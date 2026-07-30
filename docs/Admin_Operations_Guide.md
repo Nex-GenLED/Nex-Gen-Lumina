@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Admin Operations Guide"
 subtitle: "Run the dealer, installer, and corporate side of Lumina from inside the app"
 author: "Nex-Gen LED LLC"
-date: "April 2026"
+date: "July 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -715,4 +715,4 @@ Check Firebase Console → Functions → `sendWeeklyBrief` logs. Most common cau
 
 ---
 
-*Nex-Gen Lumina v2.2 — Admin Operations Guide — April 2026 — INTERNAL USE ONLY*
+*Nex-Gen Lumina — Admin Operations Guide — April 2026 — INTERNAL USE ONLY*

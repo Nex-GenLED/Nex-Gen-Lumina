@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Lumina Bridge Setup"
 subtitle: "Control your lights from anywhere"
 author: "Nex-Gen LED LLC"
-date: "April 2026"
+date: "July 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -62,6 +62,10 @@ Every time you open the app, Lumina runs a quick **bridge health check** — a f
 | Offline (grey) | Bridge didn't respond — check power and Wi-Fi |
 
 The bridge also phones home every 30 seconds with a short status update, so you always know how long it's been running and how many commands it's processed.
+
+<div class="warning">
+<strong>What the bridge does and doesn't carry.</strong> Remote commands cover the things you'd reach for while away — power, brightness, colors, patterns, and scenes. <strong>Schedule (timer) configuration is a local-network write only.</strong> Creating or editing a schedule while you're away saves it to your account, but it does not arm on the controller until the app is back on your home Wi-Fi. Open the Schedule tab once when you get home and it syncs itself.
+</div>
 
 ---
 
@@ -151,7 +155,26 @@ The bridge runs a friendly setup wizard in a web browser. You connect to the bri
 
 ### Step 4: Pair with your Lumina account
 
-1. Enter your **Lumina user ID** — find this in the Lumina app under **System → Account**.
+There are two ways to pair. **The in-app flow is easier and is what we recommend.**
+
+#### Option A — Pair from the app (recommended)
+
+1. In Lumina, go to **System → System Management → Remote Access → Set Up Bridge**.
+2. Tap **Find Your Bridge**. Powered-on bridges on your network appear in the list within a minute or so, showing **Ready to pair**.
+3. Tap your bridge, then confirm the pair. The app writes your account to the bridge for you — no user ID to copy by hand.
+4. If discovery doesn't find it, open **Advanced → Enter Bridge IP** and type the bridge's IP directly.
+
+<div class="warning">
+<strong>If you see "Bridge already paired":</strong> this bridge is paired to a different Nex-Gen account. Only continue with <strong>Transfer to my account</strong> if you are the authorized installer for this property — otherwise contact Nex-Gen support to transfer ownership.
+</div>
+
+<div class="tip">
+<strong>"This bridge firmware is outdated. Please reflash…"</strong> means the bridge predates the in-app pairing handshake. Reflash it (Part 1), or use Option B.
+</div>
+
+#### Option B — Pair from the bridge's web page
+
+1. Enter your **Lumina user ID**. Find it in the app under **System → System Management → Remote Access** — it's shown as **Your User ID**, with a **Copy User ID** button.
 2. Enter your controller's local IP address (e.g., `192.168.50.91`).
 3. Enter the controller port (default: `80`).
 4. Tap **Pair & Finish**.
@@ -283,4 +306,4 @@ Still stuck? Contact Nex-Gen LED LLC support — include your bridge's Wi-Fi nam
 
 ---
 
-*Nex-Gen Lumina v2.2 — Lumina Bridge Setup — April 2026*
+*Nex-Gen Lumina — Lumina Bridge Setup — July 2026*

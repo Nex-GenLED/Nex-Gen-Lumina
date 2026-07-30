@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Commercial User Guide"
 subtitle: "Multi-zone lighting control for your business"
 author: "Nex-Gen LED LLC"
-date: "April 2026"
+date: "July 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -231,7 +231,7 @@ Type or tap the **microphone icon** to speak. Voice commands auto-submit after a
 | "Turn off everything except the parking lot" | Selective zone control |
 | "Brighten up the patio" | Increases patio brightness |
 | "What's running on the storefront?" | Reports current status for that zone |
-| "Schedule warm white on the patio at sunset" | Creates a zone-specific schedule |
+| "Schedule warm white on the patio at 7 PM" | Creates a zone-specific schedule |
 | "Turn off all lights" | Powers down every zone |
 
 <div class="tip">
@@ -273,7 +273,7 @@ Lumina respects your preferred time format throughout the schedule UI. Set **Sys
 2. Pick:
    - **Zone** — which zone this schedule applies to, or **All** for everything
    - **Pattern/Scene** — the lighting to display
-   - **Start Time** — clock time, or Sunrise/Sunset with an offset
+   - **Start Time** — a clock time, or **Sunset** (see the note below)
    - **End Time** (optional)
    - **Repeat Days** — days of the week
 3. Tap **Save**
@@ -284,14 +284,14 @@ Schedules live on the controllers themselves — they run even when the app is c
 
 | Zone | Schedule | Days |
 |------|----------|------|
-| Storefront | Holiday pattern, sunset to 11 PM | Mon–Sun |
-| Storefront | Warm white, 5:30 AM to sunrise | Mon–Sat |
-| Patio | Warm white, sunset to closing (10 PM) | Mon–Sun |
-| Parking Lot | Bright white, sunset to sunrise | Every day |
+| Storefront | Holiday pattern, 6:00 PM to 11:00 PM | Mon–Sun |
+| Storefront | Warm white, 5:30 AM to 7:00 AM | Mon–Sat |
+| Patio | Warm white, 6:00 PM to closing (10 PM) | Mon–Sun |
+| Parking Lot | Bright white, 6:00 PM to 6:00 AM | Every day |
 | Building Perimeter | Bright white, dusk to dawn | Every day |
 
 <div class="tip">
-<strong>Tip:</strong> Use sunset/sunrise offsets for schedules that should adapt to the season. "Sunset minus 15 minutes" keeps the lights coming on just before dark all year round.
+<strong>Sunset is a useful anchor</strong> for "on when it gets dark, whatever the season" — no seasonal retiming. Two limits: one sunrise schedule and one sunset schedule per property (everything else uses clock times), and offsets aren't available yet, so a sunset block starts at sunset rather than 20 minutes before. Solar timing depends on the controller carrying the site's coordinates; if a sunset schedule won't set, ask your installer to check them.
 </div>
 
 ### Auto-Pilot
@@ -681,4 +681,4 @@ For troubleshooting, see the separate Lumina Troubleshooting Guide.
 
 ---
 
-*Nex-Gen Lumina v2.2 — Commercial User Guide — April 2026*
+*Nex-Gen Lumina — Commercial User Guide — July 2026*

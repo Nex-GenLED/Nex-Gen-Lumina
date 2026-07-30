@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Media Mode"
 subtitle: "Get the perfect shot of any Lumina home"
 author: "Nex-Gen LED LLC"
-date: "April 2026"
+date: "July 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -162,4 +162,4 @@ For troubleshooting beyond this guide, see the separate Lumina Troubleshooting G
 
 ---
 
-*Nex-Gen Lumina v2.2 — Media Mode — April 2026*
+*Nex-Gen Lumina — Media Mode — July 2026*

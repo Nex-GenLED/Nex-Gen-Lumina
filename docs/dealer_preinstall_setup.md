@@ -1,6 +1,38 @@
+---
+title: "Nex-Gen Lumina — Dealer Pre-Install Setup SOP"
+subtitle: "Bench preparation for controllers and bridges"
+author: "Nex-Gen LED LLC"
+date: "July 2026"
+pdf_options:
+  format: Letter
+  margin: 18mm
+  printBackground: true
+  headerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#5C6A88;">Nex-Gen Lumina — Dealer Pre-Install Setup SOP</div>'
+  footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#5C6A88;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>'
+stylesheet: []
+body_class: guide
+---
+
+<style>
+  body { font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif; color: #DCF0FF; background: #07091A; line-height: 1.55; font-size: 10pt; }
+  h1, h2, h3, h4 { font-family: 'Exo 2', 'Segoe UI', Arial, sans-serif; }
+  h1 { font-size: 22pt; background: linear-gradient(90deg, #6E2FFF, #00D4FF); -webkit-background-clip: text; background-clip: text; color: transparent; border-bottom: 2px solid #00D4FF; padding-bottom: 8px; }
+  h2 { color: #00D4FF; margin-top: 26px; font-size: 14pt; border-bottom: 1px solid #1F2542; padding-bottom: 4px; }
+  h3 { color: #FFFFFF; margin-top: 18px; font-size: 11.5pt; }
+  strong { color: #FFFFFF; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; background: #111527; font-size: 9pt; }
+  th, td { border: 1px solid #1F2542; padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: #241A55; color: #DCF0FF; }
+  code { background: #1F2542; color: #00D4FF; padding: 2px 5px; border-radius: 3px; font-size: 0.86em; }
+  pre { background: #0D1124; border: 1px solid #1F2542; border-radius: 6px; padding: 10px; overflow-x: auto; font-size: 8.5pt; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 4px solid #FFAA3C; background: rgba(255,170,60,0.10); margin: 12px 0; padding: 8px 14px; border-radius: 4px; }
+  hr { border: none; border-top: 1px solid #1F2542; margin: 22px 0; }
+</style>
+
 # Dealer Pre-Install Setup SOP
 
-**Version**: 1.0 — 2026-05-13
+**Version**: 1.1 — 2026-07-28
 **Audience**: Dealer shop staff preparing hardware for customer installs
 **Goal**: Ship hardware to a customer's home such that the install crew can plug in and have a working system within ~15 minutes, instead of doing full setup on-site.
 
@@ -62,7 +94,7 @@ Controller hardware (per install plan / site survey):
                                 [ ] WS2814 RGBW (type 30)
                                 [ ] WS2812B RGB
                                 [ ] Other: ____________________
-  Color order:                  [ ] GRB (default)  [ ] other: ____
+  Color order:                  [ ] RGB (default - order 1)  [ ] other: ____
   Channel plan:
     Ch 0 — pin ___ — _____ LEDs — name: __________________
     Ch 1 — pin ___ — _____ LEDs — name: __________________
@@ -164,10 +196,23 @@ Treat this as a standing never-default of the flash procedure, same class as
    - **Auto-calculate brightness limit** → ON.
 4. **LED outputs** section — add one bus per active channel. Click **+ LED output** to add each:
    - **Type**: SK6812 RGBW (type 30) unless customer info says otherwise.
-   - **Color order**: GRB (order 1) unless customer info says otherwise.
+   - **Color order**: **RGB (order 1)** unless customer info says otherwise. WLED appends the white channel automatically on an RGBW bus type. This is the same value the app's Nex-Gen Standard push writes (`type: 30`, `order: 1`) — do not "fix" it to GRB.
    - **Start index**: cumulative — first bus starts at 0, second bus starts at first bus's count, etc.
    - **Count**: from customer info sheet, per channel.
-   - **Pin**: from the controller's channel-to-pin map. For Dig-Octa, channel 1 is typically GPIO 2, channel 2 is GPIO 1, etc. **Avoid GPIO 0, 3, 12.**
+   - **Pin**: from the canonical channel-to-GPIO map below. Do **not** rely on the old "avoid GPIO 0/3/12" rule of thumb — it was wrong. GPIO 12 isn't exposed as an LED channel on the Dig-Octa at all, and GPIO 0/1/2/3 are validated for LED data on this board even though WLED's UI flags them red.
+
+   **QuinLED Dig-Octa Brainboard-32-8L — canonical map:**
+
+   | Channel | ESP32 GPIO | Notes |
+   |---|---|---|
+   | LED 1 | GPIO 0 | Strapping pin — works in production |
+   | LED 2 | GPIO 1 | UART TX0 — serial logging unavailable while in use |
+   | LED 3 | GPIO 2 | Strapping pin |
+   | LED 4 | GPIO 3 | UART RX0 |
+   | LED 5 | GPIO 4 | General-purpose, reliable |
+   | LED 6 | GPIO 5 | General-purpose, reliable |
+   | LED 7 | GPIO 13 | General-purpose, reliable |
+   | LED 8 | GPIO 21 | Shares the I2C SCL bus — avoid pairing with I2C peripherals |
    - **Reverse**: leave unchecked unless install plan calls for reversed direction.
    - **Skip first LEDs**: 0 unless there's a known dead/dummy LED at the start.
 5. **Defaults** section:
@@ -176,6 +221,22 @@ Treat this as a standing never-default of the flash procedure, same class as
 6. **Brightness limiter**: set to ~85% as a safety margin. Customer can raise later from the app.
 7. Click **Save**.
 8. Click **Reboot** at the bottom of the Config page to apply hardware changes cleanly.
+
+### 2.3b Time, timezone, and location (REQUIRED — do not skip)
+
+**A controller whose clock never syncs fires NO schedules at all.** This is the single highest-impact silent failure we ship: everything else works, the app reports success, and the customer's lights simply never come on by themselves. Set it at the bench.
+
+1. Navigate to `http://4.3.2.1` → **Config** → **Time & Macros**.
+2. **Get time from NTP server** → **ON**.
+3. **NTP server host** → `time.google.com`. The stock pool host fails on some customer networks; this is a standing never-default.
+4. **Time Zone** → the customer's local zone. A controller left on UTC fires every wall-clock timer shifted by the UTC offset.
+5. **Latitude / Longitude** → the install site's coordinates. Leaving them at `0,0` computes sunrise/sunset for the Gulf of Guinea.
+6. Click **Save**.
+
+<!-- verify -->
+**Verification (on-site, once the controller has internet):** open the controller's Info page and confirm the displayed time is correct local wall-clock time. A date in 1970 (or 2106) means NTP never synced — the clock is unset and no timer will fire. The app also surfaces this: the customer's **Schedule** tab shows a red banner with a **How to fix** action, and the installer wizard's handoff **pre-flight check** shows a *Controller clock* row.
+
+> **Why the coordinates matter:** sunrise/sunset scheduling is live, and the app **refuses to arm a solar timer** when latitude/longitude are unset or left at `0,0`. Skip this and the customer's "on at sunset" schedule silently never arms. Note the system supports **one sunrise and one sunset schedule** (positional timer slots), and offsets have no editor field yet.
 
 ### 2.4 Configure segments to match channels
 
@@ -339,13 +400,14 @@ By the time the crew arrives, the controller and bridge are pre-configured. The 
 [ ] 5. On customer's phone, open Lumina app. Sign in to customer's account
        (or assist them with the first sign-in if it's their first time).
 [ ] 6. App should auto-discover the controller via mDNS within 1-2 minutes.
-       If it doesn't, manually add via Settings → System → Lights → Add
-       Controller, and enter the IP shown in the customer's router admin
+       If it doesn't, manually add via System → System Management →
+       Controllers → Add Controller, and enter the IP shown in the router admin
        (or the .local hostname you set in Section 2.2 step 4).
 [ ] 7. App should also discover the bridge via Firestore /bridge_registry.
        Tap Pair to complete the bridge pairing handshake (skip if Option B
        pre-pairing was used).
-[ ] 8. In Lumina app: Settings → Remote Access → tap "Detect Home Network".
+[ ] 8. In Lumina app: System → System Management → Remote Access → tap
+       "Detect Home Network".
        Grant Location permission when prompted. App captures the customer's
        SSID hash for connectivity classification.
 [ ] 9. Test on-wifi: tap power on/off, change brightness, apply a pattern.
@@ -353,9 +415,13 @@ By the time the crew arrives, the controller and bridge are pre-configured. The 
 [ ] 10. Test off-wifi: enable phone hotspot, disconnect customer's phone
         from home WiFi, connect to hotspot, repeat power on/off and apply.
         Lights should respond in ~5-10 seconds through the cloud relay.
-[ ] 11. Configure Now Playing label and any quick patterns the customer
+[ ] 11. Build the customer's nightly schedule with CLOCK times, then tap
+        Sync on the Schedule tab and confirm the green "Schedules synced
+        to controller" message. Schedules are a LAN-only write - this
+        cannot be finished after you leave.
+[ ] 12. Configure Now Playing label and any quick patterns the customer
         wants pre-set.
-[ ] 12. Customer signs install acceptance form.
+[ ] 13. Customer signs install acceptance form.
 ```
 
 **If any step fails**, refer to Section 6.
@@ -391,7 +457,7 @@ By the time the crew arrives, the controller and bridge are pre-configured. The 
 
 ### App says "Could not read WiFi name" when tapping Detect Home Network on iOS
 
-**Cause**: A previous build had a known iOS configuration gap (Item #75). Confirm the customer is running the latest TestFlight build (2.3.0+150 or later). If not, install via TestFlight first.
+**Cause**: An older build had an iOS configuration gap. Confirm the customer is on the current released build; if they're on an older TestFlight install, update first. Location permission is required on both platforms to read the Wi-Fi network name.
 
 ### Power tap takes 30+ seconds off-wifi
 

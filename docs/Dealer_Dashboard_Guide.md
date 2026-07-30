@@ -2,7 +2,7 @@
 title: "Nex-Gen Lumina — Dealer Dashboard Guide"
 subtitle: "Your real-time pipeline, team, and referral rewards in one place"
 author: "Nex-Gen LED LLC"
-date: "April 2026"
+date: "July 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -424,4 +424,4 @@ For the full walkthrough on completing customer installations, see the [Dealer &
 
 ---
 
-*Nex-Gen Lumina v2.2 — Dealer Dashboard Guide — April 2026*
+*Nex-Gen Lumina — Dealer Dashboard Guide — July 2026*
