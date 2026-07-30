@@ -31,7 +31,7 @@ class ManageControllersPage extends ConsumerWidget {
         ),
       ),
       body: Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, navBarPlusFabHeight(context)),
         child: asyncList.when(
           data: (items) {
             if (items.isEmpty) {

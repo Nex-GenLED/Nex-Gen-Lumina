@@ -212,6 +212,15 @@ class UserModel {
   /// Firestore) keep their current baseline untouched.
   final bool autopilotBaselineEnabled;
 
+  /// Opt-in: arm a dedicated controller-resident WLED timer that sets MASTER
+  /// OFF at sunrise, every day, independent of any design/schedule/pattern.
+  ///
+  /// Defaults to FALSE — this turns the user's lights off unattended, so it is
+  /// never enabled implicitly (contrast [autopilotBaselineEnabled], which
+  /// defaults true for back-compat). Toggling it arms/disarms the reserved
+  /// sunrise slot directly; see sunrise_off_service.dart.
+  final bool sunriseOffEnabled;
+
   /// How autopilot resolves conflicts with user-set calendar entries.
   /// 'ask' = prompt every time, 'keep_mine' = always keep manual, 'trust_autopilot' = always overwrite.
   final String autopilotConflictPolicy;
@@ -345,6 +354,7 @@ class UserModel {
     this.preGameLighting = true,
     this.scoreCelebrations = true,
     this.autopilotBaselineEnabled = true,
+    this.sunriseOffEnabled = false,
     this.autopilotConflictPolicy = 'ask',
     this.rejectedPatterns = const [],
     this.deprioritizedPatterns = const [],
@@ -477,6 +487,8 @@ class UserModel {
       preGameLighting: (json['pre_game_lighting'] as bool?) ?? true,
       scoreCelebrations: (json['score_celebrations'] as bool?) ?? true,
       autopilotBaselineEnabled: (json['autopilot_baseline_enabled'] as bool?) ?? true,
+      // Absent → false. Opt-in only; never inferred for existing users.
+      sunriseOffEnabled: (json['sunrise_off_enabled'] as bool?) ?? false,
       autopilotConflictPolicy: (json['autopilot_conflict_policy'] as String?) ?? 'ask',
       rejectedPatterns: (json['rejected_patterns'] as List?)
               ?.whereType<Map<String, dynamic>>()
@@ -619,6 +631,7 @@ class UserModel {
       'pre_game_lighting': preGameLighting,
       'score_celebrations': scoreCelebrations,
       'autopilot_baseline_enabled': autopilotBaselineEnabled,
+      'sunrise_off_enabled': sunriseOffEnabled,
       'autopilot_conflict_policy': autopilotConflictPolicy,
       'rejected_patterns': rejectedPatterns,
       'deprioritized_patterns': deprioritizedPatterns,
@@ -712,6 +725,7 @@ class UserModel {
     bool? preGameLighting,
     bool? scoreCelebrations,
     bool? autopilotBaselineEnabled,
+    bool? sunriseOffEnabled,
     String? autopilotConflictPolicy,
     List<Map<String, dynamic>>? rejectedPatterns,
     List<String>? deprioritizedPatterns,
@@ -786,6 +800,7 @@ class UserModel {
       housePhotoUrl: housePhotoUrl ?? this.housePhotoUrl,
       autopilotEnabled: autopilotEnabled ?? this.autopilotEnabled,
       autopilotBaselineEnabled: autopilotBaselineEnabled ?? this.autopilotBaselineEnabled,
+      sunriseOffEnabled: sunriseOffEnabled ?? this.sunriseOffEnabled,
       changeToleranceLevel: changeToleranceLevel ?? this.changeToleranceLevel,
       preferredEffectStyles: preferredEffectStyles ?? this.preferredEffectStyles,
       autopilotLastGenerated: autopilotLastGenerated ?? this.autopilotLastGenerated,

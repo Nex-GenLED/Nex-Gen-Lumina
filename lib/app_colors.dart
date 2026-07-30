@@ -91,6 +91,27 @@ const kNavBarContentHeight = 100.0;
 double navBarTotalHeight(BuildContext context) =>
     kNavBarContentHeight + MediaQuery.of(context).padding.bottom;
 
+/// Height an extended FAB occupies, plus its margin — 48dp button + 16dp gap
+/// above the surface it floats over, and a little breathing room so content
+/// doesn't sit flush against it.
+const kFabClearance = 80.0;
+
+/// Bottom padding for scrollable content on a screen that ALSO has a
+/// bottom-anchored FloatingActionButton.
+///
+/// [navBarTotalHeight] alone only clears the nav dock. A screen whose FAB is
+/// lifted by that same amount leaves the FAB floating over the last ~80px of
+/// scrollable content — so the final control on the page can't be tapped.
+/// That bug shipped on Edit Profile, where the "Enable Autopilot" switch is the
+/// last row and sits under the "Update Profile" FAB (worst when autopilot is
+/// OFF and the card collapses to just that row — i.e. exactly when the user is
+/// trying to turn it on).
+///
+/// Use this instead of [navBarTotalHeight] whenever the Scaffold has a
+/// floatingActionButton.
+double navBarPlusFabHeight(BuildContext context) =>
+    navBarTotalHeight(context) + kFabClearance;
+
 /// Legacy alias — prefer [navBarTotalHeight] for device-aware padding.
 const kBottomNavBarPadding = kNavBarContentHeight;
 
