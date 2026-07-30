@@ -40,11 +40,12 @@ optional.
 | **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,206,827 bytes |
 | **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
 | **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` |
-| **Android track** | Play **Closed testing** (not Internal — Internal does not advance the 12-tester production-access streak) |
+| **Android track** | Play **Closed testing** — **UPLOADED 2026-07-30**, confirmed Closed (not Internal; Internal would not advance the 12-tester production-access streak) |
 | **iOS Codemagic build number** | `PENDING` — fill when the build completes |
 | **iOS workflow** | `ios-workflow` ("iOS Release"), started **manually** (no `triggering:` block) |
-| **iOS branch built** | `PENDING` — per the release sequence, build iOS from `main` after the branch merges |
+| **iOS branch built** | `PENDING` — build from `main` (merged as `9d4fa99`) |
 | **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
+| **Merged to main** | `9d4fa99` (`--no-ff`), pushed 2026-07-30 — **merged ahead of the device smoke test at owner's direction**; see that commit's body |
 
 **What shipped:** ON presets 1/3/4/5 now assert root master power, so a fired
 ON-timer turns the lights on instead of loading a design into a dark master.
@@ -53,8 +54,25 @@ every controller commissioned before it, and adds an on-connect healer so
 existing controllers repair without the customer editing a schedule.
 
 **Hardware verification (bench rig 192.168.1.150, WLED 0.15.1, vid 2507300):**
-end-to-end timer fire confirmed — `ps 2→1` **and** `state.on == true`. Bench
-harness 18/28 → 27/28.
+
+- Pre-merge: end-to-end timer fire — `ps 2→1` **and** `state.on == true`. Bench
+  harness 18/28 → 27/28.
+- **Post-merge, with the SHIPPED build on a real device** (evidence commits
+  `73a3745`, `adb256a`, `c09d086`): all four ON presets deliberately broken and
+  confirmed `root_on=ABSENT` → **first connect healed all four** to
+  200/51/102/153 → **second connect: no flash, zero writes**, presets
+  byte-identical to the healthy baseline and `state.on` still false. The
+  psave-storm hard stop is **cleared**.
+- Four presets were broken rather than one on purpose: a single broken preset
+  exercises the predicate but skips the settle / retry / final-readback path,
+  which exists because four back-to-back psaves produced a false green during
+  development.
+
+**Smoke coverage at upload: partial.** Connect + heal + idempotency (checklist
+steps 1-4) are verified. **Steps 5-13 are NOT** — schedule create/edit/delete,
+boundary firing, calendar-lease interaction, sunrise-off, brightness presets.
+The lease interaction is the highest-risk gap: schedule-vs-lease clobbering has
+shipped before and this change touches the same preset-write path.
 
 **Test suite at build time:** 1834 passed · 3 skipped (hardware-gated) · 1
 failed (`cloud_ai_processor_normalize` — pre-existing, proven by re-running with
