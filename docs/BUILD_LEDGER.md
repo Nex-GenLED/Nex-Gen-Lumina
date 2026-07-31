@@ -29,6 +29,75 @@ optional.
 
 ---
 
+## 2.5.10+60 — commissioning silent-failure closeout
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `d92262fbf86cc5aafbd95fd76e5e339d8783b8cf` (`d92262f`) — the build commit |
+| **Merged to main** | `4bd2227f339807fb08626a7f5ba6319669498a4a` (`4bd2227`, `--no-ff`), **pushed to origin 2026-07-31** |
+| **Branch at build time** | `fix/commissioning-silent-failures` (off `main` @ `c20ed83`) |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **60** — verified from the merged manifest (`build/app/intermediates/bundle_manifest/release/processApplicationManifestReleaseForBundle/AndroidManifest.xml`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,227,800 bytes · built 2026-07-31 11:29 |
+| **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
+| **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` — archive these, never commit |
+| **Android track** | **NOT UPLOADED** — Tyler uploads |
+| **iOS Codemagic build number** | `PENDING` — fill when the build completes |
+| **iOS workflow** | `ios-workflow` ("iOS Release"), started **manually** — `codemagic.yaml` still has no `triggering:` block |
+| **iOS branch built** | `main` @ `4bd2227` |
+| **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
+
+> ### ⚠ The iOS build number will NOT be 60 — the SHA is the join key
+>
+> `codemagic.yaml` overwrites pubspec's build number before building:
+> `BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}`, then `sed`s it into pubspec. Only the
+> version *name* (`2.5.10`) survives from the repo. `PROJECT_BUILD_NUMBER` is **Codemagic's
+> own counter**, so iOS will ship as `2.5.10+<codemagic counter>` — some number that is not
+> 60, and not predictable from here.
+>
+> **Android `versionCode 60` and the iOS build number identify the same code only through
+> `d92262f` / `4bd2227`.** When matching a TestFlight build or a crash report to this change,
+> match on the SHA.
+
+**What shipped:** three fixes on the commissioning surface, all the same class — reporting
+success for work that did not happen.
+
+- **P0-7** — the roofline pixel-map save could fail silently and the wizard advanced anyway.
+  Now a blocking retry gate; the cause is logged and shown; an empty capture still passes
+  through. No offline-queue option (it would relocate the failure, not fix it).
+- **P0-6** — `migrateInstallerControllersToCustomer` swallowed every failure, so a denied
+  migration handed over a customer account with no controllers. Now throws, with a Retry/Stop
+  dialog matching `_restoreInstallerAuthWithRetry`; Stop reports the install as FAILED.
+- **Token refresh + anon-fallback telemetry** — `_restoreInstallerAuth` re-mints the staff
+  custom token from the cached PIN instead of dropping to `signInAnonymously()`. **This build
+  is the D4 dependency**: it must be adopted, and the `installer_anon_fallback` count must
+  reach zero, before the resource rules tighten.
+
+**firestore.rules:** no new changes in this build. It carries the **already-deployed** P0-5
+fix (ruleset `ec8d918f-c279-4925-b8b2-168e96638586`, live `2026-07-31T15:10:10Z`), committed
+here so the repo matches production. D4 is not in this build.
+
+**Test suite at build time:** 1857 passed · 3 skipped · 1 failed
+(`cloud_ai_processor_normalize` — pre-existing, P1-8, proven by stash). `flutter analyze`
+clean on all six changed files.
+
+**Rules verification at build time:** 16/16 against the **live** ruleset via the Rules `:test`
+API (including cross-dealer DENY), plus a 31-path deployed-vs-live regression with 0
+behavioral differences.
+
+**Hardware verification at upload: NONE.** All three owed debts — token refresh §4.2,
+commissioning a–d, and Part B (Design Studio slices 0–5) — are consolidated into one runnable
+session in `audit/HARDWARE_VERIFICATION_+60.md`. Nothing in this build has been exercised on
+the rig. The P0-6 Retry/Stop dialog is additionally not widget-testable (no auth-mocking
+dependency); its mechanism is unit-pinned, the dialog is not.
+
+**Known-open at ship:** P3-60 (`kStaffAuthTelemetryAppVersion` is hand-bumped — verified
+`2.5.10+60` for this build, but it will drift), P3-61 (aborting after account creation is
+unrecoverable in-app), P3-62 (stale line-number cross-references), F-5a/F-5b (account
+deletion — unrelated to P0-7 despite the label collision, still open).
+
+---
+
 ## 2.5.10+59 — ON-presets self-heal master power
 
 | Field | Value |
