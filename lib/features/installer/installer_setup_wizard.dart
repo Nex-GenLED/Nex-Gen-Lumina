@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/installer/staff_auth_telemetry.dart';
 import 'package:nexgen_command/models/dealer_code.dart';
 import 'package:nexgen_command/features/installer/installer_draft_service.dart';
 import 'package:nexgen_command/features/installer/screens/customer_info_screen.dart';
@@ -120,6 +121,65 @@ InstallErrorOutcome classifyInstallError({required bool installCommitted}) =>
         ? InstallErrorOutcome.completeWithWarning
         : InstallErrorOutcome.reportFailure;
 
+/// Safety margin on the ONE-HOUR custom-token TTL.
+///
+/// A token minted at T is useless at T+60m. We treat anything older than
+/// T+50m as already dead so the re-mint happens BEFORE the exchange fails,
+/// rather than paying a guaranteed-losing round trip first. Ten minutes
+/// comfortably covers a slow driveway LTE handshake.
+const Duration kStaffTokenSafetyMargin = Duration(minutes: 50);
+
+/// Whether the cached staff custom token must be re-minted before use.
+///
+/// Custom tokens (staffAuth.ts:558) are valid for ONE HOUR from mint. The
+/// wizard caches one at PIN entry and re-exchanges it after customer-account
+/// creation; a long install — a pixel-walk on a large roofline, the app
+/// backgrounded, the phone asleep — routinely outlives it. This is the whole
+/// reason the anonymous fallback existed.
+///
+/// Pure + injectable clock so the expiry logic is testable without waiting an
+/// hour or touching Firebase.
+@visibleForTesting
+bool staffTokenNeedsRefresh({
+  required DateTime authenticatedAt,
+  required DateTime now,
+  Duration safetyMargin = kStaffTokenSafetyMargin,
+}) =>
+    !now.isBefore(authenticatedAt.add(safetyMargin));
+
+/// Outcome of [migrateInstallerControllersToCustomer].
+///
+/// A *failure* is not represented here — it throws. This distinguishes the
+/// several legitimate "nothing moved" cases from a real migration, so the
+/// caller can log precisely and a retry can tell "already done" from "never
+/// had any".
+@visibleForTesting
+class ControllerMigrationResult {
+  const ControllerMigrationResult({
+    this.controllers = 0,
+    this.pixelMapDocs = 0,
+    this.skipReason,
+  });
+
+  /// Controller documents moved to the customer.
+  final int controllers;
+
+  /// pixelMap channel documents carried along with them.
+  final int pixelMapDocs;
+
+  /// Non-null when nothing was moved, and why: `no-source-uid`, `same-uid`,
+  /// `source-empty` (includes "a prior attempt already succeeded"), `no-match`.
+  final String? skipReason;
+
+  bool get movedAnything => controllers > 0;
+
+  @override
+  String toString() => skipReason != null
+      ? 'ControllerMigrationResult(skipped: $skipReason)'
+      : 'ControllerMigrationResult($controllers controller(s), '
+          '$pixelMapDocs pixelMap doc(s))';
+}
+
 /// Copies controller documents added during the installer wizard from the
 /// installer/staff UID to the customer UID, then deletes the originals — with
 /// **each controller's `pixelMap/*` subcollection carried along** (Design
@@ -129,13 +189,26 @@ InstallErrorOutcome classifyInstallError({required bool installCommitted}) =>
 ///
 /// Only controllers whose ids are in [controllerIds] migrate; empty →
 /// ALL (legacy safety fallback). No-op when [fromUid] is null/empty or equals
-/// [toUid]. Non-throwing — a failure is logged and swallowed so handoff still
-/// completes.
+/// [toUid].
+///
+/// **THROWS on failure (P0-6, 2026-07-31).** This used to catch everything and
+/// return normally "so handoff still completes" — which meant a denied or
+/// dropped migration was reported to the installer as a successful install
+/// while the customer had no controllers at all. That swallow is what would
+/// have made the P0-5 rules denial invisible. The caller is now responsible for
+/// surfacing it; see `_migrateControllersWithRetry`.
+///
+/// SAFE TO RETRY. `WriteBatch.commit()` is atomic, so a failed commit applies
+/// none of its writes — the source documents are still intact and the
+/// destination has nothing half-written. A retry simply re-reads and re-commits.
+/// A retry after a commit that actually landed (client saw a timeout, server
+/// applied it) finds the source already drained and returns
+/// [ControllerMigrationResult.skipReason] `'source-empty'` rather than failing.
 ///
 /// Extracted as a top-level function (injectable [firestore]) so the migration
 /// — the slice's integrity guarantee — is unit-testable against a fake.
 @visibleForTesting
-Future<void> migrateInstallerControllersToCustomer({
+Future<ControllerMigrationResult> migrateInstallerControllersToCustomer({
   required FirebaseFirestore firestore,
   required String? fromUid,
   required String toUid,
@@ -143,13 +216,13 @@ Future<void> migrateInstallerControllersToCustomer({
 }) async {
   if (fromUid == null || fromUid.isEmpty) {
     debugPrint('Installer: skipping controller migration — no source UID');
-    return;
+    return const ControllerMigrationResult(skipReason: 'no-source-uid');
   }
   if (fromUid == toUid) {
     debugPrint('Installer: skipping controller migration — same UID');
-    return;
+    return const ControllerMigrationResult(skipReason: 'same-uid');
   }
-  try {
+  {
     final sourceCol =
         firestore.collection('users').doc(fromUid).collection('controllers');
     final destCol =
@@ -157,8 +230,10 @@ Future<void> migrateInstallerControllersToCustomer({
 
     final snapshot = await sourceCol.get();
     if (snapshot.docs.isEmpty) {
+      // Also the "retry after a commit that actually landed" case — the source
+      // was drained by the successful commit the client never saw acknowledged.
       debugPrint('Installer: no controllers to migrate from $fromUid');
-      return;
+      return const ControllerMigrationResult(skipReason: 'source-empty');
     }
 
     // Only migrate controllers from this installation session, so an admin's
@@ -170,7 +245,7 @@ Future<void> migrateInstallerControllersToCustomer({
     if (docsToMigrate.isEmpty) {
       debugPrint('Installer: no matching controllers to migrate '
           '(${snapshot.docs.length} total, ${controllerIds.length} selected)');
-      return;
+      return const ControllerMigrationResult(skipReason: 'no-match');
     }
 
     // Read each controller's pixelMap subcollection BEFORE the batch (reads
@@ -201,11 +276,15 @@ Future<void> migrateInstallerControllersToCustomer({
         }
       }
     }
+    // P0-6: no try/catch. A commit failure propagates to the caller, which is
+    // the only place that can tell the installer and offer a retry.
     await batch.commit();
     debugPrint('Installer: migrated ${docsToMigrate.length} controller(s) '
         '($pixelMapDocs pixelMap doc(s)) from $fromUid to $toUid');
-  } catch (e) {
-    debugPrint('Installer: controller migration failed (non-blocking): $e');
+    return ControllerMigrationResult(
+      controllers: docsToMigrate.length,
+      pixelMapDocs: pixelMapDocs,
+    );
   }
 }
 
@@ -699,9 +778,9 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
   }
 
   /// Thin instance wrapper around [migrateInstallerControllersToCustomer] using
-  /// the live Firestore instance. A failure here is non-blocking — the handoff
-  /// still completes.
-  Future<void> _migrateControllersToCustomer(
+  /// the live Firestore instance. Propagates failures — see
+  /// [_migrateControllersWithRetry].
+  Future<ControllerMigrationResult> _migrateControllersToCustomer(
     String? fromUid,
     String toUid,
     Set<String> controllerIds,
@@ -712,6 +791,92 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       toUid: toUid,
       controllerIds: controllerIds,
     );
+  }
+
+  /// The controller migration, plus an installer-visible retry (P0-6).
+  ///
+  /// This runs AFTER `createUserWithEmailAndPassword`, so a failure here leaves
+  /// a real customer account with no lights attached to it. It used to be
+  /// swallowed entirely: the wizard showed the handoff screen and the installer
+  /// drove away from a customer whose app would be empty on first login.
+  ///
+  /// Deliberately the SAME shape as [_restoreInstallerAuthWithRetry] — same
+  /// position in the flow, same Retry/Stop dialog, same "Stop rethrows into the
+  /// outer catch" contract. Two different failure UXs in one wizard would be its
+  /// own defect.
+  ///
+  /// WHY RETRY-IN-PLACE rather than flagging the account or rolling back:
+  ///   • The realistic cause is a driveway with no signal, which Retry fixes on
+  ///     the spot — the installer is still standing there with the hardware.
+  ///   • "Complete but flag for later migration" would need to WRITE that flag
+  ///     through the same Firestore that just failed, and there is no repair job
+  ///     to consume it. That is the defect again with extra steps.
+  ///   • Rolling back the customer account means deleting a just-created auth
+  ///     user (and the password-reset email has already gone out) from the
+  ///     client, in several non-atomic steps that can themselves half-fail.
+  ///
+  /// On Stop this RETHROWS. `installCommitted` is still false at this point, so
+  /// `classifyInstallError` returns `reportFailure` and the wizard reports the
+  /// install as failed — which is the truth.
+  Future<void> _migrateControllersWithRetry(
+    String? fromUid,
+    String toUid,
+    Set<String> controllerIds,
+  ) async {
+    while (true) {
+      try {
+        final result =
+            await _migrateControllersToCustomer(fromUid, toUid, controllerIds);
+        debugPrint('Installer: controller migration OK — $result');
+        return;
+      } catch (e, st) {
+        // P0-6: the cause used to be discarded here.
+        debugPrint('Installer: controller migration FAILED '
+            '(from=$fromUid to=$toUid, ${controllerIds.length} selected): '
+            '$e\n$st');
+
+        // Durable, queryable record so "the customer left without controllers"
+        // is observable by the business, not only by whoever was standing in
+        // the driveway. Cannot throw and cannot block — see the telemetry lib.
+        await recordCommissioningFailure(
+          stage: 'controller_migration',
+          reason: '$e',
+          customerUid: toUid,
+          sourceUid: fromUid,
+        );
+
+        if (!mounted) rethrow;
+
+        final retry = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text("Controllers didn't transfer"),
+            content: Text(
+              "The customer's account was created, but their controllers could "
+              'not be moved onto it ($e).\n\n'
+              'If you stop now they will sign in to an app with no lights. '
+              'Nothing has been lost — the controllers are still on this device '
+              "under your installer login — so check your connection and tap "
+              'Retry.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Stop'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        );
+        // Stop must NOT fall through into the rest of the install — that would
+        // be the seventh silent success. Rethrow so the wizard reports failure.
+        if (retry != true) rethrow;
+      }
+    }
   }
 
   /// True once [_restoreInstallerAuth] has put the installer's STAFF CLAIMS
@@ -727,30 +892,154 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
   /// `dealerCode`. Those claims are what firestore.rules hasStaffClaim() and
   /// the setAccountProfile callable check.
   ///
-  /// Falls back to anonymous — today's behavior — if no token was cached or
-  /// the token has aged out (custom tokens live ONE HOUR). The fallback is
-  /// deliberately non-fatal so residential installs keep working exactly as
-  /// before; commercial activation checks [_installerClaimsRestored] and fails
-  /// loud instead, because the callable will reject a claim-less caller.
+  /// Custom tokens live ONE HOUR, and a long install routinely outlives that.
+  /// Rather than dropping to an anonymous, claim-less session, this now
+  /// RE-MINTS a fresh token from the cached PIN (see [_refreshStaffToken]) and
+  /// exchanges that. The re-minted uid is identical — staffAuth.ts derives it
+  /// as `staff_<mode>_<pin>` — so refreshing cannot orphan the controller
+  /// migration's source path.
+  ///
+  /// The anonymous fallback is retained but should now be UNREACHABLE on the
+  /// happy path; reaching it emits a telemetry record (staff_auth_telemetry.dart)
+  /// whose fleet-wide count gates the D4 rules narrowing. Callers must treat a
+  /// false return as a HARD failure — see [_restoreInstallerAuthWithRetry].
   ///
   /// Returns true when the claims were restored.
   Future<bool> _restoreInstallerAuth(InstallerSession? session) async {
-    final token = session?.staffToken;
-    if (token != null) {
+    if (session == null) {
+      await _fallBackToAnonymous(
+        session: null,
+        stage: AnonFallbackStage.restoreAfterAccountCreation,
+        reason: 'no_session',
+      );
+      return false;
+    }
+
+    // 1. Fast path — exchange the cached token when it is still young enough
+    //    to be worth trying. Avoids a callable round trip on a normal install.
+    final cached = session.staffToken;
+    final stale = staffTokenNeedsRefresh(
+      authenticatedAt: session.authenticatedAt,
+      now: DateTime.now(),
+    );
+    if (cached != null && !stale) {
       try {
-        await FirebaseAuth.instance.signInWithCustomToken(token);
+        await FirebaseAuth.instance.signInWithCustomToken(cached);
         _installerClaimsRestored = true;
-        debugPrint('Installer: staff claims restored after account creation');
+        debugPrint('Installer: staff claims restored (cached token)');
         return true;
       } catch (e) {
-        // Most likely the 1-hour custom-token TTL expired mid-install.
-        debugPrint('Installer: staff-claim restore FAILED ($e) — falling back '
-            'to anonymous. Commercial activation will be blocked.');
+        debugPrint('Installer: cached-token exchange failed ($e) — re-minting');
       }
+    } else if (cached == null) {
+      debugPrint('Installer: no cached staff token — re-minting');
     } else {
-      debugPrint('Installer: no cached staff token — falling back to '
-          'anonymous. Commercial activation will be blocked.');
+      debugPrint('Installer: cached staff token past safety margin '
+          '— re-minting before exchange');
     }
+
+    // 2. REFRESH. Mint a brand-new custom token from the cached PIN and
+    //    exchange that. This is what replaces the anonymous fallback.
+    final fresh = await _refreshStaffToken(session);
+    if (fresh != null) {
+      _installerClaimsRestored = true;
+      return true;
+    }
+
+    // 3. Refresh itself failed. Record it, then fall back — the fallback is
+    //    preserved but should now be UNREACHABLE on the happy path.
+    await _fallBackToAnonymous(
+      session: session,
+      stage: AnonFallbackStage.restoreAfterAccountCreation,
+      reason: _lastRefreshFailure ?? 'refresh_failed',
+    );
+    return false;
+  }
+
+  /// Why the most recent [_refreshStaffToken] failed, for telemetry + UI.
+  String? _lastRefreshFailure;
+
+  /// Mint a FRESH staff custom token and sign in with it.
+  ///
+  /// WHY RE-MINT RATHER THAN "REFRESH THE TOKEN": the credential that expires
+  /// here is the CUSTOM token, not the Firebase ID token. The SDK already
+  /// auto-refreshes ID tokens; it cannot refresh a custom token, because a
+  /// custom token is minted server-side by `mintStaffToken` and is valid for
+  /// ONE HOUR from mint. The only way to get a valid one after that hour is to
+  /// ask the server for another — which we can do, because
+  /// `InstallerSession.pin` still holds the PIN that authorized this session.
+  ///
+  /// The re-minted uid is IDENTICAL to the original: staffAuth.ts:541 derives
+  /// it deterministically as `staff_<mode>_<pin>`. That matters — the controller
+  /// migration's source path is that uid, so refreshing cannot orphan it.
+  ///
+  /// On success the session's cached token and `authenticatedAt` are replaced,
+  /// so a later restore in the same install starts from a fresh clock.
+  /// Returns the new token, or null on failure (cause in [_lastRefreshFailure]).
+  Future<String?> _refreshStaffToken(InstallerSession session) async {
+    _lastRefreshFailure = null;
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('mintStaffToken');
+      final result = await callable.call<Map<String, dynamic>>({
+        'pin': session.pin,
+        'mode': 'installer',
+      });
+
+      final token = result.data['token'] as String?;
+      if (token == null || token.isEmpty) {
+        _lastRefreshFailure = 'remint_returned_no_token';
+        debugPrint('Installer: re-mint returned no token');
+        return null;
+      }
+
+      await FirebaseAuth.instance.signInWithCustomToken(token);
+
+      // Re-cache so a second restore in this install doesn't re-mint again.
+      if (mounted) {
+        ref.read(installerSessionProvider.notifier).state = InstallerSession(
+          installer: session.installer,
+          dealer: session.dealer,
+          authenticatedAt: DateTime.now(),
+          staffToken: token,
+        );
+      }
+
+      debugPrint('Installer: staff token RE-MINTED and claims restored');
+      return token;
+    } on FirebaseFunctionsException catch (e) {
+      // permission-denied here means the PIN no longer authorizes: the
+      // installer was deactivated, the dealer was deactivated, or the claim
+      // was revoked mid-install. resource-exhausted is the 10/60s IP limit.
+      _lastRefreshFailure = 'remint_${e.code}';
+      debugPrint('Installer: staff-token re-mint FAILED (${e.code}) ${e.message}');
+      return null;
+    } catch (e) {
+      _lastRefreshFailure = 'remint_error_$e';
+      debugPrint('Installer: staff-token re-mint FAILED: $e');
+      return null;
+    }
+  }
+
+  /// The preserved anonymous fallback — PLUS the record that proves it fired.
+  ///
+  /// Kept deliberately reachable-in-code but unreachable-in-practice until D4
+  /// lands: the telemetry it emits is the evidence that gates the rules deploy
+  /// (S-5). Delete this only once that counter has read zero across the fleet.
+  Future<void> _fallBackToAnonymous({
+    required InstallerSession? session,
+    required AnonFallbackStage stage,
+    required String reason,
+  }) async {
+    // Record BEFORE the sign-in: the anonymous sign-in itself can throw, and
+    // that case is the most interesting one to have a record of.
+    await recordAnonymousFallback(
+      stage: stage,
+      reason: reason,
+      dealerCode: session?.dealer.dealerCode,
+      installerCode: session?.installer.installerCode,
+      authUid: FirebaseAuth.instance.currentUser?.uid,
+    );
 
     try {
       await FirebaseAuth.instance.signInAnonymously();
@@ -758,19 +1047,66 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       debugPrint('Installer: anonymous fallback also failed: $e');
     }
     _installerClaimsRestored = false;
-    return false;
+  }
+
+  /// [_restoreInstallerAuth] plus an installer-visible retry.
+  ///
+  /// The customer's Firebase Auth account already exists by the time this runs,
+  /// so silently continuing would produce a half-provisioned customer that the
+  /// wizard reports as a success. Instead the installer is told what failed and
+  /// given an unlimited retry — the realistic cause is a driveway with no
+  /// signal, which is fixed by walking ten feet and tapping Retry.
+  ///
+  /// Returns false only when the installer explicitly stops.
+  Future<bool> _restoreInstallerAuthWithRetry(InstallerSession session) async {
+    while (true) {
+      // Re-read: a prior attempt may have re-minted and re-cached the session.
+      final current = ref.read(installerSessionProvider) ?? session;
+      if (await _restoreInstallerAuth(current)) return true;
+      if (!mounted) return false;
+
+      final retry = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Installer session could not be renewed'),
+          content: Text(
+            "The customer's login was created, but this device could not renew "
+            'your installer credentials (${_lastRefreshFailure ?? 'unknown'}).\n\n'
+            'Their controllers have NOT been transferred yet, so setup is not '
+            'finished. Move somewhere with a signal and tap Retry.\n\n'
+            'If you stop now, do not start over with the same email — contact '
+            'support to finish this install.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Stop'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      if (retry != true) return false;
+    }
   }
 
   Future<void> _completeSetup() async {
     final customerInfo = ref.read(installerCustomerInfoProvider);
-    final session = ref.read(installerSessionProvider);
+    final initialSession = ref.read(installerSessionProvider);
     final draft = ref.read(installerPreferenceDraftProvider);
     _installerClaimsRestored = false;
 
-    if (session == null) {
+    if (initialSession == null) {
       _showError('Installer session expired. Please re-enter your PIN.');
       return;
     }
+    // Non-final: the pre-flight refresh below replaces the cached session
+    // (new token + new authenticatedAt clock).
+    var session = initialSession;
 
     // Refuse the reserved master code BEFORE any install work (not at step 8).
     // A master support PIN mints DealerCode.masterReserved ('55'); attributing
@@ -791,6 +1127,61 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
+
+    // ── PRE-FLIGHT STAFF-TOKEN REFRESH ──────────────────────────────────────
+    //
+    // Runs BEFORE any Firebase work so a failure here costs nothing: no
+    // customer auth account, no docs, nothing to unwind. This is the primary
+    // defense against the 1-hour custom-token TTL. By re-minting here, the
+    // token exchanged by _restoreInstallerAuth moments later is seconds old
+    // instead of potentially over an hour old — which is what makes the
+    // anonymous fallback unreachable on the happy path.
+    //
+    // WHY NOT A PROACTIVE TIMER: a periodic refresh is exactly what a long
+    // pixel-walk defeats. Dart timers do not fire reliably with the app
+    // backgrounded and the phone asleep — iOS suspends them outright — so the
+    // one scenario a timer is meant to cover is the one it cannot. Evaluating
+    // at the point of need has no such dependency: however long the app was
+    // asleep, this line runs when the installer taps Complete.
+    //
+    // WHY NOT PERMISSION-DENIED-REACTIVE ONLY: today's broad
+    // `|| request.auth != null` grant means the anonymous writes SUCCEED. A
+    // reactive refresh would never trigger, so it could not be verified before
+    // D4 — and S-5 requires the telemetry to read zero BEFORE the rules move.
+    if (staffTokenNeedsRefresh(
+          authenticatedAt: session.authenticatedAt,
+          now: DateTime.now(),
+        ) ||
+        session.staffToken == null) {
+      final refreshed = await _refreshStaffToken(session);
+      if (refreshed == null) {
+        // Do NOT proceed claim-less and do NOT report success.
+        //
+        // Deliberately does NOT sign in anonymously: nothing has committed, so
+        // there is nothing to salvage, and the existing staff session may still
+        // be usable on retry. Dropping it here would destroy a working session
+        // for no gain. Recorded all the same — a device that cannot renew is
+        // the adoption signal S-5 is watching for, whether or not it went
+        // anonymous; `stage` distinguishes the two.
+        await recordAnonymousFallback(
+          stage: AnonFallbackStage.preflightRefresh,
+          reason: _lastRefreshFailure ?? 'refresh_failed',
+          dealerCode: session.dealer.dealerCode,
+          installerCode: session.installer.installerCode,
+          authUid: FirebaseAuth.instance.currentUser?.uid,
+        );
+        if (mounted) setState(() => _isProcessing = false);
+        _showError(
+          'Your installer session expired and could not be renewed '
+          '(${_lastRefreshFailure ?? 'unknown'}). Nothing was created — no '
+          'customer account was made. Check your connection and tap Complete '
+          'Setup again, or re-enter your PIN if this keeps happening.',
+        );
+        return;
+      }
+      // Re-read: _refreshStaffToken replaced the cached session.
+      session = ref.read(installerSessionProvider) ?? session;
+    }
 
     // Commit tracking for the outer catch (see classifyInstallError): flips true
     // once the customer's user doc lands, after which a throw is post-commit
@@ -837,7 +1228,18 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         }
         // Customer account created — restore the installer's staff claims for
         // the remaining writes.
-        await _restoreInstallerAuth(session);
+        //
+        // GATED: the controller migration below writes under the customer's
+        // uid and deletes under the installer's. Running it claim-less is what
+        // the broad rules grant exists to permit; once D4 narrows that grant it
+        // would be DENIED — and migrateInstallerControllersToCustomer swallows
+        // its own failures, so a denial would surface as a "successful" install
+        // with none of the customer's controllers. Refuse to continue instead.
+        if (!await _restoreInstallerAuthWithRetry(session)) {
+          throw StateError(
+            'staff-claim restore failed after customer account creation',
+          );
+        }
       } on FirebaseAuthException catch (e) {
         if (e.code == 'email-already-in-use') {
           // Account already exists — look up the existing user doc to
@@ -930,7 +1332,10 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
       // UID so controllersStreamProvider finds them on first login. Only move
       // the controllers that were selected for this installation — leave the
       // admin's own controllers untouched.
-      await _migrateControllersToCustomer(
+      // P0-6: gated. A failure here is surfaced with its cause and retried;
+      // declining reports the install as FAILED rather than handing over a
+      // customer account with no controllers on it.
+      await _migrateControllersWithRetry(
         installerAnonymousUid,
         userId,
         selectedControllers,

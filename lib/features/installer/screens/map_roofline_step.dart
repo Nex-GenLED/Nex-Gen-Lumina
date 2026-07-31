@@ -369,13 +369,33 @@ class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
   /// Builds the aggregate config from every channel that has marks and writes
   /// it via the Slice 1 service (all channels at once, so saving one doesn't
   /// orphan another). source_pixel_count comes from bus.len; created_by = uid.
-  Future<bool> _saveMappedChannels() async {
-    final uid = ref.read(effectiveUserUidProvider);
-    final controllerId = ref.read(activePixelMapControllerIdProvider);
-    if (uid == null || controllerId == null) return false;
+  /// Why the last [_saveMappedChannels] failed. Surfaced to the installer by
+  /// [_onContinue] — F-5 was that this cause was discarded entirely.
+  Object? _lastSaveError;
 
+  Future<bool> _saveMappedChannels() async {
     final capture = ref.read(rooflineCaptureProvider);
     final channels = _channels;
+
+    // Nothing captured → nothing can be lost. Checked BEFORE the uid/controller
+    // guard so an installer who legitimately mapped nothing is never blocked by
+    // the retry gate below.
+    if (!channels.any((c) => capture.channelMarks(c.id).isNotEmpty)) return true;
+
+    final uid = ref.read(effectiveUserUidProvider);
+    final controllerId = ref.read(activePixelMapControllerIdProvider);
+    if (uid == null || controllerId == null) {
+      // Marks exist but there is nowhere to put them. Previously a silent
+      // `false` that _onContinue discarded.
+      _lastSaveError = StateError(
+        uid == null
+            ? 'no signed-in session to save under'
+            : 'no controller selected for this capture',
+      );
+      debugPrint('MapRoofline: cannot save pixel map — $_lastSaveError');
+      return false;
+    }
+
     final segments = <RooflineSegment>[];
     final sourceCounts = <int, int>{};
     for (final c in channels) {
@@ -413,8 +433,15 @@ class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
       for (final c in channels) {
         if (capture.channelMarks(c.id).isNotEmpty) notifier.markSaved(c.id);
       }
+      _lastSaveError = null;
       return true;
-    } catch (_) {
+    } catch (e, st) {
+      // F-5: was `catch (_) { return false; }` — the cause was destroyed and
+      // the return value discarded, so a failed save looked exactly like a
+      // successful one.
+      _lastSaveError = e;
+      debugPrint('MapRoofline: pixel-map save FAILED for '
+          'uid=$uid controller=$controllerId: $e\n$st');
       return false;
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -425,8 +452,61 @@ class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
     await _restorePrior();
     // Auto-persist any mapped-but-unsaved channels so nothing is lost at
     // handoff; skipping (no marks) simply writes nothing.
-    await _saveMappedChannels();
-    widget.onNext();
+    //
+    // F-5 GATE: the wizard MUST NOT advance on an unacknowledged failure. A
+    // pixel-walk is the most expensive thing an installer does on site, and a
+    // dropped save is unrecoverable once they leave the property.
+    //
+    // NO "save offline and continue" OPTION — deliberately. Firestore's offline
+    // queue would make this look survivable while relocating the silent failure
+    // somewhere strictly worse:
+    //   • the capture is written under the STAFF uid, and the very next wizard
+    //     step migrates that path to the customer and DELETES the source. A
+    //     write still pending at that moment is copied from cache, not from the
+    //     server, so the customer can inherit a map the backend never stored.
+    //   • if the app is killed or the installer signs out before the queue
+    //     flushes, the capture is gone with no record anywhere.
+    //   • the installer has already left the site by the time anyone could know.
+    // A queued write we cannot guarantee reaches Firestore is not a save, so it
+    // is not offered as one. Retry-on-site or explicitly "Map later" instead.
+    while (true) {
+      if (await _saveMappedChannels()) {
+        widget.onNext();
+        return;
+      }
+      if (!mounted) return;
+
+      final retry = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Roofline map didn't save"),
+          content: Text(
+            'This roofline capture could NOT be saved '
+            '(${_lastSaveError ?? 'unknown error'}).\n\n'
+            'It is not stored anywhere yet — leaving this screen now would lose '
+            'the whole pixel walk. Check your connection and tap Retry.\n\n'
+            'If you need to move on, go back and choose "Map later" to record '
+            'this controller as unmapped on purpose.',
+          ),
+          actions: [
+            // 'Close', not 'Back' — the step already has its own Back button,
+            // and two of them on screen at once is genuinely ambiguous.
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+      // 'Back' keeps the installer on this step with their marks intact — it
+      // does NOT advance. Only an actual successful save calls onNext().
+      if (retry != true) return;
+    }
   }
 
   Future<void> _onMapLater() async {

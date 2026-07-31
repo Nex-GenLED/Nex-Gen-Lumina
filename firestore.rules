@@ -175,6 +175,59 @@ service cloud.firestore {
                .data.get('dealer_code', '');
     }
 
+    // ── P0-5 — ORDERING-IMMUNE STAFF RESOLUTION (2026-07-31) ─────────────
+    //
+    // THE BUG: every caller of hasStaffClaim(dealerCodeOf(userId)) resolved the
+    // scoping value through get(/users/{userId}). Against a document that does
+    // not exist, `.data` on a null get() raises "Null value error" and the rule
+    // DENIES. Proven by executing the deployed ruleset through the Rules :test
+    // API: identical path, doc present + matching dealer -> ALLOW, doc absent
+    // -> DENY at line 416.
+    //
+    // WHY THAT IS REACHABLE: the installer wizard migrates a captured pixelMap
+    // to /users/{customer}/controllers/{id}/pixelMap/{ch} at
+    // installer_setup_wizard.dart:933, but the customer's /users/{uid} document
+    // is not written until :1047. During that window the scoping document does
+    // not exist yet. The migration is ONE atomic batch, so the denied pixelMap
+    // write takes the controller set+delete down with it, and the failure is
+    // swallowed — the customer silently ends up with NO controllers.
+    //
+    // THE FIX: resolve from the CALLER'S OWN claim when there is no document to
+    // scope against. Immune to write ordering, so it cannot regress if the
+    // wizard's sequence changes later, and it does not leave the get() pattern
+    // lying around for the next rule to copy.
+    //
+    // WHY NOT PURE CLAIM-BASED (no exists() at all): hasStaffClaim(code) tests
+    // `token.dealerCode == code`. Passing the caller's own claim makes that
+    // `x == x` — trivially true for EVERY staff session — which would grant any
+    // dealer's installer write access to every other dealer's customers. That
+    // is precisely the cross-tenant class hasMediaAccess() was deleted for (see
+    // the top of this file). Scoping is preserved wherever it is meaningful.
+    //
+    // RESIDUAL, STATED PLAINLY: while /users/{userId} does not exist, any
+    // legitimately-claimed staff session may write these subcollections under
+    // that uid. A uid with no user document is not a customer — it is an
+    // unprovisioned id — so there is nothing there to disclose or corrupt, and
+    // the moment the document lands full dealer scoping applies. Cost: one
+    // extra lookup (exists + get = 2) against a budget of 10.
+    //
+    // D4 MUST USE THIS FORM. Narrowing /users/{userId}/controllers create to
+    // `hasStaffClaim(dealerCodeOf(userId))` would move this same failure onto
+    // the controller write itself and break EVERY install, not just captures.
+    // Use staffMayReach(userId).
+    function isStaffSession() {
+      return request.auth != null
+        && request.auth.token.get('dealerCode', '') != ''
+        && (request.auth.token.get('role', '') == 'salesperson'
+            || request.auth.token.get('role', '') == 'installer');
+    }
+
+    function staffMayReach(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        ? hasStaffClaim(dealerCodeOf(userId))
+        : isStaffSession();
+    }
+
     // Membership check for /commercial_organizations: the caller's own user
     // doc points at this org. Mirrors commercialOrgProvider, which reads the
     // org named by the caller's organization_id.
@@ -409,12 +462,14 @@ service cloud.firestore {
         // pattern caused the neighborhoods outage class and is banned for new
         // rules. (Slice-1 writes are all owner writes, covered by isOwner; the
         // hasStaffClaim branch is for the Slice-2 installer capture path.)
+        // P0-5 (2026-07-31): was an inline get(/users/$(userId)) that DENIED
+        // whenever the customer's user doc did not exist yet — which is exactly
+        // when the installer wizard migrates a wizard-captured map. Now resolved
+        // through staffMayReach(); see its definition for the full rationale.
         match /pixelMap/{channelId} {
           allow read: if isOwner(userId);
           allow create, update, delete: if isOwner(userId)
-            || hasStaffClaim(
-                 get(/databases/$(database)/documents/users/$(userId))
-                   .data.get('dealer_code', ''));
+            || staffMayReach(userId);
         }
       }
 
@@ -573,20 +628,20 @@ service cloud.firestore {
         // Read: owner + media/dealer/admin (support, content creation), plus
         // the customer's own dealer's staff. NOT every signed-in user.
         allow read: if canReadUserData(userId)
-          || hasStaffClaim(dealerCodeOf(userId))
+          || staffMayReach(userId)
           || hasAdminOrOwnerClaim();
 
         // isUserRoleAdmin retained on update for corporate-approved
         // brand-library correction propagation.
         allow create: if isOwner(userId)
-          || hasStaffClaim(dealerCodeOf(userId))
+          || staffMayReach(userId)
           || hasAdminOrOwnerClaim();
         allow update: if isOwner(userId)
           || isUserRoleAdmin()
-          || hasStaffClaim(dealerCodeOf(userId))
+          || staffMayReach(userId)
           || hasAdminOrOwnerClaim();
         allow delete: if isOwner(userId)
-          || hasStaffClaim(dealerCodeOf(userId))
+          || staffMayReach(userId)
           || hasAdminOrOwnerClaim();
       }
 
@@ -617,10 +672,10 @@ service cloud.firestore {
       // capture path, not for activation.
       match /commercial_locations/{locationId} {
         allow read: if canReadUserData(userId)
-          || hasStaffClaim(dealerCodeOf(userId))
+          || staffMayReach(userId)
           || hasAdminOrOwnerClaim();
         allow create, update, delete: if isOwner(userId)
-          || hasStaffClaim(dealerCodeOf(userId))
+          || staffMayReach(userId)
           || hasAdminOrOwnerClaim();
       }
 
