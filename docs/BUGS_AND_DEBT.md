@@ -47,6 +47,86 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     settle) used by `schedule_sync.dart`.
   - Files: `lib/features/schedule/calendar_entry_lease_manager.dart`.
 
+- [x] **P0-5 — D4 BLOCKER: controller migration runs BEFORE the customer user doc exists** — **DONE 2026-07-31** (rules deployed, ruleset `ec8d918f-c279-4925-b8b2-168e96638586`)
+  - FIX: claim-based resolution via new `staffMayReach(userId)` in `firestore.rules` — when
+    `/users/{userId}` does not exist yet, scope from the CALLER'S OWN `dealerCode` claim
+    instead of a `get()` on the absent doc. Ordering-immune, so it cannot regress if the
+    wizard's sequence changes. Applied to all 7 vulnerable call sites (pixelMap inline +
+    6 × `hasStaffClaim(dealerCodeOf(userId))` on brand_profile / commercial_locations).
+  - NOT pure claim-based: `hasStaffClaim(token.dealerCode)` is `x == x`, i.e. always true,
+    which would have granted every dealer's installer access to every other dealer's
+    customers. Scoping is retained whenever the customer doc exists. See `audit/COMMISSIONING_FIXES.md`.
+  - VERIFIED against the LIVE ruleset via the Rules `:test` API — 16/16 incl. cross-dealer
+    DENY; plus a 31-path deployed-vs-live regression with 0 behavioral differences.
+  - **D4 MUST use `staffMayReach(userId)`**, not `hasStaffClaim(dealerCodeOf(userId))`.
+  - Original finding below.
+  - Status: was OPEN · Evidence: source-proven (2026-07-30, token-refresh work)
+  - `_completeSetup` migrates controllers at `installer_setup_wizard.dart:933` but the
+    customer's `/users/{userId}` doc is not written until `:1047`. Any narrowed rule of the
+    form `hasStaffClaim(get(/databases/../users/$(userId)).data.dealer_code)` therefore
+    evaluates `get()` on a **non-existent document** and DENIES.
+  - This is exactly the shape D4 intends to give `/users/{userId}/controllers` create
+    (mirroring the `pixelMap` rule at `firestore.rules:414-417`). Deploying it as-is breaks
+    controller migration for every install — the driveway failure the D4 sequencing is
+    designed to avoid.
+  - **Already latent today:** the migration batch also writes
+    `/users/{customer}/controllers/{id}/pixelMap/{ch}`, which is *already* governed by that
+    `get()`-based rule. When a roofline map was captured (Design Studio Slice 2), that write
+    should already be denied — and because the whole batch fails atomically and the error is
+    swallowed (see P0-6), the customer silently receives **no controllers at all**. Needs
+    bench confirmation on a pixelMap-carrying install.
+  - Fix options: (a) move the migration to after the `:1047` user-doc write, (b) write the
+    customer user doc (at minimum `dealer_code`) before migrating, or (c) narrow using only
+    the caller's own `dealerCode` claim with no cross-doc `get()`.
+  - Files: `lib/features/installer/installer_setup_wizard.dart`, `firestore.rules`.
+
+- [x] **P0-6 — `migrateInstallerControllersToCustomer` swallowed every failure** — **DONE 2026-07-31**
+  - **DONE 2026-07-31** — see `audit/P0-6_FIX.md`. The swallow is removed:
+    `migrateInstallerControllersToCustomer` now THROWS on failure and returns a
+    `ControllerMigrationResult` on success. `_migrateControllersWithRetry` logs the cause,
+    records it to the `/demo_analytics` telemetry sink
+    (`event_type: installer_commissioning_failure`), and shows a blocking Retry/Stop dialog
+    naming the cause — the same shape as `_restoreInstallerAuthWithRetry`, not a second UX.
+    **Stop rethrows**; the migration is pre-`installCommitted`, so `classifyInstallError`
+    yields `reportFailure` and the wizard reports the install as FAILED rather than handing
+    over an account with no controllers.
+  - RETRY IS SAFE — confirmed by test, not assumed: `WriteBatch.commit()` is atomic, so a
+    failed commit leaves the source intact and the destination empty ("delete succeeded but
+    set did not" cannot occur). A retry after a commit that *did* land finds the source
+    drained and returns `skipReason: 'source-empty'` — a no-op, not an error.
+  - Tests: `test/features/installer/controller_migration_failure_test.dart` (7).
+    Full suite 1857/3/1 (only the pre-existing P1-8 AI-normalize failure).
+  - GAP: the dialog itself is not widget-tested — `_completeSetup` calls
+    `FirebaseAuth.instance.createUserWithEmailAndPassword` directly and the project has no
+    auth-mocking dependency. The mechanism is pinned in two composing halves (it throws; a
+    pre-commit throw classifies as `reportFailure`). Same gap as
+    `_restoreInstallerAuthWithRetry`. Closing it means putting the auth call behind an
+    injectable seam — worth doing, out of scope for an RC.
+  - Was: `installer_setup_wizard.dart:207-209` caught and `debugPrint`ed any migration failure
+    so "handoff still completes". A permission denial, a partial batch, or an offline device
+    all rendered as a successful install whose customer has zero controllers on first login.
+    This is what would have made the P0-5 denial invisible.
+  - Files: `lib/features/installer/installer_setup_wizard.dart`,
+    `lib/features/installer/staff_auth_telemetry.dart`.
+
+- [x] **P0-7 — Roofline pixel-map save failure was silent; wizard advanced anyway** — **DONE 2026-07-31**
+  - ⚠ **NAMING:** this was handed to me labelled "F-5", but **F-5 in
+    `audit/COMPLIANCE_AND_SECURITY.md` is ACCOUNT DELETION** (F-5a/F-5b). They are unrelated.
+    **F-5a/F-5b remain OPEN.** Tracked here as P0-7 so the ledger cannot conflate them.
+  - `map_roofline_step.dart:417` was `catch (_) { return false; }` — cause destroyed — and
+    `_onContinue()` discarded the bool and called `widget.onNext()` unconditionally. A pixel
+    walk that failed to persist looked identical to one that succeeded; the installer
+    finished the job and left. This was the **6th** silent-success instance (after F-5, F-8,
+    the off-LAN lease, `_writeZeroedSlot`, `migrateInstallerControllersToCustomer`).
+  - FIX: `_onContinue()` gates on the result and loops on a blocking Retry dialog; the
+    exception is logged with uid/controller; "nothing captured" short-circuits to success so
+    an installer who mapped nothing is never trapped. **No "save offline and continue"** — a
+    queued write would be migrated-from-cache and deleted at handoff, relocating the silent
+    failure somewhere unobservable.
+  - Regression test: `test/features/installer/map_roofline_save_gate_test.dart` (5 tests)
+    pins "onNext only on genuine success", incl. the decline-to-retry path so the fix cannot
+    become a 7th instance.
+
 - [ ] **P0-4 — System presets 1/3/4/5 ib-heal check**
   - Status: OPEN · Evidence: suspected (bench-verify pending)
   - Name-based skip in the psave path may prevent re-saving presets with `ib:true`; if stale,
@@ -518,6 +598,38 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 > Added 2026-07-30 from the pre-submission audit (`audit/LAUNCH_PLAN.md`, consolidating
 > `audit/FEATURE_STATUS_MATRIX.md` + `audit/RELEASE_READINESS.md`). None of these block
 > submission; none are customer-visible.
+
+- [ ] **P3-60 — `kStaffAuthTelemetryAppVersion` is a hand-bumped constant (drift risk)**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30)
+  - `lib/features/installer/staff_auth_telemetry.dart` stamps a hardcoded app version onto
+    every fallback row because the project has no `package_info_plus` (adding a plugin to a
+    release candidate was judged riskier than a constant). A stale value defeats the S-5
+    metric, whose entire job is telling adopted builds from stale ones.
+  - Fix: add `package_info_plus` post-submission and read the real version, or add the bump
+    to the release checklist next to the `versionCode` bump.
+
+- [ ] **P3-61 — Aborting the wizard after customer-account creation is unrecoverable in-app**
+  - Status: OPEN · Evidence: source-proven (2026-07-30)
+  - If the installer taps **Stop** on the new staff-auth retry dialog (or any post-`:822`
+    failure aborts), the customer's Firebase Auth account exists but `/users/{userId}` was
+    never written. Re-running with the same email hits `email-already-in-use`, whose recovery
+    path queries `/users` by `dealer_code` + `email`, finds nothing, and dead-ends on
+    "No existing customer matches this email under your dealer code."
+  - Pre-existing (any post-creation abort does this); the retry dialog just makes the branch
+    reachable on purpose. Mitigated by the pre-flight refresh making Stop very unlikely, and
+    the dialog copy tells the installer not to restart with the same email.
+  - Fix: recover by uid instead of by query when the account exists but the user doc does not.
+
+- [ ] **P3-62 — Stale line-number cross-references around the installer auth path**
+  - Status: OPEN · Evidence: verified-by-code (2026-07-30)
+  - `firestore.rules:405` cites `installer_providers.dart:192` for the `signInWithCustomToken`
+    call; it is at `:291`. `staff_pin_screen.dart:75-78` cites wizard lines `506`/`512` for
+    `createUserWithEmailAndPassword` / `signInAnonymously`; they are at `:822` and inside
+    `_fallBackToAnonymous`. The `staff_pin_screen` note also now misdescribes the wizard,
+    which re-mints rather than falling back.
+  - Also: `installer_setup_wizard.dart`'s `installerAnonymousUid` local is a misnomer — post-PIN
+    it holds the **staff** uid (`staff_installer_<pin>`), not an anonymous one. That name is
+    what made the "does the staff uid equal `fromUid`?" question look open. Rename it.
 
 - [ ] **P3-50 — `buildTimerEntry` still carries the known-wrong solar 24/25 encoding (dead, but loaded)**
   - Status: OPEN · Evidence: verified-by-code (2026-07-30, `393af46`)
