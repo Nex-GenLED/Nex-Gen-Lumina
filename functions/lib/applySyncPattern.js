@@ -79,7 +79,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RATE_WINDOW_MS = exports.INITIATOR_COOLDOWN_MS = exports.GROUP_CEILING_PER_MIN = exports.applySyncPattern = void 0;
 exports.isMemberSkipped = isMemberSkipped;
 exports.buildFanoutCommandDoc = buildFanoutCommandDoc;
+exports.verifyFanoutTarget = verifyFanoutTarget;
+exports.fanoutToCrew = fanoutToCrew;
 exports.evaluateRateLimit = evaluateRateLimit;
+exports.reserveFanoutSlot = reserveFanoutSlot;
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
 exports.applySyncPattern = (0, https_1.onRequest)({ maxInstances: 10, cors: false }, async (req, res) => {
@@ -327,12 +330,46 @@ async function resolveMemberTargets(db, memberUid, memberData) {
     return [{ id: "", ip: "" }];
 }
 /**
+ * SYNC-1 server-side mutual-membership verification. A fanout may only target a
+ * uid that is a VERIFIED member of the crew — present in the group's
+ * `memberUids[]` (which the self-join flow maintains for both the group doc and
+ * the member subcollection). A member SUBCOLLECTION doc that is NOT backed by
+ * memberUids membership is not a mutual/self-consented member (e.g. an orphaned
+ * or out-of-band doc) and must NOT receive a fanout write to its command queue.
+ * Pure + exported for unit verification (mirrors evaluateRateLimit).
+ */
+function verifyFanoutTarget(targetUid, groupMemberUids) {
+    if (!targetUid || targetUid.length === 0) {
+        return { ok: false, reason: "empty_uid" };
+    }
+    if (!groupMemberUids.includes(targetUid)) {
+        return { ok: false, reason: "not_in_group_member_uids" };
+    }
+    return { ok: true };
+}
+/**
  * Fan an ad-hoc sync out to every consenting crew member's own command queue.
  * Membership is read LIVE here (never a cached/passed-in list) so a member who
  * just left is already gone. Per-member work is isolated with allSettled — one
  * member's read/write failure must not abort the crew.
+ *
+ * SYNC-1: each target is verified against the group's memberUids[] via
+ * [verifyFanoutTarget] BEFORE any write — a member-subcollection doc alone (e.g.
+ * a one-sided/out-of-band insert) is skipped, never fanned out to. Exported for
+ * unit verification.
  */
 async function fanoutToCrew(db, args) {
+    // SYNC-1: the crew's verified roster. A member SUBCOLLECTION doc is only
+    // fanned out to if its uid is ALSO in the group's memberUids[] (mutual /
+    // self-consented membership). Read once; the members subcollection iteration
+    // is cross-checked against it below.
+    const groupSnap = await db
+        .collection("neighborhoods")
+        .doc(args.groupId)
+        .get();
+    const groupMemberUids = Array.isArray(groupSnap.data()?.memberUids)
+        ? groupSnap.data().memberUids.filter((x) => typeof x === "string")
+        : [];
     const membersSnap = await db
         .collection("neighborhoods")
         .doc(args.groupId)
@@ -347,8 +384,18 @@ async function fanoutToCrew(db, args) {
             skipped++;
             return;
         }
-        memberCount++;
         const memberUid = memberDoc.id;
+        // SYNC-1: reject any target not mutually verified in memberUids[]. Closes
+        // the self-fanout hole — a one-sided/out-of-band member doc never receives a
+        // write to its command queue. Structured + logged.
+        const verdict = verifyFanoutTarget(memberUid, groupMemberUids);
+        if (!verdict.ok) {
+            skipped++;
+            console.warn(`applySyncPattern FANOUT: skipped unverified target ${memberUid} ` +
+                `in ${args.groupId} — ${verdict.reason}`);
+            return;
+        }
+        memberCount++;
         tasks.push((async () => {
             const targets = await resolveMemberTargets(db, memberUid, data);
             // Webhook-Mode members need their forward URL; bridge-mode members get
@@ -399,6 +446,18 @@ async function fanoutToCrew(db, args) {
     return { memberCount, commandCount, skipped };
 }
 // ─── Slice 1 Commit 2: anti-strobe rate limit ────────────────────────────
+//
+// DELIBERATE ANTI-STROBE POLICY (not arbitrary defaults — do not weaken without
+// re-justifying). A crew fanout writes a command to EVERY member's controller;
+// unthrottled, rapid re-fanouts would strobe every crew member's lights (a
+// photosensitivity/comfort hazard, not just spam). Two independent gates:
+//   • per-INITIATOR cooldown 18s — one person can't machine-gun the crew;
+//     ~a real "change the scene" cadence, well above a strobe rate.
+//   • per-GROUP ceiling 5 per rolling 60s — even multiple initiators together
+//     can't drive the crew faster than ~1 change / 12s sustained.
+// Both are enforced transactionally in reserveFanoutSlot (concurrent-safe).
+// Locked by test/unit/fanoutRateLimit.test.js — changing these values will
+// fail that suite on purpose.
 /** Per-group ceiling: max ad-hoc fanouts committed in any rolling 60s. */
 exports.GROUP_CEILING_PER_MIN = 5;
 /** Per-initiator cooldown: minimum ms between one initiator's fanouts. */

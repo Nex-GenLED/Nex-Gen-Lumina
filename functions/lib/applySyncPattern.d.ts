@@ -41,6 +41,7 @@
  *   npm run build
  *   firebase deploy --only functions:applySyncPattern
  */
+import * as admin from "firebase-admin";
 export declare const applySyncPattern: import("firebase-functions/v2/https").HttpsFunction;
 /**
  * PURE. A crew member in these states is NOT commanded by an ad-hoc fanout
@@ -66,6 +67,41 @@ export declare function buildFanoutCommandDoc(args: {
     initiatorUid: string;
     sessionId: string;
 }): Record<string, unknown>;
+/**
+ * SYNC-1 server-side mutual-membership verification. A fanout may only target a
+ * uid that is a VERIFIED member of the crew — present in the group's
+ * `memberUids[]` (which the self-join flow maintains for both the group doc and
+ * the member subcollection). A member SUBCOLLECTION doc that is NOT backed by
+ * memberUids membership is not a mutual/self-consented member (e.g. an orphaned
+ * or out-of-band doc) and must NOT receive a fanout write to its command queue.
+ * Pure + exported for unit verification (mirrors evaluateRateLimit).
+ */
+export declare function verifyFanoutTarget(targetUid: string, groupMemberUids: string[]): {
+    ok: boolean;
+    reason?: string;
+};
+/**
+ * Fan an ad-hoc sync out to every consenting crew member's own command queue.
+ * Membership is read LIVE here (never a cached/passed-in list) so a member who
+ * just left is already gone. Per-member work is isolated with allSettled — one
+ * member's read/write failure must not abort the crew.
+ *
+ * SYNC-1: each target is verified against the group's memberUids[] via
+ * [verifyFanoutTarget] BEFORE any write — a member-subcollection doc alone (e.g.
+ * a one-sided/out-of-band insert) is skipped, never fanned out to. Exported for
+ * unit verification.
+ */
+export declare function fanoutToCrew(db: admin.firestore.Firestore, args: {
+    groupId: string;
+    initiatorUid: string;
+    payloadString: string;
+    sessionId: string;
+    source: string;
+}): Promise<{
+    memberCount: number;
+    commandCount: number;
+    skipped: number;
+}>;
 /** Per-group ceiling: max ad-hoc fanouts committed in any rolling 60s. */
 export declare const GROUP_CEILING_PER_MIN = 5;
 /** Per-initiator cooldown: minimum ms between one initiator's fanouts. */
@@ -94,4 +130,17 @@ export declare function evaluateRateLimit(state: RateState, initiatorUid: string
     windowStarts: number[];
     lastByInitiator: Record<string, number>;
 };
+/**
+ * TRANSACTIONAL check-and-reserve against
+ * neighborhoods/{groupId}/rate_limits/state. Runs inside db.runTransaction so
+ * the function's concurrent instances serialize on this single doc — two calls
+ * that would both pass a naive check can't both commit; Firestore aborts and
+ * retries one against the other's committed state. Single-doc read+write → no
+ * composite index. Admin-SDK only (new subcollection has no client rule →
+ * default-deny for clients).
+ */
+export declare function reserveFanoutSlot(db: admin.firestore.Firestore, groupId: string, initiatorUid: string, nowMs: number): Promise<{
+    allowed: boolean;
+    retryAfterMs: number;
+}>;
 export {};

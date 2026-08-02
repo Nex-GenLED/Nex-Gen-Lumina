@@ -61,6 +61,22 @@ exports.enforceScheduleLimits = enforceScheduleLimits;
 const { backfillSchedulesSubcollection } = require("./lib/backfillSchedulesSubcollection");
 exports.backfillSchedulesSubcollection = backfillSchedulesSubcollection;
 
+// ── Command safety (S1 + S2) ───────────────────────────────────────────────
+// Expires stale `pending` commands so a bridge that reconnects after an outage
+// cannot fire a backlog at the wrong time. The bridge has NO age check of its
+// own and the age check below (executeWledCommand) is webhook-only, so this is
+// the ONLY expiry enforcement that reaches the bridge-mode fleet.
+// See audit/COMMAND_SAFETY.md.
+const { sweepExpiredCommands } = require("./lib/sweepExpiredCommands");
+exports.sweepExpiredCommands = sweepExpiredCommands;
+
+// Maintains users/{uid}.controller_ips — the allowlist firestore.rules uses to
+// reject a command naming a controllerIp that is not the customer's own.
+// DEPLOY + BACKFILL BEFORE the tightened commands rule (COMMAND_SAFETY.md §5).
+const { syncControllerIps, backfillControllerIps } = require("./lib/syncControllerIps");
+exports.syncControllerIps = syncControllerIps;
+exports.backfillControllerIps = backfillControllerIps;
+
 // The single residential<->commercial activation path. Owns the cross-doc
 // batch (users + installations) that no client can write; absorbs the two
 // diverged in-app batches (item #32).

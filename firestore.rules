@@ -493,15 +493,74 @@ service cloud.firestore {
       }
 
       // Commands subcollection - Cloud Relay commands for remote WLED control
+      //
+      // S1 (2026-08-01) — controllerIp MUST name one of the customer's own
+      // registered controllers. See audit/COMMAND_SAFETY.md.
+      //
+      // THE HOLE THIS CLOSES: the bridge takes the target IP straight from this
+      // document (esp32-bridge/src/main.cpp:778-779) and only falls back to its
+      // paired IP when the field is empty (:795-800). So a compromised customer
+      // account could make that customer's bridge POST arbitrary JSON to ANY
+      // host on their home LAN — the bridge is an unauthenticated HTTP client
+      // sitting inside the perimeter.
+      //
+      // WHY AN IP ALLOWLIST AND NOT A get() ON THE CONTROLLER DOC: the natural
+      // rule keys on controllerId, which works for the main relay path but
+      // BREAKS two shipping app writers — bridge_setup_screen.dart:617 sends
+      // controllerId:'' and bridge_health_service.dart:35-46 sends none at all.
+      // Rules go live instantly and globally against an installed fleet we
+      // cannot change, so the rule must fit the app as it ships TODAY. The
+      // allowlist is denormalized onto users/{uid}.controller_ips by
+      // functions/src/syncControllerIps.ts.
+      //
+      // ⚠️ DEPLOY ORDER IS LOAD-BEARING: syncControllerIps + backfill MUST be
+      // deployed and verified BEFORE this rule. Deploying this first denies
+      // every non-empty controllerIp write fleet-wide and takes out remote
+      // control entirely. COMMAND_SAFETY.md §5 has the sequence.
+      //
+      // SCOPE: this constrains APP writers only. The Admin SDK bypasses
+      // security rules entirely, so the four server-side writers
+      // (functions/index.js:1416, functions/src/applySyncPattern.ts:243/:478,
+      // the Alexa lambda and the standalone google-home function) are NOT
+      // constrained by it. Their safety comes from construction instead — they
+      // either omit controllerIp or resolve it from the user's own controllers
+      // subcollection server-side. Recorded, not assumed.
       match /commands/{commandId} {
+        // The IP this write is asking the bridge to target ('' when absent —
+        // an omitted target is unredirectable, since the bridge then uses its
+        // own paired IP, so an empty value is always allowed).
+        function declaredControllerIp() {
+          return request.resource.data.get('controllerIp', '');
+        }
+
+        // True when no target is named, or the named target is one of this
+        // user's own registered controllers. exists() guard first: a missing
+        // user doc must deny a targeted write rather than error the ruleset
+        // (the P0-5 shape — a customer doc that does not exist yet).
+        function targetsOwnController() {
+          return declaredControllerIp() == ''
+            || (exists(/databases/$(database)/documents/users/$(userId))
+                && declaredControllerIp() in
+                   get(/databases/$(database)/documents/users/$(userId))
+                     .data.get('controller_ips', []));
+        }
+
         // Users can read their own commands; bridge reads to pick up pending commands
         allow read: if canReadUserData(userId) || isBridgeForUser(userId);
 
         // Users can create commands (sent from app when remote)
-        allow create: if isOwner(userId);
+        allow create: if isOwner(userId) && targetsOwnController();
 
-        // Users or bridge can update commands (bridge sets status to completed/failed)
-        allow update: if isOwner(userId) || isBridgeForUser(userId);
+        // Users or bridge can update commands (bridge sets status to completed/failed).
+        // The owner branch is validated too: bridge_health_service.dart uses a
+        // FIXED doc id with .set(), so its 2nd and subsequent calls are UPDATES.
+        // Validating create only would leave that path as a permanent bypass —
+        // write once with a good IP, then re-point it anywhere forever.
+        // The bridge branch is deliberately NOT IP-validated: the bridge writes
+        // status/result/error on a document whose target was already checked at
+        // create, and it authenticates as itself (isBridgeForUser).
+        allow update: if (isOwner(userId) && targetsOwnController())
+                      || isBridgeForUser(userId);
 
         // Users can delete commands (cleanup)
         allow delete: if isOwner(userId);
