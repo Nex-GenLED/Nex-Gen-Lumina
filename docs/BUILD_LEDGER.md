@@ -29,6 +29,52 @@ optional.
 
 ---
 
+## 2.5.10+61 — solar failure made legible + all-stub clobber guard
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `816aa1b538e947ad8d801bfe1d26f2349ff019db` (`816aa1b`) — the build commit |
+| **Merged to main** | `c5c7baf1f280ce07d22eee4114d3dfce1ec5e911` (`c5c7baf`, `--no-ff`), **pushed to origin 2026-08-03** |
+| **Branch at build time** | `fix/solar-legible-and-clobber-guard` (off `main` @ `624d347`) |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **61** — verified from the merged manifest (`build/app/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,237,215 bytes · built 2026-08-03 12:18 |
+| **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
+| **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` (2026-08-03 12:17) — archive these, never commit |
+| **Android track** | **NOT UPLOADED** — Tyler uploads |
+| **iOS Codemagic build number** | `PENDING` — fill when the build completes |
+| **iOS workflow** | `ios-workflow` ("iOS Release"), **started manually** — `codemagic.yaml` still has no `triggering:` block (re-verified this build) |
+| **iOS branch built** | `main` @ `c5c7baf` |
+| **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
+
+**Contents:** `presetErrors` text now renders at both display sites (was a bare count, discarding
+the composed remedy); abort message rewritten without the `internal:` prefix; five UI surfaces
+gated on the solar flag (editor, autopilot baseline, AI prompt schema, commercial events,
+neighborhood sync); `_offTrigger` default flipped off solar; `shouldSkipClobberingWrite` +
+`countRefusal` at five refusal points; both display sites reordered so warnings survive the
+`!success` branch. Audit trail: `audit/SOLAR_FIX.md`, `audit/ALL_STUB_GUARD.md`,
+`audit/ALL_STUB_CLOBBER.md`, `audit/ELLIE_SUNSET.md`.
+
+**Test suite at build time:** 1867 passed · 3 skipped (hardware-gated) · 1 failed
+(`cloud_ai_processor_normalize` — pre-existing stale P1-8 assertion, pins behavior deliberately
+removed by `b6ca2f1`; count matched the expected baseline exactly, so no stash proof was needed).
+Analyze on all changed files: **0 errors, 0 warnings** (15 pre-existing info-level lints).
+
+**Known-open at ship:** solar still does not work — this build makes the failure legible and stops
+it spreading; `config/solar_scheduling` is deliberately NOT created. The flag flip is gated on a
+solar comparator that does not exist (`isRealEnabledTimer` excludes `hour == 255`). **P0-9** open —
+lease timers occupy general slots 0-7, protected only by a same-write merge from a device-local
+SharedPreferences ledger. `firestore.rules` deliberately untouched (controller_ips mid-soak).
+
+> ### ⚠ Same join-key caveat as +60 — the iOS build number will NOT be 61
+>
+> `codemagic.yaml` still overwrites pubspec's build number:
+> `BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}`, then `sed`s it into pubspec. Only the version
+> *name* (`2.5.10`) survives from the repo. **Android `versionCode 61` and the iOS build number
+> identify the same code only through `816aa1b` / `c5c7baf`.** Match on the SHA.
+
+---
+
 ## 2.5.10+60 — commissioning silent-failure closeout
 
 | Field | Value |
