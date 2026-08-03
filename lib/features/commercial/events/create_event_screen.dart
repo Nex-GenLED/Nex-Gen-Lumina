@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/models/commercial/commercial_event.dart';
 import 'package:nexgen_command/services/commercial/brand_library_providers.dart';
 import 'package:nexgen_command/services/commercial/event_lumina_service.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 
 /// Multi-step Event creation screen.
 ///
@@ -228,12 +229,21 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
       String? activateId;
       String? revertId;
 
+      // Solar gate: with the solar_scheduling flag off, schedule_sync refuses
+      // any schedule carrying a sunrise/sunset boundary, so an event created
+      // here would silently never arm. Fall back to clock times covering the
+      // same intent (lit through the evening, off overnight). Commercial sites
+      // have no per-site coordinates on this screen, so these are fixed
+      // defaults rather than computed solar times. Read once — both the
+      // activate and revert items below need it.
+      final solarOk = ref.read(solarSchedulingEnabledSyncProvider);
+
       if (_autoActivate && designPayload != null) {
         final repeatDays = _repeatDaysFor(event.startDate, event.endDate);
         final activateItem = ScheduleItem(
           id: 'evt_${eventRef.id}_on',
-          timeLabel: 'Sunset',
-          offTimeLabel: 'Sunrise',
+          timeLabel: solarOk ? 'Sunset' : '7:00 PM',
+          offTimeLabel: solarOk ? 'Sunrise' : '11:00 PM',
           repeatDays: repeatDays,
           actionLabel: 'Event: ${event.name}',
           enabled: true,
@@ -258,7 +268,9 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
 
         final revertItem = ScheduleItem(
           id: 'evt_${eventRef.id}_off',
-          timeLabel: 'Sunrise',
+          // Same solar gate as the activate item above — a 'Sunrise' revert
+          // would be refused wholesale by schedule_sync while the flag is off.
+          timeLabel: solarOk ? 'Sunrise' : '6:00 AM',
           offTimeLabel: null,
           repeatDays: repeatDays,
           actionLabel: 'Event ended: ${event.name}',

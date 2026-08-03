@@ -568,12 +568,35 @@ class LuminaAI {
     String userPrompt, {
     String? contextBlock,
     double? temperature,
+    // Solar gate. The Smart prompt's scheduling schema offers
+    // "Sunset"/"Sunrise" as timeLabel values, but with the solar_scheduling
+    // flag off schedule_sync REFUSES any schedule carrying a solar boundary —
+    // so the model would confidently produce a schedule that cannot arm.
+    // Defaults true so non-Riverpod callers (and tests) keep the documented
+    // schema; the app passes the live flag.
+    bool solarSchedulingEnabled = true,
   }) async {
     final tier = _classifyPromptTier(userPrompt);
     final model = tier == _LuminaTier.fast ? _kHaiku : _kOpus;
-    final systemPrompt = tier == _LuminaTier.fast
+    var systemPrompt = tier == _LuminaTier.fast
         ? _kFastSystemPrompt
         : _kSmartSystemPrompt;
+
+    // Appended rather than edited into the fragment: _kSmartSystemPrompt is a
+    // compile-time const assembled from SchedulingIntent.schemaPromptFragment
+    // (the #58 single-source-of-truth, pinned by an equivalence test), so it
+    // cannot vary at runtime. A trailing hard constraint overrides the earlier
+    // schema without forking it.
+    if (!solarSchedulingEnabled && tier == _LuminaTier.smart) {
+      systemPrompt += '\n\n═══ SCHEDULING CONSTRAINT (OVERRIDES SCHEMA) ═══\n'
+          'Sunrise/sunset scheduling is NOT AVAILABLE on this system. In '
+          '`schedulingIntent`, NEVER emit "Sunset" or "Sunrise" for '
+          '`timeLabel` or `offTimeLabel` — always use an "HH:MM" clock time. '
+          'If the user asks for sunset or sunrise, pick a sensible clock time '
+          'instead (e.g. 8:00 PM for sunset, 6:00 AM for sunrise) and say '
+          'plainly in your reply that you used a specific time because '
+          'sunrise/sunset timing is not available yet.\n';
+    }
 
     final effectiveTemp = temperature ?? (tier == _LuminaTier.smart ? 0.4 : 0.2);
 

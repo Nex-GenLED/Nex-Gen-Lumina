@@ -24,6 +24,7 @@ import 'package:nexgen_command/features/audio/services/audio_capability_detector
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'dart:convert';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
 /// every Lumina AI request for improved grounding and personalization.
@@ -319,6 +320,15 @@ class LuminaBrain {
       userPrompt,
       contextBlock: contextBlock,
       temperature: isOpenEnded ? 0.7 : null,
+      // Don't let the model offer sunrise/sunset scheduling the sync layer
+      // will refuse. Read defensively — a flag read must never break chat.
+      solarSchedulingEnabled: () {
+        try {
+          return ref.read(solarSchedulingEnabledSyncProvider);
+        } catch (_) {
+          return false;
+        }
+      }(),
     );
 
     // Extract and cache the pattern from AI response

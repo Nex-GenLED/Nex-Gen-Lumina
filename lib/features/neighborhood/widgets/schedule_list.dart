@@ -17,6 +17,7 @@ import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../providers/group_autopilot_providers.dart';
 import 'group_autopilot_schedule_card.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN WIDGET
@@ -1064,17 +1065,29 @@ class _ScheduleTimeConfigSheetState
   }
 
   Widget _buildTimeRangePicker() {
+    // Solar gate: schedule_sync refuses sunrise/sunset boundaries while the
+    // solar_scheduling flag is off, so a sync started with "Start at sunset"
+    // could never arm. Disable the control rather than hide it, so the option
+    // stays discoverable and its unavailability is explained.
+    final solarEnabled = ref.watch(solarSchedulingEnabledSyncProvider);
     return Column(
       children: [
         Row(
           children: [
             Checkbox(
-              value: _useSunset,
-              onChanged: (v) => setState(() => _useSunset = v ?? false),
+              value: solarEnabled && _useSunset,
+              onChanged: solarEnabled
+                  ? (v) => setState(() => _useSunset = v ?? false)
+                  : null,
               activeColor: NexGenPalette.violet,
             ),
-            const Text('Start at sunset',
-                style: TextStyle(color: Colors.white)),
+            Text(
+              solarEnabled
+                  ? 'Start at sunset'
+                  : 'Start at sunset (unavailable — pick a time)',
+              style: TextStyle(
+                  color: solarEnabled ? Colors.white : Colors.white54),
+            ),
           ],
         ),
         const SizedBox(height: 8),

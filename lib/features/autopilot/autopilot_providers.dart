@@ -6,6 +6,8 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
+import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/autopilot_activity_entry.dart';
 import 'package:nexgen_command/models/autopilot_event.dart';
@@ -442,11 +444,17 @@ class AutopilotSettingsService {
       // Convert to regular ScheduleItem format (using user's IANA timezone for display)
       final tz = profile.timeZone;
       final userTimeFormat = profile.timeFormat;
+      // Hoisted out of the closure below: Dart won't type-promote a nullable
+      // field access inside a closure, so read them here alongside tz.
+      final lat = profile.latitude;
+      final lon = profile.longitude;
       final scheduleItems = autopilotItems
           .map((item) => _convertToScheduleItem(
                 item,
                 ianaTimezone: tz,
                 timeFormat: userTimeFormat,
+                latitude: lat,
+                longitude: lon,
               ))
           .toList();
 
@@ -542,6 +550,10 @@ class AutopilotSettingsService {
     AutopilotScheduleItem item, {
     String? ianaTimezone,
     String timeFormat = '12h',
+    // Used only when the solar flag is OFF, to resolve the sunset-baseline's
+    // OFF boundary to a real sunrise clock time instead of the 'Sunrise' token.
+    double? latitude,
+    double? longitude,
   }) {
     // item.scheduledTime is already local — produced by SunUtils.sunsetLocal()
     // / SunUtils.sunriseLocal() / AutopilotScheduler._resolveScheduledTime.
@@ -552,17 +564,39 @@ class AutopilotSettingsService {
     // Format time label
     String timeLabel = _formatTime(localTime, timeFormat);
 
+    // ── Solar gate (feature flag) ────────────────────────────────────────
+    // Autopilot is the reason unarmable solar schedules exist in the fleet:
+    // the default baseline is "warm white from sunset, off at sunrise", so a
+    // user who never chose solar still gets solar labels — and with the flag
+    // off, schedule_sync refuses the whole schedule and NOTHING arms. Emit
+    // clock times instead so the baseline actually works.
+    //
+    // The clock fallback is exact, not invented: `item.scheduledTime` is
+    // already the real sunset/sunrise moment (SunUtils.sunsetLocal /
+    // sunriseLocal via AutopilotScheduler), so `timeLabel` above IS "sunset
+    // o'clock" for the generation date. We simply stop overwriting it.
+    final solarEnabled = _solarSchedulingEnabled();
+
     // Add trigger context to time label for special triggers
-    if (item.trigger == AutopilotTrigger.sunset) {
-      timeLabel = 'Sunset';
-    } else if (item.trigger == AutopilotTrigger.sunrise) {
-      timeLabel = 'Sunrise';
+    if (solarEnabled) {
+      if (item.trigger == AutopilotTrigger.sunset) {
+        timeLabel = 'Sunset';
+      } else if (item.trigger == AutopilotTrigger.sunrise) {
+        timeLabel = 'Sunrise';
+      }
     }
 
     // Default off time: Sunrise for sunset-triggered, otherwise none
     String? offTimeLabel;
     if (item.trigger == AutopilotTrigger.sunset) {
-      offTimeLabel = 'Sunrise';
+      offTimeLabel = solarEnabled
+          ? 'Sunrise'
+          : _clockSunriseLabel(
+              afterLocal: localTime,
+              latitude: latitude,
+              longitude: longitude,
+              timeFormat: timeFormat,
+            );
     }
 
     // Format repeat days
@@ -601,6 +635,47 @@ class AutopilotSettingsService {
       ensureLocalTime(time, ianaTimezone);
 
   /// Format time as "h:mm AM/PM" (12h) or "HH:mm" (24h).
+  /// Solar feature flag, read defensively: any failure → `false`, matching the
+  /// provider's own degraded-state default. A flag read must never be the
+  /// reason an autopilot generation throws.
+  bool _solarSchedulingEnabled() {
+    try {
+      return _ref.read(solarSchedulingEnabledSyncProvider);
+    } catch (e) {
+      debugPrint('Autopilot: solar flag read failed — $e (treating as off)');
+      return false;
+    }
+  }
+
+  /// Clock-time replacement for the `'Sunrise'` OFF token when solar is off.
+  ///
+  /// Resolves the ACTUAL next sunrise after [afterLocal] from the user's
+  /// coordinates, so the baseline keeps its intended "off at sunrise" meaning
+  /// while using an encoding WLED can actually arm.
+  ///
+  /// Fallback is `06:00` only when coordinates are unavailable (a coordinate-
+  /// less account can't compute sunrise at all). 6 AM is after sunrise for
+  /// roughly half the year at mid-latitudes and before it for the other half —
+  /// erring toward switching off slightly early rather than leaving a house lit
+  /// into full daylight, and it is a round number the user can recognise as a
+  /// default and change.
+  String _clockSunriseLabel({
+    required DateTime afterLocal,
+    required double? latitude,
+    required double? longitude,
+    required String timeFormat,
+  }) {
+    if (latitude != null && longitude != null) {
+      // Sunset-triggered schedules run overnight, so the paired sunrise is the
+      // following morning.
+      final nextDay = DateTime(
+          afterLocal.year, afterLocal.month, afterLocal.day + 1, 12);
+      final sunrise = SunUtils.sunriseLocal(latitude, longitude, nextDay);
+      if (sunrise != null) return _formatTime(sunrise, timeFormat);
+    }
+    return _formatTime(DateTime(afterLocal.year, afterLocal.month, afterLocal.day, 6), timeFormat);
+  }
+
   String _formatTime(DateTime dt, String timeFormat) {
     final minute = dt.minute.toString().padLeft(2, '0');
     if (timeFormat == '24h') {
