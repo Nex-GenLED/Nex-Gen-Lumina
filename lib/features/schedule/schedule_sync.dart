@@ -18,7 +18,10 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show WledService
 // P0-3.2: lease-timer provider so syncAll can MERGE active lease timers
 // (macro 26-41) and not stub-clobber them. Flag-gated → [] when leases inactive.
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
-    show calendarLeaseActiveTimersProvider;
+    show
+        calendarLeaseActiveTimersProvider,
+        LeaseLedgerState,
+        LeaseLedgerLoading;
 // Global sunrise-off: a reserved slot-8 timer owned by a user profile toggle.
 // syncAll MERGES it for the same reason it merges lease timers — otherwise the
 // solar assembly stub-clobbers it on the next foreground sync.
@@ -1176,17 +1179,24 @@ class ScheduleSyncService {
     // stub-clobbers them (defect d: preset survives, lease timer never does).
     // Source = the lease manager's own activeLeaseTimers() via a flag-gated
     // provider (single source of truth; reuses _buildLeaseTimersPayload — no
-    // second merge impl). Returns [] when lease live-writes are off, so this is
-    // a no-op on the existing schedule-only path. Defensive: any read failure →
-    // schedule-only (never let a lease-read error break a schedule sync).
-    List<Map<String, dynamic>> leaseTimers;
+    // second merge impl). Resolves LeaseLedgerEmpty when lease live-writes are
+    // off, so this is a no-op on the existing schedule-only path.
+    //
+    // P0-9 (part a): a read FAILURE is now treated as UNKNOWN (→ refuse below),
+    // NOT as "schedule-only". The old catch proceeded on a throw, which is the
+    // clobber under another name: the payload goes out without lease timers and
+    // padTimersToMax stubs their slots. "Never let a lease-read error break a
+    // schedule sync" traded a deferred sync for silent data loss; deferring is
+    // the cheaper failure.
+    LeaseLedgerState leaseState;
     try {
-      leaseTimers = ref.read(calendarLeaseActiveTimersProvider);
+      leaseState = ref.read(calendarLeaseActiveTimersProvider);
     } catch (e) {
       debugPrint('ScheduleSync: lease-timer read failed — $e '
-          '(proceeding schedule-only)');
-      leaseTimers = const [];
+          '(treating as UNKNOWN — deferring rather than dropping leases)');
+      leaseState = const LeaseLedgerLoading();
     }
+    final leaseTimers = leaseState.timers;
     final leaseCount = leaseTimers.length;
 
     // ── Slot capacity: which armable schedules actually fit the table ───────
@@ -1307,6 +1317,44 @@ class ScheduleSyncService {
       debugPrint('ScheduleSync: off-LAN — timers not armed (bridge cannot '
           'write /json/cfg); schedule saved, will arm on next LAN sync');
       return finish(ScheduleSyncResult.deferredOffLan(
+        presetErrors: presetErrors,
+        schedulesWithPresets: updatedSchedules,
+      ));
+    }
+
+    // ── P0-9 (part a): lease-ledger loading gate ─────────────────────────
+    // The lease set is UNKNOWN — the ledger has not finished loading (prefs load
+    // + flag-doc bootstrap are fire-and-forget from the manager's provider, so a
+    // sync genuinely races them) or the read threw. Writing cfg now emits a
+    // payload with real schedule timers and NO lease timers; padTimersToMax
+    // stubs the lease slots and the controller loses every live lease. It is
+    // silent, it destroys automation this sync never owned, and it self-conceals
+    // — the lease is gone from the device AND from the ledger that would have
+    // restored it.
+    //
+    // REFUSE, don't wait. Blocking the sync on the load would make every caller
+    // pay for the ledger's network round-trip and could deadlock behind a
+    // Firestore stall; returning immediately keeps the sync path synchronous and
+    // the next sync (auto-retried by SchedulesNotifier — see runSyncNow) picks it
+    // up once the ledger is warm. Deferring a sync costs a few hundred ms; a
+    // wiped lease costs the customer their Game Day automation.
+    //
+    // ORDER — below the off-LAN check for the same reason the clobber guard is:
+    // off-LAN no cfg write is attempted anyway, so `deferredOffLan` is the
+    // truthful answer and must not be turned into a lease-ledger message. Above
+    // the clobber guard because "we don't know enough to write" is the stricter
+    // refusal; when both apply neither writes, so safety is unaffected.
+    //
+    // NOTE this deliberately does NOT gate on `leaseTimers.isEmpty` — an empty
+    // ledger that has LOADED must still write (to clear the device), exactly as
+    // a hydrated user with zero schedules does. Conflating those two is the bug.
+    if (leaseState is LeaseLedgerLoading) {
+      debugPrint('ScheduleSync: DEFERRED cfg write — the lease ledger has not '
+          'loaded, so the active lease set is UNKNOWN. Writing now would drop '
+          'any live lease timers (macro 26-41) from the merged payload and '
+          'stub-clobber their slots. Controller left unchanged; the sync '
+          're-runs once the ledger is warm.');
+      return finish(ScheduleSyncResult.deferredLeaseLedger(
         presetErrors: presetErrors,
         schedulesWithPresets: updatedSchedules,
       ));
@@ -1595,6 +1643,15 @@ class ScheduleSyncResult {
   /// genuinely zero schedules", which DOES push (to clear the device).
   final bool deferredNotLoaded;
 
+  /// Deferred because the LEASE LEDGER had not finished loading, so the active
+  /// lease set was unknown (P0-9 part a). No device write happened. Like
+  /// [deferredNotLoaded] this is neither success nor failure — writing would
+  /// have stub-clobbered any live lease timer, so the controller was left
+  /// untouched on purpose. [SchedulesNotifier] auto-retries once; a manual Sync
+  /// also clears it. Distinct from "ledger loaded with genuinely zero leases",
+  /// which DOES write.
+  final bool deferredLeaseLedger;
+
   /// Transient, interim state pushed to [lastScheduleSyncResultProvider] while
   /// we are VERIFYING a cfg write through the controller's post-commit network
   /// stall (see [ScheduleSyncService] cfg push). It is neither success nor
@@ -1612,6 +1669,7 @@ class ScheduleSyncResult {
     this.schedulesWithPresets = const [],
     this.deferredOffLan = false,
     this.deferredNotLoaded = false,
+    this.deferredLeaseLedger = false,
     this.verifying = false,
     DateTime? syncedAt,
   }) : syncedAt = syncedAt ?? DateTime.now();
@@ -1636,6 +1694,22 @@ class ScheduleSyncResult {
         deferredNotLoaded: true,
       );
 
+  /// Deferred because the lease ledger had not loaded (P0-9 part a). No device
+  /// write happened; the controller keeps whatever it already had, leases
+  /// included. Carries [presetErrors] so warnings raised earlier in the sync are
+  /// not swallowed by the deferral.
+  factory ScheduleSyncResult.deferredLeaseLedger({
+    List<ScheduleItem> schedulesWithPresets = const [],
+    List<String> presetErrors = const [],
+  }) =>
+      ScheduleSyncResult(
+        success: false,
+        deferredLeaseLedger: true,
+        error: kScheduleLeaseLedgerNotice,
+        presetErrors: presetErrors,
+        schedulesWithPresets: schedulesWithPresets,
+      );
+
   /// Interim "verifying the write through the controller's stall" state (see
   /// [verifying]). Pushed to the status provider while polling; never returned.
   factory ScheduleSyncResult.verifying() => ScheduleSyncResult(
@@ -1651,6 +1725,7 @@ class ScheduleSyncResult {
     if (verifying) return kScheduleCfgVerifying;
     if (deferredOffLan) return kScheduleOffLanNotice;
     if (deferredNotLoaded) return 'Loading your schedules…';
+    if (deferredLeaseLedger) return kScheduleLeaseLedgerNotice;
     if (!success) {
       return error ?? 'Sync failed';
     }
@@ -1672,6 +1747,13 @@ const String kScheduleOffLanNotice =
 /// will answer once it recovers (the LEDs keep running meanwhile).
 const String kScheduleCfgVerifying =
     'Saving to controller — this can take a few minutes. Your lights keep working.';
+
+/// User-facing copy for a lease-ledger deferral (P0-9 part a). Deliberately not
+/// phrased as a failure and deliberately not mentioning "leases" — nothing broke
+/// and the word means nothing to a customer. It says what is true: saved, not
+/// armed yet, resolving itself. The retry usually lands before this is read.
+const String kScheduleLeaseLedgerNotice =
+    'Saved — finishing up on your controller. This clears in a moment.';
 
 /// Terminal failure copy for the case where the controller never answered
 /// within the verification window (didn't recover). Actionable and distinct

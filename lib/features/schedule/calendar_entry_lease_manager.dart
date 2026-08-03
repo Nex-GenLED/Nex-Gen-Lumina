@@ -244,6 +244,54 @@ enum LeaseOutcome {
   writeFailed,
 }
 
+/// P0-9 (part a) — the tri-state result of [CalendarEntryLeaseManager.activeLeaseTimers].
+///
+/// WHY A SEALED TYPE AND NOT A NULLABLE LIST: the defect being fixed is that two
+/// semantically opposite situations shared one representation (`[]`). Encoding
+/// "unknown" as `null` would be the same in-band signal one step removed — a
+/// caller can still ignore it and reach for the list. A sealed hierarchy makes
+/// Dart's exhaustiveness checking refuse to compile a caller that forgets the
+/// loading case, so the conflation cannot silently reappear. That structural
+/// guarantee is worth ~20 lines on a P0 whose entire cause was an implicit
+/// encoding. Records (used elsewhere in this file for multi-value returns) were
+/// the alternative but carry no such enforcement.
+///
+/// [LeaseLedgerEmpty] and [LeaseLedgerReady] are kept DISTINCT rather than
+/// collapsed into `Ready(const [])` so the debug log can say which one it was —
+/// "ledger empty" vs "ledger loading" is the first question asked when a lease
+/// goes missing.
+sealed class LeaseLedgerState {
+  const LeaseLedgerState();
+
+  /// The lease timers to merge. Empty for both [LeaseLedgerLoading] and
+  /// [LeaseLedgerEmpty] — callers must NOT use this to distinguish them; switch
+  /// on the type. Provided only so the merge site has a well-defined value on
+  /// paths that never reach a write.
+  List<Map<String, dynamic>> get timers => const [];
+}
+
+/// The ledger has not finished loading — the lease set is UNKNOWN, not empty.
+/// A cfg write in this state would drop every live lease. Refuse instead.
+class LeaseLedgerLoading extends LeaseLedgerState {
+  const LeaseLedgerLoading();
+}
+
+/// The ledger is loaded and this account genuinely has no active leases.
+/// Merging nothing is CORRECT here — a sync must still write (to clear the
+/// device), exactly as a hydrated user with zero schedules still writes.
+class LeaseLedgerEmpty extends LeaseLedgerState {
+  const LeaseLedgerEmpty();
+}
+
+/// The ledger is loaded and holds [timers] (macro 26-41) that a schedule cfg
+/// write MUST merge or it will stub-clobber them (P0-3.2).
+class LeaseLedgerReady extends LeaseLedgerState {
+  const LeaseLedgerReady(this.timers);
+
+  @override
+  final List<Map<String, dynamic>> timers;
+}
+
 class CalendarEntryLease {
   /// CalendarEntry.dateKey — `'YYYY-MM-DD'`. Used as the registry key.
   final String dateKey;
@@ -1219,10 +1267,26 @@ class CalendarEntryLeaseManager {
   /// to MERGE so a schedule cfg write preserves leases instead of stub-clobbering
   /// them (P0-3.2). Reuses the SAME [_buildLeaseTimersPayload] the lease
   /// manager's own merged write uses — single source of truth, no second merge
-  /// implementation. Returns the unpadded real lease-timer list (may be empty).
-  List<Map<String, dynamic>> activeLeaseTimers() =>
-      ((_buildLeaseTimersPayload()['timers'] as Map)['ins'] as List)
-          .cast<Map<String, dynamic>>();
+  /// implementation.
+  ///
+  /// P0-9 (part a): returns a TRI-STATE, not a bare list. The bare list conflated
+  /// "this account has no leases" (merging nothing is correct) with "the ledger
+  /// hasn't loaded yet" (merging nothing DESTROYS live automation) — both were
+  /// `[]`. [initialize] is fire-and-forget from
+  /// [calendarEntryLeaseManagerProvider], so a schedule sync can and does race
+  /// the prefs load; the merged cfg write then omits every live lease and the
+  /// controller's timer table is overwritten without them. `_initialized` already
+  /// tracked exactly this and was read only by a `@visibleForTesting` getter.
+  ///
+  /// Callers MUST switch exhaustively — that is the point of the sealed type. A
+  /// [LeaseLedgerLoading] means "unknown"; the only safe response is to not
+  /// write cfg at all.
+  LeaseLedgerState activeLeaseTimers() {
+    if (!_initialized) return const LeaseLedgerLoading();
+    final ins = ((_buildLeaseTimersPayload()['timers'] as Map)['ins'] as List)
+        .cast<Map<String, dynamic>>();
+    return ins.isEmpty ? const LeaseLedgerEmpty() : LeaseLedgerReady(ins);
+  }
 
   /// Build the full cfg.timers.ins payload merging:
   ///   1. ScheduleItem-driven timers (enabled, non-evicted) from
@@ -1386,18 +1450,33 @@ final calendarEntryLeaseManagerProvider =
 });
 
 /// Active lease timers (macro 26-41) for the SCHEDULE sync to merge so a
-/// schedule cfg write preserves them (P0-3.2 clobber fix). Flag-gated: returns
-/// `[]` unless lease live-writes are enabled — when off, the lease manager never
+/// schedule cfg write preserves them (P0-3.2 clobber fix). Flag-gated: resolves
+/// [LeaseLedgerEmpty] when lease live-writes are OFF — the lease manager never
 /// armed lease timers on the controller, so there is nothing to preserve, and
 /// the manager is NOT instantiated (the short-circuit runs before reading it).
 /// This keeps existing schedule-sync tests (flag defaults false) behaving
-/// exactly as before: syncAll sees an empty list and its path is unchanged.
-final calendarLeaseActiveTimersProvider =
-    Provider<List<Map<String, dynamic>>>((ref) {
-  if (!ref.watch(calendarLeaseLiveWritesEnabledSyncProvider)) {
-    return const <Map<String, dynamic>>[];
-  }
-  return ref.watch(calendarEntryLeaseManagerProvider).activeLeaseTimers();
+/// exactly as before: syncAll sees no lease timers and its path is unchanged.
+///
+/// P0-9 (part a): the flag is read from the STREAM provider, not from
+/// [calendarLeaseLiveWritesEnabledSyncProvider], deliberately. That sync adapter
+/// collapses `AsyncLoading` to `false` — correct for its own callers (never WRITE
+/// when unsure) but wrong here, where `false` would mean "no leases to preserve"
+/// and license the clobbering write. During the flag's loading window the lease
+/// set is UNKNOWN, so this resolves [LeaseLedgerLoading] and the sync refuses.
+/// Same defect as the ledger race, one level up.
+///
+/// A stream ERROR resolves loading-safe too. In practice the stream's own catch
+/// yields `false` as DATA rather than surfacing an error, so that branch is
+/// near-unreachable; it is written conservatively rather than left to chance.
+final calendarLeaseActiveTimersProvider = Provider<LeaseLedgerState>((ref) {
+  return ref.watch(calendarLeaseLiveWritesEnabledProvider).when(
+        loading: () => const LeaseLedgerLoading(),
+        error: (_, __) => const LeaseLedgerLoading(),
+        data: (enabled) {
+          if (!enabled) return const LeaseLedgerEmpty();
+          return ref.watch(calendarEntryLeaseManagerProvider).activeLeaseTimers();
+        },
+      );
 });
 
 /// Internal result type from [CalendarEntryLeaseManager._writeLeaseToWled].

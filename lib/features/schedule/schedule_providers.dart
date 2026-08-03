@@ -25,6 +25,15 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// P0-9 (part a) — backoff for the lease-ledger deferral retry. Widening, and
+/// bounded: the last entry is the point at which we stop auto-retrying and leave
+/// the deferral visible instead of spinning a cfg write behind a stalled read.
+const List<Duration> _kLeaseLedgerRetryDelays = <Duration>[
+  Duration(milliseconds: 1200),
+  Duration(milliseconds: 2500),
+  Duration(milliseconds: 5000),
+];
+
 /// Streams the current user's schedules from Firestore — THE app-wide source of
 /// truth (SchedulesNotifier and all 14 consumers read through it). Reads via
 /// [effectiveUserUidProvider] so installer impersonation transparently scopes
@@ -98,6 +107,27 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// single /json/cfg push.
   Timer? _syncDebounceTimer;
 
+  /// P0-9 (part a). One-shot retry timer for a lease-ledger deferral, and the
+  /// latch that bounds it to a SINGLE re-attempt per deferral.
+  ///
+  /// Why a retry exists at all: `syncAll` refuses to write cfg while the lease
+  /// ledger is loading (it cannot know which lease timers to preserve). Without
+  /// a re-attempt that refusal is a silent no-arm — the schedule saves to
+  /// Firestore, nothing reaches the controller, and the status row clears on the
+  /// next rebuild. That is the "success reported for work not done" shape this
+  /// codebase already has too many of, so the deferral MUST be followed by
+  /// either a retry or a persistent surface. A retry is the better answer: it
+  /// usually just works, and the user never has to act.
+  ///
+  /// Why bounded and not indefinite: retrying forever would spin a cfg write
+  /// behind a Firestore stall. Three attempts on a widening backoff
+  /// ([_kLeaseLedgerRetryDelays]) comfortably covers a first-ever cold launch —
+  /// where the ledger waits on BOTH a prefs read and the flag doc's first
+  /// Firestore emission — after which the deferral stands and stays visible on
+  /// the status row for the user to act on.
+  Timer? _leaseLedgerRetryTimer;
+  int _leaseLedgerRetries = 0;
+
   /// Session guard for the one-time solar-timer cleanup (P0 hour:24/25). The
   /// cross-session, per-account gate is a SharedPreferences flag; this only
   /// avoids re-attempting within a single app session once a terminal state
@@ -112,6 +142,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   @override
   void dispose() {
     _syncDebounceTimer?.cancel();
+    _leaseLedgerRetryTimer?.cancel();
     super.dispose();
   }
 
@@ -178,6 +209,18 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         debugPrint(
             'SchedulesNotifier: WLED sync failed — ${result.error ?? "unknown"}');
       }
+      // P0-9 (part a): the cfg write was refused because the lease ledger was
+      // still loading. Nothing reached the controller, so re-attempt ONCE after
+      // a short delay — by then the prefs load and flag-doc bootstrap have
+      // normally completed and the retry writes with the lease timers merged.
+      // Bounded by `_leaseLedgerRetryArmed` so a persistently cold ledger cannot
+      // spin. Cleared on any non-deferred outcome so a LATER deferral (a new
+      // account, a re-login) gets its own retry.
+      if (result.deferredLeaseLedger) {
+        _scheduleLeaseLedgerRetry();
+      } else {
+        _leaseLedgerRetries = 0;
+      }
       return result;
     } catch (e) {
       debugPrint('SchedulesNotifier: WLED sync threw — $e');
@@ -188,6 +231,35 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     } finally {
       _syncInFlight = false;
     }
+  }
+
+  /// Arms the next lease-ledger retry (P0-9 part a), or gives up once
+  /// [_kLeaseLedgerRetryDelays] is exhausted.
+  ///
+  /// The delays widen because the ledger can be waiting on two different things:
+  /// a prefs read (fast) and the lease flag doc's first Firestore emission
+  /// (slow on a first-ever launch, instant from cache afterwards). A single
+  /// short retry would burn its one attempt against a cold Firestore and leave
+  /// the schedule unarmed with nothing further scheduled.
+  void _scheduleLeaseLedgerRetry() {
+    if (_leaseLedgerRetries >= _kLeaseLedgerRetryDelays.length) {
+      debugPrint('SchedulesNotifier: lease ledger STILL cold after '
+          '$_leaseLedgerRetries retries — giving up on the auto-retry. The '
+          'deferred state stays on the status row; a schedule edit or a manual '
+          'Sync will try again.');
+      return;
+    }
+    final delay = _kLeaseLedgerRetryDelays[_leaseLedgerRetries];
+    _leaseLedgerRetries++;
+    _leaseLedgerRetryTimer?.cancel();
+    debugPrint('SchedulesNotifier: lease ledger cold — re-running the sync in '
+        '${delay.inMilliseconds}ms (attempt $_leaseLedgerRetries of '
+        '${_kLeaseLedgerRetryDelays.length})');
+    _leaseLedgerRetryTimer = Timer(
+      delay,
+      // ignore: unawaited_futures
+      () => _runWledSync(),
+    );
   }
 
   Future<void> _init() async {

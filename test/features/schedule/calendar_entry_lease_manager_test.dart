@@ -852,6 +852,64 @@ void main() {
   // ────────────────────────────────────────────────────────────────
   // Group: persistence
   // ────────────────────────────────────────────────────────────────
+  group('P0-9 (part a) — activeLeaseTimers tri-state', () {
+    test('BEFORE initialize() the ledger reports LOADING, not empty', () {
+      // The race, at its source: the provider fires initialize() without
+      // awaiting it, so this is the exact state a cold-launch sync observes.
+      // Pre-fix it returned `[]` — indistinguishable from "no leases" — and the
+      // sync merged nothing, stub-clobbering every live lease.
+      final h = buildHarness(now: fixedNow);
+      final state = h.manager.activeLeaseTimers();
+
+      expect(state, isA<LeaseLedgerLoading>(),
+          reason: 'an unloaded ledger is UNKNOWN, never empty');
+      expect(h.manager.isInitializedForTest, isFalse,
+          reason: '_initialized is the signal — and is now read in production');
+    });
+
+    test('AFTER initialize() with genuinely zero leases the ledger reports '
+        'EMPTY — the sync must still write', () async {
+      SharedPreferences.setMockInitialValues(const {});
+      final h = buildHarness(now: fixedNow);
+      await h.manager.initialize();
+
+      final state = h.manager.activeLeaseTimers();
+
+      expect(state, isA<LeaseLedgerEmpty>(),
+          reason: 'loaded-and-empty is a WRITE case; conflating it with loading '
+              'would strand stale timers on the controller forever');
+      expect(state.timers, isEmpty);
+      expect(h.manager.isInitializedForTest, isTrue);
+    });
+
+    test('AFTER initialize() with a restored lease the ledger reports READY '
+        'with that timer', () async {
+      // Phase 1: create a lease so prefs hold one.
+      {
+        final h = buildHarness(now: fixedNow);
+        await h.manager.initialize();
+        final r = await h.manager.handleEntryCreated(buildEntry(
+          dateKey: dateKeyFor(fixedNow),
+          onTime: '18:00',
+          offTime: '22:00',
+        ));
+        expect(r.outcome, LeaseOutcome.leased);
+      }
+      // Phase 2: fresh manager over the same prefs — the rehydrated ledger must
+      // surface its timer so the merge can preserve it.
+      {
+        final h = buildHarness(now: fixedNow);
+        await h.manager.initialize();
+        final state = h.manager.activeLeaseTimers();
+
+        expect(state, isA<LeaseLedgerReady>());
+        expect(state.timers, isNotEmpty);
+        expect(state.timers.single['macro'], greaterThanOrEqualTo(26),
+            reason: 'lease timers live in the macro 26-41 preset range');
+      }
+    });
+  });
+
   group('persistence', () {
     test('leases persist across simulated app restart', () async {
       // Phase 1: create a lease, await persistence.

@@ -10,7 +10,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
-    show calendarLeaseActiveTimersProvider;
+    show
+        calendarLeaseActiveTimersProvider,
+        LeaseLedgerEmpty,
+        LeaseLedgerReady;
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -111,7 +114,13 @@ ScheduleItem _sched(String id, int presetId, String time) => ScheduleItem(
   final repo = _FakeService();
   final container = ProviderContainer(overrides: [
     wledRepositoryProvider.overrideWithValue(repo),
-    calendarLeaseActiveTimersProvider.overrideWithValue(leases),
+    // P0-9 (part a): the provider is now a tri-state. These P0-3.2 cases are all
+    // "ledger LOADED" — an empty list here means genuinely zero leases, which
+    // must still write. The loading case has its own suite
+    // (schedule_sync_lease_tristate_test.dart).
+    calendarLeaseActiveTimersProvider.overrideWithValue(
+      leases.isEmpty ? const LeaseLedgerEmpty() : LeaseLedgerReady(leases),
+    ),
   ]);
   addTearDown(container.dispose);
   return (container: container, repo: repo);
