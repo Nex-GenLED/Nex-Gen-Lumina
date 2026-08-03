@@ -44,7 +44,7 @@ optional.
 | **Android track** | **NOT UPLOADED** — Tyler uploads |
 | **iOS Codemagic build number** | `PENDING` — fill when the build completes |
 | **iOS workflow** | `ios-workflow` ("iOS Release"), **started manually** — `codemagic.yaml` still has no `triggering:` block (re-verified this build) |
-| **iOS branch to build** | `main` @ `43e85c8` |
+| **iOS branch to build** | `main` @ **`bdf9b7c`** — the branch tip, which is what Codemagic selects by default. Code-identical to the merge commit `43e85c8`: the only diff is `docs/BUILD_LEDGER.md` + `audit/HARDWARE_VERIFICATION_+60.md`; `lib/ android/ ios/ pubspec.yaml codemagic.yaml test/` are byte-identical, so the IPA is the same either way |
 | **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
 
 **Contents:** P0-9 part (a) only — the tri-state lease-ledger gate.
