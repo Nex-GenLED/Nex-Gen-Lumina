@@ -29,6 +29,53 @@ optional.
 
 ---
 
+## 2.5.10+62 — P0-9a tri-state lease-ledger gate
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `306f3d233097a181c5866e69979ef4410dc6a15b` (`306f3d2`) — the build commit |
+| **Merged to main** | `43e85c8457e3ebb8173f769ae986bc617cb8170c` (`43e85c8`, `--no-ff`), **pushed to origin 2026-08-03** |
+| **Branch at build time** | `fix/p0-9a-lease-tristate-gate` (off `main` @ `c0ebe36`) |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **62** — verified from the merged manifest (`build/app/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,239,152 bytes · built 2026-08-03 13:33 |
+| **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
+| **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` (2026-08-03 13:33) — archive these, never commit |
+| **Android track** | **NOT UPLOADED** — Tyler uploads |
+| **iOS Codemagic build number** | `PENDING` — fill when the build completes |
+| **iOS workflow** | `ios-workflow` ("iOS Release"), **started manually** — `codemagic.yaml` still has no `triggering:` block (re-verified this build) |
+| **iOS branch to build** | `main` @ `43e85c8` |
+| **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
+
+**Contents:** P0-9 part (a) only — the tri-state lease-ledger gate.
+`activeLeaseTimers()` returns a sealed `LeaseLedgerLoading | LeaseLedgerEmpty | LeaseLedgerReady`
+instead of a bare list, so "no leases" and "ledger not loaded yet" stop sharing one representation.
+`_initialized` is consulted in production for the first time (it existed, was set correctly, and was
+read only by a `@visibleForTesting` getter). `calendarLeaseActiveTimersProvider` reads the flag
+*stream* rather than the sync adapter, which collapsed `AsyncLoading → false` and licensed the same
+clobber one level up. `syncAll` refuses the cfg write on `Loading`
+(`ScheduleSyncResult.deferredLeaseLedger`, neutral UI, bounded 3-attempt backoff retry).
+
+**Verification:** suite 1878 pass / 3 skipped / 1 fail (pre-existing stale
+`cloud_ai_processor_normalize`, P1-8). `flutter analyze` on all changed files: 0 errors, 0 new
+warnings. **Bench end-to-end on 192.168.1.150** (real `syncAll`, real `WledService`): cold-ledger
+sync wiped a live lease and returned `success=true` (case 0), gate leaves the table byte-identical
+with no POST (case 1), warm sync arms schedule + lease together (case 2). Rig restored to baseline
+and verified. Full report: `audit/LEASE_TRISTATE.md`.
+
+**Ships into, but does NOT change:** solar is still OFF fleetwide —
+`config/solar_scheduling` has never existed in either Firebase project, and this build does not
+create it. **Still open:** P0-9b (ledger durability — reinstall / second device) and P0-9c
+(`_kLeaseStorageKey` not uid-namespaced).
+
+> **Note on numbering.** This was requested as "+61". versionCode **61 was already consumed** by the
+> build below — merged (`c5c7baf`), pushed, ledgered, and its AAB preserved on disk as
+> `versionCode61-816aa1b-solar-and-clobber-guard.aab.bak`. Re-cutting +61 would have made the pushed
+> +61 row describe contents it does not have, so this is **+62**. The solar fix and all-stub clobber
+> guard listed in the +62 request shipped in +61; +62 adds only the lease gate on top.
+
+---
+
 ## 2.5.10+61 — solar failure made legible + all-stub clobber guard
 
 | Field | Value |
