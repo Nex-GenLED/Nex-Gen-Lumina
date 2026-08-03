@@ -127,6 +127,63 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     pins "onNext only on genuine success", incl. the decline-to-retry path so the fix cannot
     become a 7th instance.
 
+- [ ] **P0-8 — Out-of-range timer bounds stored verbatim; `timersInsLanded` reports "landed"**
+  - Status: OPEN · Evidence: bench-proven (`verified-by-bench` — 192.168.1.150, vid 2507300,
+    0.15.1, 2026-08-01) · **7th silent-success instance — and the FIRST where the VERIFIER
+    itself is fooled** (after F-5, F-8, the off-LAN lease, `_writeZeroedSlot`,
+    `migrateInstallerControllersToCustomer`, P0-7).
+  - POSTed `/json/cfg` slot 0:
+    `{"en":1,"hour":23,"min":59,"macro":1,"dow":127,"start":{"mon":13,"day":40},"end":{"mon":1,"day":5}}`
+    → **HTTP 200**, and `/json/cfg` read back **byte-identical**, `"start":{"mon":13,"day":40}`
+    intact. No clamp, no normalization, no rejection. Month 13 / day 40 accepted and stored.
+  - Why this class is new: `timersInsLanded` compares SENT vs READBACK. Here they MATCH, so it
+    reports "landed" on a row whose start month can never equal a real month — a permanently
+    dead timer that reads healthy at every layer. **Readback verification structurally cannot
+    catch this.** The only downstream signal is a schedule that never fires, discovered months
+    later by a customer.
+  - **HARD REQUIREMENT for Phase 0:** range validation MUST live in the bound builder, BEFORE
+    the POST (mon 1–12, day 1–31, day valid for that mon). Do NOT bolt it onto the readback
+    comparator — wrong layer, and it would still pass any garbage that round-trips cleanly.
+  - Same-session bench facts that bound the scope: date bounds ARE evaluated, not decorative —
+    `start=end=`today fired at 22:12:00 (`ps -1→1`, `on false→true`), `start=end=`tomorrow did
+    NOT fire across 44 polls spanning target +6.5min. Year-wrap `start:{mon:12,day:20}`/
+    `end:{mon:1,day:5}` also stored verbatim. Wrap **evaluation** then confirmed separately: a
+    wrap range CONTAINING today (`start:{mon:9,day:1}`/`end:{mon:8,day:2}`, today 8/1) FIRED at
+    23:12:02 (`ps -1→1`, `bri→200`, seg0/seg1 flipped to preset 1's fingerprint). **The
+    evaluator is wrap-aware — a Dec–Jan season is ONE row, no year-end splitting.**
+  - Files: `lib/features/schedule/cfg_payload_builder.dart` (`buildTimerEntry` — add the range
+    guard; it already refuses dow:0 and unparseable times, this is the same refusal class),
+    `lib/features/schedule/timer_landing.dart` (`timersInsLanded` — document that it cannot
+    catch out-of-range bounds, so nobody re-derives false confidence from it).
+
+- [ ] **P0-9 — Lease timers occupy GENERAL slots 0-7; any shrinking sync can drop one**
+  - Status: OPEN · Evidence: bench-proven (`verified-by-bench` — 192.168.1.150, vid 2507300,
+    2026-08-03) · **Logged, not fixed. Independent of solar.**
+  - **`macro 26-41` is a PRESET-ID convention, NOT a slot reservation.** Armed
+    `{en:1,hour:19,min:10,macro:27,dow:16}` alongside a clock timer and the slot-8 sunrise-off,
+    then pushed 8 disabled stubs: **the lease was WIPED along with the clock timer.** Only the
+    slot-8 sentinel survived, and only because an 8-entry push never reaches slot 8. Full
+    before/after tables: `audit/ALL_STUB_CLOBBER.md` §2.
+  - **The only thing protecting a lease is being re-merged into the same write** from
+    `calendarLeaseActiveTimersProvider` (P0-3.2). That ledger is **device-local
+    SharedPreferences** (`_kLeaseStorageKey`, `_loadFromPrefs`), not Firestore — so any sync run
+    while the ledger is COLD drops every live lease: after a reinstall, a cleared app cache, on a
+    second device, or simply before the ledger finishes loading.
+  - **Severity note — this is why it is P0 rather than P1:** the failure is silent, destroys
+    automation the user configured, and self-conceals (the lease is gone from the controller AND
+    absent from the ledger that would have restored it).
+  - **Unverifiable from either side, structurally.** Firestore holds only the `CalendarEntry`;
+    the derived lease (slot, presetId, wledHour, dowMask) exists solely on the phone. Neither a
+    Firestore read nor a controller readback can tell you whether a given lease *should* be
+    armed — the authoritative record is on a device you cannot query. Confirming a fix therefore
+    needs a SharedPreferences dump from the handset, not a bench test.
+  - The `shouldSkipClobberingWrite` guard (P0-9's sibling, shipped 2026-08-03) narrows the blast
+    radius but does NOT close this: it only blocks the all-refused case. A partially-armable sync
+    with a cold ledger still writes real timers and drops the leases.
+  - Files: `lib/features/schedule/calendar_entry_lease_manager.dart` (ledger + `activeLeaseTimers`),
+    `lib/features/schedule/schedule_sync.dart` (merge point).
+  - Related: [[project_ai_dated_entry_5th_write_boundary]], P0-3.2.
+
 - [ ] **P0-4 — System presets 1/3/4/5 ib-heal check**
   - Status: OPEN · Evidence: suspected (bench-verify pending)
   - Name-based skip in the psave path may prevent re-saving presets with `ib:true`; if stale,

@@ -402,6 +402,54 @@ class ScheduleSyncService {
   /// schedule zeros the slot it vacated on the controller. Apply ONLY at the
   /// final push stage (syncAll / _buildMergedCfgPayload) — never inside
   /// buildCfgPayload, whose callers merge its real-timer list before padding.
+  /// True when the assembled [ins] would ERASE the controller's timer table
+  /// while arming nothing — an "all-stub clobber" — and must not be POSTed.
+  ///
+  /// BENCH-PROVEN 2026-08-03 on 192.168.1.150 (0.15.1, vid 2507300): pushing
+  /// eight disabled stubs wiped a real clock timer AND a lease timer
+  /// (macro 27) from slots 0-7. Only the slot-8 solar sentinel survived, and
+  /// only because an 8-entry push doesn't reach it. **Lease timers live in
+  /// GENERAL slots — macro 26-41 is a preset-id convention, not a slot
+  /// reservation** — so an all-stub write destroys live lease automation.
+  ///
+  /// The condition is deliberately BOTH of:
+  /// - [ins] contains no real enabled timer ([isRealEnabledTimer]: `en` truthy,
+  ///   `macro != 0`, `hour != 255`) — so a payload carrying merged lease timers
+  ///   still POSTs, which is what keeps an all-solar user's leases armed; and
+  /// - [refusedCount] > 0 — enabled schedules existed and were ALL refused.
+  ///
+  /// The second conjunct is what preserves the legitimate CLEARING write. A
+  /// user who deletes their last schedule has `refusedCount == 0`, so the
+  /// padded all-stub payload still goes out and reclaims the vacated slots
+  /// (the dow:0 accumulation fix — see [padTimersToMax]). "We had schedules and
+  /// rejected them all" and "there are no schedules" produce byte-identical
+  /// payloads; this flag is the only thing that tells them apart.
+  ///
+  /// "Carries nothing" deliberately uses [_carriesAnyEnabledEntry] and NOT
+  /// [isRealEnabledTimer]: the latter excludes `hour == 255`, so a payload whose
+  /// only content is the GLOBAL SUNRISE-OFF at slot 8 would look empty and be
+  /// skipped — silently breaking the invariant that every sync re-asserts that
+  /// slot rather than leaving it to luck (see syncAll's solar-assembly branch,
+  /// and sunrise_off_preserve_test). Such a write asserts something real; it is
+  /// not a clobber.
+  @visibleForTesting
+  static bool shouldSkipClobberingWrite({
+    required List<Map<String, dynamic>> ins,
+    required int refusedCount,
+  }) =>
+      refusedCount > 0 && !ins.any(_carriesAnyEnabledEntry);
+
+  /// True when [t] is an enabled entry that does something — a clock timer, a
+  /// lease, or a solar sentinel. Broader than [isRealEnabledTimer] on purpose:
+  /// this asks "is there anything worth writing?", not "is this an armable
+  /// clock timer?". A disabled padding stub (`en:0, macro:0`) is neither.
+  static bool _carriesAnyEnabledEntry(Map<String, dynamic> t) {
+    final en = t['en'];
+    final enOn = en == true || en == 1;
+    final macro = (t['macro'] is num) ? (t['macro'] as num).toInt() : 0;
+    return enOn && macro != 0;
+  }
+
   static List<Map<String, dynamic>> padTimersToMax(
       List<Map<String, dynamic>> ins) {
     final out = ins.length > kMaxWledTimers
@@ -987,6 +1035,28 @@ class ScheduleSyncService {
     // pattern actions (Turn Off/On, Brightness) map to legacy presets and are
     // left untouched; audio-reactive items already had a payload built above.
     final List<ScheduleItem> armable = [];
+    // ── All-stub clobber guard: count REFUSALS, not warnings ─────────────
+    // Bench-proven 2026-08-03 (.150): an 8-entry all-stub push WIPES every
+    // general timer in slots 0-7, lease timers included. If every schedule is
+    // refused below, `armable` is empty, buildCfgPayload returns nothing, and
+    // the payload degrades to pure stubs — a write that erases the controller's
+    // timer table and arms nothing. See [shouldSkipClobberingWrite].
+    //
+    // Why a counter and NOT `presetErrors.isNotEmpty`: several warnings are
+    // emitted WITHOUT dropping a schedule (slots-full overflow, a redundant
+    // sunrise OFF superseded by the global one). Keying on the warning list
+    // would refuse a legitimate CLEARING write and strand stale timers on the
+    // controller forever — the exact dow:0 accumulation padTimersToMax exists
+    // to fix.
+    //
+    // Only count refusals that would OTHERWISE HAVE ARMED. This loop, unlike
+    // buildCfgPayload, does not filter on `enabled`/eviction — so without this
+    // filter a single DISABLED solar schedule would block the clearing write
+    // for a user who has switched everything off.
+    var refusedCount = 0;
+    void countRefusal(ScheduleItem s) {
+      if (s.enabled && !s.isCurrentlyEvicted) refusedCount++;
+    }
     for (final s in updatedSchedules) {
       final isPatternAction = s.actionLabel.toLowerCase().startsWith('pattern');
       final presetSaved =
@@ -997,6 +1067,7 @@ class ScheduleSyncService {
             'schedule and pick a pattern.');
         debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — no '
             'preset saved at id ${s.presetId}');
+        countRefusal(s);
         continue;
       }
 
@@ -1021,6 +1092,7 @@ class ScheduleSyncService {
             'set a valid time.');
         debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — '
             'unparseable time label(s): ${badLabels.join(", ")}');
+        countRefusal(s);
         continue;
       }
 
@@ -1046,6 +1118,7 @@ class ScheduleSyncService {
         debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — sunrise '
             'ON conflicts with the global sunrise-off (slot '
             '$kWledSunriseSlot)');
+        countRefusal(s);
         continue;
       }
 
@@ -1073,6 +1146,7 @@ class ScheduleSyncService {
         debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — solar '
             'not enabled (flagOn=$solarFlagOn coordsUsable=$solarCoordsUsable; '
             '${solarLabels.join(", ")})');
+        countRefusal(s);
         continue;
       }
 
@@ -1089,6 +1163,7 @@ class ScheduleSyncService {
             'schedule and pick at least one day.');
         debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — '
             'repeatDays produced dow:0 (${s.repeatDays})');
+        countRefusal(s);
         continue;
       }
 
@@ -1201,7 +1276,22 @@ class ScheduleSyncService {
           'Refusing to POST a no-op that would false-green.');
       return finish(ScheduleSyncResult(
         success: false,
-        error: 'internal: enabled schedules produced no armable timers',
+        // Customer-facing. The old text ("internal: enabled schedules produced
+        // no armable timers") leaked a developer assertion into a red banner
+        // and named neither cause nor remedy.
+        //
+        // NOTE ON SCOPE: this guard does NOT fire for solar-only accounts —
+        // solar schedules are refused upstream in the `armable` loop, so
+        // `armedSchedules` is empty and the first conjunct is false. Those
+        // users get the specific "uses sunrise/sunset timing…" presetErrors
+        // message instead (now rendered, not counted). So this message must
+        // NOT mention sunrise/sunset: reaching here means a schedule passed
+        // every arm check and still produced no timer, which is an internal
+        // inconsistency, not a user misconfiguration. Keep it honest about
+        // that rather than guessing at a cause.
+        error: 'Your schedules are saved but could not be armed on the '
+            'controller. Try syncing again — if this keeps happening, '
+            'contact support.',
         presetErrors: presetErrors,
         schedulesWithPresets: updatedSchedules,
       ));
@@ -1217,6 +1307,39 @@ class ScheduleSyncService {
       debugPrint('ScheduleSync: off-LAN — timers not armed (bridge cannot '
           'write /json/cfg); schedule saved, will arm on next LAN sync');
       return finish(ScheduleSyncResult.deferredOffLan(
+        presetErrors: presetErrors,
+        schedulesWithPresets: updatedSchedules,
+      ));
+    }
+
+    // ── All-stub clobber guard ───────────────────────────────────────────
+    // Every enabled schedule was refused above, and no lease timer filled the
+    // payload either, so `ins` is nothing but disabled stubs. POSTing it would
+    // ERASE the controller's timer table (bench-proven: a real clock timer and
+    // a lease at macro 27 both wiped) and arm nothing in their place — strictly
+    // worse than doing nothing, because it destroys working automation this
+    // sync never owned.
+    //
+    // Deliberately NOT a silent skip: a refusal that looks like a success is
+    // the exact defect class this guard exists to prevent. success:false with a
+    // message that says what happened, plus the per-schedule presetErrors that
+    // say what to fix (both now rendered — see my_schedule_page).
+    //
+    // ORDER MATTERS — this MUST stay below the off-LAN check. Off-LAN no cfg
+    // write is attempted at all, so there is nothing to clobber and
+    // `deferredOffLan` is the truthful, non-alarming answer ("saved, will arm
+    // on next LAN sync"). Running this guard first turned that neutral state
+    // into a red failure for every off-LAN all-solar user — caught by
+    // schedule_sync_off_lan_test.
+    if (shouldSkipClobberingWrite(ins: ins, refusedCount: refusedCount)) {
+      debugPrint('ScheduleSync: SKIPPED cfg write — $refusedCount enabled '
+          'schedule(s) refused and no lease timers, so the payload was all '
+          'stubs. POSTing it would clear the controller\'s timer table and arm '
+          'nothing. Controller left unchanged.');
+      return finish(ScheduleSyncResult(
+        success: false,
+        error: 'None of your schedules could be armed, so your controller was '
+            'left unchanged. Check the warnings for what to fix.',
         presetErrors: presetErrors,
         schedulesWithPresets: updatedSchedules,
       ));

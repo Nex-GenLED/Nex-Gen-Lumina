@@ -37,6 +37,7 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/sun_time_provider.dart';
 import 'package:nexgen_command/features/ai/light_effect_animator.dart';
 import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -279,16 +280,53 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                 ));
                 if (mounted) setState(() => _lastSyncTime = DateTime.now());
               } else if (!result.success) {
+                // A failure can ALSO carry per-schedule warnings — the all-stub
+                // clobber guard returns success:false plus the reasons every
+                // schedule was refused. This branch short-circuits the warning
+                // branch below, so surface the details here too or the only
+                // actionable text is lost.
+                final warnings = result.presetErrors;
                 messenger.showSnackBar(SnackBar(
                   content: Text(result.error ?? 'Schedule sync failed'),
                   backgroundColor: Colors.red.shade700,
-                  duration: const Duration(seconds: 4),
+                  duration: Duration(seconds: warnings.isEmpty ? 4 : 6),
+                  action: warnings.isEmpty
+                      ? null
+                      : SnackBarAction(
+                          label: 'Details',
+                          textColor: Colors.white,
+                          onPressed: () {
+                            if (!context.mounted) return;
+                            showScheduleWarningsDialog(context, warnings);
+                          },
+                        ),
                 ));
               } else if (result.hasPresetErrors) {
+                // Render the ACTUAL warning text, not a count. Every
+                // presetErrors message in the sync path is composed with the
+                // schedule name and an actionable remedy ("uses sunrise/sunset
+                // timing … please set a specific time"), and all of it was
+                // previously discarded here — customers saw only "saved with
+                // warnings" and could not tell WHICH schedule failed or why.
+                // First message inline (a SnackBar can't readably hold N);
+                // the rest behind a "Details" action.
+                final warnings = result.presetErrors;
                 messenger.showSnackBar(SnackBar(
-                  content: const Text('Schedule saved with warnings'),
+                  content: Text(
+                    warnings.length == 1
+                        ? warnings.first
+                        : '${warnings.first}\n+${warnings.length - 1} more',
+                  ),
                   backgroundColor: Colors.orange.shade700,
-                  duration: const Duration(seconds: 3),
+                  duration: const Duration(seconds: 6),
+                  action: SnackBarAction(
+                    label: 'Details',
+                    textColor: Colors.white,
+                    onPressed: () {
+                      if (!context.mounted) return;
+                      showScheduleWarningsDialog(context, warnings);
+                    },
+                  ),
                 ));
                 if (mounted) setState(() => _lastSyncTime = DateTime.now());
               } else {
@@ -687,6 +725,73 @@ Future<void> _showPendingPreviewSheet(
 /// Compact status strip shown beneath the AppBar reflecting the most
 /// recent schedule sync attempt. Renders nothing until the user has
 /// triggered at least one sync this session.
+/// Shows the full list of sync warnings (`ScheduleSyncResult.presetErrors`).
+///
+/// These messages are composed with the schedule name and an actionable remedy
+/// at every refuse point in `schedule_sync.dart` (solar-not-enabled, dow:0,
+/// dead macro, slots full, sunrise-off conflict, solar slot contention). They
+/// used to be reduced to a count at both display sites, so the user was told
+/// "1 warning" and never which schedule stopped working or what to do about it.
+/// A dialog is the only treatment that stays readable for N messages.
+void showScheduleWarningsDialog(BuildContext context, List<String> warnings) {
+  if (warnings.isEmpty) return;
+  showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: NexGenPalette.gunmetal,
+      title: Row(children: [
+        Icon(Icons.warning_amber_rounded, color: Colors.orange.shade400, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            warnings.length == 1
+                ? 'Schedule warning'
+                : '${warnings.length} schedule warnings',
+            style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 17),
+          ),
+        ),
+      ]),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final w in warnings)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6, right: 8),
+                      child: Icon(Icons.circle,
+                          size: 5, color: Colors.orange.shade400),
+                    ),
+                    Expanded(
+                      child: Text(
+                        w,
+                        style: const TextStyle(
+                            color: NexGenPalette.textHigh,
+                            fontSize: 13,
+                            height: 1.35),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+}
+
 class _SyncStatusRow extends ConsumerWidget {
   const _SyncStatusRow();
 
@@ -714,20 +819,37 @@ class _SyncStatusRow extends ConsumerWidget {
     } else if (!last.success) {
       icon = Icons.cloud_off_rounded;
       color = Colors.red.shade400;
-      label = last.error ?? 'Not synced — controller offline';
+      // A failure can carry warnings too (the all-stub clobber guard). This
+      // branch precedes the warning branch, so append them here or the
+      // per-schedule reasons never render. Row is already tappable whenever
+      // presetErrors is non-empty, regardless of success.
+      final base = last.error ?? 'Not synced — controller offline';
+      final warnings = last.presetErrors;
+      label = warnings.isEmpty
+          ? base
+          : warnings.length == 1
+              ? '$base\n${warnings.first}'
+              : '$base\n${warnings.first}\n+${warnings.length - 1} more — '
+                  'tap for details';
     } else if (last.hasPresetErrors) {
       icon = Icons.warning_amber_rounded;
       color = Colors.orange.shade400;
-      label =
-          'Synced with ${last.presetErrors.length} warning${last.presetErrors.length == 1 ? '' : 's'} '
-          '· ${_formatRelative(last.syncedAt)}';
+      // Show the real message, not a count. This row already wraps without
+      // ellipsis (deliberate — bench 2026-07-23), so long remedy text is
+      // readable here; that is exactly what it was missing. With more than one
+      // warning, lead with the first and make the row tappable for the rest.
+      final warnings = last.presetErrors;
+      label = warnings.length == 1
+          ? '${warnings.first} · ${_formatRelative(last.syncedAt)}'
+          : '${warnings.first}\n+${warnings.length - 1} more — tap for details '
+              '· ${_formatRelative(last.syncedAt)}';
     } else {
       icon = Icons.check_circle_rounded;
       color = Colors.green.shade400;
       label = 'Synced · ${_formatRelative(last.syncedAt)}';
     }
 
-    return Container(
+    final row = Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(
@@ -753,6 +875,13 @@ class _SyncStatusRow extends ConsumerWidget {
           ),
         ],
       ),
+    );
+
+    // Warnings are the only state with more to show than fits the row.
+    if (!last.hasPresetErrors) return row;
+    return InkWell(
+      onTap: () => showScheduleWarningsDialog(context, last.presetErrors),
+      child: row,
     );
   }
 
@@ -3753,6 +3882,16 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     // Defaults: all days (Daily) unless a specific day was preselected
     _selectedDays = {0, 1, 2, 3, 4, 5, 6};
     _enabled = true;
+    // The field default for a NEW schedule's OFF boundary is solarEvent
+    // ("off at sunrise"). With the solar flag off that default alone would
+    // mint an unarmable schedule for a user who never touched the Solar
+    // control — the same way the autopilot baseline did. Fall back to the
+    // clock default (_offTime, 11:00 PM) instead. An EXISTING schedule is
+    // hydrated below and keeps whatever it was saved with, so a stranded
+    // solar schedule still opens showing its real setting.
+    if (!ref.read(solarSchedulingEnabledSyncProvider)) {
+      _offTrigger = _TriggerType.specificTime;
+    }
     // If editing an existing item, hydrate state from it.
     final editing = widget.editing;
     if (editing != null) {
@@ -3843,6 +3982,15 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
   @override
   Widget build(BuildContext context) {
     final schedules = ref.watch(schedulesProvider);
+    // Solar gate: with the flag off, schedule_sync REFUSES any schedule that
+    // has a sunrise/sunset boundary, so offering it here invites the user into
+    // a configuration that cannot arm. Disable rather than remove the segment:
+    // an EXISTING solar schedule initialises `_onTrigger`/`_offTrigger` to
+    // solarEvent, and a SegmentedButton whose selected value is absent from its
+    // segments asserts. Disabled-but-present also leaves 'Time' selectable, so
+    // an affected user can convert a stranded solar schedule in place instead
+    // of deleting and recreating it.
+    final solarEnabled = ref.watch(solarSchedulingEnabledSyncProvider);
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       child: BackdropFilter(
@@ -3905,9 +4053,9 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       ),
                       const SizedBox(height: 12),
                       SegmentedButton<_TriggerType>(
-                        segments: const [
-                          ButtonSegment(value: _TriggerType.specificTime, icon: Icon(Icons.schedule_rounded, size: 18), label: Text('Time')),
-                          ButtonSegment(value: _TriggerType.solarEvent, icon: Icon(Icons.wb_sunny_rounded, size: 18), label: Text('Solar')),
+                        segments: [
+                          const ButtonSegment(value: _TriggerType.specificTime, icon: Icon(Icons.schedule_rounded, size: 18), label: Text('Time')),
+                          ButtonSegment(value: _TriggerType.solarEvent, enabled: solarEnabled, icon: const Icon(Icons.wb_sunny_rounded, size: 18), label: const Text('Solar')),
                         ],
                         selected: {_onTrigger},
                         style: ButtonStyle(
@@ -3962,9 +4110,9 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       if (_hasOffTime) ...[
                         const SizedBox(height: 12),
                         SegmentedButton<_TriggerType>(
-                          segments: const [
-                            ButtonSegment(value: _TriggerType.specificTime, icon: Icon(Icons.schedule_rounded, size: 18), label: Text('Time')),
-                            ButtonSegment(value: _TriggerType.solarEvent, icon: Icon(Icons.wb_sunny_rounded, size: 18), label: Text('Solar')),
+                          segments: [
+                            const ButtonSegment(value: _TriggerType.specificTime, icon: Icon(Icons.schedule_rounded, size: 18), label: Text('Time')),
+                            ButtonSegment(value: _TriggerType.solarEvent, enabled: solarEnabled, icon: const Icon(Icons.wb_sunny_rounded, size: 18), label: const Text('Solar')),
                           ],
                           selected: {_offTrigger},
                           style: ButtonStyle(
