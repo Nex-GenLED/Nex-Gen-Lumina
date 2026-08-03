@@ -14,6 +14,8 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
+    show calendarLeaseActiveTimersProvider, LeaseLedgerEmpty;
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -99,6 +101,14 @@ final _refProvider = Provider<Ref>((ref) => ref);
 ({ProviderContainer container, _FakeService repo}) _harness(_FakeService repo) {
   final container = ProviderContainer(overrides: [
     wledRepositoryProvider.overrideWithValue(repo),
+    // P0-9 (part a): syncAll now refuses to write cfg while the lease ledger is
+    // UNKNOWN, and an un-overridden provider resolves to LOADING (the flag's
+    // Firestore stream has not emitted in a unit-test container). These tests
+    // exercise PRESET idempotency, not lease behaviour, so they declare the
+    // loaded-and-empty state explicitly. Previously they relied on the flag's
+    // sync adapter collapsing its loading window to `false` — an accidental
+    // resolution of exactly the race this guard closes.
+    calendarLeaseActiveTimersProvider.overrideWithValue(const LeaseLedgerEmpty()),
   ]);
   addTearDown(container.dispose);
   return (container: container, repo: repo);

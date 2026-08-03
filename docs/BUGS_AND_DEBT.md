@@ -156,9 +156,25 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `lib/features/schedule/timer_landing.dart` (`timersInsLanded` — document that it cannot
     catch out-of-range bounds, so nobody re-derives false confidence from it).
 
-- [ ] **P0-9 — Lease timers occupy GENERAL slots 0-7; any shrinking sync can drop one**
+- [x] **P0-9 (part a) — cold-ledger race CLOSED: the lease ledger is now a tri-state**
+  - Status: **FIXED 2026-08-03** · Evidence: **bench-proven end-to-end** (192.168.1.150,
+    vid 2507300 — real `syncAll` against the real controller). Report: `audit/LEASE_TRISTATE.md`.
+  - `activeLeaseTimers()` returned a bare list, so "no leases" and "ledger not loaded yet" were
+    both `[]`. `initialize()` is fire-and-forget, so a sync racing the load merged ZERO leases and
+    `padTimersToMax` stubbed their slots. `_initialized` already tracked this and was read ONLY by
+    a `@visibleForTesting` getter — nothing production-side consulted it.
+  - Now returns sealed `LeaseLedgerLoading | LeaseLedgerEmpty | LeaseLedgerReady`; `syncAll`
+    REFUSES the cfg write on Loading (`ScheduleSyncResult.deferredLeaseLedger`, neutral UI,
+    bounded auto-retry). Bench: lease `macro 27` WIPED pre-fix → SURVIVES post-fix, table
+    byte-identical; warm sync still arms schedule + lease together.
+  - Also closed one level up: the flag's sync adapter collapsed `AsyncLoading`→`false`, which
+    would have licensed the same clobber while the flag doc was still loading.
+  - **Part (b), the Firestore migration, is still open** — design only, `audit/LEASE_LEDGER_MIGRATION.md`.
+    Part (a) stops the data loss; part (b) makes lease survival verifiable and multi-device correct.
+
+- [ ] **P0-9 (part b) — lease ledger is device-local SharedPreferences, not Firestore**
   - Status: OPEN · Evidence: bench-proven (`verified-by-bench` — 192.168.1.150, vid 2507300,
-    2026-08-03) · **Logged, not fixed. Independent of solar.**
+    2026-08-03) · **Design only (`audit/LEASE_LEDGER_MIGRATION.md`); not implemented.**
   - **`macro 26-41` is a PRESET-ID convention, NOT a slot reservation.** Armed
     `{en:1,hour:19,min:10,macro:27,dow:16}` alongside a clock timer and the slot-8 sunrise-off,
     then pushed 8 disabled stubs: **the lease was WIPED along with the clock timer.** Only the
@@ -169,6 +185,11 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     SharedPreferences** (`_kLeaseStorageKey`, `_loadFromPrefs`), not Firestore — so any sync run
     while the ledger is COLD drops every live lease: after a reinstall, a cleared app cache, on a
     second device, or simply before the ledger finishes loading.
+    **UPDATE 2026-08-03 — "before the ledger finishes loading" is CLOSED by part (a) above.**
+    The remaining exposure is durability, not timing: reinstall / cleared cache / second device
+    still start from an empty ledger, which now correctly reports EMPTY (not Loading) because it
+    genuinely finished loading nothing. Part (a) cannot distinguish "loaded, empty" from "loaded,
+    empty because the data lives on another phone" — only part (b) can.
   - **Severity note — this is why it is P0 rather than P1:** the failure is silent, destroys
     automation the user configured, and self-conceals (the lease is gone from the controller AND
     absent from the ledger that would have restored it).
@@ -182,6 +203,21 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     with a cold ledger still writes real timers and drops the leases.
   - Files: `lib/features/schedule/calendar_entry_lease_manager.dart` (ledger + `activeLeaseTimers`),
     `lib/features/schedule/schedule_sync.dart` (merge point).
+
+- [ ] **P0-9c — `_kLeaseStorageKey` is not uid-namespaced: account switch inherits stale leases**
+  - Status: OPEN · Evidence: code-confirmed 2026-08-03 · **Logged during P0-9 part (a), not fixed
+    (out of scope for a release candidate; no user report).**
+  - `const String _kLeaseStorageKey = 'calendar_leases_v1'` is a single GLOBAL SharedPreferences
+    key with no uid in it. Sign out of account A and into account B on the same handset and B's
+    lease manager rehydrates **A's leases** — A's `slotIndex`/`presetId` values then get merged
+    into B's cfg writes, arming timers against presets B never saved (a dead-macro fire) and
+    occupying slots B's own leases need.
+  - Most likely to bite installers and demo devices, which switch accounts routinely; a normal
+    customer handset has one account for life.
+  - Fixed incidentally by P0-9 part (b) — the Firestore path `/users/{uid}/leases/{dateKey}` is
+    uid-scoped by construction. A standalone fix is a one-line key change plus a migration of the
+    existing unscoped blob, which is why it is worth doing WITH part (b) rather than before it.
+  - Files: `lib/features/schedule/calendar_entry_lease_manager.dart:74`.
   - Related: [[project_ai_dated_entry_5th_write_boundary]], P0-3.2.
 
 - [ ] **P0-4 — System presets 1/3/4/5 ib-heal check**

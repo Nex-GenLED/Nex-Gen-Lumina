@@ -279,6 +279,16 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   duration: const Duration(seconds: 4),
                 ));
                 if (mounted) setState(() => _lastSyncTime = DateTime.now());
+              } else if (result.deferredLeaseLedger) {
+                // P0-9 (part a): refused because the lease ledger was cold —
+                // writing would have wiped live lease timers. Nothing broke and
+                // a retry is armed, so this must NOT fall through to the red
+                // failure branch below. Informational, matching off-LAN.
+                messenger.showSnackBar(SnackBar(
+                  content: Text(result.summaryMessage),
+                  backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.9),
+                  duration: const Duration(seconds: 3),
+                ));
               } else if (!result.success) {
                 // A failure can ALSO carry per-schedule warnings — the all-stub
                 // clobber guard returns success:false plus the reasons every
@@ -814,6 +824,16 @@ class _SyncStatusRow extends ConsumerWidget {
       // Saved, just not armed yet — the user is away from home. Nothing failed,
       // so this must NOT read like an error: neutral icon, neutral colour.
       icon = Icons.home_outlined;
+      color = NexGenPalette.cyan;
+      label = last.summaryMessage;
+    } else if (last.deferredLeaseLedger) {
+      // P0-9 (part a): the cfg write was refused because the lease ledger had
+      // not loaded, so the controller was left untouched ON PURPOSE — writing
+      // would have wiped live lease timers. Nothing failed and a retry is
+      // already armed, so this is neutral, never red. It is surfaced rather than
+      // hidden because a refusal the user cannot see is indistinguishable from
+      // the silent no-op this whole guard exists to prevent.
+      icon = Icons.sync_rounded;
       color = NexGenPalette.cyan;
       label = last.summaryMessage;
     } else if (!last.success) {
