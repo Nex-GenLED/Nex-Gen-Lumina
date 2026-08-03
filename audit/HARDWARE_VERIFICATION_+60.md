@@ -1,4 +1,27 @@
-# Hardware verification — 2.5.10+60
+# Hardware verification — 2.5.10+60 · **still owed at +61 and +62**
+
+> ### ⚠ CARRIED FORWARD — NOTHING IN THIS FILE HAS BEEN RUN
+>
+> **Status at 2026-08-03: every row in the checklist below is still blank.** Two further builds
+> have shipped on top of +60 without discharging any of it:
+>
+> | Build | SHA | Added | Hardware debt discharged |
+> |---|---|---|---|
+> | `2.5.10+60` | `d92262f` | commissioning silent-failure closeout | none — this file is its debt |
+> | `2.5.10+61` | `816aa1b` | solar legibility + all-stub clobber guard | none |
+> | `2.5.10+62` | `306f3d2` | P0-9a tri-state lease gate | none *(its own bench work is separate — see below)* |
+>
+> **+62 must NOT go to EXTERNAL TestFlight until this session passes.** Internal TestFlight and
+> the Play closed track are fine — the point of those is to get it onto a handset so this run can
+> happen. External distribution is what the gate is for.
+>
+> **What +62 DID verify on hardware, and what it did not.** `audit/LEASE_TRISTATE.md` §3 is a real
+> end-to-end bench run against `192.168.1.150` — but it drove `syncAll` from a `flutter test`
+> harness on the laptop, **not from the app on a handset**. It therefore discharges nothing in the
+> checklist below, all of which requires the installed APK, the wizard, and a signed-in staff
+> session. Do not let "+62 was bench-verified" be mistaken for "+62 was device-verified".
+>
+> Three separate reports feed this run; none of them can be closed from a desk.
 
 **One session. One rig. Two app installs.** This consolidates every hardware debt owed across
 three reports into a single ordered run:
