@@ -42,10 +42,23 @@ optional.
 | **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
 | **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` — archive these, never commit |
 | **Android track** | **NOT UPLOADED** — Tyler uploads |
-| **iOS Codemagic build number** | `PENDING` — fill when the build completes |
+| **iOS Codemagic build number** | **277** — uploaded to App Store Connect 2026-08-05 |
 | **iOS workflow** | `ios-workflow` ("iOS Release"), **started manually** — `codemagic.yaml` still has no `triggering:` block (re-verified this build) |
-| **iOS branch to build** | **`main` tip.** Commits after the merge `dad7329` are docs-only. Stable identifiers: **`68786e9`** (build) and **`dad7329`** (merge) |
+| **iOS branch built** | `main` @ `dad7329` |
 | **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
+
+> ### 🔑 JOIN KEY — all three identities of this build
+>
+> | Identity | Value |
+> |---|---|
+> | **Git build commit** | **`68786e9`** (`68786e9e745b28ce45bb637cc76e267d6d07b736`) |
+> | **Git merge commit** | **`dad7329`** (`dad7329382e1d379cef5ebeeb1213f45b85d031f`) |
+> | **Android versionCode** | **64** |
+> | **iOS build number** | **277** |
+>
+> A tester who reports "build 277" is reporting on `68786e9` / `dad7329`, which is the same code as
+> Android `versionCode 64`. The numbers differ only because `codemagic.yaml` overwrites pubspec's
+> build number with its own `PROJECT_BUILD_NUMBER` counter.
 
 **Contents.** *Solar:* `config/solar_scheduling.enabled = true` went LIVE 2026-08-05
 (readback-confirmed) — it had **never existed** since solar was declared live 2026-07-28, so four
@@ -75,9 +88,31 @@ info). Whole-lib was used deliberately: the `CfgPushOutcome` addition broke an e
 >   genuine install.
 > - **P1-50 step 6** — undo/erase confirmed in the RUNNING editor on a handset. Only the wire
 >   equivalent is proven.
-> - **NEW: end-to-end confirmation that `PrivacyInfo.xcprivacy` lands in the built IPA.** The
->   inclusion proof here is structural (valid plist + Resources build phase); no Mac in this
->   checkout. The first Codemagic run confirms it.
+> - **`PrivacyInfo.xcprivacy` in the built IPA — still unconfirmed.** See the note below; the
+>   successful upload does NOT establish it. Low effort to close, low risk if it slipped.
+
+> ### ⚠ WHAT THE SUCCESSFUL UPLOAD DOES AND DOES NOT PROVE
+>
+> Build 277 uploaded to App Store Connect cleanly. It is tempting to read that as confirmation that
+> `PrivacyInfo.xcprivacy` shipped in the IPA. **It does not**, and this project's own history is the
+> counter-example: the file was created **today**, in `68786e9` — yet **2.5.6 went live and 2.5.7+43
+> uploaded successfully with no app-level privacy manifest at all.** If a missing manifest failed
+> upload validation, those uploads could not have happened.
+>
+> More precisely, upload validation checks **required-reason API declarations**
+> (`NSPrivacyAccessedAPITypes`, e.g. ITMS-91053) — and those can be satisfied entirely by the
+> bundled plugins' own manifests (`shared_preferences_foundation` ships one). The part this build
+> actually adds — **`NSPrivacyCollectedDataTypes`, the 12 first-party data types** — is **not
+> validated at upload at all**. It feeds the privacy report, while the App Privacy "nutrition label"
+> comes from the ASC questionnaire, filled in by hand.
+>
+> **To actually close this**, do one of:
+> 1. In App Store Connect, generate the **privacy report** for build 277 and confirm the 12
+>    first-party data types appear; or
+> 2. Download the Codemagic IPA artifact, unzip, and confirm
+>    `Payload/Runner.app/PrivacyInfo.xcprivacy` exists.
+>
+> Either takes a couple of minutes and turns a structural argument into an observation.
 >
 > ### ⚠ Same join-key caveat — the iOS build number will NOT be 64
 >
