@@ -1011,6 +1011,23 @@ function addSecurityHeaders(res) {
 // trigger can run it too (Slice 0 — previously onCall-only, so it NEVER fired
 // automatically and command docs accumulated forever). Returns the stats map;
 // throws on error for the caller to handle.
+// Per-user delete cap for every subcollection this routine drains (C5,
+// audit/DIAGNOSTICS_FIX.md). A Firestore batch commits at most 500 operations,
+// so an UNBOUNDED query that matches >500 docs for a single user fails
+// batch.commit() and — because the whole routine is one try/catch — ABORTS THE
+// ENTIRE RUN, starving every user later in the loop. Silent and total.
+//
+// 450 leaves headroom under 500 and is the value already proven by the commands
+// and debug_errors blocks. Every capped query filters on a single timestamp
+// field with no second filter and no orderBy, so it is served by the automatic
+// single-field index; adding a limit does NOT create a composite-index
+// requirement. Backlogs drain over successive daily runs.
+const PER_USER_DELETE_CAP = 450;
+
+// oauth_codes is the one collection that must NOT simply reuse the cap above —
+// see the drain loop at the end of runDataCleanup() for why.
+const OAUTH_CODES_MAX_PAGES = 5;
+
 async function runDataCleanup() {
     const USAGE_RETENTION_DAYS = 90;
     const SUGGESTIONS_RETENTION_DAYS = 30;
@@ -1056,12 +1073,17 @@ async function runDataCleanup() {
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
 
-        // Clean up AI usage logs
+        // Clean up AI usage logs.
+        //
+        // limit(PER_USER_DELETE_CAP) — see the constant's comment. Queries
+        // `timestamp` only (single-field auto-index); the limit does not
+        // introduce a composite-index requirement.
         const oldAiLogs = await db
           .collection("users")
           .doc(userId)
           .collection("ai_usage")
           .where("timestamp", "<", usageCutoffTimestamp)
+          .limit(PER_USER_DELETE_CAP)
           .get();
 
         if (oldAiLogs.size > 0) {
@@ -1071,12 +1093,13 @@ async function runDataCleanup() {
           stats.aiUsage += oldAiLogs.size;
         }
 
-        // Clean up pattern usage logs
+        // Clean up pattern usage logs. Bounded; `created_at` only.
         const oldPatternLogs = await db
           .collection("users")
           .doc(userId)
           .collection("pattern_usage")
           .where("created_at", "<", usageCutoffTimestamp)
+          .limit(PER_USER_DELETE_CAP)
           .get();
 
         if (oldPatternLogs.size > 0) {
@@ -1086,12 +1109,13 @@ async function runDataCleanup() {
           stats.patternUsage += oldPatternLogs.size;
         }
 
-        // Clean up old detected habits
+        // Clean up old detected habits. Bounded; `detected_at` only.
         const oldHabits = await db
           .collection("users")
           .doc(userId)
           .collection("detected_habits")
           .where("detected_at", "<", usageCutoffTimestamp)
+          .limit(PER_USER_DELETE_CAP)
           .get();
 
         if (oldHabits.size > 0) {
@@ -1101,12 +1125,15 @@ async function runDataCleanup() {
           stats.habits += oldHabits.size;
         }
 
-        // Clean up old suggestions
+        // Clean up old suggestions. Bounded; `created_at` only. This is the
+        // collection that motivated C5 — it grows with usage, so it is the
+        // most likely of the five to reach 500 for a single user.
         const oldSuggestions = await db
           .collection("users")
           .doc(userId)
           .collection("suggestions")
           .where("created_at", "<", suggestionsCutoffTimestamp)
+          .limit(PER_USER_DELETE_CAP)
           .get();
 
         if (oldSuggestions.size > 0) {
@@ -1127,7 +1154,7 @@ async function runDataCleanup() {
           .doc(userId)
           .collection("commands")
           .where("createdAt", "<", commandsCutoffTimestamp)
-          .limit(450)
+          .limit(PER_USER_DELETE_CAP)
           .get();
 
         if (oldCommands.size > 0) {
@@ -1160,7 +1187,7 @@ async function runDataCleanup() {
           .doc(userId)
           .collection("debug_errors")
           .where("timestamp", "<", debugErrorsCutoffTimestamp)
-          .limit(450)
+          .limit(PER_USER_DELETE_CAP)
           .get();
 
         if (oldDebugErrors.size > 0) {
@@ -1171,18 +1198,44 @@ async function runDataCleanup() {
         }
       }
 
-      // Clean up expired OAuth codes (> 1 hour old)
+      // Clean up expired OAuth codes (> 1 hour old).
+      //
+      // THIS ONE IS DELIBERATELY NOT A PLAIN limit(450), and it is the only one
+      // of the five that differs. Two properties make it unlike the per-user
+      // subcollections above:
+      //
+      //   1. It is TOP-LEVEL and sits OUTSIDE the per-user loop, so it runs
+      //      once per invocation. A bare cap would be 450 per RUN in total,
+      //      not 450 per user — roughly a 24x smaller drain rate here.
+      //   2. Its retention window is ONE HOUR, not 30 or 90 days. These are
+      //      spent OAuth authorization codes; letting them accumulate for days
+      //      because of a throughput ceiling is a poor match for a
+      //      security-sensitive artifact with a one-hour life.
+      //
+      // Capping it at a flat 450 would therefore have been a REGRESSION: the
+      // unbounded query drained every expired code on each run, and a bare cap
+      // would newly strand the remainder until the next day. So it pages
+      // instead — bounded work per page to protect the batch limit, repeated
+      // until exhausted, with a hard page ceiling so a runaway backlog cannot
+      // threaten the 60s function timeout (measured at 17.4s on the heaviest
+      // run to date; see audit/DIAGNOSTICS_FIX.md C4).
       const oneHourAgo = admin.firestore.Timestamp.fromDate(new Date(Date.now() - 60 * 60 * 1000));
-      const expiredCodes = await db
-        .collection("oauth_codes")
-        .where("createdAt", "<", oneHourAgo)
-        .get();
+      for (let page = 0; page < OAUTH_CODES_MAX_PAGES; page++) {
+        const expiredCodes = await db
+          .collection("oauth_codes")
+          .where("createdAt", "<", oneHourAgo)
+          .limit(PER_USER_DELETE_CAP)
+          .get();
 
-      if (expiredCodes.size > 0) {
+        if (expiredCodes.empty) break;
+
         const batch5 = db.batch();
         expiredCodes.docs.forEach((doc) => batch5.delete(doc.ref));
         await batch5.commit();
-        stats.oauthCodes = expiredCodes.size;
+        stats.oauthCodes += expiredCodes.size;
+
+        // A short page means the backlog is exhausted; no need to re-query.
+        if (expiredCodes.size < PER_USER_DELETE_CAP) break;
       }
 
       console.log(`Cleanup complete:`, stats);
