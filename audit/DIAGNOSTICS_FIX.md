@@ -234,3 +234,131 @@ types, same Linked = yes, same Tracking = no. If the existing Play form omits **
   ship none (`COMPLIANCE_AND_SECURITY.md` F-9). Outside this app-level file.
 - **End-to-end confirmation the manifest lands in the built IPA** — first Codemagic run.
 - The crash sink still collects; that is intended, and is now declared rather than silent.
+
+---
+
+# DEPLOY LOG — `scheduledDataCleanup` ✅ 2026-08-05
+
+**Deployed alone. Nothing else in this release** — the `firestore.rules` deploy had just landed, and
+a first-ever bulk delete stacked onto it would have made any incident impossible to attribute.
+
+Closes **D2/D12** (`audit/COMMAND_SAFETY.md`): the function existed in source but had **never been
+deployed**, so no retention had ever run for any collection. Only the uncalled `cleanupOldData`
+callable was live — confirmed immediately before deploying:
+
+```
+cleanupOldData          v2  callable   us-central1   ← deployed
+sweepExpiredCommands    v2  scheduled  us-central1   ← deployed
+scheduledDataCleanup                                 ← ABSENT
+```
+
+This is why 78-day-old `pending` commands survived until the expiry sweeper caught them.
+
+## 1 — Pre-deploy re-count
+
+Measured with `runDataCleanup()`'s own cutoffs (90d usage / 30d suggestions / 7d commands / 30d
+debug_errors), its per-user loop, and its 450 caps.
+
+| Collection | Live | Matching cutoff | **First run** | Max/user | 500-op batch cap |
+|---|---|---|---|---|---|
+| `commands` | 8,386 | 8,008 | **3,336** | 3,228 | bounded 450 |
+| `debug_errors` | 669 | 413 | **413** | 156 | bounded 450 |
+| `suggestions` | 362 | 236 | **236** | 49 | ok (<500) |
+| `ai_usage` | 0 | 0 | 0 | 0 | ok |
+| `pattern_usage` | 59 | 0 | 0 | 0 | ok |
+| `detected_habits` | 0 | 0 | 0 | 0 | ok |
+| `oauth_codes` | 0 | 0 | 0 | 0 | ok |
+| **TOTAL** | | **8,657** | **3,985** | | |
+
+**The brief's 8,641 was the eventual total, not the first-run blast radius.** The 450/user cap holds
+back 4,672 of the 8,008 matching commands, so run one deletes **3,985** and the rest drains over
+about eight daily runs. Reported before deploying; the divergence is smaller-not-larger and fully
+explained by the documented cap.
+
+**No unbounded collection approaches the 500-op batch limit.** `suggestions`, `ai_usage`,
+`pattern_usage`, `detected_habits` and `oauth_codes` are queried without a `.limit()`, so a single
+user holding >500 matching docs would fail `batch.commit()` and abort the entire run. The worst case
+today is 49. Worth re-checking before any future growth in `suggestions`.
+
+## 2 — Deploy
+
+```
+firebase deploy --only functions:scheduledDataCleanup
+  + creating Node.js 20 (2nd Gen) function scheduledDataCleanup(us-central1)...
+  + Successful create operation.
+```
+
+Cloud Scheduler job `firebase-schedule-scheduledDataCleanup-us-central1` created, `0 4 * * *` UTC,
+ENABLED.
+
+## 3 — First run — EXACT MATCH TO PREDICTION
+
+Triggered manually at **2026-08-05T20:03:49Z** rather than waiting eight hours for 04:00 UTC.
+
+| Collection | Predicted | **Actual** | Δ |
+|---|---|---|---|
+| `commands` | 3,336 | **3,336** | 0 |
+| `debug_errors` | 413 | **413** | 0 |
+| `suggestions` | 236 | **236** | 0 |
+| `aiUsage` / `patternUsage` / `habits` / `oauthCodes` | 0 | **0** | 0 |
+| **TOTAL** | 3,985 | **3,985** | **0** |
+
+**Zero divergence on every collection.** The query is matching exactly what was predicted and
+nothing unexpected — the step-3 stop condition never came close.
+
+## 4 — Cap and timeout behaviour ✅
+
+**Runtime 17.4s** (20:03:56.708 → 20:04:14.077). The function declares no `timeoutSeconds` and so
+inherits the **60s v2 default**; the heaviest run it will ever do — a first-ever drain with twelve
+450-op batch deletes — finished in under a third of that. Later runs are strictly smaller. No
+timeout risk, but the margin is worth remembering if collections are ever added to the loop.
+
+**The cap drained exactly 450 per user, not in one burst:**
+
+| User | Before | After | Removed | Runs left |
+|---|---|---|---|---|
+| `YcSGiwesJuS7` | 3,228 | 2,778 | 450 | 7 |
+| `wrQRUUKyXyc0` | 1,632 | 1,182 | 450 | 3 |
+| `5oHhaEaf6icm` | 996 | 546 | 450 | 2 |
+| `NmDukd5rKwP9` | 616 | 166 | 450 | 1 |
+| 8 others | ≤443 | 0 | all | 0 |
+
+Fleet total 8,008 → **4,672** still matching. The ~3,212-command user in the brief is
+`YcSGiwesJuS7` (3,228 at deploy time) and is draining as designed — **8 daily runs, not one burst.**
+
+## 5 — Nothing customer-visible was touched ✅
+
+| Account | schedules | controllers | designs | `calendar_entries` | user doc |
+|---|---|---|---|---|---|
+| Ellie Cochran | 1 | 1 | 1 | 10 | OK, 72 fields |
+| Tim Kelly | 1 | 1 | 0 | 0 | OK, 72 fields |
+| Chris Cipollone | 1 | 1 | 2 | 6 | OK, 73 fields |
+| Taps On Main | 0 | 1 | 2 | 21 | OK, 70 fields |
+
+Fleet-wide: **24/24 user documents, 15 controllers, 12 schedules, 11 designs, 84 dated calendar
+entries across 8 users** — all intact. This is structural, not just observed: `runDataCleanup()`
+touches only the seven subcollections in the table above plus top-level `oauth_codes`, and never
+writes to a user document at all.
+
+> **A path error caught during this verification — third instance of the same class.** The first
+> pass reported `calendar_entries: 0` for every account, which would have looked like a wipe.
+> **`calendar_entries` is a MAP FIELD on `users/{uid}`, not a subcollection**
+> (`user_service.dart:836-871`) — counting a subcollection by that name returns 0 for everyone
+> whether or not the data exists. Re-measured on the field: 84 entries across 8 users, intact.
+>
+> Same mistake as the `bridge_health` probe in `audit/COMMAND_SAFETY.md` §5 and the admin-SDK
+> readback in `audit/SOLAR_UI_GATE.md`: **verifying against something other than what the code
+> actually does.** Confirm the shape and path from the writing code before reading a count as
+> evidence — a zero from the wrong path is indistinguishable from a zero that means data loss.
+
+## Findings
+
+| # | Finding | Severity |
+|---|---|---|
+| C1 | `scheduledDataCleanup` is deployed; **retention now actually runs**, daily 04:00 UTC. D2/D12 closed | **Resolved** |
+| C2 | First run deleted **3,985 of 8,657**, matching prediction exactly on every collection | Verified |
+| C3 | First-run blast radius is **3,985, not 8,641** — the latter is the eventual total across ~8 runs | Correction |
+| C4 | Runtime 17.4s against a **60s default timeout** on the heaviest run the function will ever do | Verified, thin-ish margin |
+| C5 | `suggestions`, `ai_usage`, `pattern_usage`, `detected_habits`, `oauth_codes` are queried **without `.limit()`** — >500 matching docs for one user aborts the whole run. Worst case today is 49 | **P3, latent** |
+| C6 | `commands` still has 4,672 matching docs; full drain ~7 more daily runs | Expected |
+| C7 | `calendar_entries` is a user-document field, not a subcollection — a subcollection count returns a misleading 0 | Gotcha, recorded |
