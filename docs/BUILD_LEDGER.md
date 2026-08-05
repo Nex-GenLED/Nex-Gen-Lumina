@@ -88,9 +88,19 @@ Rig restored byte-equal.
 > `BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}`. Only the version *name* survives from the repo.
 > **Match on `a346805` / `d0c4753`.**
 
-**Also standing (not from this build):** `#84 INSTRUMENTATION — TEMPORARY, strip before public
-release` is still present in 4 sites (`favorites_providers.dart`, `user_service.dart` ×3). Pre-dates
-+63; it is a **store-submission gate**, not an internal-build gate. See `dcfbeb8`.
+> ### ⛔ THIS AAB IS SUPERSEDED — DO NOT UPLOAD
+>
+> The +63 artifact above was built **before** the #84 instrumentation was stripped, so it still
+> contains `captureBug84`, which performs a **Firestore write to `users/{uid}/debug_errors`
+> carrying `errorMessage` and `stackTrace` in release builds**. That is a data-collection path that
+> must not go to review undeclared.
+>
+> The strip landed after this build (see the commit following `d0c4753`). **`main` no longer matches
+> this AAB.** A fresh build is required before any upload, and it must take **versionCode ≥ 64** —
+> 63 is consumed by the artifact on disk.
+>
+> The Git SHA / versionCode rows above remain accurate for *this artifact*; they are kept so a
+> crash report against it can still be resolved.
 
 ---
 
