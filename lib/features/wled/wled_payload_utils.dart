@@ -354,6 +354,55 @@ Map<String, dynamic> filterMultiSegByParticipation(
 /// Additionally normalizes legacy key names: `gp` -> `grp`, `sp` -> `spc`.
 ///
 /// The input map may be `const` (immutable), so this always returns a new map.
+/// FROZEN-SEGMENT FIX 2 — guarantee a `psave` cannot capture `frz:true`.
+///
+/// `psave` saves the state included in the same command merged over the CURRENT
+/// live state. Bench-proven (audit/FROZEN_SEGMENT.md): with a segment frozen,
+/// `{"psave":N}` stored `seg.frz = [true, ...]`; loading that preset re-froze
+/// the segment, so it could not render its own stored colours — a preset that
+/// loads successfully and lights nothing.
+///
+/// This is the DURABLE half of the defect. A live freeze clears on the next
+/// segment write or a reboot; a poisoned preset re-freezes on every load until
+/// it is re-saved. Reachable in production because schedule sync ALWAYS psaves
+/// pattern presets from live state.
+///
+/// [normalizeWledPayload] already clears `frz` on any seg entry the caller
+/// supplied. This covers the seg-LESS case — the ON-preset states
+/// (`{'on': true, 'bri': N, 'ib': true}`, presets 1/3/4/5, the ones schedules
+/// fire) carry no `seg`, so WLED would capture the live segment state including
+/// its freeze. A minimal `{'id': n, 'frz': false}` entry touches ONLY the
+/// freeze flag; colour, effect and everything else stay live and are captured
+/// normally.
+///
+/// Atomic by design — one write, rather than an unfreeze POST followed by a
+/// psave, which would leave a window where the strip is unfrozen but unsaved
+/// and add a round trip on a controller with known post-commit stall behaviour.
+///
+/// [participating] is the cached participating-channel list; `null` means
+/// legacy/no preference, in which case this falls back to segment 0 — the
+/// segment a per-pixel paint targets by default. Residual: a multi-segment
+/// controller with no participation preference could still capture a freeze on
+/// a segment that cannot be enumerated here.
+Map<String, dynamic> ensurePsaveClearsFreeze(
+  Map<String, dynamic> state,
+  List<int>? participating,
+) {
+  final seg = state['seg'];
+  // Caller supplied segments → normalizeWledPayload already set frz:false.
+  if (seg is List && seg.isNotEmpty) return state;
+
+  final ids = (participating != null && participating.isNotEmpty)
+      ? participating
+      : const <int>[0];
+
+  final out = Map<String, dynamic>.from(state);
+  out['seg'] = [
+    for (final id in ids) <String, dynamic>{'id': id, 'frz': false},
+  ];
+  return out;
+}
+
 Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
   final seg = payload['seg'];
   if (seg is! List || seg.isEmpty) {
@@ -448,6 +497,33 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
     final iArray = s['i'];
     if (iArray is List) {
       s['i'] = normalizeIArray(iArray, source: 'normalizeWledPayload');
+    }
+
+    // ── FROZEN-SEGMENT CHOKEPOINT (audit/FROZEN_SEGMENT.md) ───────────────
+    // A per-pixel write sets `seg.frz = true` on WLED 0.15.1 (bench-proven,
+    // 192.168.1.150). A FROZEN SEGMENT DOES NOT RUN ITS EFFECT, so every
+    // subsequent segment-level colour/effect write is stored, answers 200,
+    // reads back correctly from /json/state — and never reaches the LEDs.
+    // Nothing in the app ever sent `frz` at all, so the freeze persisted until
+    // a preset load or a reboot cleared it.
+    //
+    // A segment-level write means "render this". Clear the freeze on every one
+    // of them. The ONLY exception is a per-pixel write, which sets the pixel
+    // buffer directly and re-freezes by design — detected by the `i` key.
+    //
+    // WHY HERE and not at the call sites: there are ~66 `applyJson` call sites
+    // across ~30 files. Both repositories (WledService + CloudRelayRepository)
+    // and savePreset funnel through THIS function, so one edit covers every
+    // current caller and every future one. Patching applyBaseAndSpans would
+    // have fixed Design Studio and left quick presets, the colour picker,
+    // celebrations, neighborhood fanout and the healer still swallowed — and
+    // P1-51 (P0-7 covering 1 of 3 roofline save surfaces) is this codebase's
+    // own evidence that call-site patches do not get remembered.
+    //
+    // Safe unconditionally: nothing in lib/ ever writes `frz`, so there is no
+    // deliberate freeze anywhere for this to override.
+    if (!s.containsKey('i')) {
+      s['frz'] = false;
     }
 
     normalizedSegs.add(s);

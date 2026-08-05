@@ -598,6 +598,15 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
   }
 
   @override
+  /// See WledService._participatingChannelsOrNull — best-effort, never fatal.
+  Future<List<int>?> _participatingChannelsOrNull() async {
+    try {
+      return await getCachedParticipatingChannels();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> savePreset({
     required int presetId,
     required Map<String, dynamic> state,
@@ -607,7 +616,11 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
     // Pre-normalize caller state so the preset persists with all 3 col
     // slots populated; mirrors the WledService.savePreset fix so local +
     // relay paths produce identical preset shapes on the controller.
-    final normalizedState = normalizeWledPayload(state);
+    // FROZEN-SEGMENT FIX 2 — mirrors WledService.savePreset so local and relay
+    // paths produce identical preset shapes; a relay psave can poison a preset
+    // exactly the same way (the bridge routes psave via /json/state).
+    final normalizedState = ensurePsaveClearsFreeze(
+        normalizeWledPayload(state), await _participatingChannelsOrNull());
     // Save preset via cloud relay by sending the state with psave field
     final payload = <String, dynamic>{
       ...normalizedState,

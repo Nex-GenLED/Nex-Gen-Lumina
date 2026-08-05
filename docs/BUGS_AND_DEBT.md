@@ -451,6 +451,199 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `applyChannelFilter`), `lib/features/wled/channel_power_payload.dart`
     (`buildChannelPowerPayload`).
 
+- [ ] **P1-49 — Design Studio conflict prompt blocks EVERY AI search with no selectable control**
+  - Status: OPEN · Evidence: bench-observed 2026-08-03 (2.5.10+62, 192.168.1.150) ·
+    **LOG ONLY, not fixed.** Blocks Part B slice 3 entirely — map-driven smart presets could not
+    be tested.
+  - **Observed:** every AI design search returns *"Resolve Conflict — These settings overlap,
+    which should take priority?"* with **no selectable option**. The user cannot choose a priority
+    and cannot proceed. Dismissible (back to home), so it blocks the feature rather than trapping
+    the app.
+  - **The DETECTION is correct, the RESOLUTION UI is the defect.** Captured corners sit at the
+    boundary of adjacent runs, so the overlap is genuine — this is not a false positive to be
+    tuned away. Suppressing the detection would be the wrong fix.
+  - The question is built at
+    [clarification_service.dart:379-388](../lib/features/design/services/clarification_service.dart#L379)
+    and **does** populate `options` — including a `'merge'`/"Blend both" option injected at
+    `:371-378`, then `options.take(4)`. So options exist at construction. The break is therefore
+    downstream: either the list arrives empty/1-length at the widget, or
+    [clarification_dialog.dart](../lib/features/design/widgets/clarification_dialog.dart) has no
+    render arm for `ClarificationType.conflictResolution`. **Not isolated — needs a repro to
+    discriminate.** Start by logging `options.length` at the dialog boundary.
+  - **Severity note:** filed P1, not P0, because no customer lighting is broken and there is no
+    data loss. Re-file as P0 if Design Studio is launch-critical — as observed it is a total
+    feature block with no workaround, on every search.
+  - Files: `lib/features/design/services/clarification_service.dart`,
+    `lib/features/design/widgets/clarification_dialog.dart`,
+    `lib/features/design/models/clarification_models.dart`.
+
+- [ ] **P1-50 — Manual pixel editor: Undo and Erase do nothing; a 290-px misclick is unrecoverable**
+  - Status: OPEN · Evidence: bench-observed 2026-08-03 (2.5.10+62) · **LOG ONLY, not fixed.**
+  - **Observed:** painting is correct — corners and runs land exactly on the captured segments,
+    clean boundaries, no bleed (the substantive R-4 result). But after applying colour, **UNDO and
+    ERASE both do nothing**, with no way to revert. Installer-facing on a 290-pixel run, where a
+    misclick is inevitable.
+  - **The machinery exists and is wired**, which is why this needs a repro rather than a rebuild:
+    `EditHistory` implements undo/redo/`canUndo`
+    ([edit_history.dart](../lib/features/design/manual_editor/edit_history.dart)); `_commit` pushes
+    to history ([manual_design_editor.dart:81](../lib/features/design/manual_editor/manual_design_editor.dart#L81));
+    Erase → `_clearSelectionToBase` (`:348`), Undo → `_undo` (`:349`).
+  - ## ROOT CAUSE — BENCH-PROVEN 2026-08-04 on 192.168.1.150. **The Dart is correct end to end.**
+    **A per-pixel write FREEZES the WLED segment (`frz:true`), and the undo/erase payload is a
+    segment-level `col` write, which a frozen segment never renders.**
+    - Proven by replaying the app's exact wire payloads:
+
+      | Step | POST | `seg0.frz` after |
+      |---|---|---|
+      | A | unfreeze + base solid (`col:[[10,10,12,0]]`) | `false` |
+      | B | **per-pixel** `{"seg":[{"id":0,"fx":0,"i":[100,[0,229,255,0]]}]}` | **`true`** ← the paint froze it |
+      | C | base solid **with `"frz":false`** | `false` |
+
+    - `applyBaseAndSpans` writes base-then-spans
+      ([design_apply.dart:39-52](../lib/features/design/manual_editor/design_apply.dart#L39)) and
+      **never sends `frz`**. After any paint the segment is frozen, so the base write is stored but
+      not rendered — the painted pixels persist and undo/erase look inert.
+    - Only a direct `i` write changes a frozen segment's pixels. Undo/erase emit **fewer** spans,
+      so they write nothing per-pixel and rely entirely on the base repaint that cannot land.
+    - **The rig was found already frozen** (`frz:true`) from Tyler's own design session before the
+      experiment began — independent corroboration.
+    - **This is why three code-reading passes failed.** Nothing in the Dart is wrong; the defect is
+      a single WLED field the app never sends. It is invisible from the source alone.
+    - **Fix direction (NOT implemented):** include `"frz": false` in the base payload of
+      `applyBaseAndSpans`, or unfreeze before the base write. Needs a bench re-verify that
+      unfreezing does not break the per-pixel paint that immediately follows it (order matters:
+      unfreeze → base → per-pixel, since step B shows the per-pixel write re-freezes anyway).
+  - **FALSIFIED HYPOTHESES — do not re-derive.** Each was reasoned from source and each was wrong
+    against hardware: (1) controls unwired — they are wired; (2) empty undo stack — history is
+    pushed on every paint; (3) the `_livePreview` gate — Tyler re-tested with **Live Preview
+    explicitly ON** and the strip still did not revert.
+  - **Collateral finding — a frozen segment is a latent hazard beyond this editor.** Anything that
+    renders by setting segment colour/effect (schedules, presets, Apply-to-Lights, the healer) will
+    appear to do nothing while `frz:true` persists. The freeze survives until something explicitly
+    clears it. Worth its own audit; the bench rig is sitting frozen right now.
+  - Superseded source-only reading (kept for the trail): the controls are NOT dead and the history
+    is NOT empty — undo and erase mutate the document correctly and simply never reach the LEDs.
+    - The strip is written from exactly two places: `_apply()` ("Apply to Lights", `:366→:220`) and
+      `_scheduleLivePreview()` (`:212`). **`_scheduleLivePreview` is gated on `_livePreview`, which
+      defaults to `false`** (`:42`) — and `_commit` (`:83`), `_undo` (`:106`) and `_redo` (`:112`)
+      *all* push to the strip only through that gate.
+    - So the observed sequence is: **Paint** → document + on-screen preview update, strip unchanged
+      → **Apply to Lights** → strip shows the design (this is the "painting works" observation) →
+      **Undo/Erase** → document + on-screen preview revert, **but `_apply()` is not re-run and live
+      preview is off, so the strip keeps showing the applied design.**
+    - Nothing tells the user that Undo requires pressing "Apply to Lights" again to take effect on
+      the hardware.
+    - **Falsification test (one minute at the bench):** toggle **Live Preview ON**, paint, then
+      undo. If the strip reverts, this is confirmed and the fix is about re-apply/affordance, not
+      about the history stack.
+  - **Secondary real defect found in the same trace:** `_clearSelectionToBase` (`:95-101`) has **no
+    empty-selection guard**, unlike `_paintSelection` (`:87`, which early-returns). With no active
+    selection, Erase commits a document identical to the current one *and pushes it onto the undo
+    stack* — a silent no-op that also inflates history with junk entries the user must undo through.
+  - **Ruled out during the trace, record so it is not re-derived:**
+    - *Additive-only apply* — `applyBaseAndSpans` repaints the base across the effective channels
+      (`col: [baseRgbw]`, [design_apply.dart:39-52](../lib/features/design/manual_editor/design_apply.dart#L39))
+      **before** overlaying spans, so a removal IS visible once a push happens. `onlyPainted: true`
+      in `_spans()` is therefore not the problem.
+    - *Empty history / disabled Undo* — the only paint path is the explicit **Paint** button
+      (`:347 → _paintSelection → _commit → _history.push`); tapping the strip toggles *selection*
+      (`:419-420 onToggle`), it does not paint. So `canUndo` is true after any real paint.
+    - *Selection cleared by paint* — `_commit` does not touch `_selection`, so Erase still has
+      pixels to act on immediately after a Paint.
+  - Files: `lib/features/design/manual_editor/manual_design_editor.dart`,
+    `lib/features/design/manual_editor/edit_history.dart`.
+
+- [ ] **P1-51 — P0-7 fixed ONE of at least THREE roofline save surfaces**
+  - Status: OPEN · Evidence: verified-by-source 2026-08-03 · **Scoping gap in a shipped fix.
+    Checkable without hardware.**
+  - P0-7 gated `MapRooflineStep._onContinue()` on a confirmed save. That step is constructed at
+    exactly one call site ([installer_setup_wizard.dart:728](../lib/features/installer/installer_setup_wizard.dart#L728))
+    — so the fix covers the **wizard path only**. Two other roofline save paths are routed and
+    reachable:
+    1. [roofline_editor_screen.dart:636-647](../lib/features/site/roofline_editor_screen.dart#L636) —
+       `_saveRoofline` awaits `configEditor.save()`, then shows a **green "Saved N roofline
+       segments"** and `context.pop()`s. Success is inferred from "no exception thrown", not from a
+       confirmed write. Its `catch` does surface a red snackbar, so it is **not silent** — but it is
+       the same assume-success shape P0-7 was written to remove.
+    2. [roofline_setup_wizard.dart:140](../lib/features/design/roofline_setup_wizard.dart#L140) —
+       `savePixelMap` / `saveConfiguration`, a third independent path.
+  - **Why it matters:** the P0-7 regression test pins the wizard step only, so a future change to
+    either other surface reintroduces the class with the suite still green.
+  - Files: `lib/features/site/roofline_editor_screen.dart`,
+    `lib/features/design/roofline_setup_wizard.dart`,
+    `test/features/installer/map_roofline_save_gate_test.dart` (coverage stops at the wizard).
+
+- [ ] **P1-48 — Off-WiFi save is NOT detected as off-LAN; it attempts a LAN write and parks on
+  "this can take a few minutes"**
+  - Status: OPEN · Evidence: reported (bench-observed 2026-08-03, root cause traced in source;
+    not yet isolated with a repro) · **LOG ONLY — the schedule armed correctly on the next
+    on-WiFi sync; no data was lost.**
+  - **Observed:** schedule created with the phone OFF the home WiFi. App showed the neutral cyan
+    *"Saving to controller — this can take a few minutes. Your lights keep working."* Nothing
+    further happened — no retry, no resolution, nothing armed. Reconnecting and syncing again
+    landed the write and both boundaries fired.
+  - **The branch that fired was `verifying`, NOT either deferral.** That copy is
+    `kScheduleCfgVerifying` ([schedule_sync.dart:1748](../lib/features/schedule/schedule_sync.dart#L1748)).
+    `verifying` is only reachable from `_pushCfgWithVerify`'s `onVerifying` callback
+    ([:1485](../lib/features/schedule/schedule_sync.dart#L1485)) or the transient in-flight drop
+    ([schedule_providers.dart:198](../lib/features/schedule/schedule_providers.dart#L198), cleared
+    in a `finally`). The first implies **a cfg write was actually attempted** — so
+    `repoCanWriteCfg(repo)` returned TRUE and the off-LAN branch never ran.
+  - **Why:** `repoCanWriteCfg` is `repo is! CloudRelayRepository || repo.supportsCfgWrites`
+    ([cloud_relay_repository.dart:651](../lib/features/wled/cloud_relay_repository.dart#L651)) — it
+    is a REPO-TYPE test, not a reachability test. Off WiFi the SSID is null and connectivity
+    **defaults to LOCAL, not remote** (known behavior — see project memory
+    `feedback_connectivity_defaults`), so the app selects `WledService` and believes it can write.
+    It then issues a LAN HTTP call to a controller it cannot reach and parks in the verify poll.
+  - **Why this matters more than the wording:** the copy says the write *committed* and the
+    controller will answer once it recovers. Nothing left the phone. The user is reassured about a
+    write that never happened, and the only reason it self-corrected is that a later on-WiFi sync
+    redid it. **This is the silent-success shape wearing a progress message.**
+  - **NOT the lease gate pre-empting the off-LAN check.** In `syncAll` the off-LAN check
+    (`:1316`) precedes `deferredLeaseLedger` (`:1357`), so the lease gate cannot pre-empt it. That
+    ordering is correct and needs no change; the display-chain ordering is correct too.
+  - Files: `lib/features/wled/cloud_relay_repository.dart` (`repoCanWriteCfg`), repo selection /
+    connectivity detection, `lib/features/schedule/schedule_sync.dart` (`_pushCfgWithVerify`).
+  - Related: P0-9, [[feedback_connectivity_defaults]].
+
+- [ ] **P2-51 — In-app instruction points at an "Unpair Bridge" affordance that does not exist**
+  - Status: OPEN · Evidence: verified-by-source 2026-08-03 · **LOG ONLY.**
+  - [bridge_setup_screen.dart:528](../lib/features/site/bridge_setup_screen.dart#L528) tells the
+    user to go to **"Settings → Remote Access → Unpair Bridge"**.
+    `lib/features/site/remote_access_screen.dart` contains **no** unpair, reset, or forget action —
+    grepped for all three. A customer following the in-app instruction finds nothing and calls
+    support.
+  - **This is also a real operational gap, not only a copy bug.** There is no supported app-side
+    way to release a bridge: the firmware re-asserts `pairedUid` from NVS every heartbeat and
+    `pollPairingRequest` returns early unless `status == "pairing"` (`main.cpp:1219-1220`), so a
+    registry reset alone does not release it. Recovery today needs `/api/reset` over LAN or a
+    re-flash. `manage_controllers_page`'s **Remove Controller** deletes the Firestore doc and its
+    saved settings but does **not** touch NVS — leaving a bridge still claiming a uid the account
+    has forgotten.
+  - Two separable fixes: (a) correct or remove the dead instruction; (b) build the unpair path the
+    instruction already promises. (a) is trivial and should not wait for (b).
+  - Found while scoping whether the bench rig could be unpaired for commissioning verification —
+    it cannot. See `audit/PART_B_RESULTS.md`.
+  - Files: `lib/features/site/bridge_setup_screen.dart`,
+    `lib/features/site/remote_access_screen.dart`, `esp32-bridge/src/main.cpp`.
+
+- [ ] **P2-50 — Lease-deferral copy promises it "clears in a moment"; after ~8.7 s of backoff it
+  never will**
+  - Status: OPEN · Evidence: verified-by-source · **LOG ONLY — cosmetic; the protection works.**
+  - `kScheduleLeaseLedgerNotice` = *"Saved — finishing up on your controller. This clears in a
+    moment."* ([schedule_sync.dart:1755](../lib/features/schedule/schedule_sync.dart#L1755)).
+    The retry ladder `_kLeaseLedgerRetryDelays` is `1200 + 2500 + 5000 ms` = **8.7 s total**
+    ([schedule_providers.dart:31](../lib/features/schedule/schedule_providers.dart#L31)).
+  - Once the ladder exhausts, the deferral **stands and stays on the status row** by design
+    (documented at `schedule_providers.dart:124-127`) — so it is NOT silent, and that is the right
+    call. But the copy asserts it will clear, and past that point it will not. Either soften the
+    copy or give the exhausted state its own line.
+  - **Scope correction on the report that raised this:** the "could take a few minutes" string is
+    NOT the lease copy — it belongs to `verifying` (see P1-48). The 8.7 s ladder pairs with
+    "in a moment", which is defensible. The two were conflated; only this narrower overpromise is
+    real.
+  - Files: `lib/features/schedule/schedule_sync.dart`, `lib/features/schedule/schedule_providers.dart`.
+
 ---
 
 ## P2 — hardening & platform
