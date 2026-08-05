@@ -362,3 +362,65 @@ writes to a user document at all.
 | C5 | `suggestions`, `ai_usage`, `pattern_usage`, `detected_habits`, `oauth_codes` are queried **without `.limit()`** — >500 matching docs for one user aborts the whole run. Worst case today is 49 | **P3, latent** |
 | C6 | `commands` still has 4,672 matching docs; full drain ~7 more daily runs | Expected |
 | C7 | `calendar_entries` is a user-document field, not a subcollection — a subcollection count returns a misleading 0 | Gotcha, recorded |
+
+---
+
+## C5 FIX — cap the unbounded cleanup queries ⏸ NOT DEPLOYED
+
+**Rides the next `functions` deploy.** `runDataCleanup()` only; nothing else touched.
+
+**The bug:** `suggestions`, `ai_usage`, `pattern_usage`, `detected_habits` and `oauth_codes` were
+queried with no `.limit()`. A Firestore batch commits at most 500 operations, so one user matching
+>500 docs fails `batch.commit()`, and because the whole routine is a single `try/catch` it **aborts
+the entire run** — starving every user later in the loop. Silent and total. `commands` and
+`debug_errors` were already bounded at 450.
+
+**The fix:** all five now bounded, with the cap hoisted to a named constant `PER_USER_DELETE_CAP =
+450` and the two pre-existing hardcoded `450`s converted to it so the values cannot drift apart.
+
+**Index check — no composite index needed for any of them.** Each query is a single inequality on
+one timestamp field with no second filter and no explicit `orderBy`, so it is served by the
+automatic single-field index; a `.limit()` does not change index requirements. `firestore.indexes.json`
+declares **no `fieldOverrides`** and no composite index naming any of these collections, so nothing
+is exempted from automatic indexing. Same check that kept `debug_errors` index-free.
+
+| Collection | Field | Scope | Cap |
+|---|---|---|---|
+| `ai_usage` | `timestamp` | per user | 450 |
+| `pattern_usage` | `created_at` | per user | 450 |
+| `detected_habits` | `detected_at` | per user | 450 |
+| `suggestions` | `created_at` | per user | 450 |
+| `oauth_codes` | `createdAt` | **top-level, per run** | **450 × up to 5 pages** |
+
+### One of the five needed different treatment: `oauth_codes`
+
+Applying a flat `limit(450)` to it would have been a **regression**, not a fix. Two properties make
+it unlike the other four:
+
+1. **It is top-level and sits outside the per-user loop**, so it runs once per invocation. A bare
+   cap means 450 per *run* rather than 450 per *user* — with 24 users, roughly a 24× smaller drain
+   rate for the same number.
+2. **Its retention window is one hour, not 30 or 90 days.** These are spent OAuth authorization
+   codes. Stranding them for days behind a throughput ceiling is a poor match for a
+   security-sensitive artifact with a one-hour life.
+
+The unbounded query drained every expired code on each run; a bare cap would newly leave the
+remainder behind. So it **pages** instead — 450 per batch to respect the 500-op limit, repeated
+until exhausted, with `OAUTH_CODES_MAX_PAGES = 5` (2,250/run) as a hard ceiling so a runaway backlog
+cannot threaten the **60s** function timeout. Current live count is 0, and the heaviest run measured
+so far took 17.4s (C4), so the ceiling is generous headroom rather than a live constraint. It also
+now accumulates with `+=` rather than `=`, which the loop requires.
+
+The other four keep the plain per-user cap: their retention windows are long, they are already
+inside the per-user loop, and a multi-day drain is the tradeoff already accepted for `commands`.
+
+**Verification:** `node -c` clean; functions unit suite **66/66 pass**. Not covered by a new unit
+test — `runDataCleanup` is a private function inside `index.js` with no export seam, and adding one
+would mean refactoring beyond the scope of this fix. The paging loop is the only new control flow:
+empty first page breaks with `stats.oauthCodes` at 0, a short page breaks after committing, and a
+full page re-queries against a cutoff computed once outside the loop.
+
+| # | Finding | Severity |
+|---|---|---|
+| C5 | All five unbounded queries now capped; run-aborting batch overflow closed | **Fixed, undeployed** |
+| C8 | `oauth_codes` needed paging rather than a flat cap — a bare `limit(450)` would have cut its drain rate ~24× on a one-hour-retention collection | Design note |
