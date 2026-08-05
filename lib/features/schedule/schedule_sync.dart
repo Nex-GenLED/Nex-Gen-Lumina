@@ -32,7 +32,7 @@ import 'package:nexgen_command/features/schedule/sunrise_off_service.dart'
 // resolve timersInsLanded / isRealEnabledTimer.
 import 'package:nexgen_command/features/schedule/timer_landing.dart';
 export 'package:nexgen_command/features/schedule/timer_landing.dart'
-    show isRealEnabledTimer, timersInsLanded;
+    show isRealEnabledTimer, timersInsLanded, solarTimersLanded;
 import 'package:nexgen_command/features/schedule/cfg_payload_builder.dart' as cfg;
 
 // isRealEnabledTimer + timersInsLanded moved to timer_landing.dart (pure Dart)
@@ -142,6 +142,16 @@ enum CfgPushOutcome {
   /// The write was never confirmed — the controller never answered within the
   /// verification window, or a relay/webhook reported a plain failure.
   notConfirmed,
+
+  /// The CLOCK timers landed, but a SUNRISE/SUNSET row did not match.
+  ///
+  /// Its own state rather than folding into [mismatch] because the user-facing
+  /// answer differs: their timed schedules ARE set on the controller and will
+  /// run; only the solar boundary is unverified. Telling them "the controller
+  /// stored different values" would understate what worked and overstate what
+  /// broke. Solar is also the newer, flag-gated path, so separating it keeps a
+  /// solar regression from reading as a general firmware-compatibility fault.
+  solarMismatch,
 }
 
 /// Shared hardened cfg-write-and-verify — the SINGLE implementation used by
@@ -178,11 +188,21 @@ Future<CfgPushOutcome> pushCfgWithVerify({
   // Readback content-match: does the controller's timer table CONTAIN every
   // real timer we sent (en==1)? true=confirmed, false=recovered-but-absent,
   // null=unreadable (relay/mock, fetch error, or still stalled) → inconclusive.
+  // Set when the CLOCK timers matched but a SOLAR row did not, so the caller
+  // can report the narrower failure instead of a blanket firmware mismatch.
+  var solarOnlyMismatch = false;
+
   Future<bool?> readback() async {
     if (repo is! WledService) return null; // cfg is not readable via the relay
     final actual = await repo.fetchTimerInstances();
     if (actual == null) return null;
-    return timersInsLanded(ins, actual);
+    final clockOk = timersInsLanded(ins, actual);
+    // SOLAR ROWS ARE INVISIBLE TO timersInsLanded — isRealEnabledTimer excludes
+    // hour == 255, so without this a solar row verifies clean whether it
+    // landed, landed wrong, or never landed at all (the P0-8 blindness class).
+    final solarOk = solarTimersLanded(ins, actual);
+    solarOnlyMismatch = clockOk && !solarOk;
+    return clockOk && solarOk;
   }
 
   final ok = await repo.applyConfig(payload);
@@ -200,6 +220,13 @@ Future<CfgPushOutcome> pushCfgWithVerify({
       // The race is ruled out by the delayed re-look, so a persisting mismatch
       // is a real defect (firmware stored our values wrong, e.g. the en:0 bool
       // class). Fail loudly.
+      if (solarOnlyMismatch) {
+        // Clock timers verified; only the sunrise/sunset row differs. Report the
+        // narrower failure so the user is not told their whole schedule broke.
+        debugPrint('CfgVerify: clock timers landed but the SOLAR row did not '
+            'match on the delayed re-look — reporting solarMismatch');
+        return CfgPushOutcome.solarMismatch;
+      }
       debugPrint('CfgVerify: cfg 2xx but readback CONTENT-MISMATCH persisted on '
           'the delayed re-look — the controller stored different values; '
           'failing loudly');
@@ -1423,6 +1450,15 @@ class ScheduleSyncService {
             presetErrors: presetErrors,
             schedulesWithPresets: updatedSchedules,
           ));
+        case CfgPushOutcome.solarMismatch:
+          // Clock timers verified; only the solar row is unconfirmed. Narrower
+          // message so the user is not told their whole schedule failed.
+          return finish(ScheduleSyncResult(
+            success: false,
+            error: kScheduleSolarMismatch,
+            presetErrors: presetErrors,
+            schedulesWithPresets: updatedSchedules,
+          ));
         case CfgPushOutcome.notConfirmed:
           return finish(ScheduleSyncResult(
             success: false,
@@ -1766,6 +1802,16 @@ const String kScheduleCfgWriteFailed =
 /// Terminal failure copy for a 2xx write whose readback content did NOT match
 /// what we sent — the controller accepted the POST but stored different values,
 /// which points at a firmware incompatibility rather than a transient.
+/// User-facing copy when the CLOCK timers verified but a SUNRISE/SUNSET row did
+/// not. Deliberately distinct from [kScheduleCfgFirmwareMismatch]: their timed
+/// schedules ARE armed and will run, so leading with "the controller reported
+/// different values" would overstate the damage. Names the part that failed and
+/// the most likely cause (location/clock on the controller).
+const String kScheduleSolarMismatch =
+    'Your timed schedules are set, but the sunrise/sunset part could not be '
+    "confirmed on the controller. Check the controller's location and time "
+    'settings, then sync again.';
+
 const String kScheduleCfgFirmwareMismatch =
     'Schedule saved but the controller reported different values — sync may be '
     'incompatible with this controller\'s firmware. Contact support if this '

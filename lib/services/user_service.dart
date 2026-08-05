@@ -188,7 +188,8 @@ class UserService {
           throw FirestoreSerializationError(
             path: childPath,
             valueType: item.runtimeType,
-            valuePreview:
+            // Constant description, not the value — safe by construction.
+            valueShape:
                 'nested list (arrays-of-arrays not Firestore-safe); '
                 'jsonEncode this field upstream',
           );
@@ -215,19 +216,35 @@ class UserService {
     throw FirestoreSerializationError(
       path: path,
       valueType: value.runtimeType,
-      valuePreview: _safePreview(value),
+      valueShape: _safeShape(value),
     );
   }
 
-  /// Best-effort string preview of a value for error diagnostics. Never
-  /// throws — falls back to the runtime type name if `toString()` itself
-  /// blows up.
-  static String _safePreview(dynamic value) {
+  /// SHAPE of a non-encodable value for error diagnostics — **never its
+  /// content**. Returns the runtime type and the `toString()` LENGTH only.
+  ///
+  /// PRIVACY (audit/DIAGNOSTICS_DECLARATION.md §2): this string ends up inside
+  /// [FirestoreSerializationError.toString()], which the global uncaught-error
+  /// sink in `main.dart` persists verbatim to `users/{uid}/debug_errors`. This
+  /// helper previously returned `value.toString()` truncated to 120 chars — the
+  /// ACTUAL VALUE. Because the throw originates in `sanitizeForFirestore`,
+  /// which wraps USER-DOCUMENT writes, that could put `address`, `phone_number`,
+  /// `home_ssid_encrypted`, `email` or coordinates into a diagnostics
+  /// collection. It never did in 669 live records — the path had not fired —
+  /// but it was unguarded, so the content is gone rather than the risk being
+  /// tracked.
+  ///
+  /// The useful diagnostic was never the value: it is
+  /// [FirestoreSerializationError.path], which pinpoints the offending field
+  /// and is carried separately. Type + length is enough to tell a stray
+  /// `Color` from a stray `Duration` and to spot an unexpectedly huge blob.
+  ///
+  /// Never throws — falls back to the type alone if `toString()` blows up.
+  static String _safeShape(dynamic value) {
     try {
-      final s = value.toString();
-      return s.length > 120 ? '${s.substring(0, 120)}…' : s;
+      return '${value.runtimeType} (toString length ${value.toString().length})';
     } catch (_) {
-      return '<${value.runtimeType}: toString failed>';
+      return '${value.runtimeType} (toString threw)';
     }
   }
 
@@ -874,7 +891,10 @@ class UserService {
 /// The [path] locates the offending leaf from the root of the sanitized map
 /// (e.g. `channels[0].color_groups[0].color[3]`). [valueType] names the
 /// Dart class so a future sanitizer iteration can add explicit handling.
-/// [valuePreview] is a truncated `toString()` for context.
+/// [valueShape] describes the value's TYPE and SIZE — never its content.
+/// See UserService._safeShape: this message is persisted verbatim to
+/// `users/{uid}/debug_errors` by the global error sink, so it must not carry
+/// user data (audit/DIAGNOSTICS_DECLARATION.md).
 ///
 /// Caught by the existing try/catch in every write path that wraps
 /// `sanitizeForFirestore` (favorites_providers `addFavorite`,
@@ -883,19 +903,19 @@ class UserService {
 class FirestoreSerializationError implements Exception {
   final String path;
   final Type valueType;
-  final String valuePreview;
+  final String valueShape;
 
   const FirestoreSerializationError({
     required this.path,
     required this.valueType,
-    required this.valuePreview,
+    required this.valueShape,
   });
 
   @override
   String toString() {
     final loc = path.isEmpty ? '<root>' : path;
     return 'FirestoreSerializationError: non-encodable value at "$loc" '
-        '(type: $valueType, preview: $valuePreview). '
+        '(type: $valueType, shape: $valueShape). '
         'Add explicit handling in UserService._sanitizeValue.';
   }
 }

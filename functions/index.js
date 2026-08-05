@@ -1005,6 +1005,7 @@ function addSecurityHeaders(res) {
  * - Detected habits older than 90 days
  * - Expired OAuth codes
  * - Suggestions older than 30 days
+ * - Crash-sink records (debug_errors) older than 30 days
  */
 // Shared cleanup routine. Extracted from the onCall handler so a scheduled
 // trigger can run it too (Slice 0 — previously onCall-only, so it NEVER fired
@@ -1014,6 +1015,7 @@ async function runDataCleanup() {
     const USAGE_RETENTION_DAYS = 90;
     const SUGGESTIONS_RETENTION_DAYS = 30;
     const COMMANDS_RETENTION_DAYS = 7;
+    const DEBUG_ERRORS_RETENTION_DAYS = 30;
     const usageCutoff = new Date();
     usageCutoff.setDate(usageCutoff.getDate() - USAGE_RETENTION_DAYS);
     const usageCutoffTimestamp = admin.firestore.Timestamp.fromDate(usageCutoff);
@@ -1026,9 +1028,15 @@ async function runDataCleanup() {
     commandsCutoff.setDate(commandsCutoff.getDate() - COMMANDS_RETENTION_DAYS);
     const commandsCutoffTimestamp = admin.firestore.Timestamp.fromDate(commandsCutoff);
 
+    const debugErrorsCutoff = new Date();
+    debugErrorsCutoff.setDate(debugErrorsCutoff.getDate() - DEBUG_ERRORS_RETENTION_DAYS);
+    const debugErrorsCutoffTimestamp =
+      admin.firestore.Timestamp.fromDate(debugErrorsCutoff);
+
     console.log(`Starting data cleanup:
       - Usage logs older than ${usageCutoff.toISOString()}
       - Suggestions older than ${suggestionsCutoff.toISOString()}
+      - Crash-sink records older than ${debugErrorsCutoff.toISOString()}
       - Expired OAuth codes`);
 
     try {
@@ -1039,6 +1047,7 @@ async function runDataCleanup() {
         suggestions: 0,
         commands: 0,
         oauthCodes: 0,
+        debugErrors: 0,
       };
 
       // Get all users
@@ -1126,6 +1135,39 @@ async function runDataCleanup() {
           oldCommands.docs.forEach((doc) => batchC.delete(doc.ref));
           await batchC.commit();
           stats.commands += oldCommands.size;
+        }
+
+        // Clean up old crash-sink records (audit/DIAGNOSTICS_DECLARATION.md §4).
+        //
+        // users/{uid}/debug_errors is written by the global uncaught-error sink
+        // in main.dart and holds error text + stack traces keyed to the uid. It
+        // was absent from this routine entirely, so it had NO retention at all —
+        // even a correctly deployed cleanup would never have touched it. That is
+        // a data-minimisation problem on top of a declaration one: "how long do
+        // you keep it?" had no good answer for a reviewer or a data-subject
+        // request.
+        //
+        // 30 days: the sink exists to answer "what crashed recently" — Tyler has
+        // no Crashlytics and no Mac, so he reads these in the console within
+        // days of a report. Older records have no diagnostic value.
+        //
+        // Same bounded shape as the commands block above: limit 450 keeps a
+        // single user's backlog under the 500-op batch cap, and successive daily
+        // runs drain the rest. Queries `timestamp` only (single-field
+        // auto-index), so no composite index is required.
+        const oldDebugErrors = await db
+          .collection("users")
+          .doc(userId)
+          .collection("debug_errors")
+          .where("timestamp", "<", debugErrorsCutoffTimestamp)
+          .limit(450)
+          .get();
+
+        if (oldDebugErrors.size > 0) {
+          const batchD = db.batch();
+          oldDebugErrors.docs.forEach((doc) => batchD.delete(doc.ref));
+          await batchD.commit();
+          stats.debugErrors += oldDebugErrors.size;
         }
       }
 
