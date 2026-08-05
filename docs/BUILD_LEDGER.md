@@ -29,6 +29,63 @@ optional.
 
 ---
 
+## 2.5.10+64 — solar LIVE + comparator wired + privacy manifest + #84 strip
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `68786e9e745b28ce45bb637cc76e267d6d07b736` (`68786e9`) — the build commit |
+| **Merged to main** | `dad7329382e1d379cef5ebeeb1213f45b85d031f` (`dad7329`, `--no-ff`), **pushed to origin 2026-08-05** |
+| **Branch at build time** | `feat/solar-live-comparator-privacy` (off `main` @ `7e04b00`) |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **64** — verified from the merged manifest (`build/app/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,237,290 bytes · built 2026-08-05 13:04 |
+| **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
+| **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` — archive these, never commit |
+| **Android track** | **NOT UPLOADED** — Tyler uploads |
+| **iOS Codemagic build number** | `PENDING` — fill when the build completes |
+| **iOS workflow** | `ios-workflow` ("iOS Release"), **started manually** — `codemagic.yaml` still has no `triggering:` block (re-verified this build) |
+| **iOS branch to build** | **`main` tip.** Commits after the merge `dad7329` are docs-only. Stable identifiers: **`68786e9`** (build) and **`dad7329`** (merge) |
+| **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
+
+**Contents.** *Solar:* `config/solar_scheduling.enabled = true` went LIVE 2026-08-05
+(readback-confirmed) — it had **never existed** since solar was declared live 2026-07-28, so four
+accounts had solar silently refused for eight days. Bench gate passed properly this time: a slot-9
+row **FIRED at 11:27:09 against a computed sunset of 11:27**. `solarTimersLanded` +
+`CfgPushOutcome.solarMismatch` wired into `pushCfgWithVerify` the same day — before it, solar rows
+verified clean whether or not they landed. *Privacy:* #84 instrumentation stripped (it wrote
+PII-bearing diagnostics to Firestore in release builds), `_safePreview` → `_safeShape`,
+`debug_errors` retention at 30d, and `ios/Runner/PrivacyInfo.xcprivacy` declaring **12** data types
+and wired into the Runner target's **Resources build phase**.
+
+**Three findings from this build worth keeping:**
+- `GET /settings/s.js?p=5` exposes the controller's **computed** sunrise/sunset — `/json/info` and
+  `/json/state` have no solar field. Verifies the computation without firing.
+- Coordinate writes do **not** recompute; a **reboot** does. Longitude-only is exactly 4 min/degree.
+- WLED 0.15.1 stores the solar offset **SIGNED** (`-30` reads back `-30`, not `226`) — measured.
+
+**Test suite at build time:** 1934 passed · 3 skipped · 1 failed (`cloud_ai_processor_normalize` —
+pre-existing stale P1-8). **`flutter analyze lib/` WHOLE: 0 errors, 0 warnings** (368 pre-existing
+info). Whole-lib was used deliberately: the `CfgPushOutcome` addition broke an exhaustive switch in
+`sunrise_off_service.dart` that a file-scoped analyze had missed.
+
+> ### ⚠ HARDWARE DEBT — now owed on +60, +61, +62, +63 AND +64
+>
+> - **Token refresh 4.2** — undischarged since +60.
+> - **Commissioning a-d (P0-5/P0-6/P0-7)** — blocked by rig pairing state; carries to the next
+>   genuine install.
+> - **P1-50 step 6** — undo/erase confirmed in the RUNNING editor on a handset. Only the wire
+>   equivalent is proven.
+> - **NEW: end-to-end confirmation that `PrivacyInfo.xcprivacy` lands in the built IPA.** The
+>   inclusion proof here is structural (valid plist + Resources build phase); no Mac in this
+>   checkout. The first Codemagic run confirms it.
+>
+> ### ⚠ Same join-key caveat — the iOS build number will NOT be 64
+>
+> `codemagic.yaml` overwrites pubspec's build number with
+> `BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}`. **Match on `68786e9` / `dad7329`.**
+
+---
+
 ## 2.5.10+63 — frozen-segment fix (seg.frz cleared on every segment write)
 
 | Field | Value |
