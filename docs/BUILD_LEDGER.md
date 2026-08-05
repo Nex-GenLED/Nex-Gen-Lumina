@@ -29,6 +29,71 @@ optional.
 
 ---
 
+## 2.5.10+63 — frozen-segment fix (seg.frz cleared on every segment write)
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `a3468058d3eab379095786d48084cd09607b2f20` (`a346805`) — the build commit |
+| **Merged to main** | `d0c4753aa0c49dbaf7708dea8ab513b55b577f31` (`d0c4753`, `--no-ff`), **pushed to origin 2026-08-05** |
+| **Branch at build time** | `fix/frozen-segment-clear` (off `main` @ `8326c47`) |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **63** — verified from the merged manifest (`build/app/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,239,711 bytes · built 2026-08-05 09:55 |
+| **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
+| **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` (2026-08-05 09:55) — archive these, never commit |
+| **Android track** | **NOT UPLOADED** — Tyler uploads |
+| **iOS Codemagic build number** | `PENDING` — fill when the build completes |
+| **iOS workflow** | `ios-workflow` ("iOS Release"), **started manually** — `codemagic.yaml` still has no `triggering:` block (re-verified this build) |
+| **iOS branch to build** | **`main` tip.** Commits after the merge `d0c4753` are docs-only, so `lib/ android/ ios/ pubspec.yaml codemagic.yaml test/` are byte-identical to the build commit. Stable identifiers are **`a346805`** (build) and **`d0c4753`** (merge) |
+| **iOS distribution** | TestFlight **internal only** (no `beta_groups:` in `codemagic.yaml`) |
+
+**Contents:** `normalizeWledPayload` clears `seg.frz` on any seg entry without an `i` key — one
+chokepoint covering both transports and ~66 `applyJson` call sites. New pure
+`ensurePsaveClearsFreeze` synthesizes `{id, frz:false}` for seg-LESS psaves, so the
+schedule-fired ON-presets (1/3/4/5) cannot be poisoned. Participation lookup wrapped `try/catch`
+with a segment-0 fallback (`savePreset` had no I/O of its own before this).
+
+**Why:** a per-pixel write sets `seg.frz = true` on WLED 0.15.1; a frozen segment does not run its
+effect, so every segment-level colour/effect write was stored, answered 200, read back correctly —
+and never reached the LEDs. Found by **wire replay** after three source-reading passes each produced
+a wrong hypothesis; every Dart layer was correct and the defect was one WLED field never sent.
+The `psave` half is the durable one: a preset saved while frozen re-freezes on every load and cannot
+render its own colours, and schedule sync always-psaves from live state.
+
+**Fleet exposure at time of fix: ZERO** — no account holds a single `pixelMap` document (all 24 user
+docs scanned).
+
+**Test suite at build time:** 1893 passed · 3 skipped · 1 failed (`cloud_ai_processor_normalize` —
+pre-existing stale P1-8 assertion). 1878 baseline + 15 new = 1893, so no test was lost. Analyze on
+all changed files: **0 errors, 0 warnings** (28 pre-existing info).
+
+**Hardware verification: 5 of 6 on 192.168.1.150.** Freeze → fixed segment write clears and renders
+→ per-pixel still paints (ordering `base(frz:false) → per-pixel` verified, not assumed) → psave
+while frozen stores `[False, False]` (pre-fix `[True, False]`) → loading it does not re-freeze.
+Rig restored byte-equal.
+
+> ### ⚠ HARDWARE DEBT CARRIED FORWARD — now owed on +60, +61, +62 AND +63
+>
+> - **Token refresh 4.2** — undischarged since +60.
+> - **Commissioning a-d (P0-5 / P0-6 / P0-7)** — **blocked by rig pairing state**, not by time.
+>   `bridge_discovery_service.dart:90` filters `status == 'unpaired'`, so the already-paired bench
+>   rig never appears and the wizard cannot reach the roofline step. No supported app-side unpair
+>   exists (`/api/reset` over LAN or a re-flash). Carries to the next genuine install.
+> - **NEW: P1-50 step 6** — undo/erase confirmed in the RUNNING editor on a handset. Only the wire
+>   equivalent is proven. **P1-50 stays OPEN until this is done.**
+>
+> ### ⚠ Same join-key caveat — the iOS build number will NOT be 63
+>
+> `codemagic.yaml` overwrites pubspec's build number with
+> `BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}`. Only the version *name* survives from the repo.
+> **Match on `a346805` / `d0c4753`.**
+
+**Also standing (not from this build):** `#84 INSTRUMENTATION — TEMPORARY, strip before public
+release` is still present in 4 sites (`favorites_providers.dart`, `user_service.dart` ×3). Pre-dates
++63; it is a **store-submission gate**, not an internal-build gate. See `dcfbeb8`.
+
+---
+
 ## 2.5.10+62 — P0-9a tri-state lease-ledger gate
 
 | Field | Value |
