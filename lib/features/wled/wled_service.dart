@@ -926,6 +926,17 @@ class WledService
   }
 
   @override
+  /// Participation ids for [ensurePsaveClearsFreeze], or null if unavailable.
+  /// Deliberately swallows: a freeze-clearing nicety must never be the reason
+  /// a preset fails to save.
+  Future<List<int>?> _participatingChannelsOrNull() async {
+    try {
+      return await getCachedParticipatingChannels();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> savePreset({
     required int presetId,
     required Map<String, dynamic> state,
@@ -946,7 +957,16 @@ class WledService
     // safe and produces the same wire shape as before plus padding.
     // Normalized BEFORE the simulation hook so sim-mode tests observe the
     // exact shape the live HTTP path produces.
-    final normalizedState = normalizeWledPayload(state);
+    // FROZEN-SEGMENT FIX 2 — never let a psave capture frz:true. Shared pure
+    // helper so the relay repo produces an identical preset shape.
+    //
+    // The participation read is best-effort and MUST NOT be able to break a
+    // preset save: it reaches SharedPreferences, which throws without a
+    // Flutter binding. savePreset had no I/O of its own before this fix, and
+    // several suites call it bindingless. null → ensurePsaveClearsFreeze
+    // falls back to segment 0.
+    final normalizedState = ensurePsaveClearsFreeze(
+        normalizeWledPayload(state), await _participatingChannelsOrNull());
 
     if (_simulate) {
       lastSimulatedPresetSave = (

@@ -172,9 +172,22 @@ void main() {
       ]));
     });
 
-    test('no-seg payload → captured state passes through unchanged', () async {
-      // normalizeWledPayload short-circuits when seg is missing/empty, so
-      // the on/bri-only payload must round-trip unchanged.
+    test('no-seg payload → gains ONLY a freeze-clearing seg entry', () async {
+      // CONTRACT CHANGED DELIBERATELY — audit/FROZEN_SEGMENT_FIX.md.
+      //
+      // This previously asserted the payload round-tripped unchanged, on the
+      // grounds that normalizeWledPayload short-circuits without a seg key.
+      // That is still true OF NORMALIZE, but savePreset now also runs
+      // ensurePsaveClearsFreeze, because a seg-less psave lets WLED capture the
+      // LIVE segment state — including `frz:true` after a per-pixel paint.
+      // Bench-proven: such a preset re-freezes on every load and cannot render
+      // its own stored colours. The seg-less shape is exactly the ON-presets
+      // (1/3/4/5) that schedules fire, so this is the path that mattered.
+      //
+      // The ORIGINAL INTENT of this test — savePreset must not fabricate
+      // segment content — is preserved and still asserted below: the injected
+      // entry carries `id` and `frz` and nothing else, so live colour/effect
+      // state is untouched and is captured normally.
       final ok = await service.savePreset(
         presetId: 9,
         state: {'on': true, 'bri': 128},
@@ -184,7 +197,15 @@ void main() {
       final captured = service.lastSimulatedPresetSave!.state;
       expect(captured['on'], isTrue);
       expect(captured['bri'], 128);
-      expect(captured.containsKey('seg'), isFalse);
+
+      final seg = (captured['seg'] as List).cast<Map<String, dynamic>>();
+      expect(seg, isNotEmpty);
+      for (final s in seg) {
+        expect(s['frz'], isFalse);
+        expect(s.keys.toSet(), {'id', 'frz'},
+            reason: 'no colour/effect may be synthesized — the psave must '
+                'capture whatever is live');
+      }
     });
   });
 }
