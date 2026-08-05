@@ -5,6 +5,26 @@
 Solar had been off fleetwide since being declared live 2026-07-28 — the flag had never existed in
 either Firebase project.
 
+> ## ⚠️ CORRECTION — the "readback-confirmed" above was a FALSE GREEN
+>
+> **That readback used the admin SDK, which bypasses security rules.** It proved the document
+> existed; it did **not** prove the app could read it. There was no
+> `match /config/solar_scheduling` block in `firestore.rules`, so an ordinary client's listen was
+> default-denied, the provider's `catch` yielded a terminal `false`, and **solar remained refused
+> fleetwide for a further day** — the flag flip had no effect on any of the six gated surfaces or
+> the sync path. Diagnosed in `audit/SOLAR_UI_GATE.md`.
+>
+> **Resolved 2026-08-05T19:27Z:** the rules block was added and deployed (ruleset `93c99c50-…`,
+> replacing `ec8d918f-…`), shipped alongside the `controller_ips` command-safety rule because a
+> rules deploy publishes the whole file. Re-verified with a plain authenticated **non-admin**
+> `idToken` — `config/solar_scheduling` now reads `enabled=true` for an ordinary client — and Tyler
+> confirmed the acceptance test on build 277: the Sunrise/Sunset segments are selectable.
+>
+> **Everything else in this document stands.** The comparator, the bench verification and the
+> fleet-readiness work were all correct; only the flag's *reachability* was unverified, and only
+> because the wrong credential was used. Deploy log: `audit/COMMAND_SAFETY.md` § "STEP 7 — RULE
+> DEPLOYED".
+
 ---
 
 ## PART 1 — coordinate fudge

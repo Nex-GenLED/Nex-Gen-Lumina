@@ -2,6 +2,11 @@
 
 **Date:** 2026-08-03 · **Scope:** steps 1-3 implemented, step 4 investigated only.
 **Not done, deliberately:** `config/solar_scheduling` NOT created; solar comparator NOT built.
+> **Both since done.** Comparator built and bench-verified 2026-08-05 (`audit/SOLAR_COMPARATOR.md`)
+> and wired into the verify path. The flag was created and flipped `enabled=true`, but stayed
+> unreadable by the app until its **rules block** was deployed 2026-08-05T19:27Z (ruleset
+> `93c99c50-…`) — see `audit/SOLAR_UI_GATE.md` and `audit/COMMAND_SAFETY.md` § "STEP 7 — RULE
+> DEPLOYED". **Solar is live and confirmed in-app on build 277.**
 **Product decisions applied (Tyler, 2026-08-02):** refuse-whole (the `continue` stays); guides
 handled separately.
 

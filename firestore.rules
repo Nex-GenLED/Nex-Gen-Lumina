@@ -1607,6 +1607,28 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Solar Scheduling Feature Flag (config/solar_scheduling) ──
+    // Gates sunrise/sunset triggers across SIX call sites (schedule editor,
+    // editor OFF-trigger default, autopilot baseline, AI prompt schema,
+    // commercial events, neighborhood sync) AND the sync path itself
+    // (schedule_sync.dart). Mirrors config/sync_fanout above exactly.
+    //
+    // THIS BLOCK'S ABSENCE WAS THE 2026-08-05 OUTAGE. The flag document was
+    // created and flipped to enabled=true, but with no rules block the
+    // catch-all default-DENY rejected the client's listen; the provider's
+    // catch converted the permission error into a settled `false`, so solar
+    // stayed refused fleetwide and the flip had no effect. An admin-SDK
+    // readback confirmed the document but bypassed rules and so proved
+    // nothing about the app. See audit/SOLAR_UI_GATE.md.
+    match /config/solar_scheduling {
+      allow read: if request.auth != null;
+      // Bootstrap-only create with the safe default (enabled=false). Any
+      // subsequent flip is console-only.
+      allow create: if request.auth != null &&
+                       request.resource.data.enabled == false;
+      allow update, delete: if false;
+    }
+
     // ── Migration tracking (Item #72 and future migrations) ──
     // config/migrations/items/{migrationId} tracks one-time migration
     // completion. Cloud Functions (admin SDK) write; no client writes.
