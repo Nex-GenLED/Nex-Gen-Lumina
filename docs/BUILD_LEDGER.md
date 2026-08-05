@@ -29,6 +29,44 @@ optional.
 
 ---
 
+## 2.5.10+65 — rebuild at versionCode 65 (no app-code change since +64)
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `361c958` — the build commit (the version bump itself) |
+| **Merged to main** | built directly on `main`; no feature branch — the bump is the only change |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **65** — verified from the merged manifest (`android:versionCode="65"`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,237,538 bytes · built 2026-08-05 16:23 |
+| **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
+| **Android signing** | `jar verified` — CN=Tyler Honeycutt, OU=Nex-Gen LED LLC (correct upload key) |
+| **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` — archive these, never commit |
+| **Android track** | **NOT UPLOADED** — Tyler uploads |
+| **iOS Codemagic build number** | **n/a** — Android-only rebuild; no IPA cut at this version |
+
+> ### WHAT CHANGED SINCE +64: NO APP CODE.
+>
+> `git diff 68786e9..361c958 -- lib/ android/ ios/` is empty apart from the two version constants.
+> Everything on `main` since +64 is server-side or documentation:
+>
+> - **`firestore.rules` DEPLOYED** (ruleset `93c99c50`) — `config/solar_scheduling` + the
+>   `controller_ips` command-safety rule. **This is why +65 behaves differently from +64 in the
+>   field despite identical app code:** +64's solar surfaces were shut only because the rules
+>   blocked the flag read. Any build from `68786e9` onward un-gates solar now that the rule is live.
+> - **`scheduledDataCleanup` DEPLOYED** — first retention run, 3,985 documents.
+> - **C5 cleanup-query caps** in `functions/` — committed, **NOT deployed**.
+>
+> `kStaffAuthTelemetryAppVersion` bumped to `2.5.10+65` in the same commit so S-5 dealer-adoption
+> telemetry records the right build.
+
+> ### ⚠ +64 IS SUPERSEDED — DO NOT UPLOAD
+>
+> A built AAB consumes its versionCode whether or not it is uploaded. The +64 artifact is
+> quarantined on disk as `versionCode64-68786e9-DO-NOT-UPLOAD-superseded.aab.bak`.
+> **Next Android build ≥ +66.** Superseded and unuploaded: +64, +63, +62, +61, +60.
+
+---
+
 ## 2.5.10+64 — solar LIVE + comparator wired + privacy manifest + #84 strip
 
 | Field | Value |
