@@ -203,8 +203,8 @@ void main() {
           } on FirestoreSerializationError catch (e) {
             // Path points at the inner array element — the offending list-in-list.
             expect(e.path, 'wledPayload.seg[0].col[0]');
-            expect(e.valuePreview, contains('nested list'));
-            expect(e.valuePreview, contains('jsonEncode'));
+            expect(e.valueShape, contains('nested list'));
+            expect(e.valueShape, contains('jsonEncode'));
           }
         },
       );
@@ -288,7 +288,7 @@ void main() {
       } on FirestoreSerializationError catch (e) {
         expect(e.path, 'wledPayload.seg[0].extra.tag');
         expect(e.valueType, _UnknownLeaf);
-        expect(e.valuePreview, contains('UnknownLeaf'));
+        expect(e.valueShape, contains('UnknownLeaf'));
         // The toString format is what surfaces in the user-facing snackbar
         // and in any /debug_errors/ doc — verify it's diagnostic.
         final msg = e.toString();

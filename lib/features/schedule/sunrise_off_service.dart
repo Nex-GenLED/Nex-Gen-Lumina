@@ -193,6 +193,12 @@ class SunriseOffService {
             'written + verified (macro ${slot8Entry['macro']}, '
             'en ${slot8Entry['en']})');
         return SunriseOffWriteResult.confirmed;
+      // solarMismatch is reachable here and IS a failure for this writer: the
+      // global sunrise-off IS the slot-8 solar row, so "clock timers fine, only
+      // the solar row is wrong" means precisely the thing we just tried to write
+      // did not land. The schedule path distinguishes the two because it also
+      // owns clock timers; this path owns nothing else.
+      case CfgPushOutcome.solarMismatch:
       case CfgPushOutcome.mismatch:
       case CfgPushOutcome.notConfirmed:
         debugPrint('SunriseOff: write NOT confirmed ($outcome)');
