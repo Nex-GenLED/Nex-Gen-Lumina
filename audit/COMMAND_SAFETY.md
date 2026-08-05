@@ -663,7 +663,7 @@ node scripts/_run_backfill_controller_ips.js --dry
 **Expected after a clean soak: `updated: 0`, `unchanged: 15`.** Any non-zero `updated` means the
 trigger missed a change — investigate before deploying the rule.
 
-## STEP 7 — RULE ⛔ NOT RUN
+## STEP 7 — RULE ⛔ NOT RUN *(superseded — see "STEP 7 — RULE DEPLOYED ✅ 2026-08-05" below)*
 
 Deliberately not executed. Requires a separate session after a clean soak. Sequence and the three
 hand-verification paths are in §5.
@@ -679,3 +679,144 @@ hand-verification paths are in §5.
 | D5 | Reviewer account has 0 controllers and has never written a command → **cannot hit a denial; no submission risk**, and self-heals via the trigger if a controller is added | Cleared |
 | D6 | Node.js 20 runtime is **decommissioned 2026-10-30**; deploys will fail after that date | P3, unrelated |
 | D7 | Real counts are **24 users / 15 with controllers**, not the 20/7 in §5 (those were calendar-entry figures from a different audit) | Correction |
+
+---
+
+# STEP 7 — RULE DEPLOYED ✅ 2026-08-05
+
+**Shipped: the `controller_ips` command-safety rule AND the `config/solar_scheduling` rule, together,
+in one `firestore.rules` release.** Tyler's decision — a rules deploy publishes the whole file, so
+solar could not ship without also cutting over command safety. Steps 1–5 of the soak plan were
+already complete; the backfill dry run below re-confirmed the population immediately before deploy.
+
+**Prior live ruleset:** `ec8d918f-c279-4925-b8b2-168e96638586`, released **2026-07-31T15:10:10Z**,
+102,165 bytes. Keep this ID — it is the rollback target.
+
+## 1 — The solar rule, and the config/ audit
+
+`match /config/solar_scheduling` added mirroring `config/sync_fanout` exactly: `read` for any
+authed user, bootstrap-only `create` with `enabled == false`, `update`/`delete` denied.
+
+**Audit of the whole `config/` collection — solar was the only gap.** Four flag documents are read
+by the client; three had blocks and solar did not:
+
+| Client-read document | Rules block | Status |
+|---|---|---|
+| `config/calendar_leases` | :1564 | covered |
+| `config/schedules_subcollection` | :1583 | covered |
+| `config/sync_fanout` | :1601 | covered |
+| `config/solar_scheduling` | **was absent** | **added this deploy** |
+| `config/migrations/items/{id}` | :1615 | covered (admin-write) |
+
+The three other client reads that *look* like `config` are different paths and each already has a
+covering block: `dealers/{code}/config/{docId}` (:1809), `users/{uid}/roofline_config/{configId}`
+(:615), `neighborhoods/{id}/game_day_autopilot/{configId}` (:627). **No sibling carries the same
+gap.**
+
+## 2 — Backfill dry run (pre-deploy)
+
+```
+node scripts/_run_backfill_controller_ips.js --dry
+  scanned: 24   updated: 0   unchanged: 15   withoutControllers: 9   errors: []
+```
+
+`updated: 0 / unchanged: 15` — the exact expectation. The backfill is a **no-op**: every account
+holding controllers already carries `controller_ips`, so the rule had nothing to strand.
+
+## 3 — Verification gate (pre-deploy)
+
+New script `scripts/_test_rules_deploy_gate.js` asserts absolute expectations against the candidate
+rules via the Security Rules `:test` endpoint. **29/29 pass.**
+
+- **Part A — 15-case `controllerIp` matrix (15/15).** Registered IPs allowed on create and update;
+  unregistered denied on both; **commands with no `controllerIp`, and with `controllerIp: ''`,
+  still allowed** (the pairing/health regression risk); bridge status update allowed; reads and
+  deletes unaffected; stranger and unauth denied.
+- **Part B — solar + sibling control (14/14).** Authed read allowed, unauth denied, create only
+  with `enabled == false`, the flip denied, delete denied. The three sibling flags behave
+  identically, and `config/not_a_real_flag` is still denied — proving the new block is not an
+  accidental wildcard.
+
+**53-path differential, run against the LIVE deployed ruleset** (not `HEAD` — the fetched
+`ec8d918f` source), so it measures what this deploy actually changes:
+
+```
+Probed 53 · Unchanged 51 · Changed 2 · Out-of-scope 0
+  ALLOW → DENY   commands: owner create, UNREGISTERED ip
+  ALLOW → DENY   commands: owner update, UNREGISTERED ip
+BLAST RADIUS CONTAINED
+```
+
+Both changes are the intended ones. **No other path moved**, so the stop condition never triggered.
+A textual diff of live-vs-candidate agrees: the only non-comment changes are the
+`declaredControllerIp()`/`targetsOwnController()` helpers with their two `/commands` guards, and the
+`config/solar_scheduling` block.
+
+## 4 — Deploy
+
+```
+firebase deploy --only firestore:rules
+  + rules file firestore.rules compiled successfully
+  + released rules firestore.rules to cloud.firestore
+```
+
+## 5 — Post-deploy verification — NON-ADMIN TOKEN
+
+**Every assertion below was made with a plain authenticated `idToken` over the Firestore REST API,
+so rules were enforced.** The admin SDK was used only to mint the custom token and to seed/clean the
+throwaway user — never to assert. This is the correction to the 2026-08-05 failure recorded in
+`audit/SOLAR_UI_GATE.md`, where an admin-SDK readback of `config/solar_scheduling` reported a
+healthy flag that the app could not actually read.
+
+**(0) The flag the deploy was for:**
+
+```
+config/solar_scheduling         READABLE  enabled=true     ← was 403 PERMISSION_DENIED
+config/calendar_leases          READABLE  enabled=true
+config/schedules_subcollection  READABLE  enabled=false
+config/sync_fanout              READABLE  enabled=false
+```
+
+**(a) Customer remote control via the relay** — power and brightness with a registered
+`controllerIp` both accepted; an unregistered IP refused with 403. Remote control is intact.
+
+**(b) Bridge pairing verification ping** — `controllerId: ''` accepted, and a ping with no
+`controllerIp` field at all accepted. The empty-string escape in `declaredControllerIp()` works
+against live rules.
+
+**(c) Bridge health check `.set()`** — create, update-over-existing, both accepted with a registered
+IP; unregistered refused.
+
+**12/12 pass.**
+
+> **One correction worth recording.** The first (c) probe wrote to a `users/{uid}/bridge_health/`
+> collection and got a 403 that briefly looked like a regression. **That collection does not
+> exist.** `bridge_health_service.dart:34-46` writes to
+> `users/{uid}/commands/bridge_health_check` — a *commands* document carrying a `controllerIp`, and
+> therefore genuinely subject to the new rule. The 403 was the catch-all correctly denying an
+> undeclared path; the differential had already shown zero out-of-scope movement. Re-probing the
+> real path passed. **Verify against the path the code actually writes, not the one its name
+> suggests.**
+
+## 6 — Acceptance test ✅ CONFIRMED BY TYLER
+
+Build 277 force-closed and reopened; **the schedule editor's Sunrise/Sunset segments are
+selectable.** That is the acceptance test — a Firestore read is not, which is the whole lesson of
+this deploy. All six gated surfaces and the sync path read the same provider, so they follow.
+
+`firestore.rules` is now **committed** (it was held uncommitted only until this confirmation).
+
+**Rollback:** redeploy the prior ruleset **`ec8d918f-c279-4925-b8b2-168e96638586`** from the
+Firebase console — that reverts *both* rules in one action. To revert solar alone, drop the
+`match /config/solar_scheduling` block and redeploy; note that this re-breaks solar fleetwide and
+should only follow a decision to do so.
+
+## Deploy-log findings (continued)
+
+| # | Finding | Severity |
+|---|---|---|
+| D8 | `config/solar_scheduling` had no rules block; the 2026-08-05 flag flip therefore had **no effect for a full day**. The client's listen was default-denied and the provider's `catch` turned it into a settled `false`, making a permission denial indistinguishable from a flag that is off | **Fixed this deploy** |
+| D9 | The `controller_ips` backfill is a **no-op** (`updated: 0`) — the cutover stranded nobody | Gate passed |
+| D10 | Blast radius against the live ruleset is **exactly 2 paths**, both intended `/commands` denials | Gate passed |
+| D11 | A `catch`-to-safe-default on a feature-flag stream hides permission errors. Worth distinguishing "denied" from "off" in the flag providers so the next missing block is loud | P3, new |
+| D12 | `scheduledDataCleanup` **still not deployed** (D2 unchanged); 7-day command retention still never runs | P2, carried |
