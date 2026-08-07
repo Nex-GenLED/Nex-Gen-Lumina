@@ -77,6 +77,27 @@ const { syncControllerIps, backfillControllerIps } = require("./lib/syncControll
 exports.syncControllerIps = syncControllerIps;
 exports.backfillControllerIps = backfillControllerIps;
 
+// S6 — CONTROLLER HEALTH TELEMETRY (cloud half). audit/CONTROLLER_HEALTH.md.
+//
+// A daily READ-ONLY getInfo probe per controller, read back 15 minutes later
+// into /users/{uid}/controller_health/{controllerId}, plus the two fleet alerts
+// and a push digest.
+//
+// Why this exists: on 2026-08-05 two customer bridges had been dark for 15.0 and
+// 21.4 days and a third customer had a powered, online, never-paired bridge for
+// five days with 17 failed commands — none of it visible to the customer, the
+// dealer or Tyler, because everyday lighting is device-resident and kept
+// working (audit/BRIDGE_TRIAGE.md). The mechanism needs NO firmware: the bridge
+// already copies WLED's response body into the command doc's `result` field.
+const { probeControllerHealth } = require("./lib/probeControllerHealth");
+const {
+  collectControllerHealth,
+  backfillControllerHealth,
+} = require("./lib/collectControllerHealth");
+exports.probeControllerHealth = probeControllerHealth;
+exports.collectControllerHealth = collectControllerHealth;
+exports.backfillControllerHealth = backfillControllerHealth;
+
 // The single residential<->commercial activation path. Owns the cross-doc
 // batch (users + installations) that no client can write; absorbs the two
 // diverged in-app batches (item #32).
