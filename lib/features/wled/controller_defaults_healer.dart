@@ -16,6 +16,13 @@
 // never reboot — the audioreactive disable takes effect on the controller's
 // next loop() iteration (see audioreactive_health.dart for the firmware proof).
 //
+// ORDER: (a) ntp-host → (b) tz → (c) coords → (d) audioreactive → (e) ON-preset
+// master power → (f) GAMMA → (g) reboot. Gamma is deliberately the LAST cfg
+// write: on WLED 0.15.1 a cfg POST omitting `light.gc` wipes colour gamma
+// (audit/GAMMA_BUG.md), so a gamma heal placed before any other cfg write gets
+// undone by it. normalizeWledCfgPayload makes that structurally impossible now;
+// the ordering is kept as the second line of defence. Do not move (f) earlier.
+//
 // LAN-ONLY. Every heal needs /json/cfg — to READ the current value (heal-only-
 // broken) and to WRITE the correction. The bridge can do neither: its dispatch
 // maps only getState → /json/state and getInfo → /json/info, and routes
@@ -432,18 +439,7 @@ class ControllerDefaultsHealer {
       }
     }
 
-    // (d) gamma — folded in; pushGammaConfig readback-skips when already correct
-    final ip = controllerIp;
-    if (ip != null && ip.isNotEmpty) {
-      try {
-        final g = await gammaAction(ip);
-        if (g.success && !g.noChange) report.gammaHealed = true;
-      } catch (e) {
-        report.log.add('gamma heal failed: $e');
-      }
-    }
-
-    // (e) AudioReactive usermod — the flash image ships it ENABLED with a mic
+    // (d) AudioReactive usermod — the flash image ships it ENABLED with a mic
     // on GPIOs our hardware doesn't have; its I2S+FFT task starves the LED
     // show task and freezes effects. Own surgical POST, no reboot: the
     // controller suspends sound processing on its next loop() and the payload
@@ -453,7 +449,7 @@ class ControllerDefaultsHealer {
       await _healAudioReactive(arSource as AudioReactiveConfigSource, report);
     }
 
-    // (e2) ON-preset master power — repair presets 1/3/4/5 that store segments
+    // (e) ON-preset master power — repair presets 1/3/4/5 that store segments
     // only (no root `on`), so a fired ON-timer powers the strip instead of
     // loading a design into a dark master. See _healOnPresetMasterPower.
     final presetSource = repo;
@@ -461,7 +457,56 @@ class ControllerDefaultsHealer {
       await _healOnPresetMasterPower(presetSource, report);
     }
 
-    // (f) reboot ONLY when an NTP-retry field (host/en) changed — never for
+    // (f) gamma — DELIBERATELY LAST of the cfg writes, and before the reboot.
+    //
+    // ORDERING IS LOAD-BEARING. This used to run at step (d), BEFORE the
+    // AudioReactive heal. On WLED 0.15.1 any cfg POST omitting `light.gc` wipes
+    // colour gamma (audit/GAMMA_BUG.md), so the AR write at (d) destroyed the
+    // gamma this step had just asserted — the healer undid its own work every
+    // run where AR needed healing, then reported success.
+    //
+    // normalizeWledCfgPayload now makes that mechanically impossible, so this
+    // move is belt-and-braces rather than the fix. It stays because "assert the
+    // invariant after every write that could disturb it" is the correct shape
+    // regardless, and it keeps the next cfg writer added above from reopening
+    // the hole if the chokepoint is ever bypassed.
+    //
+    // Before the reboot, not after: (f) may POST {'rb':true}, and a cfg write
+    // racing a reboot is not guaranteed to reach flash.
+    final ip = controllerIp;
+    if (ip != null && ip.isNotEmpty) {
+      try {
+        final g = await gammaAction(ip);
+        // gammaHealed means VERIFIED healed, not "the POST returned 2xx".
+        //
+        // WledConfigPushResult.warning carries success:true, so the previous
+        // `g.success && !g.noChange` test marked the heal successful on a
+        // readback MISMATCH — asserting an outcome it had just failed to
+        // confirm. That is the defect class this codebase keeps hitting, and it
+        // is worth fixing independently of the gamma bug itself.
+        //
+        // Three outcomes, three different meanings — noChange FIRST because
+        // skipped() also carries a warning ("already correct"), and a healthy
+        // device must stay silent (heal-only-broken: zero writes, zero log).
+        if (g.noChange) {
+          // Device already correct — the healthy path. Nothing written, nothing
+          // to say.
+        } else if (g.success && g.warnings.isEmpty) {
+          report.gammaHealed = true;
+        } else if (g.success) {
+          // Wrote, but the readback did not confirm it. Not a heal.
+          report.log.add('gamma heal unverified: ${g.warnings.join('; ')}');
+        } else {
+          // Hard failure. Previously swallowed entirely — success:false simply
+          // fell through and the run reported nothing at all.
+          report.log.add('gamma heal failed: ${g.errorMessage ?? 'unknown'}');
+        }
+      } catch (e) {
+        report.log.add('gamma heal failed: $e');
+      }
+    }
+
+    // (g) reboot ONLY when an NTP-retry field (host/en) changed — never for
     // tz/coords/gamma/audioreactive. WLED re-attempts NTP only on boot. Gate on
     // device state so we don't reboot an actively-running non-boot look: defer
     // instead (the cfg write persists and applies on the next natural boot).

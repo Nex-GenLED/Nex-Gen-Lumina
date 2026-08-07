@@ -541,6 +541,13 @@ class WledService
   }
 
   Future<bool> _postConfig(Map<String, dynamic> data) async {
+    // GAMMA CHOKEPOINT. On WLED 0.15.1 a cfg POST that omits `light.gc` wipes
+    // colour gamma and persists it to flash (audit/GAMMA_BUG.md). Injected
+    // HERE — the single LAN cfg boundary — so applyConfig, clearWifiCredentials
+    // and every future cfg writer are covered without touching their call
+    // sites. Runs before the simulate branch so tests observe the real wire
+    // payload.
+    data = normalizeWledCfgPayload(data);
     if (_simulate) {
       // Capture for test inspection then acknowledge success (unless
       // the failure-injection flag is flipped by an integration test).

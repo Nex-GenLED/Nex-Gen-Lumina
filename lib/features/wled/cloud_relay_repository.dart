@@ -442,7 +442,11 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
       );
     }
     // Webhook Mode: the Cloud Function routes this to /json/cfg correctly.
-    return _executeBool('applyConfig', cfg);
+    // GAMMA CHOKEPOINT — see [normalizeWledCfgPayload]. The off-LAN case is the
+    // one that MOST needs it: GammaWatchdog and the defaults healer are both
+    // LAN-only, so a webhook cfg write that wiped gamma would go unrepaired
+    // until the phone came home.
+    return _executeBool('applyConfig', normalizeWledCfgPayload(cfg));
   }
 
   @override
