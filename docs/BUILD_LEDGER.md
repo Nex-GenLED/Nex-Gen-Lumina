@@ -29,6 +29,85 @@ optional.
 
 ---
 
+## 2.5.10+66 — gamma cfg-write chokepoint + S6 controller-health functions
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `d4f124f818b5a5a215e81f741522a65edfd78481` (`d4f124f`) — the build commit (version bump) |
+| **Merged to main** | two `--no-ff` merges ahead of it: `6ca15e4` (gamma, from `fix/gamma-cfg-chokepoint` @ `ef91660`) and `ec2925e` (S6, from `feat/s6-controller-health` @ `985c23a`). **Pushed to origin 2026-08-07** |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **66** — verified from the merged manifest (`android:versionCode="66"`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,231,469 bytes · built 2026-08-07 11:22 |
+| **Android build flags** | `--release --obfuscate --split-debug-info=build/debug-info/android` |
+| **Android signing** | `jar verified` — CN=Tyler Honeycutt, OU=Nex-Gen LED LLC (correct upload key), SHA256withRSA 2048-bit |
+| **Android symbols** | `build/debug-info/android/app.android-{arm,arm64,x64}.symbols` — archive these, never commit |
+| **Android track** | **NOT UPLOADED** — Tyler uploads |
+| **iOS Codemagic build number** | **PENDING** — not triggered by this session |
+
+> ### WHAT SHIPPED: THE GAMMA FIX. This is the first app-code change since +62.
+>
+> **Colour gamma was being wiped fleetwide, durably, by the app itself.** Root cause is a WLED
+> 0.15.1 firmware deserializer defect: any `POST /json/cfg` omitting `light.gc` resets
+> `gammaCorrectCol`/`gammaCorrectBri` to false and `serializeConfig()` persists it to `cfg.json`
+> on LittleFS — it survives reboot. `gc.val` is preserved by a separate code path; that
+> `col`-resets-while-`val`-survives asymmetry is the fingerprint.
+>
+> All eight of Lumina's cfg writers omitted `light.gc`, so every schedule sync, calendar-lease
+> sweep, healer heal and installer hardware push disabled gamma on its way past — a no-op
+> re-sync with byte-identical timers did it too. Every controller in the fleet is affected;
+> the visible harm is washed/amber rendering on every colour until repair.
+>
+> - **Fix 1** — `normalizeWledCfgPayload` asserts `light.gc` at the **write boundary**, on all
+>   three cfg transports (`WledService._postConfig`, `wled_config_pusher._postConfig`,
+>   `CloudRelayRepository.applyConfig`). Same shape as `normalizeWledPayload`/`frz` for state.
+> - **Fix 2** — the defaults healer's step (e) AudioReactive write wiped the gamma step (d) had
+>   just set, while reporting `gammaHealed: true`. Gamma is now step (f), last cfg write, before
+>   the reboot; `gammaHealed` now means VERIFIED (it was set on readback mismatches, and hard
+>   failures were swallowed silently).
+> - **Fix 3** — deleted the dead `{'loc':…}` write in edit_profile (F-8). `loc` is not a WLED
+>   cfg key; its only effect was triggering the deserializer.
+>
+> **Bench-verified 9/9 on rig `.150`** via `scripts/_verify_gamma_chokepoint.dart`, which drives
+> the real `WledService` and reads `/cfg.json` — the LittleFS **file**, not the live serialise.
+> Its test 1 is a control asserting the raw defect still reproduces, so the suite cannot pass
+> vacuously on patched firmware. Timers, NTP and coords all still land.
+> Diagnosis `audit/GAMMA_BUG.md`, fix `audit/GAMMA_FIX.md`.
+>
+> **Also on main, NOT in the app binary:** S6 controller-health telemetry (`functions/` only —
+> daily read-only getInfo probe, collect, fleet alerts, push digest). **NOT DEPLOYED**;
+> `FLEET_HEALTH_DIGEST_TO` must be set first. See `audit/CONTROLLER_HEALTH.md` §7.
+>
+> **Not deployed this build:** `functions/` (S6 + the C5 caps still pending from +65).
+> **`firestore.rules` UNTOUCHED** — no rules change is pending; last touched by `bb12cb6`.
+>
+> `kStaffAuthTelemetryAppVersion` bumped to `2.5.10+66` in the same commit so S-5
+> dealer-adoption telemetry records the right build.
+
+> ### Pre-release sweep (the one that caught #84)
+>
+> `TEMPORARY` / strip-before-release / test-only sweep over `lib/`: **clean** — every hit is
+> "contemporary", "temporary password", or an `@visibleForTesting` seam. `kSimulationMode`
+> `false`. `kStaffTokenSafetyMargin` at its real value (`Duration(minutes: 50)`, documented
+> against the 60-minute custom-token TTL). `debugPrint` nulled in release
+> (`main.dart:129`). Firebase `icrt6menwsv2d8all8oijs021b06s5` consistent across
+> `firebase_options.dart`, `.firebaserc` and `google-services.json`; package
+> `com.nexgenled.lumina`. **No `192.168.1.150` in any executable path** — all rig references in
+> `lib/` are doc comments, and the rig harness lives in `scripts/` (not compiled into the app).
+> `PrivacyInfo.xcprivacy` confirmed still in the Runner target's Resources build phase
+> (`97C146EC…`, `project.pbxproj:273`) after pbxproj churn.
+
+> ### ⚠ +65 AND EARLIER ARE SUPERSEDED — DO NOT UPLOAD
+>
+> A built AAB consumes its versionCode whether or not it is uploaded.
+> **Next Android build ≥ +67.** Superseded and unuploaded: +65, +64, +63, +62, +61, +60.
+
+**Test suite at build time:** 1945 passed · 3 skipped · 1 failed
+(`cloud_ai_processor_normalize` — pre-existing and stale, unrelated).
+`flutter analyze lib/` — 0 errors, 0 warnings. `functions`: 143/143 jest,
+`node --check index.js` clean.
+
+---
+
 ## 2.5.10+65 — rebuild at versionCode 65 (no app-code change since +64)
 
 | Field | Value |
