@@ -2,9 +2,16 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/models/controller_type.dart';
+
+// kNglLightGammaConfig moved to wled_payload_utils.dart to break an import
+// cycle (see the note at its former location below). Re-exported so every
+// existing importer of this file keeps resolving it.
+export 'package:nexgen_command/features/wled/wled_payload_utils.dart'
+    show kNglLightGammaConfig;
 
 /// Outcome of a config-push operation, including the HTTP status code on
 /// failure so dealers can troubleshoot on-site.
@@ -63,18 +70,12 @@ const int kWledTzUtc = 0;
 /// Resolves the WLED tz enum for an IANA name. Unknown names map to UTC.
 int wledTzForIana(String? iana) => kWledTzByIana[iana] ?? kWledTzUtc;
 
-/// The NGL color-gamma standard, written to `cfg.light.gc`.
-///
-/// Matches the WLED firmware default that renders saturated colors correctly
-/// on the Lumina SK6812/WS2814 RGBW strip: brightness gamma OFF (`bri:1`),
-/// color gamma ON (`col:2.8`), exponent 2.8 (`val:2.8`). WLED stores gamma
-/// here — NOT under `hw.led`. A `2.8`/`1`/`2.8` triple is what makes orange
-/// render vivid instead of washed amber (gamma darkens the green midtone).
-const Map<String, dynamic> kNglLightGammaConfig = <String, dynamic>{
-  'bri': 1,
-  'col': 2.8,
-  'val': 2.8,
-};
+// kNglLightGammaConfig — the NGL color-gamma standard — now lives in
+// wled_payload_utils.dart (see the `export` with this file's imports). It moved
+// so normalizeWledCfgPayload can reach it without closing an import cycle:
+// this file imports wled_service, which imports wled_payload_utils. Still ONE
+// definition; it is re-exported from here so existing importers of this file
+// keep resolving it unchanged.
 
 /// Pushes NGL-standard WLED defaults for a given [ControllerType] to the
 /// device at [controllerIp].
@@ -542,6 +543,11 @@ Future<WledConfigPushResult> _postConfig(
   Map<String, dynamic> data,
 ) async {
   try {
+    // GAMMA CHOKEPOINT — see [normalizeWledCfgPayload]. This is the install-time
+    // cfg boundary (raw HTTP, no repository), so the hw.led bus rebuild, the
+    // mDNS rename and the NTP/location push all carry gamma from here. The
+    // gamma push itself already supplies `light.gc` and passes through unchanged.
+    data = normalizeWledCfgPayload(data);
     final body = jsonEncode(data);
     final bodyBytes = utf8.encode(body);
     debugPrint('[WledConfig] Sending to /json/cfg: $body');
