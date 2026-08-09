@@ -37,6 +37,7 @@ import 'autopilot_providers.dart';
 import 'game_day_autopilot_config.dart';
 import 'game_day_autopilot_service.dart';
 import 'game_day_background_persistence.dart';
+import '../wled/participation_denormalizer.dart';
 
 // ---------------------------------------------------------------------------
 // Service singletons
@@ -163,6 +164,17 @@ final gameDayAutopilotServiceProvider =
       // Fire-and-forget — never block payload construction on the
       // SharedPreferences write.
       unawaited(saveLocalParticipatingChannels(resolved));
+      // S3b: publish to Firestore so a SERVER-side fire can honour the same
+      // set. The local cache above is unreachable from a Cloud Function —
+      // `allDeviceChannelIds` comes from /json/cfg, which is LAN-only. Without
+      // this a cloud Game Day fire lights every channel or falls back to
+      // segment 0. Also fire-and-forget; never fatal.
+      unawaited(publishParticipatingChannels(
+        controllerId: ref.read(selectedControllerIdProvider),
+        resolved: resolved,
+        deviceChannelIds: deviceChannelIds,
+        source: 'game_day',
+      ));
       return resolved;
     } catch (e) {
       debugPrint(
