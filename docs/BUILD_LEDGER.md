@@ -29,6 +29,32 @@ optional.
 
 ---
 
+## 2.5.10+67 — base ladder root fix + _presetForAction routing
+
+| Field | Value |
+|---|---|
+| **Git SHA** | `c400d62` (build commit, version bump) · merged to main as `bea0d68` (`--no-ff` from `release/2.5.10+67`). **Pushed to origin 2026-08-09** |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **67** — verified from the merged manifest (`android:versionCode="67"`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,241,882 bytes · built 2026-08-09 16:54 |
+| **iOS** | **PENDING** — Codemagic not triggered. Same SHA `bea0d68` is the iOS↔Android join key |
+| **Uploaded** | NO |
+
+**Contents since +66**
+
+- **Base ladder root fix** (`4e1a3a0`) — ON presets captured ambient segment state and fired dark. Nothing asserted `seg.on` on save, so any `psave` taken while a channel was off baked it in permanently; 4 of 5 ON presets on the bench were damaged at 4 different moments. `buildNglOnPresetState` writes `seg` explicitly at all four `psaveIfChanged` sites AND `isNglOnPresetSatisfied` asserts segment state — either alone is inert. **The healer had the identical defect** and would have re-damaged every repair on the next connect. Kill switch `config/base_ladder_repair` **fails OPEN**, deliberately opposite to `solar_scheduling`.
+- **`_presetForAction` routing** (`6aa6785`) — `contains('off')` was a substring test running first, so `"Pattern: 1 On 4 Off - Solid"` resolved to the OFF preset; that label is on two accounts today. Now returns `int?` with anchored matching; unrecognised labels refuse rather than defaulting to macro 1.
+- Team consolidation (`7dd018b`), S3b participation denormalization (`e6b0b67`).
+- **functions/** (`0cd5bec`) — S3 dispatcher (deployed earlier), S5 Game Day planner + ESPN end signal and S4 `endsAt` companion **log-only and UNDEPLOYED**, S6 health source.
+- Debt log (`34c681e`) — P1-52 `pdel` corrupts `presets.json`; P1-53 chunked-POST gotcha.
+
+**Fleet exposure for the ladder defect is ZERO, structurally** — no scheduled boundary routes to the ladder because every schedule in the fleet carries a `wledPayload` and gets its own 10–25 pattern slot. That is a coincidence, not a guard: one payload-less schedule makes it non-zero.
+
+**NOT deployed with this build:** Cloud Functions, and `firestore.rules` (the `config/base_ladder_repair` rule is committed but undeployed — the switch fails open, so a missing rule costs the ability to PULL it, not the fix).
+
+**Verification:** `flutter analyze lib/` whole-tree — 0 errors, 0 warnings, 368 pre-existing info. Dart suite 2010 passed / 3 skipped / 1 pre-existing failure (`cloud_ai_processor_normalize`, proven unrelated by stashing to HEAD). `functions/` `npm run build` exit 0 (explicit check, not piped). Functions suite 8/8, 237 tests. Hardware test on `.150` passed.
+
+---
 ## 2.5.10+66 — gamma cfg-write chokepoint + S6 controller-health functions
 
 | Field | Value |
@@ -142,7 +168,7 @@ optional.
 >
 > A built AAB consumes its versionCode whether or not it is uploaded. The +64 artifact is
 > quarantined on disk as `versionCode64-68786e9-DO-NOT-UPLOAD-superseded.aab.bak`.
-> **Next Android build ≥ +66.** Superseded and unuploaded: +64, +63, +62, +61, +60.
+> **Next Android build ≥ +68.** +67 BUILT 2026-08-09, not uploaded. Superseded and unuploaded: +66, +64, +63, +62, +61, +60.
 
 ---
 
