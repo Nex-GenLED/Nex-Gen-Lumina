@@ -65,6 +65,19 @@ const COLLECT_SCHEDULE = "30 9 * * *";
  */
 const digestTo = defineString("FLEET_HEALTH_DIGEST_TO");
 
+// NOTE — there was an interim `FLEET_HEALTH_DIGEST_FROM` override here between
+// 17:20 and 18:50 UTC on 2026-08-07, pointing the digest at Resend's shared
+// `onboarding@resend.dev` while `nex-genled.com` was unverified (Resend status
+// `not_started` since 2026-04-08, so every send from `hello@nex-genled.com` was
+// refused 403). The domain verified at ~18:45 UTC and the override was removed.
+//
+// Two things learned, kept because both will recur:
+//   - A `defineString` with no value in .env FAILS the deploy in
+//     non-interactive mode, and an explicit `{default: ""}` does NOT satisfy
+//     it. An optional param must either keep a key in .env or not exist.
+//   - The `fromEmail` option on sendEmail() survives and is still useful (a
+//     per-dealer sender is a plausible future need); it simply has no caller.
+
 const HEALTH_COLLECTION = "controller_health";
 /** Top-level daily snapshot, for scripting and history. */
 const FLEET_SNAPSHOT_COLLECTION = "fleet_health";
@@ -225,7 +238,10 @@ export async function collectAll(
 
     // Newest probe per controller. Equality on a single field → auto-indexed;
     // 7-day retention keeps this to a handful of documents per controller.
-    const probesByController = new Map<string, ProbeCommandDoc & { createdMs: number }>();
+    const probesByController = new Map<
+      string,
+      ProbeCommandDoc & { createdMs: number; commandId: string }
+    >();
     if (!opts.seedOnly) {
       const probeSnap = await db
         .collection("users")
@@ -239,6 +255,7 @@ export async function collectAll(
         const prev = probesByController.get(cid);
         if (!prev || createdMs > prev.createdMs) {
           probesByController.set(cid, {
+            commandId: p.id,
             status: p.get("status"),
             result: p.get("result"),
             error: p.get("error"),
@@ -269,7 +286,20 @@ export async function collectAll(
         : null;
 
       const probe = probesByController.get(controllerId) ?? null;
-      const classification = classifyProbe(probe);
+
+      // IDEMPOTENCE ACROSS REPEATED COLLECTS.
+      //
+      // Found by running collect twice against the SAME probe on 2026-08-07:
+      // consecutiveFailures went 1 → 2 and a WARN escalated to an ALERT with no
+      // new evidence. Cloud Functions retry, and a scheduler job can be run by
+      // hand — so a re-run must not manufacture a second failure. If this probe
+      // has already been folded, record only that the collector ran.
+      const alreadyFolded =
+        probe !== null &&
+        typeof previous?.lastFoldedCommandId === 'string' &&
+        previous.lastFoldedCommandId === probe.commandId;
+
+      const classification = classifyProbe(alreadyFolded ? null : probe);
       if (classification.outcome === "missing") stats.missing++;
       else stats.probed++;
 
@@ -354,7 +384,11 @@ export async function collectAll(
 
       if (!opts.dryRun) {
         await healthRef.set(
-          { ...record, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          {
+            ...record,
+            lastFoldedCommandId: probe ? probe.commandId : previous?.lastFoldedCommandId ?? null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
           { merge: true }
         );
         stats.written++;

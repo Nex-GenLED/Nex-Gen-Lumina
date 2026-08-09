@@ -217,6 +217,17 @@ export interface ControllerHealthRecord {
   firstFailureAt: number | null;
   /** Always advanced by the collector, even on `missing`. Proves it ran. */
   lastCollectedAt: number | null;
+  /**
+   * The probe command id most recently folded into this record.
+   *
+   * IDEMPOTENCE GUARD. Found by running collect twice against the same probe on
+   * 2026-08-07: `consecutiveFailures` went 1 → 2 and a WARN escalated to an
+   * ALERT with no new evidence. Cloud Functions retry, and a scheduler job can
+   * be run by hand, so a re-run must not manufacture a failure. When this
+   * matches the probe about to be folded, the collector records only that it
+   * ran.
+   */
+  lastFoldedCommandId?: string | null;
   consecutiveFailures: number;
   /** Derived from consecutiveFailures; recorded so a skip is auditable. */
   probeCadence: "daily" | "weekly";

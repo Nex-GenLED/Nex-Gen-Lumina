@@ -98,6 +98,28 @@ exports.probeControllerHealth = probeControllerHealth;
 exports.collectControllerHealth = collectControllerHealth;
 exports.backfillControllerHealth = backfillControllerHealth;
 
+// S3 — FIRE-JOB DISPATCHER (audit/S3_DISPATCHER.md). The minute cron that makes
+// unattended Game Day and Neighborhood Sync possible at all: both are 100%
+// app-open-only today because kSportsBackgroundServiceEnabled = false and iOS
+// background fetch cannot wake an app for a wall-clock instant.
+//
+// Reconciles dispatched jobs, then writes ONE command per due job — always
+// naming a server-resolved controllerIp, always with an explicit expiresAt, and
+// always through the one-in-flight guard so a fire never competes with customer
+// traffic. Ships in PING SHADOW MODE: no real payload fires until the measured
+// P50/P95 in /fire_metrics says the transport behaves.
+//
+// REQUIRES the COLLECTION_GROUP index on fire_jobs(state, fireAt) — deploy
+// indexes BEFORE this function or every tick throws.
+const { dispatchFireJobs } = require("./lib/dispatchFireJobs");
+exports.dispatchFireJobs = dispatchFireJobs;
+
+// S5 — GAME DAY PLANNER (audit/S5_GAMEDAY.md). The producer S3 was waiting for.
+// SHIPS LOG-ONLY: config/gameday_planner.write_jobs defaults FALSE, so it records
+// what it WOULD fire and writes no jobs until deliberately flipped.
+const { planGameDayFires } = require("./lib/planGameDayFires");
+exports.planGameDayFires = planGameDayFires;
+
 // The single residential<->commercial activation path. Owns the cross-doc
 // batch (users + installations) that no client can write; absorbs the two
 // diverged in-app batches (item #32).
