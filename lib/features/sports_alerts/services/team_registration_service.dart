@@ -127,6 +127,27 @@ class TeamRegistrationService {
     onTeamsChanged?.call();
   }
 
+  /// Strip a team from the profile arrays ONLY, with no config to delete.
+  ///
+  /// TEAM CONSOLIDATION: for legacy free-text entries that match no catalogue
+  /// team — `sports_teams[]` was unvalidated, so the fleet carries values like
+  /// `"Kansas City Sporting Kansas City"` — there is no `game_day_autopilot`
+  /// document and never could have been. Removing one must still clear both
+  /// arrays rather than silently doing nothing.
+  ///
+  /// Deliberately narrow: it cannot delete a config, so it can never be used to
+  /// remove a real team by the wrong route.
+  Future<void> removeTeamByNameOnly({
+    required String uid,
+    required String teamName,
+  }) async {
+    if (uid.isEmpty) {
+      throw StateError('TeamRegistrationService.removeTeamByNameOnly: empty uid');
+    }
+    await _stripTeamFromProfile(uid, teamName);
+    onTeamsChanged?.call();
+  }
+
   /// Bridge free-text team input (installer handoff, chat, etc.) to a
   /// [kTeamColors] slug. Returns null when:
   ///   • the resolver finds no candidate

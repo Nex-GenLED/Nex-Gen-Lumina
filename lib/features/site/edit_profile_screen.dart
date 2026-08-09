@@ -9,7 +9,6 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/house_photo_uploader.dart';
 import 'package:nexgen_command/data/sports_teams.dart';
-import 'package:nexgen_command/widgets/team_autocomplete.dart';
 import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/utils/time_format.dart';
@@ -18,6 +17,10 @@ import 'package:nexgen_command/models/custom_holiday.dart';
 import 'package:nexgen_command/data/metro_builders.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
+import 'package:nexgen_command/features/sports_alerts/services/team_registration_service.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -34,8 +37,56 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   bool _saving = false;
   bool _hydrated = false; // Prevent re-hydrating on every build
 
+  /// Remove a team from BOTH stores.
+  ///
+  /// TEAM CONSOLIDATION: this screen previously removed a team by dropping it
+  /// from the local `_sportsTeams` list, which on save stripped
+  /// `sports_teams[]` and left `game_day_autopilot/{slug}` intact — so the
+  /// customer removed a team from the screen they were looking at and Game Day
+  /// kept firing for it. A live path with zero instances only because nobody had
+  /// exercised it yet.
+  ///
+  /// `TeamRegistrationService.removeTeam` is the inverse of `addTeam`: it strips
+  /// both profile arrays AND deletes the config. Resolving the slug from the
+  /// display name is required because the array holds names and the
+  /// subcollection is keyed by slug.
+  Future<void> _removeTeamEverywhere(String teamName) async {
+    final uid = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u?.uid,
+          orElse: () => null,
+        );
+    if (uid == null) return;
+
+    final n = teamName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final slugEntry = kTeamColors.entries.where(
+      (e) => e.value.teamName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '') == n,
+    );
+
+    try {
+      final svc = ref.read(teamRegistrationServiceProvider);
+      if (slugEntry.isEmpty) {
+        // No catalogue match — an unmappable legacy free-text entry. Strip it
+        // from the arrays directly; there is no config to delete because none
+        // could ever have been created for it.
+        await svc.removeTeamByNameOnly(uid: uid, teamName: teamName);
+      } else {
+        // Remove EVERY sport that shares this display name. A college name maps
+        // to both a football and a basketball slug, and leaving one behind would
+        // reproduce the exact orphan this change exists to remove.
+        for (final e in slugEntry) {
+          await svc.removeTeam(uid: uid, teamSlug: e.key, teamName: teamName);
+        }
+      }
+      if (mounted) setState(() => _sportsTeams = _sportsTeams.where((t) => t != teamName).toList());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not remove $teamName: $e')),
+      );
+    }
+  }
+
   // Lifestyle fields
-  final _teamInputCtrl = TextEditingController();
   List<String> _sportsTeams = [];
   Set<String> _favoriteHolidays = {};
   double _vibeLevel = 0.5; // 0 subtle .. 1 bold
@@ -78,7 +129,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
-    _teamInputCtrl.dispose();
     _debounce?.cancel();
     super.dispose();
   }
@@ -159,7 +209,17 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         location: address.isEmpty ? base.location : address, // keep location aligned with address
         timeZone: DateTime.now().timeZoneName,
         updatedAt: now,
-        sportsTeams: _sportsTeams,
+        // TEAM CONSOLIDATION: `sports_teams` is NO LONGER written here. It is a
+        // DERIVED MIRROR of the game_day_autopilot subcollection, maintained
+        // solely by TeamRegistrationService, which writes the config, the array
+        // and `sports_team_priority` together. This screen writing the array on
+        // save is what let a team exist with no config — and it also silently
+        // skipped the priority list, so a profile-added team was missing from
+        // GameDayPriorityResolver's tie-break as well as from the fire path.
+        //
+        // Passing the unchanged value would be equally wrong: a save here would
+        // clobber a concurrent Game Day add. Omitted entirely; copyWith leaves
+        // the existing value alone.
         favoriteHolidays: _favoriteHolidays.toList(),
         vibeLevel: _vibeLevel,
         hoaComplianceEnabled: _hoaCompliance,
@@ -478,10 +538,19 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               ),
               const SizedBox(height: 16),
               _InterestsCard(
-                teamInputCtrl: _teamInputCtrl,
                 teams: _sportsTeams,
-                onAddTeam: (t) => setState(() { if (t.isNotEmpty && !_sportsTeams.contains(t)) _sportsTeams = [..._sportsTeams, t]; _teamInputCtrl.clear(); }),
-                onRemoveTeam: (t) => setState(() => _sportsTeams = _sportsTeams.where((e) => e != t).toList()),
+                // TEAM CONSOLIDATION (audit/TEAM_CONSOLIDATION.md).
+                //
+                // This card no longer ADDS teams. It used to write
+                // `sports_teams[]` directly and nothing else, which created a
+                // team the fire path never saw — 26 of 45 selected teams
+                // fleet-wide (58 %) were in that state. Adding now goes through
+                // the Game Day screen, whose TeamRegistrationService writes the
+                // config, the array AND the priority list together.
+                onAddTeam: () => context.push(AppRoutes.gameDay),
+                // Removal routes through the same service so it CASCADES: the
+                // old path stripped the array and left the config firing.
+                onRemoveTeam: _removeTeamEverywhere,
                 favoriteHolidays: _favoriteHolidays,
                 onToggleHoliday: (h) => setState(() {
                   if (_favoriteHolidays.contains(h)) { _favoriteHolidays.remove(h); } else { _favoriteHolidays.add(h); }
@@ -690,23 +759,38 @@ class _IdentityCard extends ConsumerWidget {
   }
 }
 
-class _InterestsCard extends StatelessWidget {
-  final TextEditingController teamInputCtrl;
+class _InterestsCard extends ConsumerWidget {
   final List<String> teams;
-  final void Function(String) onAddTeam;
+  final VoidCallback onAddTeam;
   final void Function(String) onRemoveTeam;
   final Set<String> favoriteHolidays;
   final void Function(String) onToggleHoliday;
   final double vibeLevel;
   final ValueChanged<double> onVibeChanged;
-  const _InterestsCard({required this.teamInputCtrl, required this.teams, required this.onAddTeam, required this.onRemoveTeam, required this.favoriteHolidays, required this.onToggleHoliday, required this.vibeLevel, required this.onVibeChanged});
+  const _InterestsCard({required this.teams, required this.onAddTeam, required this.onRemoveTeam, required this.favoriteHolidays, required this.onToggleHoliday, required this.vibeLevel, required this.onVibeChanged});
 
   static const _holidays = <String>[
     'Christmas','Halloween','Hanukkah','July 4th','Valentine\'s','New Year\'s','Easter','Thanksgiving','Diwali'
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Per-row status comes from the store that actually fires. Before the
+    // consolidation this list showed teams with no indication that Game Day had
+    // never heard of them — the reason 58 % of selected teams were inert.
+    final configs = ref.watch(gameDayAutopilotConfigsProvider).maybeWhen(
+          data: (c) => c,
+          orElse: () => const <GameDayAutopilotConfig>[],
+        );
+    String statusFor(String teamName) {
+      final n = teamName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final matches = configs.where(
+        (c) => c.teamName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '') == n,
+      );
+      if (matches.isEmpty) return 'not set up';
+      return matches.any((c) => c.enabled) ? 'on' : 'off';
+    }
+
     return _SectionCard(
       title: 'Interests & Fandom',
       child: Column(
@@ -718,15 +802,51 @@ class _InterestsCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Type to search NFL, NBA, MLB, NHL, MLS, and college teams',
+            'Manage teams in Game Day — that is where colours, designs and '
+            'score celebrations live.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
           ),
           const SizedBox(height: 12),
-          TeamSelector(
-            controller: teamInputCtrl,
-            selectedTeams: teams,
-            onAddTeam: onAddTeam,
-            onRemoveTeam: onRemoveTeam,
+          if (teams.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'No teams yet.',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: NexGenPalette.textMedium),
+              ),
+            )
+          else
+            ...teams.map((t) {
+              final status = statusFor(t);
+              final notSetUp = status == 'not set up';
+              return ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text(t),
+                subtitle: Text(
+                  'Game Day: $status',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: notSetUp
+                            ? Theme.of(context).colorScheme.error
+                            : NexGenPalette.textMedium,
+                      ),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Remove $t',
+                  onPressed: () => onRemoveTeam(t),
+                ),
+              );
+            }),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: onAddTeam,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add a team in Game Day'),
+            ),
           ),
           const SizedBox(height: 20),
           Align(
