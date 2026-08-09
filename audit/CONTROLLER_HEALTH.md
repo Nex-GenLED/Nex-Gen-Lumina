@@ -694,3 +694,218 @@ GET http://192.168.1.96/api/bridge/status
 
 **Filed as a pairing-flow/firmware defect, independent of S6. Not fixed here.** S6 is immune
 because it always names the IP (§1.1) — and it was S6's bench run that found this.
+
+---
+
+# DEPLOY LOG — 2026-08-07
+
+**S6 deployed. Its own step; nothing else in this pass.** `dispatchFireJobs` (S3) confirmed
+NOT deployed.
+
+## STEP 1 — DIGEST RECIPIENT ✅
+
+`FLEET_HEALTH_DIGEST_TO=tyler.honeycutt@nex-genled.com` appended to `functions/.env`
+(gitignored at `.gitignore:189`; the backup `.env.bak.pre-s6` is ignored at `:108`). Confirmed
+alongside `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `RESEND_FROM_NAME`, all holding real values
+(`re_QWW…`, `hello@nex-genled.com`) rather than the placeholders that file's own comment warns
+about. The deploy line `Loaded environment variables from .env` confirms the CLI picked it up.
+
+## STEP 2 — DEPLOY ✅ (after one transient failure)
+
+**First attempt failed:** `User code failed to load. Cannot determine backend specification.
+Timeout after 10000.` Not a code fault — `require('./index.js')` locally takes **819 ms**. It is
+the CLI's 10 s discovery probe timing out on this machine; `FUNCTIONS_DISCOVERY_TIMEOUT=120`
+cleared it. **That error reads like a broken module and is not.**
+
+```
++  functions[probeControllerHealth(us-central1)]    Successful create operation.
++  functions[collectControllerHealth(us-central1)]  Successful create operation.
++  functions[backfillControllerHealth(us-central1)] Successful create operation.
+```
+
+Scope verified: three ACTIVE, `dispatchFireJobs` **absent** as intended. Two pre-existing
+warnings unchanged and not caused by this — Node.js 20 decommissioned 2026-10-30, and an
+outdated `firebase-functions` pin.
+
+**Correction to §7.1:** it implied a free-tier scheduler position. There are now **7** Cloud
+Scheduler jobs, so the 3-free allowance was exceeded long before S6. Immaterial in money; the
+claim was simply wrong.
+
+## STEP 3 — BACKFILL DRY RUN ✅ — and it reconciles with the three recoveries
+
+**One obstacle first.** The callable returned `HTTP 401 — Your client does not have permission
+to the requested URL`. That is **not** the admin guard: Cloud Run IAM shows
+`roles/run.invoker → allUsers` on `backfillcontrollerhealth`, identical to the working
+`backfillcontrollerips`. It is the `cloudfunctions.net/{Name}` legacy alias not yet resolving
+for a minutes-old 2nd-gen function. The canonical Cloud Run URL worked immediately.
+`scripts/_run_backfill_controller_health.js` now honours an `FN_URL` override.
+
+```json
+{ "dryRun": true, "controllers": 15, "seeded": 15, "written": 0,
+  "alertCount": 0, "warnCount": 1,
+  "alerts": [ { "kind": "bridge_superseded_orphan",
+                "who": "brooke.rozenberg1@gmail.com", "ageDays": 23.8 } ] }
+```
+
+**§4's dry run produced 2 alerts + 3 warnings. This one produces 0 + 1.** The difference is
+exactly the three recoveries, and the seed reflects them without being told:
+
+| §4 (2026-08-06) | Now | Why |
+|---|---|---|
+| `bridge_paired_but_silent` ecochran08 16.8 d | **gone** | rebooted 16:24 UTC → registry fresh → `live` |
+| `bridge_paired_but_silent` cpaschall10 23.1 d | **gone** | back 16:22 UTC → `live` |
+| `controller_unreachable` ×2 (seeded from staleness) | **gone** | the seed only sets a failure when the bridge is >24 h silent; neither is |
+| `bridge_unpaired_but_heartbeating` (Iron Reserve) | already absent | paired 2026-08-05 |
+| `bridge_superseded_orphan` brooke 23.7 d | **23.8 d, retained** | correct — stale registry row, not a customer outage |
+
+**It does not still alert on Ellie or Chris. No finding.**
+
+## STEP 4 — SEED FOR REAL ✅
+
+`{"dryRun": false, "controllers": 15, "seeded": 15, "written": 15}`
+
+Independently verified: 15 `controller_health` documents — **9 `live`, 6 `never`**, all at
+`consecutiveFailures: 0`, `probeCadence: daily`, probe fields null (no probe had run, and a
+seed must not masquerade as a measurement).
+
+## STEP 5 — PROBE + COLLECT ✅ — run MANUALLY, not on schedule
+
+The scheduled passes are 09:15 / 09:30 UTC, ~16 h away. Both Cloud Scheduler jobs exist and are
+`ENABLED`. Rather than leave the deploy unverified overnight, both were **triggered manually**
+via `gcloud scheduler jobs run`. **These are manual invocations — the first scheduled run is
+2026-08-08 09:15 UTC and still needs a look.**
+
+```
+probeControllerHealth: controllers=15 written=14 skipped={"in_flight":1} errors=0 reconciled=true
+```
+
+Counts reconcile (15 = 14 + 1 + 0); the one skip is the guard working.
+
+**Probe outcomes, sampled 15 s apart as the sweeper acted — the full S2 taxonomy, live:**
+
+```
+t+0s   {"completed":9, "pending":6, "failed":2}
+t+15s  {"completed":9, "expired":6, "failed":2}   ← the sweeper flipped the 6
+```
+
+```
+collectControllerHealth: {"controllers":15,"probed":14,"missing":1,"seeded":0,"written":15} alerts=2
+identity mismatch for Q8VIQ9lrIA… — auth=brooke.rozenberg1@gmail.com doc=brooke.rozenberg@gmail.com; using auth
+```
+
+`fleet_health/2026-08-07`: controllers 15, probedOk 7, **alerts 0, warns 2**, roster
+never-had 6 / now-silent 0.
+
+## STEP 6 — SPOT-CHECK ✅ EXACT MATCH
+
+Manual `GET http://192.168.1.150/json/info` versus the health document the probe wrote:
+
+| Field | Manual | Health doc |
+|---|---|---|
+| `ver` | `0.15.1` | `0.15.1` |
+| `vid` | `2507300` | `2507300` |
+| `leds.count` | `290` | `290` |
+| `leds.rgbw` | `true` | `true` |
+| `release` | `ESP32_Ethernet` | `ESP32_Ethernet` |
+
+Five for five, plus `outcome: completed`, `latency: 2181 ms`, `targeting: server_resolved_ip`.
+
+## WHAT THE FIRST RUN FOUND
+
+### D1 — Chris Paschall's controller is unreachable behind a live bridge — **P1**
+
+```
+cpaschall10@gmail.com   live   failed   blame=controller   ERROR: HTTP -1
+```
+
+His bridge recovered at 16:22 UTC and is heartbeating. **His controller at the registered
+`192.168.1.201` is not answering it.** This is exactly the `expired`-vs-`failed` distinction S2
+fought to preserve, and it is a conclusion the heartbeat recheck could not reach — that recheck
+said "bridge → Firestore proven, bridge → controller unproven". It is now proven, and negative.
+`HTTP -1` is a connection failure, so **a DHCP move after the reboot is the leading
+hypothesis**: if the controller took a new address, `192.168.1.201` is stale in both
+`controllers` and the `controller_ips` allowlist. Needs a LAN check.
+
+### D2 — Ellie Cochran's controller runs WLED **16.0.0**, not the pinned 0.15.1 — **P1**
+
+Raw probe result from `10.0.0.32`:
+
+```json
+{"ver":"16.0.0","vid":2605030,"cn":"Niji","release":"ESP32","leds":{"count":89,…}}
+```
+
+Every other controller reports `0.15.1` / vid `2507300` / `ESP32_Ethernet`. Hers is a different
+major version, a different build flavour, a different name, and **89 LEDs** against a fleet
+range of 199-290. The firmware pin exists because 0.15.4 caused periodic both-core stalls
+(SOP §2.0); 16.0.0 is far outside anything validated here, and the app's effect catalogue is
+pinned to 0.15.1. **How it got there is unknown** — swapped hardware, a self-update, or a
+different device now answering at her registered IP. Not concluding; but it is precisely the
+per-account build signal V2 §6 predicted, found on the first run.
+
+### D3 — the digest sent NOWHERE: the Resend sending domain is unverified — **P1, wider than S6**
+
+```
+Resend error: The nex-genled.com domain is not verified.
+```
+
+`RESEND_FROM_EMAIL=hello@nex-genled.com`, and that domain is unverified, so **every Resend email
+this project sends fails** — not just the digest. That includes `createCustomerAccount`'s
+welcome email with the password-reset link, and the sales-job notifications. A 7-day log search
+finds Resend errors from **only** `collectControllerHealth`, meaning no other function has
+*attempted* a send in the retained window — so this is pre-existing and simply never surfaced.
+**Verify the domain in Resend, or point `RESEND_FROM_EMAIL` at a verified sender, before the
+digest is worth anything.**
+
+The failure behaved as designed: it did **not** fail the collection. All 15 health documents and
+the snapshot were written first, and the error was loud. `fleet_health/2026-08-07` holds
+everything the email would have carried.
+
+### D4 — `bridge_superseded_orphan` is the only standing item
+
+Brooke's `0070077E8F60`, silent 23.8 d beside her live replacement. Correctly a `warn`, correctly
+described as a cleanup task. It repeats daily until the row is cleared.
+
+## Deploy findings
+
+| # | Finding | Severity |
+|---|---|---|
+| D1 | **Chris Paschall: bridge live, controller unreachable** (`failed` / `blame: controller` / `HTTP -1`). DHCP move after the reboot is the leading hypothesis; `192.168.1.201` may now be stale in both `controllers` and the allowlist | **P1 — field check** |
+| D2 | **Ellie Cochran's controller runs WLED 16.0.0** (vid 2605030, `ESP32`, 89 LEDs) against a fleet pinned to 0.15.1. Provenance unknown | **P1 — investigate** |
+| D3 | **The Resend sending domain is unverified, so every email this project sends fails** — including the customer welcome email. Pre-existing; S6 is just the first thing to attempt a send and notice | **P1, beyond S6** |
+| D4 | The seed **reconciles exactly with the three recovered bridges** — 2 alerts + 3 warns became 0 + 1, with no manual input | Validates the design |
+| D5 | `HTTP 401` on a minutes-old 2nd-gen callable is the **`cloudfunctions.net` alias lagging**, not IAM | Ops gotcha |
+| D6 | `User code failed to load … Timeout after 10000` is the **CLI discovery probe**, not broken code (local load 819 ms) | Ops gotcha |
+| D7 | §7.1's free-tier scheduler note was wrong — there were already **7** scheduler jobs | Correction |
+| D8 | The full S2 taxonomy observed live in one pass: **9 completed / 6 expired / 2 failed**, the sweeper flipping pending→expired between samples 15 s apart | Validates S2 |
+
+---
+
+# D3 RESOLVED — 2026-08-07 ~18:45 UTC
+
+`nex-genled.com` is **verified** in Resend. Tyler added the three records at Porkbun; all four
+authoritative nameservers and Google's resolver serve them, and Resend reports
+`TXT resend._domainkey / MX send / TXT send` all `verified`.
+
+**Cutover done:** the interim `FLEET_HEALTH_DIGEST_FROM` override was removed from `.env` and
+from `collectControllerHealth`, and the function redeployed. Confirmed live:
+
+```
+sendEmail: ok (id=036d4fc3-0953-4c2a-97dd-4d0fd04a9a6f, to=tyler.honeycutt@nex-genled.com)
+collectControllerHealth: digest sent — Lumina fleet: 2 warning(s)
+```
+
+A direct API send from `hello@nex-genled.com` also succeeded (id `5a7e6209…`), which is the
+thing that matters beyond the digest: **`createCustomerAccount`'s welcome email — the one
+carrying the password-reset link — can now deliver.** That path had never worked and had never
+been exercised, so no customer was ever affected; the next one created through the wrap-up
+screen will get their credentials.
+
+## Notes worth keeping
+
+| # | Note |
+|---|---|
+| D9 | **My verification watcher was broken, not Resend.** A missing paren in an inline `node -e` made it print an empty status on every poll, so it never matched `verified` and ran to exhaustion reporting "still pending". The domain had in fact verified. A watcher whose failure mode is indistinguishable from the thing it watches is worse than no watcher |
+| D10 | **A `defineString` with no value in `.env` FAILS the deploy** in non-interactive mode — and an explicit `{ default: "" }` does **not** satisfy it. An optional param must either keep a key in `.env` or not exist in code. Removing the interim override therefore required deleting the param, not just the env line |
+| D11 | **`firebase deploy` ships `lib/`, not `src/`, and does not check they agree.** A piped `npm run build \| tail` swallows tsc's exit code, so a failed build followed by `&& firebase deploy` deploys the *previous* compilation silently. Always check the build's exit code explicitly |
+| D12 | The collector was **not idempotent across repeated runs**: re-folding the same probe incremented `consecutiveFailures` and escalated a WARN to an ALERT with no new evidence. Fixed with `lastFoldedCommandId`; verified by two consecutive runs holding steady. The repeated manual collects had also pushed `cpaschall10` onto weekly backoff, which would have delayed re-checking a genuinely broken customer by up to 7 days — reset to 1/daily |
+| D13 | One transient `An Internal error has occurred` from `firebase deploy`; succeeded on retry ~20 s later. Unrelated to the change |

@@ -1620,6 +1620,15 @@ service cloud.firestore {
     // stayed refused fleetwide and the flip had no effect. An admin-SDK
     // readback confirmed the document but bypassed rules and so proved
     // nothing about the app. See audit/SOLAR_UI_GATE.md.
+    // Kill switch for the base-ladder segment repair (audit/BASE_LADDER.md).
+    // Public read: every client evaluates it on each schedule sync. The flag
+    // FAILS OPEN (a 403 or missing doc leaves the repair ON), so a missing rule
+    // costs us the ability to PULL the switch, not the fix itself.
+    match /config/base_ladder_repair {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /config/solar_scheduling {
       allow read: if request.auth != null;
       // Bootstrap-only create with the safe default (enabled=false). Any

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/base_ladder_repair_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart'
     show ClockInfoSource;
@@ -386,8 +387,34 @@ class ScheduleSyncService {
   /// The exact state a system ON preset must be psaved with. `ib: true` is what
   /// makes WLED persist the ROOT `on`/`bri` into the stored preset instead of
   /// segments only — without it the preset loads DARK from a master-off strip.
-  static Map<String, dynamic> onPresetHealState(int bri) =>
-      {'on': true, 'bri': bri, 'ib': true};
+  ///
+  /// ⚠️ [liveState] IS NOT OPTIONAL IN SPIRIT. Omitting the `seg` key is the
+  /// AMBIENT-CAPTURE DEFECT (audit/BASE_LADDER.md): a `psave` merges its inline
+  /// state over the controller's CURRENT live state, so a payload with no `seg`
+  /// stores whatever the segments happened to be doing. Save the ladder while a
+  /// channel is off and that channel is dark in the base layer FOREVER —
+  /// bench-proven 2026-08-09 on `.150`, where presets 1/4/5 stored
+  /// `s0:OFF s1:OFF` and `{"ps":1}` gave master on with zero segments lit.
+  /// The null fallback exists only for repos that cannot read live state
+  /// (cloud relay / mock); it is strictly worse and must not be the app path.
+  static Map<String, dynamic> onPresetHealState(int bri,
+          [Map<String, dynamic>? liveState]) =>
+      buildNglOnPresetState(bri, liveState);
+
+  /// THE definition of an ON ladder preset (1/3/4/5). Single source of truth,
+  /// mirroring [buildNglOffPresetState] — the KNOWN-GOOD sibling. That the OFF
+  /// preset passed `seg` explicitly and the ON ladder did not is exactly the
+  /// split that diagnosed this defect: every lease and pattern preset on the
+  /// bench rig was healthy (`s0:on s1:on`) while all four ON ladder slots were
+  /// damaged.
+  static Map<String, dynamic> buildNglOnPresetState(
+          int bri, Map<String, dynamic>? liveState) =>
+      <String, dynamic>{
+        'on': true,
+        'bri': bri,
+        'ib': true,
+        'seg': _fullStripOnSegments(liveState),
+      };
 
   /// An ON system preset (1/3/4/5) is satisfied only when it carries the right
   /// name AND asserts ROOT master power (`on: true`).
@@ -411,9 +438,33 @@ class ScheduleSyncService {
   ///
   /// `ib` is NOT asserted anywhere: it is a psave REQUEST flag, never stored —
   /// WLED does not write it back, so `ib` is absent on healthy presets too.
-  static bool isNglOnPresetSatisfied(
-          Map<String, dynamic> def, String expectedName) =>
-      _presetNamed(def, expectedName) && def['on'] == true;
+  /// SEGMENT ASSERTION (audit/BASE_LADDER.md §6, 2026-08-09). [repairSegments]
+  /// additionally requires every stored segment to be `on:true`, so a preset
+  /// damaged by ambient capture is reported UNSATISFIED and [psaveIfChanged]
+  /// repairs it instead of skipping it forever.
+  ///
+  /// WHY THIS HAD TO CHANGE TOO, AND NOT JUST THE PSAVE PAYLOAD: adding `seg`
+  /// to the write while leaving this predicate at name + root `on` would make
+  /// the fix INERT on the entire installed fleet — every already-damaged preset
+  /// still reports satisfied and is skipped. That is precisely what happened to
+  /// the ib:true work before 9158c00 (see the paragraph above). Same file, same
+  /// function, same mistake available twice.
+  ///
+  /// WHY ALL-SEGMENTS-ON IS THE RIGHT BAR: the app cannot record a deliberate
+  /// channel exclusion — per-channel power writes live `/json/state` only and is
+  /// documented as schedule-overridable, `DeviceChannel` has no enabled field,
+  /// and participation is show-scoped (§4d). So within the app's model an
+  /// all-segments-off ON preset is DAMAGE, never intent. The residual case — a
+  /// channel excluded outside the app — is what
+  /// [baseLadderRepairEnabledSyncProvider] exists to switch off.
+  ///
+  /// A preset with NO `seg` list is treated as unsatisfied: that is the legacy
+  /// segments-absent shape, and re-saving it is the repair.
+  static bool isNglOnPresetSatisfied(Map<String, dynamic> def, String expectedName,
+          {bool repairSegments = true}) =>
+      _presetNamed(def, expectedName) &&
+      def['on'] == true &&
+      (!repairSegments || _presetAllSegmentsOn(def));
 
   static bool isNglOffPresetSatisfied(Map<String, dynamic> def) =>
       _presetNamed(def, kNglOffPresetName) &&
@@ -606,6 +657,13 @@ class ScheduleSyncService {
       final dow = _computeDowMask(s.repeatDays);
       if (dow == 0) continue;
       final presetId = s.presetId ?? _presetForAction(s.actionLabel);
+      // Unrecognised action → refuse the SOLAR boundary too, for the same
+      // reason as the clock path: never arm a macro we had to guess.
+      if (presetId == null) {
+        debugPrint('ScheduleSync: REFUSED solar "${s.actionLabel}" — action '
+            'not recognised and no design payload');
+        continue;
+      }
 
       // ON boundary (offset 0 — no offset UI yet; see PR bench-gate note).
       if (_isSolarLabel(s.timeLabel)) {
@@ -809,6 +867,33 @@ class ScheduleSyncService {
     final Map<String, dynamic>? capturedLiveState = await activeRepo.getState();
     bool didWriteAnyPreset = false;
 
+    // ── Base-ladder segment repair (audit/BASE_LADDER.md) ────────────────
+    // Kill switch, DEFAULTS TRUE. Off only when an explicit `enabled:false`
+    // sits at config/base_ladder_repair — see the flag file for why this fails
+    // OPEN where solar_scheduling fails closed.
+    final bool repairLadder = ref.read(baseLadderRepairEnabledSyncProvider);
+
+    // Which ON ladder slots are about to be REPAIRED (as opposed to created or
+    // left alone). Computed BEFORE the psaves, because psaveIfChanged consumes
+    // existingPresets. Drives the user-visible release note below: a repair can
+    // relight a channel that was dark, and the customer is owed an explanation
+    // for lights changing on their house without them asking.
+    final List<int> repairedLadderSlots = repairLadder
+        ? kOnPresetSpecs.entries
+            .where((e) {
+              final def = existingPresets[e.key];
+              if (def == null) return false; // absent = created, not repaired
+              // Already-satisfied under the OLD bar but not the new one ⇒ this
+              // sync is repairing segment damage, not fixing master power.
+              return isNglOnPresetSatisfied(def, e.value.name,
+                      repairSegments: false) &&
+                  !isNglOnPresetSatisfied(def, e.value.name,
+                      repairSegments: true);
+            })
+            .map((e) => e.key)
+            .toList()
+        : const <int>[];
+
     // psave [state]→[id] ONLY when [isSatisfied] reports the slot's current
     // definition is wrong/absent. On skip the slot is already correct, so it
     // still counts as armable (added to savedPresetIds) — the empty-macro
@@ -851,11 +936,17 @@ class ScheduleSyncService {
     // master-off → master TRUE. So the ON-timer asserts master power at fire
     // time via the preset itself. OFF preset 2 is intentionally left without ib
     // (its lights-off is via seg.on:false — see below).
+    //
+    // SEGMENT STATE (audit/BASE_LADDER.md, 2026-08-09): every ON preset now
+    // writes `seg` EXPLICITLY via buildNglOnPresetState. Omitting it let the
+    // psave capture ambient segment state and store a permanently-dark base
+    // layer. Do not "simplify" these back to a bare {on, bri, ib} map.
     await psaveIfChanged(
       id: 1,
-      state: {'on': true, 'bri': 200, 'ib': true},
+      state: buildNglOnPresetState(200, capturedLiveState),
       name: 'NGL On',
-      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL On'),
+      isSatisfied: (d) =>
+          isNglOnPresetSatisfied(d, 'NGL On', repairSegments: repairLadder),
     );
     // Preset 2 = Off. OFF timers fire `macro: 2`. `ib` is required on BOTH
     // directions — ib persists WHATEVER master state is saved: ON presets
@@ -885,6 +976,16 @@ class ScheduleSyncService {
     // was post-main queue item #3 and is now CLOSED: they use
     // isNglOnPresetSatisfied, which asserts root on:true the same way this one
     // asserts root on:false.)
+    //
+    // ⚠️ PRESET 2 IS CORRECT AS-IS — DO NOT "FIX" IT TO MATCH THE ON LADDER.
+    // Its all-segments-off shape is right for an OFF preset, and it got there
+    // via `_fullStripOffSegments` (explicit, deliberate). Note that on a rig
+    // damaged by ambient capture, preset 2 ALSO reads all-segments-off — but
+    // there it is right BY ACCIDENT, because it captured a dark house. The two
+    // are indistinguishable by inspection, which is why preset 2 keeps its own
+    // predicate (isNglOffPresetSatisfied) and is excluded from the ON ladder
+    // repair. Applying the ON bar here would relight the house on every OFF
+    // boundary.
     await psaveIfChanged(
       id: kNglOffPresetId,
       state: buildNglOffPresetState(capturedLiveState),
@@ -893,22 +994,42 @@ class ScheduleSyncService {
     );
     await psaveIfChanged(
       id: 3,
-      state: {'on': true, 'bri': 51, 'ib': true},
+      state: buildNglOnPresetState(51, capturedLiveState),
       name: 'NGL Dim',
-      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL Dim'),
+      isSatisfied: (d) =>
+          isNglOnPresetSatisfied(d, 'NGL Dim', repairSegments: repairLadder),
     );
     await psaveIfChanged(
       id: 4,
-      state: {'on': true, 'bri': 102, 'ib': true},
+      state: buildNglOnPresetState(102, capturedLiveState),
       name: 'NGL Low',
-      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL Low'),
+      isSatisfied: (d) =>
+          isNglOnPresetSatisfied(d, 'NGL Low', repairSegments: repairLadder),
     );
     await psaveIfChanged(
       id: 5,
-      state: {'on': true, 'bri': 153, 'ib': true},
+      state: buildNglOnPresetState(153, capturedLiveState),
       name: 'NGL Medium',
-      isSatisfied: (d) => isNglOnPresetSatisfied(d, 'NGL Medium'),
+      isSatisfied: (d) =>
+          isNglOnPresetSatisfied(d, 'NGL Medium', repairSegments: repairLadder),
     );
+
+    // USER-VISIBLE RELEASE NOTE (audit/BASE_LADDER.md item D). A repair can
+    // relight a channel that was dark, on the customer's house, without them
+    // asking. presetErrors renders as text in the schedule sync status, so it
+    // is the one surface that can say so. Emitted only when a repair actually
+    // happened — never on a clean or first-time sync.
+    if (repairedLadderSlots.isNotEmpty) {
+      presetErrors.add(
+        'Your base lighting presets were repaired (slot'
+        '${repairedLadderSlots.length == 1 ? '' : 's'} '
+        '${repairedLadderSlots.join(', ')}). A previous app version could save '
+        'these presets with channels switched off, which left the lights dark '
+        'when a schedule ran. They now turn on every channel. If a channel you '
+        'had deliberately turned off has come back on, contact support and we '
+        'can disable this.',
+      );
+    }
 
     int nextPresetId = _firstSchedulePresetId;
 
@@ -1566,7 +1687,7 @@ class ScheduleSyncService {
   ///
   /// For now we use simple conventions. Future improvement: let users
   /// select which preset to trigger per schedule item.
-  int _presetForAction(String actionLabel) => cfg.presetForAction(actionLabel);
+  int? _presetForAction(String actionLabel) => cfg.presetForAction(actionLabel);
 
   /// Extracts brightness percentage from an action label.
   /// Returns null if the label doesn't contain a brightness percentage.
@@ -1614,6 +1735,50 @@ class ScheduleSyncService {
     return [
       {'on': false}
     ];
+  }
+
+  /// "All segments ON" payload covering the full strip — the exact mirror of
+  /// [_fullStripOffSegments], and for the same firmware reason: a preset load
+  /// only touches segments PRESENT in the preset, so an ON preset that names no
+  /// segments (or only seg 0) cannot light the rest of the house. Mirrors the
+  /// controller's live layout so the ladder covers every segment the device
+  /// actually has.
+  ///
+  /// Bounds are deliberately NOT written. Sending stale `start`/`stop` would
+  /// re-bound a physically resized channel (the P1-42 hazard already handled
+  /// this way in `buildChannelPowerPayload`); WLED applies id-only seg entries
+  /// to the existing segments untouched.
+  ///
+  /// Falls back to a single `{'on': true}` when live state is unavailable
+  /// (cloud relay / mock / getState failure) — same degraded path the OFF
+  /// builder takes.
+  static List<Map<String, dynamic>> _fullStripOnSegments(
+      Map<String, dynamic>? liveState) {
+    final seg = liveState?['seg'];
+    if (seg is List && seg.isNotEmpty) {
+      final out = <Map<String, dynamic>>[];
+      for (var i = 0; i < seg.length; i++) {
+        final s = seg[i];
+        final id = (s is Map && s['id'] is int) ? s['id'] as int : i;
+        out.add({'id': id, 'on': true});
+      }
+      return out;
+    }
+    return [
+      {'on': true}
+    ];
+  }
+
+  /// True when every stored segment is explicitly `on:true` — the health bar
+  /// for an ON ladder preset. A preset with no `seg` list, an empty list, or
+  /// any segment not `on:true` is damaged (or legacy) and gets re-saved.
+  static bool _presetAllSegmentsOn(Map<String, dynamic> def) {
+    final seg = def['seg'];
+    if (seg is! List || seg.isEmpty) return false;
+    for (final s in seg) {
+      if (s is! Map || s['on'] != true) return false;
+    }
+    return true;
   }
 
   /// True when the preset represents an OFF state. This firmware stores

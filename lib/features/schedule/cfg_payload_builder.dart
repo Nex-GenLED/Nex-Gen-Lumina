@@ -68,24 +68,71 @@ bool isArmableTimeLabel(String label) {
 
 /// Maps an action label to a WLED preset ID (1=on, 2=off, 3/4/5=dim/low/medium,
 /// 10=pattern). See ScheduleSyncService docs for the preset conventions.
-int presetForAction(String actionLabel) {
-  final a = actionLabel.toLowerCase();
-  if (a.contains('turn off') || a.contains('off')) return 2;
-  if (a.contains('turn on') || a.contains('on')) return 1;
-  if (a.startsWith('brightness')) {
-    final percentMatch = RegExp(r'(\d+)%?').firstMatch(a);
-    if (percentMatch != null) {
-      final percent = int.tryParse(percentMatch.group(1)!) ?? 50;
-      if (percent <= 25) return 3;
-      if (percent <= 45) return 4;
-      if (percent <= 70) return 5;
-      return 1;
-    }
-    return 3;
+/// Resolves a PAYLOAD-LESS schedule's action label to a system preset id, or
+/// `null` when the label is not a recognised action.
+///
+/// ⚠️ ONLY payload-less schedules reach here. A schedule carrying a
+/// `wledPayload` is psaved to its own 10–25 slot by `syncAll` and never
+/// consults this function (audit/BASE_LADDER.md §5c). The canonical labels the
+/// UI produces for the payload-less case are exactly `Turn On`, `Turn Off`, and
+/// `Brightness: N%`.
+///
+/// WHY `null` AND NOT A DEFAULT (this is the fix): the previous version ended
+/// `return 1`, so ANY unrecognised label silently armed macro 1 — the NGL On
+/// ladder preset. `"Deep Blue"` and `"Warm White"` both exist in the fleet and
+/// both landed there. Silently routing an unknown action to "turn the house on
+/// at full brightness" is how a mis-typed or renamed label becomes lights
+/// behaving unpredictably at 3am, with every layer reporting success. An
+/// unknown action is now a REFUSAL the caller must handle, not a guess.
+///
+/// THE THREE SUBSTRING BUGS THIS REPLACES (all bench-visible on fleet labels):
+///   1. `contains('off')` ran FIRST, so `"Pattern: 1 On 4 Off - Solid"` → 2,
+///      the OFF preset. That label is live on two accounts; a payload-less
+///      version would turn the lights OFF at its ON boundary.
+///   2. `contains('on')` ran before the pattern test, so `Neon`, `Bronze`, and
+///      `Monday` all resolved to macro 1.
+///   3. The `return 1` fallthrough, above.
+/// All three were unreachable only because every schedule in the fleet happens
+/// to carry a payload. The path was unguarded, not unreachable.
+///
+/// ⚠️ MODEL PROBLEM, NAMED NOT PATCHED: `ScheduleItem` persists `actionLabel`,
+/// a DISPLAY STRING, and has no action-type field. So this function is parsing
+/// UI copy to recover intent that was never stored. Anchored matching makes
+/// that parsing honest and its failures loud, but it cannot make it correct —
+/// renaming a button, translating the app, or an AI-authored label all break
+/// the mapping, and nothing outside this function knows. The real fix is an
+/// `actionType` enum persisted on the schedule and written at authoring time,
+/// with this reduced to a migration shim for pre-existing rows. Not done here:
+/// it changes the model, the write paths, and needs a backfill.
+int? presetForAction(String actionLabel) {
+  final a = actionLabel.trim().toLowerCase();
+
+  // Anchored, not substring. `==` for the fixed actions so a design named
+  // "Turn On The Lights" cannot be mistaken for the Turn On action.
+  if (a == 'turn off' || a == 'off') return kNglOffPresetIdCfg;
+  if (a == 'turn on' || a == 'on') return 1;
+
+  // `Brightness: N%` — the label the UI writes. Anchored so a design called
+  // "Brightness Boost" does not match.
+  final bri = RegExp(r'^brightness\s*:?\s*(\d{1,3})\s*%?$').firstMatch(a);
+  if (bri != null) {
+    final percent = int.tryParse(bri.group(1)!);
+    if (percent == null || percent < 0 || percent > 100) return null;
+    if (percent <= 25) return 3;
+    if (percent <= 45) return 4;
+    if (percent <= 70) return 5;
+    return 1;
   }
-  if (a.startsWith('pattern') || a.contains('pattern')) return 10;
-  return 1;
+
+  // A bare "Brightness" with no percentage is not actionable — the old code
+  // guessed 3 (Dim). Refuse instead; the caller warns and does not arm.
+  return null;
 }
+
+/// Preset id holding the master-OFF state. Mirrors
+/// `ScheduleSyncService.kNglOffPresetId`; duplicated here because this file is
+/// deliberately Flutter-free (the bench/CLI imports it).
+const int kNglOffPresetIdCfg = 2;
 
 /// Builds a single timer entry from a time label. Returns null if unparseable
 /// (NEVER a phantom midnight). `en` is a type-strict INT (WLED stores a bool as
@@ -164,6 +211,16 @@ Map<String, dynamic> buildCfgPayload(
     }
 
     final presetId = s.presetId ?? presetForAction(s.actionLabel);
+
+    // UNRECOGNISED ACTION → REFUSE TO ARM. Previously an unknown label fell
+    // through to macro 1 and armed the house ON. Skipping is the same posture
+    // as the empty-macro guard in syncAll: an ON-timer we cannot resolve must
+    // not fire something we did not choose.
+    if (presetId == null) {
+      debug?.call('ScheduleSync: REFUSED "${s.actionLabel}" — action not '
+          'recognised and no design payload; nothing armed for this schedule');
+      continue;
+    }
 
     if (!onSolar) {
       final onTimer = buildTimerEntry(

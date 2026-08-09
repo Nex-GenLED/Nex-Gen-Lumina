@@ -19,6 +19,7 @@ import 'services/channel_participation_resolver.dart';
 import 'services/pre_sync_scene_snapshot.dart';
 import 'services/sync_event_background_persistence.dart';
 import 'services/sync_teardown_resolver.dart';
+import '../wled/participation_denormalizer.dart';
 
 /// Engine that handles timing calculations and sync execution for neighborhood groups.
 ///
@@ -678,6 +679,15 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       // Persist the resolved list for the background isolate (Bundle 4
       // will read this; Bundle 3 only writes it). Fire-and-forget.
       unawaited(saveLocalParticipatingChannels(participating));
+      // S3b: same set, published to Firestore for the server-side fire path.
+      // The SharedPreferences cache above is on the phone and unreachable from
+      // a Cloud Function. See participation_denormalizer.dart.
+      unawaited(publishParticipatingChannels(
+        controllerId: _ref.read(selectedControllerIdProvider),
+        resolved: participating,
+        deviceChannelIds: deviceChannelIds,
+        source: 'neighborhood_sync',
+      ));
 
       // (REMOVED) The b4a6f46 empty-participation skip-apply gate used
       // to short-circuit here. Symptom 1 of the multi-home regression:

@@ -231,6 +231,55 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P1 — correctness & trust
 
+- [ ] **P1-52 — `pdel` can leave `presets.json` UNPARSEABLE; the app then goes blind to every preset and says nothing**
+  - Status: OPEN · Evidence: **bench-reproduced 2026-08-09 on `.150`** (observed, not theorised)
+  - Found while cleaning up two scratch presets during the base-ladder work
+    (`audit/BASE_LADDER.md` §6b). Two `pdel`s left a stray `s` byte inside the padding run
+    before the closing brace, so the ENTIRE file failed to parse — not one entry, the whole
+    document.
+  - **TRIGGER IS ROUTINE APP BEHAVIOUR, not a manual action.** `schedule_sync.dart:1131-1140`
+    issues `pdel` for every orphaned schedule preset in the managed 10–25 range on any sync that
+    finds one. A deleted schedule leaves an orphan, so this fires in ordinary use on customer
+    controllers. Nothing about this required a bench or a scratch slot.
+  - **`psave` does NOT repair it.** WLED patches `presets.json` in place; byte length was
+    identical (13,246) before and after a re-save. Recovery required rebuilding the file with the
+    stray byte blanked and uploading it via `/edit` — not something a customer or a support call
+    can do.
+  - **NO DETECTION.** `WledService.fetchPresets()` catches the `FormatException` and
+    `return const {}` — the SAME value it returns for sim mode, an empty controller, a non-2xx
+    response, and an unreachable device. A corrupted preset file is indistinguishable from a
+    device with no presets.
+  - What the customer would see: presets silently stop being visible, and **the lights flash on
+    every Sync** — with `existingPresets` empty, `psaveIfChanged` believes every slot is missing
+    and re-`psave`s the whole block, and each psave APPLIES its inline state to the live strip.
+    That is precisely the "every-sync storm" the idempotence work exists to prevent, reappearing
+    with no error text anywhere. The on-connect defaults healer also goes inert
+    (`presets.isEmpty → return`), so nothing self-heals.
+  - Not-worse note: the orphan purge is guarded by `existingPresets.containsKey(id)`, so an empty
+    map means it stops issuing further `pdel`s. The corruption does not cascade.
+  - **Detection cost — cheap, and worth it even without a fix.** Separate the parse failure from
+    the empty case in `fetchPresets`: catch `FormatException` distinctly and surface a named
+    error ("controller preset file is unreadable") instead of folding it into `const {}`. That
+    alone converts a silent, uninterpretable failure into one a support call can act on. A
+    stronger version returns a tri-state (`presets | empty | unreadable`) so `psaveIfChanged` can
+    refuse to rewrite the world on an unreadable file. **Repairing the file from the app is a
+    separate, larger question — this entry asks only that it be NAMED.**
+  - Logged read-only per instruction; nothing fixed. Full incident write-up in
+    `audit/BASE_LADDER.md` §6b.
+
+- [ ] **P1-53 — WLED rejects chunked-encoding POSTs; Dart's `HttpClient` sends chunked by default**
+  - Status: OPEN (gotcha to document, not necessarily code to change) · Evidence: bench 2026-08-09
+  - `HttpClient` uses `Transfer-Encoding: chunked` whenever `contentLength` is not set. WLED's
+    HTTP server rejects those bodies, so **the POST fails while GETs on the same client succeed** —
+    which reads as "the controller ignored my write" rather than a transport error.
+  - Fix at the call site is one line: `req.contentLength = bytes.length;` and `req.add(bytes)`
+    instead of `req.write(...)`.
+  - Cost an hour during the base-ladder hardware test, where a damage step silently no-opped and
+    the assertion was too weak to say why. The bench harness hit the same thing earlier.
+  - Worth a check that every `HttpClient` POST in `lib/` sets `contentLength` — the shipping
+    `WledService` paths appear to work, so this may be test-only today, but the failure mode is
+    silent and the next person will pay the same hour.
+
 - [ ] **P1-5 — Gamma drift root cause (Symptom C)**
   - Status: OPEN · Evidence: bench-proven (symptom) / suspected (cause)
   - `gc.col` flipped 2.8→1 during the AI-command window; self-healed by the pusher on-connect.
