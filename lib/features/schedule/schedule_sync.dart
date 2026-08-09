@@ -657,6 +657,13 @@ class ScheduleSyncService {
       final dow = _computeDowMask(s.repeatDays);
       if (dow == 0) continue;
       final presetId = s.presetId ?? _presetForAction(s.actionLabel);
+      // Unrecognised action → refuse the SOLAR boundary too, for the same
+      // reason as the clock path: never arm a macro we had to guess.
+      if (presetId == null) {
+        debugPrint('ScheduleSync: REFUSED solar "${s.actionLabel}" — action '
+            'not recognised and no design payload');
+        continue;
+      }
 
       // ON boundary (offset 0 — no offset UI yet; see PR bench-gate note).
       if (_isSolarLabel(s.timeLabel)) {
@@ -1680,7 +1687,7 @@ class ScheduleSyncService {
   ///
   /// For now we use simple conventions. Future improvement: let users
   /// select which preset to trigger per schedule item.
-  int _presetForAction(String actionLabel) => cfg.presetForAction(actionLabel);
+  int? _presetForAction(String actionLabel) => cfg.presetForAction(actionLabel);
 
   /// Extracts brightness percentage from an action label.
   /// Returns null if the label doesn't contain a brightness percentage.
