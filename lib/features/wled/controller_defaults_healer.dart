@@ -579,6 +579,18 @@ class ControllerDefaultsHealer {
       }
       if (presets.isEmpty) return; // un-synced or unreadable — nothing to heal
 
+      // Live segment layout for the heal payload. Without it onPresetHealState
+      // omits `seg` and the psave captures AMBIENT segment state — the exact
+      // defect this heal is supposed to repair (audit/BASE_LADDER.md). A null
+      // here degrades to a single-segment fallback, never to ambient capture.
+      Map<String, dynamic>? liveState;
+      try {
+        liveState = await svc.getState();
+      } catch (e) {
+        report.log.add('on-preset heal: getState failed ($e); seg fallback');
+        liveState = null;
+      }
+
       final broken = <int>[];
       for (final entry in ScheduleSyncService.kOnPresetSpecs.entries) {
         final def = presets[entry.key];
@@ -601,7 +613,7 @@ class ControllerDefaultsHealer {
         try {
           await svc.savePreset(
             presetId: id,
-            state: ScheduleSyncService.onPresetHealState(spec.bri),
+            state: ScheduleSyncService.onPresetHealState(spec.bri, liveState),
             presetName: spec.name,
           );
           if (!report.onPresetsHealed.contains(id)) {
