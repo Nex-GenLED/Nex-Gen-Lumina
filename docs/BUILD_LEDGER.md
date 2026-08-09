@@ -33,11 +33,12 @@ optional.
 
 | Field | Value |
 |---|---|
-| **Git SHA** | `c400d62` (build commit, version bump) · merged to main as `bea0d68` (`--no-ff` from `release/2.5.10+67`). **Pushed to origin 2026-08-09** |
+| **Git SHA (build from this)** | **`037a83c`** — current `main`. This is what a build off `main` produces today, and the **iOS↔Android join key**. |
+| **Android .aab cut at** | `bea0d68` (the `--no-ff` merge of `release/2.5.10+67`; build commit `c400d62`). `037a83c` adds only this ledger entry — **docs-only, app bytes identical**, so the artifact is valid for `037a83c`. Pushed to origin 2026-08-09. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **67** — verified from the merged manifest (`android:versionCode="67"`), not pubspec |
 | **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,241,882 bytes · built 2026-08-09 16:54 |
-| **iOS** | **PENDING** — Codemagic not triggered. Same SHA `bea0d68` is the iOS↔Android join key |
+| **iOS** | **PENDING** — Codemagic not triggered. It will build `037a83c` off `main`; record that SHA, not the merge commit |
 | **Uploaded** | NO |
 
 **Contents since +66**
