@@ -4,7 +4,81 @@
 **Repo:** `main` @ `393af46`, `2.5.10+58`.
 **Date:** 2026-07-30.
 **Field finding being addressed:** verified live across two households — Neighborhood Sync fanout works, but there is no way to express that several physical channels form one visual surface. A 2-channel façade renders an effect twice against a 1-channel neighbor's once. **MISSING capability, not a bug.**
+**Customer-visible symptom (added 2026-08-10, see §0):** a chase that **changes pace partway across the façade** — the longer channel appears faster, because WLED's effect period is per-segment. Prefer this description over "renders twice" when talking to anyone who has actually looked at the lights.
 **Decided going in:** grouping, arbitrary N channels per group. Per-channel exclusion is not the primary fix.
+
+---
+
+## 0. THE CUSTOMER-VISIBLE SYMPTOM — observed 2026-08-10 on `.150`
+
+> **Use this description, not "the effect renders twice."** That phrasing is
+> accurate about the payload and useless to anyone standing in a driveway.
+> **What a customer sees is a chase that changes pace partway across the
+> façade.**
+
+Confirmed live with Game Day (Royals, `fx 28` Chase, both channels
+participating). Readback:
+
+| | seg 0 | seg 1 |
+|---|---|---|
+| bounds | `0–128` | `128–290` |
+| **len** | **128** | **162** |
+| `sx` (speed) | 129 | 129 |
+| `grp` / `spc` / `of` | 1 / 0 / 0 | 1 / 0 / 0 |
+| `rev` / `mi` | false / false | false / false |
+
+Every continuity field is inert — `grp:1` is "no grouping". Nothing tells WLED
+these are one surface, so it runs two effect instances from two origins.
+
+**Why it reads as a pace change rather than as two effects.** WLED's chase
+period is **per segment**: the dot crosses each segment in the same *time*
+regardless of how many pixels it contains. seg 1 is 162 px against seg 0's 128,
+so at an identical `sx` of 129 the dot travels **~27% faster across the longer
+channel**. Tyler observed exactly this directly — the longer segment appears to
+move faster.
+
+So the defect presents as a **speed discontinuity at the channel boundary**, not
+as an obviously duplicated animation. That is why it survived so long without a
+crisp description: "renders twice" does not match the lived observation, so the
+report and the payload never got connected.
+
+### Commercial implication — length variance compounds
+
+Residential exposure is small: two channels, one boundary, one pace change.
+**Commercial is multi-channel by definition.** A hotel corridor or a monument run
+on 3–4 channels of differing lengths shows **several apparent speeds
+simultaneously**, one per channel, all from a single "apply this effect" action.
+There is no length at which this cancels out — only equal-length channels look
+right, and equal-length channels are an accident of the install, never a design
+guarantee.
+
+This also means the defect scales with exactly the installations that are
+hardest to re-visit and most likely to be seen by the public.
+
+### Rules out the "already continuous" hypothesis (2026-08-10)
+
+A same-day observation suggested Game Day might already render as one continuous
+surface. **It does not.** Three independent confirmations:
+
+1. **Two segments in the readback**, with no grouping fields. §7/§176's fix is to
+   emit ONE segment spanning the group (`start = min`, `stop = max`); the rig
+   shows the opposite.
+2. **`wled_payload_utils.dart` is byte-unchanged** between `2.5.10+66` and
+   `+67`. `applyChannelFilter` still emits one segment per channel from a shared
+   template. Nothing in +67 touched any payload-construction path — its Game Day
+   additions (`participation_denormalizer.dart`) only publish participation to
+   Firestore, fire-and-forget.
+3. **The pace change itself**, above, is only possible with two segments.
+
+**What prompted the hypothesis was a real change, but a different one:** both
+channels lit *for the first time* after the base-ladder repair
+(`audit/BASE_LADDER.md` §4b restored the ladder to full scope; the preceding
+Game Day fire had used `participatingChannels:[0]`). "Spanning both channels" was
+new participation, not merged segments.
+
+> Note on effect choice when reproducing: `fx 28` Chase is position-dependent and
+> shows this clearly. A solid or a twinkle would look identical either way — an
+> effect that hides the symptom is not evidence the symptom is gone.
 
 ---
 
