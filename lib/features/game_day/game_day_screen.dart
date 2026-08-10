@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/autopilot/base_layer_gate.dart';
+import 'package:nexgen_command/nav.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -603,6 +606,25 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     debugPrint(
       '\u{1F3DF}\u{FE0F} Game Day Autopilot set to: $value for team: ${config.teamSlug}',
     );
+    // BASE-LAYER GATE (audit/BASE_LAYER_GATE.md). Fires only on ENABLE, and
+    // only when no everyday schedule is visible. Informational: 'Enable
+    // anyway' proceeds, a dismissal proceeds, and ANY failure proceeds. It
+    // must never block a customer from a feature they already use.
+    if (value) {
+      final gateUid = ref.read(authStateProvider).maybeWhen(
+            data: (u) => u?.uid ?? '',
+            orElse: () => '',
+          );
+      if (gateUid.isNotEmpty && context.mounted) {
+        final proceed = await maybeWarnNoBaseLayer(
+          context: context,
+          ref: ref,
+          uid: gateUid,
+          onSetUpSchedule: () => context.push(AppRoutes.schedule),
+        );
+        if (!proceed) return;
+      }
+    }
     try {
       await ref
           .read(gameDayAutopilotNotifierProvider.notifier)

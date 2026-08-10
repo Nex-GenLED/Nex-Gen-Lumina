@@ -207,7 +207,17 @@ void main() {
       expect(result, isNotNull);
       expect(result!.length, 1);
       final intent = result.first;
-      expect(intent.timeLabel, 'Sunset');
+      // P1-8 — CORRECTED 2026-08-10. This asserted 'Sunset'. The code is right
+      // and the assertion was stale: b6ca2f1 deliberately REMOVED the 'Sunset'
+      // default because it fabricated hour:25 timers that never fire. A garbage
+      // time value must normalise to empty and be refused downstream, not
+      // silently become a real boundary.
+      //
+      // It had been red in every suite run for weeks and cost real time as a
+      // false suspect during the Block E diagnosis. A permanently red test is a
+      // credible suspect for every future mystery, which is the actual cost.
+      expect(intent.timeLabel, '',
+          reason: 'garbage time must NOT default to a real boundary');
       expect(intent.offTimeLabel, isNull);
       expect(intent.repeatDays,
           ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
