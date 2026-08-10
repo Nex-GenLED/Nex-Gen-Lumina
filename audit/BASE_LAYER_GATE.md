@@ -150,6 +150,33 @@ a credible suspect for every future mystery.
 
 ## 8. THE GATE, RESTATED
 
+### ✅ SATISFIED 2026-08-10 — by direct outreach, not by the release
+
+**Tyler warned all six accounts directly.** That was the recommended route in §5
+— for six known accounts a phone call is faster than a release — and it closes
+the specific risk this gate existed for: those six enabling or running Game Day
+without knowing that a failed end signal leaves the lights on.
+
+**What outreach covers, and what it does not:**
+
+| | status |
+|---|---|
+| The six known accounts are informed | ✅ done directly |
+| The six now have a base layer | ❌ **NO** — they are informed, not protected |
+| A NEW account enabling Game Day without a base layer | covered only once +68 reaches their device |
+| Any of the six enabling another team later | covered by the in-app prompt once they update |
+
+> ⚠️ **Warned is not fixed.** Nothing about the outreach creates a floor. If an
+> end signal fails for one of those six, the design still runs until someone
+> intervenes — the difference is that they now know that, and accepted it. That
+> distinction matters most for **Taps On Main**, which is commercial: an
+> informed bar left lit overnight is still a bar left lit overnight.
+
+The in-app prompt remains the durable mechanism for every account after these
+six, and it ships in **2.5.10+68**.
+
+### The original gate
+
 > **Do not flip `config/gameday_planner.write_jobs` until this ships to devices.**
 
 It is committed but **not built and not deployed**. Until a build carrying it
