@@ -29,6 +29,31 @@ optional.
 
 ---
 
+## 2.5.10+68 — base-layer gate for Game Day + P1-8 closed
+
+| Field | Value |
+|---|---|
+| **Git SHA (build from this)** | **`585b574`** — the `--no-ff` merge of `release/2.5.10+68`, and the state `main` built from. **iOS↔Android join key.** |
+| **SHA range for this release** | `08ae0b6..585b574`. Any docs-only commit AFTER this (e.g. this ledger row) does not change app bytes and remains valid for +68 — recorded as a range so the SHA is not chased with corrections. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **68** — verified from the merged manifest (`android:versionCode="68"`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,264,238 bytes · built 2026-08-10 14:12 |
+| **iOS** | **PENDING** — Codemagic NOT triggered; Tyler triggers. It will build `main` HEAD; record that SHA against this row. |
+| **Uploaded** | NO |
+
+**Contents since +67**
+
+- **Base-layer gate** (`e2edd64`) — six Game-Day-enabled accounts have no everyday schedule (Tim Kelly, Chris Paschall, Jim Dyer, Darrin Nicholas, **Taps On Main — commercial**, Demo Home). A failed end signal leaves the design running with no next boundary to return the house. Prompts on enable, never refuses, never auto-creates, **fails OPEN**. Enum is `absentInFirestore` not `absent` (census counts Firestore intent, not device reality) and **a test pins that name**. Happy path does not consume the session slot.
+- **P1-8 closed** (`cf6d0a2`) — stale `Sunset` assertion corrected; the test was wrong, the code was right (`b6ca2f1` removed that default because it fabricated `hour:25` timers that never fire).
+- Carried from the +67→+68 window: **B3 newest-wins** (`f7bd784`) and **A3 dated-entry overwrite guard** (`94fca3a`), merged as `b3214a1`; **CHANNEL_GROUPING_SCOPE §0** (`08ae0b6`).
+
+**Verification:** `flutter analyze lib/` whole-tree — **0 errors, 0 warnings** (373 pre-existing info). Dart suite **2036 passed / 3 skipped / 0 FAILED — fully green for the first time in weeks**. `functions` `npm run build` exit 0 (explicit check). Functions suite 8/8, 237 tests.
+
+**NOT deployed with this build:** Cloud Functions, `firestore.rules` (`config/base_ladder_repair` committed but undeployed — the switch fails open), and **`config/gameday_planner.write_jobs` NOT flipped**.
+
+> ⚠️ **`write_jobs` stays gated until this build REACHES DEVICES.** The gate existing in code is not the same as customers having it. Until then the six accounts are unwarned.
+
+---
 ## 2.5.10+67 — base ladder root fix + _presetForAction routing
 
 | Field | Value |
@@ -169,7 +194,7 @@ optional.
 >
 > A built AAB consumes its versionCode whether or not it is uploaded. The +64 artifact is
 > quarantined on disk as `versionCode64-68786e9-DO-NOT-UPLOAD-superseded.aab.bak`.
-> **Next Android build ≥ +68.** +67 BUILT 2026-08-09, not uploaded. Superseded and unuploaded: +66, +64, +63, +62, +61, +60.
+> **Next Android build ≥ +69.** +68 BUILT 2026-08-10, not uploaded. Superseded and unuploaded: +67, +66, +64, +63, +62, +61, +60.
 
 ---
 
