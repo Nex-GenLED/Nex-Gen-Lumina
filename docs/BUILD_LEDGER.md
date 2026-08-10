@@ -38,7 +38,7 @@ optional.
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **68** — verified from the merged manifest (`android:versionCode="68"`), not pubspec |
 | **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,264,238 bytes · built 2026-08-10 14:12 |
-| **iOS** | **PENDING** — Codemagic NOT triggered; Tyler triggers. It will build `main` HEAD; record that SHA against this row. |
+| **iOS** | **BUILDING from `e3eeb3a`** (triggered 2026-08-10). Differs from the Android tree `585b574` by `docs/BUILD_LEDGER.md` ONLY — verified docs-only, so **app bytes are identical** and the two platforms are the same build despite different SHAs. |
 | **Uploaded** | NO |
 
 **Contents since +67**
