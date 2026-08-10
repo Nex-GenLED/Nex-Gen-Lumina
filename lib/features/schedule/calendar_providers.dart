@@ -41,6 +41,22 @@ String _dayName(int wd) => const [
 
 // ─── Calendar Schedule State ──────────────────────────────────────────────────
 
+/// An existing dated entry that a write is about to replace, with both sides
+/// so the prompt can name what is being lost AND what replaces it.
+///
+/// A3 (audit/MULTI_ENTRY_DISPLAY.md §2). Storage holds one entry per date, so
+/// there is no honest "keep both" — see [DatedOverwriteChoice].
+class DatedOverwrite {
+  final String dateKey;
+  final CalendarEntry existing;
+  final CalendarEntry incoming;
+  const DatedOverwrite({
+    required this.dateKey,
+    required this.existing,
+    required this.incoming,
+  });
+}
+
 class CalendarScheduleNotifier
     extends StateNotifier<Map<String, CalendarEntry>> {
   final Ref _ref;
@@ -146,6 +162,43 @@ class CalendarScheduleNotifier
     return conflicting;
   }
 
+  // ─── A3 — self-overwrite guard (audit/MULTI_ENTRY_DISPLAY.md §2) ──────
+  //
+  // `calendar_entries` is Map<String, CalendarEntry> keyed by 'YYYY-MM-DD', so
+  // a date holds exactly ONE entry. A second entry for that date replaces the
+  // first with no record that it existed. [findUserConflictKeys] above already
+  // detects this shape, but only for autopilot-over-user — a user writing over
+  // their OWN dated entry got nothing.
+  //
+  // This does NOT preserve the replaced entry. Storage cannot hold two (A1 is
+  // unbuilt). It converts silent loss into a deliberate choice.
+
+  /// An existing dated entry that an incoming write would replace.
+  ///
+  /// Returned rather than a bare date key so the prompt can NAME what is about
+  /// to be lost — "Deep Blue, 6:00 PM" is a decision a customer can make;
+  /// "this date has an entry" is not.
+  ///
+  /// Only incoming entries of [CalendarEntryType.user] are considered. Autopilot
+  /// writes have their own resolution flow ([findUserConflictKeys] +
+  /// [resolveAutopilotConflicts]) and must not be double-guarded here.
+  /// Holiday/auto entries are generated, not authored, so replacing one loses
+  /// nothing the user created.
+  List<DatedOverwrite> findDatedOverwrites(List<CalendarEntry> entries) {
+    final out = <DatedOverwrite>[];
+    for (final incoming in entries) {
+      if (incoming.type != CalendarEntryType.user) continue;
+      final existing = state[incoming.dateKey];
+      if (existing == null) continue;
+      // Replacing a generated entry is not data loss — only a user-authored
+      // one represents work the customer will not get back.
+      if (existing.type != CalendarEntryType.user) continue;
+      out.add(DatedOverwrite(
+          dateKey: incoming.dateKey, existing: existing, incoming: incoming));
+    }
+    return out;
+  }
+
   /// Filter [entries] according to [choice], returning only the entries
   /// that should actually be written.
   ///
@@ -203,9 +256,30 @@ class CalendarScheduleNotifier
   ///
   /// Returns true if the Firestore write succeeded.
   Future<bool> applyEntries(List<CalendarEntry> entries,
-      {ConflictResolution? resolution, RecurringIntent? recurringIntent}) async {
+      {ConflictResolution? resolution,
+      RecurringIntent? recurringIntent,
+      bool overwriteAcknowledged = false}) async {
     // ── Conflict resolution (before optimistic update) ───────────
     if (resolution == ConflictResolution.cancel) return false;
+
+    // ── A3 — self-overwrite guard, ENFORCED AT THE WRITE ─────────
+    // Deliberately here and not only in the UI. A guard that lives in a widget
+    // is bypassed by the next call site that forgets it, and this codebase has
+    // a long list of guards that reported success for work never done. A write
+    // that would destroy a user-authored dated entry without an explicit
+    // acknowledgement is REFUSED and returns false — the caller's existing
+    // failure handling surfaces it. It cannot pass silently.
+    if (!overwriteAcknowledged && recurringIntent == null) {
+      final overwrites = findDatedOverwrites(entries);
+      if (overwrites.isNotEmpty) {
+        debugPrint('CalendarSchedule: REFUSED write — would replace '
+            '${overwrites.length} user entry(ies) on '
+            '${overwrites.map((o) => o.dateKey).join(", ")} without '
+            'acknowledgement. Prompt the user, then pass '
+            'overwriteAcknowledged: true.');
+        return false;
+      }
+    }
 
     // Recurring-intent fast path: skip CalendarEntry storage entirely and
     // write a single ScheduleItem instead. The schedules-provider addAll

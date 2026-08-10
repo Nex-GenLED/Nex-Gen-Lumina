@@ -1347,7 +1347,13 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         };
         return (map[wd] ?? {}).any(dl.contains);
       }).toList();
-      final first = recurring.isNotEmpty ? recurring.first : null;
+      // B3 (audit/MULTI_ENTRY_DISPLAY.md §2): NEWEST of the day, not oldest.
+      // sortKey is stamped max+1 per insert and both backends deliver ascending
+      // order (subcollection .orderBy(sortKey); legacy array appends), so the
+      // newest matching schedule is the LAST element. .first showed the oldest,
+      // so adding a schedule to an already-covered day changed nothing visible
+      // and read as a failed save. Precedence (calEntry ?? recurring) UNCHANGED.
+      final first = recurring.isNotEmpty ? recurring.last : null;
 
       // Route through the slug resolver so snake_case pattern slugs
       // (e.g. KC_Royals_Game_Day) render as display names, matching every
