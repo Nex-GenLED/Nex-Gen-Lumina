@@ -1187,7 +1187,13 @@ class _DayHeroCard extends ConsumerWidget {
     // Resolve the best available entry
     final wd = selDate.weekday % 7; // 0=Sun..6=Sat
     final recurringItems = _itemsForWeekday(scheduleItems, wd);
-    final recurringFirst = recurringItems.isNotEmpty ? recurringItems.first : null;
+    // B3 (audit/MULTI_ENTRY_DISPLAY.md §2): NEWEST of the day, not oldest.
+    // sortKey is stamped max+1 per insert and both backends deliver ascending
+    // order (subcollection .orderBy(sortKey); legacy array appends), so the
+    // newest matching schedule is the LAST element. .first showed the oldest,
+    // so adding a schedule to an already-covered day changed nothing visible
+    // and read as a failed save. Precedence (calEntry ?? recurring) UNCHANGED.
+    final recurringFirst = recurringItems.isNotEmpty ? recurringItems.last : null;
 
     final patternName = calEntry?.displayName ??
         (recurringFirst != null ? _labelFromAction(recurringFirst.actionLabel) : null);
@@ -2123,7 +2129,7 @@ class _WeekDayCell extends ConsumerWidget {
 
     final patternName = calEntry?.displayName ??
         (recurringItems.isNotEmpty
-            ? _labelFromAction(recurringItems.first.actionLabel)
+            ? _labelFromAction(recurringItems.last.actionLabel) // B3: newest
             : null);
 
     // Mixed formats: CalendarEntry stores 'HH:mm' 24-hour; ScheduleItem stores
@@ -2131,9 +2137,9 @@ class _WeekDayCell extends ConsumerWidget {
     // into the user's preferred display format (12-hour by default).
     final timeFormat = ref.watch(timeFormatPreferenceProvider);
     final rawOnTime =
-        calEntry?.onTime ?? recurringItems.firstOrNull?.timeLabel;
+        calEntry?.onTime ?? recurringItems.lastOrNull?.timeLabel; // B3
     final rawOffTime =
-        calEntry?.offTime ?? recurringItems.firstOrNull?.offTimeLabel;
+        calEntry?.offTime ?? recurringItems.lastOrNull?.offTimeLabel; // B3
     final onTime = rawOnTime == null
         ? null
         : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
