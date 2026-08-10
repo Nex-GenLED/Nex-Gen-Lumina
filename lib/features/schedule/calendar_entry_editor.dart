@@ -12,6 +12,7 @@ import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
 import 'calendar_entry.dart';
 import 'calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/dated_overwrite_dialog.dart';
 
 /// Show the calendar entry editor bottom sheet.
 ///
@@ -397,7 +398,21 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
         autopilot: false,
       );
       final notifier = ref.read(calendarScheduleProvider.notifier);
-      await notifier.applyEntries([userEntry]);
+      // A3 — ask BEFORE destroying a user-authored dated entry. Storage holds
+      // one entry per date, so saving here replaces whatever is there.
+      final overwrites = notifier.findDatedOverwrites([userEntry]);
+      var acknowledged = false;
+      if (overwrites.isNotEmpty) {
+        if (!mounted) return;
+        final choice = await showDatedOverwriteDialog(context, overwrites);
+        if (choice == DatedOverwriteChoice.cancel) {
+          if (mounted) setState(() => _saving = false);
+          return;
+        }
+        acknowledged = true;
+      }
+      await notifier.applyEntries([userEntry],
+          overwriteAcknowledged: acknowledged);
       if (!mounted) return;
       Navigator.pop(context); // Close editor
       ScaffoldMessenger.of(context).showSnackBar(

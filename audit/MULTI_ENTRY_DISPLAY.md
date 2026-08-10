@@ -241,7 +241,51 @@ optional, and the reason A1/A2 cannot go first.
 | entry editor | `calendar_entry_editor.dart:399` | which entry is being edited |
 | sync→calendar bridge | `sync_event_calendar_bridge.dart` | may now append |
 
-### A3 — INTERIM GUARD — **ship first, alone**
+### A3 — INTERIM GUARD — ✅ **IMPLEMENTED 2026-08-10**
+
+**Enforced at the WRITE, not only in the UI.** `applyEntries` gained
+`overwriteAcknowledged` (default `false`); if a write would replace a
+user-authored dated entry without it, the write is **REFUSED and returns
+`false`** with a named debugPrint. That is the answer to "confirm the guard
+cannot itself fail silently": a guard living in a widget is bypassed by the next
+call site that forgets it, and this codebase has a long list of guards that
+reported success for work never done. A new UI path that skips the prompt gets a
+refused write surfaced through the caller's existing failure handling — not
+silent data loss.
+
+**Dialog, not `presetErrors`.** `presetErrors` is a POST-hoc report rendered
+after a sync has already run. This is a PRE-write decision about a destructive
+action: the answer is needed before anything is lost. Telling someone what you
+just destroyed is not a choice.
+
+**No "keep both".** `ConflictResolution` already has a `keepBoth` member and is
+deliberately NOT reused — storage cannot represent two entries for one date
+(A1 unbuilt), so offering it would promise what the write cannot deliver. The
+new `DatedOverwriteChoice` has exactly `{ replace, cancel }`, and a test pins
+that it never grows a third option. The dialog also states plainly *"A day can
+only hold one saved entry. The old one is not kept."*
+
+**Scope of detection** — `findDatedOverwrites` flags only a **user** entry
+landing on an existing **user** entry:
+
+| incoming → existing | flagged | why |
+|---|---|---|
+| user → user | **yes** | authored work, unrecoverable |
+| user → empty | no | the common path takes no new friction |
+| user → holiday / auto | no | generated, not authored |
+| autopilot → user | no | has its own flow (`resolveAutopilotConflicts`); double-guarding would prompt twice |
+
+**Wired at both user write paths:** `calendar_entry_editor.dart:399` (save this
+game only) and `my_schedule_page.dart:712` (pending-batch apply). Dismissing the
+dialog returns `cancel` — a destructive action never defaults to proceeding.
+
+**Verified:** 7/7 new unit tests; full suite **2025 passed / 3 skipped / 1
+pre-existing failure**; `flutter analyze lib/` **0 errors, 0 warnings**.
+
+**LIMIT:** this does not preserve the replaced entry and is not a fix. It makes
+the loss deliberate. A1 remains the fix.
+
+#### Original scoping
 
 `findUserConflictKeys` already detects exactly this case and is already
 documented as detecting overwrites. It is only wired to the autopilot-over-user

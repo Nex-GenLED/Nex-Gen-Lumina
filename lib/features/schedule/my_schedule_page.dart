@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/dated_overwrite_dialog.dart';
 import 'package:nexgen_command/features/schedule/eviction_picker_dialog.dart';
 import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
@@ -707,12 +708,27 @@ Future<void> _showPendingPreviewSheet(
       if (resolution == ConflictResolution.cancel) return;
     }
 
+    // A3 — a pending batch can replace user-authored dated entries. Ask first.
+    var overwriteAck = false;
+    if (pending.recurringIntent == null) {
+      final overwrites = ref
+          .read(calendarScheduleProvider.notifier)
+          .findDatedOverwrites(pending.changes);
+      if (overwrites.isNotEmpty) {
+        if (!context.mounted) return;
+        final choice = await showDatedOverwriteDialog(context, overwrites);
+        if (choice == DatedOverwriteChoice.cancel) return;
+        overwriteAck = true;
+      }
+    }
+
     final ok = await ref
         .read(calendarScheduleProvider.notifier)
         .applyEntries(
           pending.changes,
           resolution: resolution,
           recurringIntent: pending.recurringIntent,
+          overwriteAcknowledged: overwriteAck,
         );
     if (pending.changes.isNotEmpty) {
       ref.read(selectedCalendarDateProvider.notifier).state =
