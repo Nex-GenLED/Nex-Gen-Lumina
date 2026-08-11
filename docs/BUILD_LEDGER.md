@@ -29,6 +29,68 @@ optional.
 
 ---
 
+## 2.5.10+69 — healer publishes device-only facts on connect
+
+| Field | Value |
+|---|---|
+| **Git SHA (build from this)** | **`e4bd463`** — the `--no-ff` merge of `release/2.5.10+69`. **iOS↔Android join key. Build iOS from this SHA.** |
+| **SHA range for this release** | `ec9db58..e4bd463`, plus docs-only commits after it (this ledger row, and any `audit/*.md` edit). Docs do not change app bytes and remain valid for +69 — recorded as a range so the SHA is not chased with corrections. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **69** — verified from the merged manifest (`android:versionCode="69"`, `android:versionName="2.5.10"`), not pubspec |
+| **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,295,738 bytes · built 2026-08-11 16:25 |
+| **Built from** | The **working tree**, before the commits below existed. Verified content-identical to `e4bd463`: no `lib/` file changed after the build — the only post-build edits were to `audit/HEALER_PUBLISH.md`, which is not compiled. |
+| **iOS** | **NOT YET TRIGGERED.** Must be built from `e4bd463`. |
+| **Uploaded** | NO |
+
+**Contents since +68**
+
+- **Healer publish** (`f041463`) — `participating_channels` and `base_boundaries`
+  now publish from the on-connect defaults healer, one `set(merge:true)`, zero
+  writes when both families dedup. Closes the gap where publishing required an
+  autopilot evaluation or a hand-run neighborhood sync, which left five accounts
+  at `never_resolved` through a 24-hour shadow. `deviceChannelIds` and the
+  resolved set are **parameters**, not a `ref` — the healer stays
+  dependency-light on a path that runs for every controller on every connect.
+- **Predicate/range consolidation** (`b9c9ec9`) — `carriesAnyEnabledEntry`, the
+  `timers.ins` extractor, and the preset-id ranges each had a second
+  implementation. No behaviour change; verified standalone (clean analyze, 465
+  schedule tests) before the feature was stacked on it.
+
+> ⚠️ **BEHAVIOUR CHANGE.** A participation resolution computed against an
+> **empty bus list is no longer published**. `[]` is a *usable* server-side
+> verdict meaning "light nothing", and the healer publishes far earlier in a
+> session than the old call sites did, so the pre-load window would have
+> darkened houses that expected a show.
+
+> ⚠️ **WRITE RATE IS ONCE PER APP SESSION PER CONTROLLER**, not
+> zero-when-healthy — the dedup memo is process-scoped and never reads
+> Firestore. A relaunch republishing an unchanged value is the designed
+> self-heal, pinned by tests in both directions. Do not "fix" it.
+
+**Verification:** device-side bench-verified against `.150` on 2026-08-11,
+**read-only** — base boundaries match `timers.ins` exactly, `gc.col` still 2.8
+before and after, ladder (presets 1/3/4/5) intact, zero cfg writes. The bench
+found and fixed a real defect first: **WLED compacts the `/json/cfg` readback**,
+so the slot-8 solar sentinel arrives at index 3 and classifying solar by array
+index published it as a clock row at `hour: 255`. Dart suite **2137 passed · 3
+skipped · 1 failed** (`test/hardware/base_ladder_repair_live_test.dart` —
+pre-existing, proven by re-running with the change stashed). `functions`
+`npx jest test/unit` 8 suites / 237 tests. `flutter analyze lib/ test/` no
+errors.
+
+**App-side verification OWED** — `audit/HEALER_PUBLISH.md` §7.2b. The bench
+tablet was unavailable, so the protocol is written against a phone on home
+Wi-Fi: install +69, open the app on-LAN, do **not** run a neighborhood sync, and
+read `users/wrQRUUKyXyc0deyuu0ORS6wsovO2/controllers/192_168_1_150` **with a
+client credential, not the Admin SDK**.
+
+**NOT deployed with this build:** Cloud Functions, `firestore.rules` (no rules
+change is needed — the controllers subcollection is already owner-writable), and
+**`config/gameday_planner.write_jobs` NOT flipped**. Nothing server-side reads
+`base_boundaries` yet; this build publishes inputs only, with no arbitration.
+
+---
+
 ## 2.5.10+68 — base-layer gate for Game Day + P1-8 closed
 
 | Field | Value |
