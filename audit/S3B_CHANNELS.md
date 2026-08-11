@@ -437,3 +437,103 @@ So: flip `write_jobs` when the shadow satisfies you, watch one house, and ship
 the healer publish after — deliberately, so the fleet arrives at participation
 AFTER the downstream paths have been exercised on a single controller rather
 than at the same moment.
+
+---
+
+# RECONCILER VERIFICATION — 2026-08-11. Static read; bench test still owed.
+
+## 1. The exact republish condition — and it is NOT a readback
+
+```dart
+bool shouldPublishParticipation({
+  required List<int> resolved,
+  required List<int>? lastPublished,
+}) {
+  if (lastPublished == null) return true;              // <-- the important line
+  if (lastPublished.length != resolved.length) return true;
+  for (var i = 0; i < resolved.length; i++) {
+    if (lastPublished[i] != resolved[i]) return true;
+  }
+  return false;
+}
+```
+
+`lastPublished` comes from `publishedParticipationMemo` — a **process-lifetime
+in-memory map**, explicitly "not persisted". It is NOT read from Firestore.
+
+**Consequence: the memo is empty at every app launch, so the first resolve of
+every app session ALWAYS republishes.** Dedup only applies within a single
+process lifetime.
+
+That is deliberate — the comment says it "heals drift if a write was ever lost,
+without needing a read-back". It is a self-healing choice, not an oversight.
+But it means the comparison is against **what this process last wrote**, never
+against **what the device or Firestore actually holds**.
+
+## ⚠️ CORRECTION to the healer scope (§ publish gap, item 3)
+
+I wrote there that a compare-then-write in the healer means *"a controller whose
+`participating_channels` already matches receives ZERO writes."*
+
+**That is wrong.** With a session-scoped memo and no Firestore read, a healer
+publish would write **once per app session per controller**, healthy or not.
+
+Revised cost: **one small Firestore write per app launch per controller**, not
+zero. Still cheap — it is one document set on a path that already does LAN I/O —
+but it is not free, and the earlier claim overstated the gating. Making it
+genuinely zero-write would require reading the Firestore value first, which is
+the read-back the design deliberately avoids.
+
+## 2. What the reconciler compares — and what it does NOT
+
+It compares the **resolved channel list** against the **memo**. It does not
+compare against `participating_channels_device_ids`, and it does not compare
+against the device bus shape directly.
+
+So the bus-change path works like this: bus shape changes → the resolver returns
+a different list → that differs from the memo → republish. **The reconciliation
+is a side effect of the resolver seeing new hardware, not of anything comparing
+old device ids to new ones.**
+
+That matters for the staleness argument: `participating_channels_device_ids` is
+written alongside but is **never read back for comparison** anywhere in the
+publish path. It is currently evidence, not a control input.
+
+## 3–4. The bench tests — STILL OWED, and item 4 will likely "fail"
+
+Tyler's controller now carries the first real input the reconciler has ever had
+(published 16:25:51 today, `[0,1]` with matching device ids).
+
+**Test 3 — bus shape change → republish.** Change the bus layout on `.150`,
+then trigger a resolve (a neighborhood sync from the phone on +67 — the trigger
+that worked this morning). Expect BOTH `participating_channels` and
+`participating_channels_device_ids` to update. **Not yet run.**
+
+**Test 4 — no change → no republish.** Predicted result: **it WILL republish**
+if the app was backgrounded/relaunched between the two resolves, because the
+memo resets. Within one continuous session it will correctly skip.
+
+> **So test 4 must specify the session.** Two syncs without leaving the app =
+> a genuine negative test. Two syncs with a relaunch between = a republish that
+> is CORRECT BY DESIGN and must not be read as a reconciler defect. Getting this
+> backwards would produce a bug report against working code.
+
+Both tests need Tyler: the bus change is a `/json/cfg` write to a rig he is
+watching, and the resolve trigger is on his phone.
+
+## 5. Does this still gate the healer publish?
+
+**Less than I argued.** The original concern was that frequent publishing would
+mask a broken reconciler. But the reconciler already republishes once per
+session regardless of change — so **the masking is already happening today**,
+wherever the app is opened more than once. A healer publish increases the rate
+but does not introduce the property.
+
+Revised view: **test 3 is still worth running before the healer ships** — it is
+the only check that the bus-change path produces a correct new value rather than
+a stale or malformed one, and it has never run. Test 4 is worth running to pin
+the session semantics so nobody later "fixes" the once-per-session write as a
+bug.
+
+Neither blocks `write_jobs`. Both block the healer publish, which is the change
+that would put this on every customer.
