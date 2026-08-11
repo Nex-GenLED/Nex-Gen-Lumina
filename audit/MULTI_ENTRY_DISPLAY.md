@@ -446,3 +446,73 @@ two-release window before anyone sees a fix.
    surfaced it, and only for the autopilot-over-user direction.
 3. Should a dated entry continue to mask recurring schedules once a day can show
    several things?
+
+---
+
+# B1 + C — PARTIAL. Shared resolver built and decoy removed; WIRING NOT DONE.
+
+**Date:** 2026-08-11 · **Shipped:** the shared function, its tests, and the
+decoy deletion. **NOT shipped:** the four call-site migrations, and therefore
+defect C is NOT yet fixed on screen.
+
+## What shipped
+
+**`lib/features/schedule/day_resolution.dart`** — one pure `resolveDay()`,
+no widgets and no Riverpod, because the surfaces have irreconcilable layouts
+(full-width card, 1/7-width cell, a few-mm dot) but identical logic. Returns
+`DayResolution` with `source`, `datedEntry`, `recurringPrimary`,
+`others` and `totalCount`.
+
+It preserves both existing behaviours exactly:
+
+- **Precedence unchanged** — a dated entry masks recurring, as all four
+  surfaces already did. Changing it is B2 and would mask the storage bug.
+- **Newest-wins (B3)** — the newest recurring item is primary; `others` is
+  newest-first.
+
+Masked recurring items are **counted, not discarded** (`totalCount`,
+`hasMore`), so B2 can add a `+N` badge without touching resolution again.
+
+**Decoy DELETED** — `schedule_day_row.dart` and `schedule_plan_controller.dart`
+are gone. They looked exactly like this component and were referenced only by
+each other; anyone told to "fix the day row" found them first and fixed
+nothing. Re-confirmed unreferenced across `lib/` and `test/` before removal;
+`flutter analyze lib/` is 0 errors / 0 warnings after.
+
+**Tests: 11/11** — precedence, masked-but-counted, newest-wins, third-displaces,
+tied `sortKey`, disabled excluded, empty, and a defect-C case asserting a
+recurring-only day resolves to `DaySource.recurring` rather than empty.
+
+## What did NOT ship — and the honest consequence
+
+**The four surfaces still open-code their own resolution.** `resolveDay` is
+currently unused by any widget:
+
+| surface | file:line | still to do |
+|---|---|---|
+| `_DayHeroCard` | `my_schedule_page.dart:1190` | replace inline resolve |
+| `_WeekDayCell` | `my_schedule_page.dart:2126,2134,2136` | replace 3 expressions |
+| `_CalDayCell` | `my_schedule_page.dart:2488` | **needs a new `recurringItems` param AND a caller change** — this is defect C |
+| `_buildTonightCard` | `wled_dashboard_page.dart:1350` | replace inline resolve |
+
+> ⚠️ **Defect C is NOT fixed.** A day covered solely by a recurring schedule
+> still renders EMPTY in the month view. The resolver can express it
+> (`DaySource.recurring`, pinned by a test) but `_CalDayCell` does not yet
+> receive recurring items. Fixing it needs the new param and its call site —
+> and note that the month grid will get visibly much busier, since most days
+> have some recurring coverage. It will want dated-vs-recurring visual weight
+> or it stops communicating anything.
+
+**Why it stopped here:** the session ran short of room to migrate four surfaces
+across two files and verify no visual regression. A half-migrated set of display
+surfaces — some resolving centrally, some inline — is worse than none, because
+the next person cannot tell which is authoritative. The resolver landing first
+with tests makes the remaining work mechanical.
+
+## Still true, and unchanged by this
+
+**This does NOT make multi-entry days display all their entries.** A day with
+three schedules still shows one. That is B2 — a per-surface design question
+(chip, stacked rows, dot counts) — and A1 still cannot store two dated entries
+per date, blocked behind the `user_service.dart:875` rollout hazard and the
+lease-registry re-key.
