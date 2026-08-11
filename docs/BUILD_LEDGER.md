@@ -25,6 +25,12 @@ optional.
   **not** from pubspec — they drift.
 - Fill the iOS build number **when the Codemagic build completes**, not when it
   is queued. `PENDING` is an honest value; a guess is not.
+- **Never instruct "build iOS from `<sha>`".** Codemagic auto-builds the **tip of
+  `main`** on push, and the ledger row naming the SHA is itself a commit on
+  `main` — so the instruction invalidates itself the moment it is written, and
+  correcting it moves the tip again. Instead: record the SHA that fixes the **app
+  bytes**, assert that every later commit in the release is **docs-only**, and
+  give the command that proves it. A range is stable; a pinned SHA is not.
 - Archive `build/debug-info/<platform>/*.symbols` per build. Never commit them.
 
 ---
@@ -33,13 +39,14 @@ optional.
 
 | Field | Value |
 |---|---|
-| **Git SHA (build from this)** | **`e4bd463`** — the `--no-ff` merge of `release/2.5.10+69`. **iOS↔Android join key. Build iOS from this SHA.** |
-| **SHA range for this release** | `ec9db58..e4bd463`, plus docs-only commits after it (this ledger row, and any `audit/*.md` edit). Docs do not change app bytes and remain valid for +69 — recorded as a range so the SHA is not chased with corrections. |
+| **Git SHA (app bytes)** | **`e4bd463`** — the `--no-ff` merge of `release/2.5.10+69`. **iOS↔Android join key.** The last commit in this release that changes what the app does. |
+| **SHA range for this release** | **`ec9db58..e4bd463` defines the app bytes; every commit after it on `main` for this release is docs-only.** Verified, not assumed: `lib/`, `assets/`, `pubspec.yaml`, `pubspec.lock`, `android/`, `ios/` are byte-identical trees across the range. Recorded as a range so the SHA is not chased with corrections. |
+| **Which SHA to build iOS from** | **The tip of `main`, whatever it is** — Codemagic auto-builds the tip on push, and *this row is itself inside the range it describes*, so naming one SHA is self-defeating: every ledger correction moves the tip. Any tip whose diff against `e4bd463` is docs-only is the same build. Check before triggering: `git diff --name-only e4bd463 origin/main \| grep -v -E '^(docs\|audit)/.*\.md$'` — **empty output means safe**. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **69** — verified from the merged manifest (`android:versionCode="69"`, `android:versionName="2.5.10"`), not pubspec |
 | **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,295,738 bytes · built 2026-08-11 16:25 |
 | **Built from** | The **working tree**, before the commits below existed. Verified content-identical to `e4bd463`: no `lib/` file changed after the build — the only post-build edits were to `audit/HEALER_PUBLISH.md`, which is not compiled. |
-| **iOS** | **NOT YET TRIGGERED.** Must be built from `e4bd463`. |
+| **iOS** | **NOT YET TRIGGERED.** Build number is `PENDING` — fill it when Codemagic finishes, not when it is queued. Codemagic takes only the version *name* (`2.5.10`) from pubspec and overwrites the build number with its own `PROJECT_BUILD_NUMBER`, so the iOS build number will NOT be 69 and is not expected to be. Expect the iOS SHA to be a docs-only descendant of `e4bd463` (see the row above) — record the actual SHA here when it completes. |
 | **Uploaded** | NO |
 
 **Contents since +68**
