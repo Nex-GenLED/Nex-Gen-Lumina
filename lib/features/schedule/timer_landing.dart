@@ -16,6 +16,41 @@ bool isRealEnabledTimer(Map<String, dynamic> t) {
   return enOn && macro != 0 && hour != 255;
 }
 
+/// True when [t] is an enabled entry that DOES something — a clock timer, a
+/// lease, or a solar sentinel. Broader than [isRealEnabledTimer] on purpose:
+/// this asks "is there anything here at all?", not "is this an armable clock
+/// timer?". A disabled padding stub (`en:0, macro:0`) is neither.
+///
+/// Two callers depend on the SAME answer and must never drift:
+///   • `ScheduleSyncService.shouldSkipClobberingWrite` — "would this payload
+///     erase the timer table while arming nothing?"
+///   • `extractBaseBoundaries` — "which rows does the planner have to treat as
+///     fixed points?"
+/// A row the clobber guard counts as content is, by definition, a boundary the
+/// planner has to know about. One predicate, one meaning.
+bool carriesAnyEnabledEntry(Map<String, dynamic> t) {
+  final en = t['en'];
+  final enOn = en == true || en == 1;
+  final macro = (t['macro'] is num) ? (t['macro'] as num).toInt() : 0;
+  return enOn && macro != 0;
+}
+
+/// Pull `cfg.timers.ins` out of a raw `/json/cfg` map as a list of plain maps.
+///
+/// Returns **null** when the block is absent or the wrong shape — which is NOT
+/// the same as an empty list. WLED always serializes a `timers.ins` array, so
+/// null means "we could not see the timer table" (cfg unreadable, relay mode,
+/// truncated body) while `[]` would mean "we saw it and it holds nothing". Every
+/// consumer of this data has to keep those apart; returning null is how.
+List<Map<String, dynamic>>? timerInstancesFromCfg(Map<String, dynamic>? cfg) {
+  if (cfg == null) return null;
+  final timers = cfg['timers'];
+  if (timers is! Map) return null;
+  final ins = timers['ins'];
+  if (ins is! List) return null;
+  return ins.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+}
+
 /// The `hour` value WLED serializes for a solar (sunrise/sunset) timer slot.
 /// Not a clock hour — a marker. See [solarTimersLanded].
 const int kSolarHourMarker = 255;
