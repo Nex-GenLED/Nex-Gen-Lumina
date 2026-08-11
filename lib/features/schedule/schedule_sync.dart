@@ -10,6 +10,7 @@ import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.d
 import 'package:nexgen_command/features/wled/clock_health.dart'
     show ClockInfoSource;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
+import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -33,7 +34,12 @@ import 'package:nexgen_command/features/schedule/sunrise_off_service.dart'
 // resolve timersInsLanded / isRealEnabledTimer.
 import 'package:nexgen_command/features/schedule/timer_landing.dart';
 export 'package:nexgen_command/features/schedule/timer_landing.dart'
-    show isRealEnabledTimer, timersInsLanded, solarTimersLanded;
+    show
+        isRealEnabledTimer,
+        carriesAnyEnabledEntry,
+        timerInstancesFromCfg,
+        timersInsLanded,
+        solarTimersLanded;
 import 'package:nexgen_command/features/schedule/cfg_payload_builder.dart' as cfg;
 
 // isRealEnabledTimer + timersInsLanded moved to timer_landing.dart (pure Dart)
@@ -294,11 +300,12 @@ Future<CfgPushOutcome> pushCfgWithVerify({
 class ScheduleSyncService {
   const ScheduleSyncService();
 
-  /// First available preset ID for user schedules
-  static const int _firstSchedulePresetId = 10;
-
-  /// Last available preset ID for user schedules
-  static const int _lastSchedulePresetId = 25;
+  /// First / last available preset ID for user schedules. Aliases of the
+  /// canonical range in `wled_preset_ranges.dart`, which is where the whole
+  /// 1-250 allocation map is documented and where the base-boundary publisher
+  /// reads it from to classify a timer's `macro`.
+  static const int _firstSchedulePresetId = kFirstSchedulePresetId;
+  static const int _lastSchedulePresetId = kLastSchedulePresetId;
 
   /// GENERAL (clock) timer slots — WLED 0.15.1 `timers.ins` indices 0-7.
   /// (Was "total slots"; solar now uses the two dedicated slots below, so this
@@ -506,7 +513,7 @@ class ScheduleSyncService {
   /// rejected them all" and "there are no schedules" produce byte-identical
   /// payloads; this flag is the only thing that tells them apart.
   ///
-  /// "Carries nothing" deliberately uses [_carriesAnyEnabledEntry] and NOT
+  /// "Carries nothing" deliberately uses [carriesAnyEnabledEntry] and NOT
   /// [isRealEnabledTimer]: the latter excludes `hour == 255`, so a payload whose
   /// only content is the GLOBAL SUNRISE-OFF at slot 8 would look empty and be
   /// skipped — silently breaking the invariant that every sync re-asserts that
@@ -518,18 +525,12 @@ class ScheduleSyncService {
     required List<Map<String, dynamic>> ins,
     required int refusedCount,
   }) =>
-      refusedCount > 0 && !ins.any(_carriesAnyEnabledEntry);
+      refusedCount > 0 && !ins.any(carriesAnyEnabledEntry);
 
-  /// True when [t] is an enabled entry that does something — a clock timer, a
-  /// lease, or a solar sentinel. Broader than [isRealEnabledTimer] on purpose:
-  /// this asks "is there anything worth writing?", not "is this an armable
-  /// clock timer?". A disabled padding stub (`en:0, macro:0`) is neither.
-  static bool _carriesAnyEnabledEntry(Map<String, dynamic> t) {
-    final en = t['en'];
-    final enOn = en == true || en == 1;
-    final macro = (t['macro'] is num) ? (t['macro'] as num).toInt() : 0;
-    return enOn && macro != 0;
-  }
+  // `carriesAnyEnabledEntry` moved to timer_landing.dart (pure Dart) and is
+  // re-exported above. The base-boundary publisher asks the SAME question of
+  // the SAME rows — "is there anything here the planner must respect?" — so the
+  // two share one predicate rather than two that can drift.
 
   static List<Map<String, dynamic>> padTimersToMax(
       List<Map<String, dynamic>> ins) {

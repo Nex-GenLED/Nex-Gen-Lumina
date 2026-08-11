@@ -46,6 +46,9 @@ import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
+import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
+export 'package:nexgen_command/features/wled/wled_preset_ranges.dart'
+    show kFirstLeasePresetId, kLastLeasePresetId;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
@@ -60,12 +63,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Total timer slots in WLED's `timers.ins` array.
 const int kWledMaxTimerSlots = 8;
 
-/// Preset ID range reserved for lease-owned presets. Picked so the
+/// Preset ID range reserved for lease-owned presets (26–41). Picked so the
 /// existing ScheduleItem range (10–25, see [ScheduleSyncService]) and
 /// system presets (1, 2) are untouched. 16 lease slots × 48h lifetime
 /// >> any realistic dateKey-modulo-16 collision frequency.
-const int kFirstLeasePresetId = 26;
-const int kLastLeasePresetId = 41;
+///
+/// The constants themselves now live in `wled_preset_ranges.dart` — the file
+/// that documents the whole 1-250 allocation map — and are re-exported here so
+/// existing importers are unaffected. They moved because a second reader
+/// appeared: the base-boundary publisher classifies a timer's `macro` by which
+/// range allocated it, and a private-to-this-file range would have forced a
+/// duplicate table.
 const int _kLeasePresetCount = kLastLeasePresetId - kFirstLeasePresetId + 1; // 16
 
 const Duration kLeaseWindow = Duration(hours: 48);

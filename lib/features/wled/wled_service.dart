@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
+import 'package:nexgen_command/features/schedule/timer_landing.dart'
+    show timerInstancesFromCfg;
 import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
@@ -662,14 +664,7 @@ class WledService
   Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
     if (_simulate) {
       // Echo back the last simulated cfg payload's timers so tests can verify.
-      final ins = (lastSimulatedConfigPayload?['timers'] as Map?)?['ins'];
-      if (ins is List) {
-        return ins
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
-      }
-      return null;
+      return timerInstancesFromCfg(lastSimulatedConfigPayload);
     }
     try {
       // Short timeouts (10s) keep verification polling responsive — a stalled
@@ -682,13 +677,7 @@ class WledService
       client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final cfg = jsonDecode(body) as Map<String, dynamic>;
-        final ins = (cfg['timers'] as Map?)?['ins'];
-        if (ins is List) {
-          return ins
-              .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
-              .toList();
-        }
+        return timerInstancesFromCfg(cfg);
       }
     } catch (e) {
       debugPrint('WledService.fetchTimerInstances exception: $e');
