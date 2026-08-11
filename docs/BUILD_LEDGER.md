@@ -29,8 +29,19 @@ optional.
   `main`** on push, and the ledger row naming the SHA is itself a commit on
   `main` — so the instruction invalidates itself the moment it is written, and
   correcting it moves the tip again. Instead: record the SHA that fixes the **app
-  bytes**, assert that every later commit in the release is **docs-only**, and
-  give the command that proves it. A range is stable; a pinned SHA is not.
+  bytes** and prove the tip has not disturbed them. A range is stable; a pinned
+  SHA is not.
+- **Prove that with a TREE COMPARISON, not a path-pattern grep.** Compare the
+  trees that actually become the app; a grep for "docs-only" silently mislabels
+  any new top-level directory as app code (a `scripts/` diagnostic tripped
+  exactly this on +69). Empty output = the tip is the same build:
+
+  ```sh
+  for d in lib assets pubspec.yaml pubspec.lock android ios; do
+    [ "$(git rev-parse <app-bytes-sha>:$d)" = "$(git rev-parse origin/main:$d)" ] \
+      || echo "DIFFERS: $d"
+  done
+  ```
 - Archive `build/debug-info/<platform>/*.symbols` per build. Never commit them.
 
 ---
@@ -41,7 +52,7 @@ optional.
 |---|---|
 | **Git SHA (app bytes)** | **`e4bd463`** — the `--no-ff` merge of `release/2.5.10+69`. **iOS↔Android join key.** The last commit in this release that changes what the app does. |
 | **SHA range for this release** | **`ec9db58..e4bd463` defines the app bytes; every commit after it on `main` for this release is docs-only.** Verified, not assumed: `lib/`, `assets/`, `pubspec.yaml`, `pubspec.lock`, `android/`, `ios/` are byte-identical trees across the range. Recorded as a range so the SHA is not chased with corrections. |
-| **Which SHA to build iOS from** | **The tip of `main`, whatever it is** — Codemagic auto-builds the tip on push, and *this row is itself inside the range it describes*, so naming one SHA is self-defeating: every ledger correction moves the tip. Any tip whose diff against `e4bd463` is docs-only is the same build. Check before triggering: `git diff --name-only e4bd463 origin/main \| grep -v -E '^(docs\|audit)/.*\.md$'` — **empty output means safe**. |
+| **Which SHA to build iOS from** | **The tip of `main`, whatever it is** — Codemagic auto-builds the tip on push, and *this row is itself inside the range it describes*, so naming one SHA is self-defeating: every ledger correction moves the tip. Any tip that leaves the app-byte trees untouched is the same build. Check before triggering (see below) — **empty output means safe**. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **69** — verified from the merged manifest (`android:versionCode="69"`, `android:versionName="2.5.10"`), not pubspec |
 | **Android artifact** | `build/app/outputs/bundle/release/app-release.aab` · 68,295,738 bytes · built 2026-08-11 16:25 |
