@@ -593,12 +593,21 @@ exact state `outside_horizon` was added to escape. All three now push
 `{uid, teamSlug, action:"skip", reason}`; `outside_horizon` also carries
 `eventId` and `fireAt`.
 
-**Volume needs no cap, and this is why:** rows persist via `arrayUnion`, which
-**dedupes identical objects**. A row carrying no per-tick-varying field collapses
-to ONE entry for the whole day however many ticks run. Volume is bounded by
-distinct `(uid, teamSlug, reason)` — at most `configsEnabled` rows/day from these
-three buckets, not `ticks × configs`. Adding a timestamp would defeat the dedupe
-and turn 11 rows into ~3,100; that is the thing not to do here.
+**Volume needs no cap, and this was MEASURED, not argued.** Rows persist via
+`arrayUnion`, which **dedupes identical objects**, so a row carrying no
+per-tick-varying field collapses to ONE entry for the whole day however many
+ticks run. Observed across a live tick after deploy:
+
+```
+BEFORE  rows=25  ticks=45
+AFTER   rows=25  ticks=46   (+1 tick, +0 rows)
+```
+
+A full tick added **zero** rows. Volume is bounded by distinct
+`(uid, teamSlug, reason)` — at most `configsEnabled` rows/day from these three
+buckets, not `ticks × configs`. Adding a timestamp would defeat the dedupe and
+turn 11 rows into ~3,100 on a 42-tick day; that is the thing not to do here, and
+it is commented at the call site.
 
 Still counter-only, deliberately, as they did not appear on 2026-08-11:
 `daylight_game`, `start_already_planned`, `start_time_passed`. **`start_time_passed`
