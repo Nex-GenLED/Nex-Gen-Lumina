@@ -368,3 +368,154 @@ dispatcher (`write_jobs` is off, so no jobs are written for
 `dispatchFireJobs` to pick up), multi-account fan-out, or
 `minimumPlausibleDuration` as a rejection unless the game ends abnormally
 early. A normal-length game reaching a normal final proves the happy path only.
+
+---
+
+# BASE-ROW vs GAME DAY COLLISION — scope, 2026-08-11. DESIGN ONLY.
+
+Found during the base-layer restore. A device base ON row and a cloud Game Day
+fire act on the same house with **no arbitration**, and the device timer wins by
+default because nothing server-side knows it exists. From the customer's seat,
+a base row firing mid-game is **the design dying mid-game**.
+
+This is NOT the end-signal failure case. That one is "the design never stops".
+This one is "the design stops early, on schedule, correctly, for the wrong
+reason".
+
+## ⚠️ CORRECTION — tonight does NOT collide
+
+I first reported the base row landing 23 minutes AFTER the design fire. **That
+was wrong** — I mixed UTC and local. With `DEFAULT_LEAD_MINUTES = 30`:
+
+| event | local (CDT) | UTC |
+|---|---|---|
+| base ON row | 20:23 | 01:23 |
+| Game Day START fire | 20:40 | 01:40 |
+| first pitch | 21:10 | 02:10 |
+
+The base row fires **17 minutes BEFORE** the design, so the design lands on top
+and stays. **Tonight is clean.** The late west-coast start is what saves it —
+and that is luck, not design.
+
+## 1. Does anything suppress it today? — NO, confirmed
+
+No server code reads `timers.ins`. Every reference in `functions/src` is a
+COMMENT, and the comments say why: *"lives in timers.ins + presets on the
+controller — device-resident cfg behind /json/cfg, which is LAN-only. There is
+no off-LAN read."* (`gameDayPlanning.ts:405`).
+
+The planner reads Firestore configs and ESPN. It has **no knowledge that base
+rows exist**, cannot enumerate them, and cannot reason about them. Your prior
+was right.
+
+## 2. How often does it actually bite? — COMMONLY, on ordinary evening games
+
+Collision window = **[START fire, end fire]** = first pitch −30 min through the
+final. A base ON row inside that window overwrites the design.
+
+A typical MLB evening home game: 19:10 first pitch → design fires 18:40 → final
+~22:10. **Any base ON boundary between 18:40 and 22:10 collides.**
+
+| account | base ON | typical evening game (18:40–22:10) |
+|---|---|---|
+| Trend Setter | 20:23 | **COLLIDES** |
+| Ellie Cochran | 20:30 | **COLLIDES** |
+| Chris Cipollone | Sunset (~20:10 in Aug) | **COLLIDES** |
+| Steve Stegall | 11:00 | no — outside the window |
+
+**Three of the four accounts with a base layer collide on a normal evening
+game.** That is the common case, not the edge. Evening base-ON boundaries and
+evening first pitches occupy the same hours by nature — people turn their house
+lights on around sunset, and baseball starts around sunset.
+
+Tonight avoids it only because a west-coast away game pushes first pitch to
+21:10 local, later than every base row.
+
+## 3. Options — scoped, not chosen
+
+### (a) Planner disables conflicting base rows for the window — **DEAD**
+
+Confirmed dead on the LAN constraint, as suspected. Disabling a base row is a
+`/json/cfg` write; the bridge resolves only `/json/state` and `/json/info`
+and has no cfg branch (audit/BASE_LADDER.md §5b). The server cannot read the
+rows, let alone rewrite them. **Would require the owed bridge firmware branch
+AND a restore-after guarantee that survives the bridge being offline** — if the
+disable lands and the restore does not, the customer loses their everyday
+schedule silently. Strictly worse than the problem.
+
+### (b) End fire restores base; collisions are overridden then corrected
+
+Accept that a base row may interrupt, and rely on the END fire to put the design
+— or the base — back. **Cheapest, and partly built**: S4's `endsAt` companion
+already restores to base rather than off.
+Cost: the customer sees a visible flip to Warm White mid-game, then back. On a
+3-hour game with one base row that is one interruption; the design does not
+return until the next planner tick (≤5 min).
+
+### (c) Design re-fires after the base row, on a schedule
+
+The planner knows the design and could re-assert it periodically or immediately
+after a known base boundary. **But it does not know the boundaries** (§1), so
+this degrades to blind periodic re-fire — every N minutes for the game duration.
+Cost: N× the commands per game per house, each a Firestore write and a bridge
+round-trip, against a fleet where bridge reach is ~40%. Correctness is decent,
+cost and noise are high.
+
+### (d) Accept and disclose
+
+Tell the customer their everyday schedule will interrupt a game design. **Zero
+engineering, honest, and bad** — it makes the flagship feature visibly
+unreliable for three of four current base-layer accounts, on ordinary games.
+Viable only as a stopgap alongside (b).
+
+## 4. What this means for the floor — the tension, stated plainly
+
+**The base ON row is half the §D floor AND the thing that interrupts.** The same
+row that guarantees the house is reclaimed if an end signal never lands is the
+row that overwrites a healthy running design.
+
+They cannot be separated by removing the row: deleting it fixes the collision
+and destroys the floor — precisely the state Trend Setter was in for two days,
+where a failed end signal would have left the house lit indefinitely.
+
+So the base layer is **both the safety net and the interference**, and any fix
+has to preserve the first while suppressing the second — which is the arbitration
+problem, i.e. **the compositor**.
+
+## 5. Is this a `write_jobs` gate? — PARTIALLY. I do not fully agree.
+
+Your read was that flipping would make Tyler's house demonstrate the bug on the
+first game. **On tonight's game specifically, it would not** — the base row
+fires 17 minutes before the design and the design lands on top (see the
+correction above). Tonight would be a clean live-fire test.
+
+But it gates the **next** ordinary evening game, and it gates any rollout past
+Tyler: three of four base-layer accounts collide on a normal 19:10 start.
+
+**Recommendation:** flip for tonight if the shadow satisfies you — one house,
+demonstrated floor, no collision on this fixture — and treat the collision as a
+blocker on the NEXT game and on widening beyond one account. Watching one clean
+game first is worth more than deferring until arbitration is designed, and the
+collision is visible-and-recoverable rather than dangerous: the house shows the
+wrong scene, it does not stay dark or stay lit forever.
+
+## Against the V2 compositor section
+
+This is **the compositor question arriving early**. V2 scoped a shared compositor
+to arbitrate Game Day against Neighborhood Sync — two CLOUD sources contending
+for the same house. This is the same arbitration problem with a third contender
+the design did not account for: **a device-resident timer that no cloud path can
+see or modify.**
+
+That changes the compositor's shape. Arbitrating cloud-vs-cloud is a server-side
+priority question. Arbitrating cloud-vs-device requires either the cfg bridge
+branch (making device rows readable and writable off-LAN) or an explicit model
+where **the device layer is authoritative and the cloud composes around it** —
+accepting base rows as fixed points and planning fires between them.
+
+The second is cheaper, needs no firmware, and matches how the floor already
+works. It also means the planner must LEARN the base boundaries — which, given
+§1, would have to be published from the app the same way participation is
+(audit/S3B_CHANNELS.md publish gap). **The same on-LAN publish mechanism solves
+both**, and that is the strongest argument yet for putting it in the defaults
+healer.
