@@ -76,6 +76,23 @@ class DayResolution {
 
   /// True when more covers this day than is being shown. B2's trigger.
   bool get hasMore => totalCount > 1;
+
+  /// The newest matching recurring item **regardless of dated masking**, or
+  /// null when no recurring schedule covers this day.
+  ///
+  /// This is NOT a second precedence rule — [recurringPrimary] remains the only
+  /// thing a surface renders as the day's content. It exists because the
+  /// call sites fall THROUGH a dated entry field-by-field: `CalendarEntry.onTime`
+  /// and `offTime` are nullable, so a dated entry with no ON time has always
+  /// shown the recurring item's time, and the Tonight card's tap target has
+  /// always opened the recurring `ScheduleItem` even on a dated day (a
+  /// `CalendarEntry` is not editable in that editor). Resolving to
+  /// `recurringPrimary` alone would silently drop both behaviours.
+  ///
+  /// When [source] is [DaySource.dated] the masked items live in [others],
+  /// newest-first, so the head is the newest recurring item.
+  ScheduleItem? get newestRecurring =>
+      recurringPrimary ?? (others.isNotEmpty ? others.first : null);
 }
 
 /// Resolve one day for display.

@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/dated_overwrite_dialog.dart';
+import 'package:nexgen_command/features/schedule/day_resolution.dart';
 import 'package:nexgen_command/features/schedule/eviction_picker_dialog.dart';
 import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
@@ -1200,16 +1201,20 @@ class _DayHeroCard extends ConsumerWidget {
     final isToday = _fmt(today) == dateKey;
     final isPast = selDate.isBefore(DateTime(today.year, today.month, today.day));
 
-    // Resolve the best available entry
+    // Resolve the best available entry.
+    //
+    // B1 (audit/MULTI_ENTRY_DISPLAY.md §2): resolution is no longer open-coded
+    // here — resolveDay owns precedence (dated masks recurring, UNCHANGED) and
+    // newest-wins ordering (B3) for every surface. `newestRecurring` rather
+    // than `recurringPrimary` because the fields below fall through a dated
+    // entry one at a time: onTime/offTime are nullable on CalendarEntry, so a
+    // dated entry with no ON time has always borrowed the recurring item's.
     final wd = selDate.weekday % 7; // 0=Sun..6=Sat
-    final recurringItems = _itemsForWeekday(scheduleItems, wd);
-    // B3 (audit/MULTI_ENTRY_DISPLAY.md §2): NEWEST of the day, not oldest.
-    // sortKey is stamped max+1 per insert and both backends deliver ascending
-    // order (subcollection .orderBy(sortKey); legacy array appends), so the
-    // newest matching schedule is the LAST element. .first showed the oldest,
-    // so adding a schedule to an already-covered day changed nothing visible
-    // and read as a failed save. Precedence (calEntry ?? recurring) UNCHANGED.
-    final recurringFirst = recurringItems.isNotEmpty ? recurringItems.last : null;
+    final day = resolveDay(
+      datedEntry: calEntry,
+      recurringForDay: _itemsForWeekday(scheduleItems, wd),
+    );
+    final recurringFirst = day.newestRecurring;
 
     final patternName = calEntry?.displayName ??
         (recurringFirst != null ? _labelFromAction(recurringFirst.actionLabel) : null);
@@ -2139,23 +2144,31 @@ class _WeekDayCell extends ConsumerWidget {
     final isPast = d.isBefore(DateTime(today.year, today.month, today.day));
     final isWeekend = d.weekday == 6 || d.weekday == 7;
 
+    // B1 (audit/MULTI_ENTRY_DISPLAY.md §2): shared resolution. Precedence
+    // (dated masks recurring) and newest-wins ordering (B3) both live in
+    // resolveDay now — this cell renders the answer, it no longer computes it.
+    final day = resolveDay(
+      datedEntry: calEntry,
+      recurringForDay: recurringItems,
+    );
+    // `newestRecurring`, not `recurringPrimary`: the time fields below fall
+    // through a dated entry individually (onTime/offTime are nullable).
+    final recurringNewest = day.newestRecurring;
+
     // Resolve color from calEntry first, then recurring
-    final color = calEntry?.color ??
-        (recurringItems.isNotEmpty ? null : null); // Recurring has no color
+    final color = calEntry?.color; // Recurring carries no colour
 
     final patternName = calEntry?.displayName ??
-        (recurringItems.isNotEmpty
-            ? _labelFromAction(recurringItems.last.actionLabel) // B3: newest
+        (recurringNewest != null
+            ? _labelFromAction(recurringNewest.actionLabel)
             : null);
 
     // Mixed formats: CalendarEntry stores 'HH:mm' 24-hour; ScheduleItem stores
     // 'h:mm AM/PM' (or 'Sunset'/'Sunrise'). formatTimeLabel normalises both
     // into the user's preferred display format (12-hour by default).
     final timeFormat = ref.watch(timeFormatPreferenceProvider);
-    final rawOnTime =
-        calEntry?.onTime ?? recurringItems.lastOrNull?.timeLabel; // B3
-    final rawOffTime =
-        calEntry?.offTime ?? recurringItems.lastOrNull?.offTimeLabel; // B3
+    final rawOnTime = calEntry?.onTime ?? recurringNewest?.timeLabel;
+    final rawOffTime = calEntry?.offTime ?? recurringNewest?.offTimeLabel;
     final onTime = rawOnTime == null
         ? null
         : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
@@ -2248,7 +2261,7 @@ class _WeekDayCell extends ConsumerWidget {
 
                   // Pattern name
                   Text(
-                    patternName ?? (recurringItems.isNotEmpty ? '—' : 'Empty'),
+                    patternName ?? (day.isEmpty ? 'Empty' : '—'),
                     textAlign: TextAlign.center,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

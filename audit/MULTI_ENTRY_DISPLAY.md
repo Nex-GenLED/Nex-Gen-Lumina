@@ -516,3 +516,98 @@ three schedules still shows one. That is B2 — a per-surface design question
 (chip, stacked rows, dot counts) — and A1 still cannot store two dated entries
 per date, blocked behind the `user_service.dart:875` rollout hazard and the
 lease-registry re-key.
+
+---
+
+# B1 — WIRING. Three of four surfaces migrated. Defect C still OPEN.
+
+**Date:** 2026-08-11 · **Shipped:** `_DayHeroCard`, `_WeekDayCell` and
+`_buildTonightCard` now call `resolveDay`. **NOT shipped:** `_CalDayCell`, and
+therefore **defect C remains open.**
+
+## What moved
+
+| surface | file | was | now |
+|---|---|---|---|
+| `_DayHeroCard` | `my_schedule_page.dart` | inline `.last` + `_itemsForWeekday` | `resolveDay(...)` |
+| `_WeekDayCell` | `my_schedule_page.dart` | 3 inline `.last`/`.lastOrNull` expressions | one `resolveDay(...)` |
+| `_buildTonightCard` | `wled_dashboard_page.dart` | inline `.last` | `resolveDay(...)` |
+| `_CalDayCell` | `my_schedule_page.dart` | receives only `calEntry` | **UNCHANGED — see below** |
+
+`resolveDay` is no longer dead code. Precedence and storage are untouched, and
+the single-item presentation is unchanged — `others`/`totalCount` are carried
+but nothing renders them. That is still B2.
+
+## The one thing that had to be added — `DayResolution.newestRecurring`
+
+The migration is not a straight swap of `.last` for `recurringPrimary`, and
+assuming it was would have caused two silent regressions. **The call sites fall
+through a dated entry field-by-field, not all-or-nothing:**
+
+- `CalendarEntry.onTime` / `offTime` are **nullable**. `calEntry?.onTime ??
+  recurring?.timeLabel` means a dated entry with no ON time has always displayed
+  the recurring item's time. `recurringPrimary` is null whenever a dated entry
+  wins, so resolving to it alone would have blanked those times.
+- The Tonight card's **tap target** is the recurring `ScheduleItem`
+  (`showScheduleEditor(editing: first)`) — a `CalendarEntry` is not editable in
+  that editor. Using `recurringPrimary` would have sent a dated day with a
+  recurring schedule to the schedule list instead of the editor.
+- `_DayHeroCard`'s `typeLabel`/`typeColor` reach the `🔁 Recurring` branch when a
+  dated entry is present but is of type `auto` (the enum has four members and
+  only three are matched above that branch).
+
+So `DayResolution` gained a getter — **not a second precedence rule**. It is
+`recurringPrimary ?? others.first`, which is exactly "the newest recurring item
+regardless of dated masking"; the masked items were already retained in `others`
+for B2's `+N` badge. Nothing renders it as day content.
+
+> This is the B1 argument holding up under its first use: the shared function
+> was correct for rendering the day's *content*, and three surfaces still needed
+> a second thing from the same resolution. Better to find that once, here, than
+> in a fourth open-coded copy.
+
+## BEHAVIOUR CHANGE — recorded deliberately, not incidental
+
+**Soft-evicted schedules no longer show on these three surfaces.** None of them
+filtered `isCurrentlyEvicted` before; `resolveDay` does, and adopting the
+resolver adopts that. A schedule the lease manager has evicted was being
+displayed as the day's plan while the device was never going to run it.
+`resolveDay` uses the same predicate as `cfg_payload_builder.dart:183`, so
+**display now matches what actually arms.** Three tests pin it, including that
+an expired eviction is live again.
+
+Two smaller equivalents that fell out of the same swap:
+
+- `_WeekDayCell`'s dead `color` ternary (`recurringItems.isNotEmpty ? null :
+  null`) collapsed to `calEntry?.color`.
+- Its `'—' : 'Empty'` fallback now keys off `day.isEmpty` rather than
+  `recurringItems.isNotEmpty`, which is the same test plus the eviction filter.
+
+## Why `_CalDayCell` was NOT migrated
+
+It needs a new `recurringItems` param **and a design decision**, and the second
+is not mine to make. Recurring `ScheduleItem`s carry **no colour** — the month
+grid's entire visual vocabulary is a coloured dot fed by `CalendarEntry.color`.
+Rendering recurring days there is not restyling an existing mark; it is
+inventing a second mark on a few-millimetre cell, on a grid that will go from
+sparsely marked to nearly fully marked because most days have some recurring
+coverage. That wants a mockup and Tyler's call, not a default chosen in a
+migration pass.
+
+**Defect C stays open.** A day covered solely by a recurring schedule still
+renders empty in the month view. The resolver can already express it
+(`DaySource.recurring`, pinned by a test) — only the cell and its caller are
+missing.
+
+## Verified
+
+- **26/26** resolver tests (11 existing + **9 new**: `newestRecurring`
+  fall-through incl. the dated-mask case, and the eviction filter) plus the 8
+  B3 newest-wins tests.
+- Full suite **2059 passed / 3 skipped / 1 failure** — the failure is
+  `test/hardware/base_ladder_repair_live_test.dart`, "rig should expose both
+  channels" (`1` vs `>= 2`), which is the rig's 2-segment precondition and
+  **environmental** (the bench controller collapses to one segment after a
+  reboot). Unrelated to this change.
+- `flutter analyze` on all three changed files: **0 errors, 0 warnings** (16
+  pre-existing deprecation infos).

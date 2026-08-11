@@ -142,4 +142,103 @@ void main() {
       expect(a.datedEntry?.patternName, b.datedEntry?.patternName);
     });
   });
+
+  // The three migrated surfaces (_DayHeroCard, _WeekDayCell, _buildTonightCard)
+  // do NOT read `recurringPrimary` directly — they fall through a dated entry
+  // field-by-field, so they need the newest recurring item even on a day a
+  // dated entry masks. That is what `newestRecurring` is, and these pin it.
+  group('newestRecurring — the masked fall-through accessor', () {
+    test('with no dated entry it IS the primary', () {
+      final r = resolveDay(datedEntry: null, recurringForDay: [
+        sched(id: 'old', sortKey: 1),
+        sched(id: 'new', sortKey: 2),
+      ]);
+      expect(r.newestRecurring!.id, 'new');
+      expect(r.newestRecurring, same(r.recurringPrimary));
+    });
+
+    test('a dated entry does NOT hide it — the newest is still reachable', () {
+      final r = resolveDay(datedEntry: dated(), recurringForDay: [
+        sched(id: 'old', sortKey: 1),
+        sched(id: 'new', sortKey: 2),
+      ]);
+      // Precedence is intact: nothing renders the recurring item as content.
+      expect(r.source, DaySource.dated);
+      expect(r.recurringPrimary, isNull);
+      // But onTime/offTime fall-through and the Tonight card's tap target
+      // both still resolve to the newest recurring schedule, as before B1.
+      expect(r.newestRecurring!.id, 'new');
+    });
+
+    test('null when nothing recurring covers the day, dated or not', () {
+      expect(
+        resolveDay(datedEntry: null, recurringForDay: const []).newestRecurring,
+        isNull,
+      );
+      expect(
+        resolveDay(datedEntry: dated(), recurringForDay: const [])
+            .newestRecurring,
+        isNull,
+      );
+    });
+
+    test('a disabled schedule is not a fall-through target either', () {
+      final r = resolveDay(
+        datedEntry: dated(),
+        recurringForDay: [sched(id: 'off', enabled: false)],
+      );
+      expect(r.newestRecurring, isNull);
+      expect(r.totalCount, 1, reason: 'the dated entry only');
+    });
+  });
+
+  // BEHAVIOUR CHANGE at the three migrated surfaces, recorded deliberately:
+  // none of them filtered soft-evicted schedules before B1, so a schedule the
+  // lease manager had evicted still showed as the day's plan while the device
+  // was never going to run it. resolveDay uses the same predicate as
+  // cfg_payload_builder.dart:183, so display now matches what actually arms.
+  group('soft-evicted schedules do not cover a day', () {
+    ScheduleItem evicted(String id, {int sortKey = 1}) => ScheduleItem(
+          id: id,
+          timeLabel: '8:00 PM',
+          actionLabel: 'Warm White',
+          repeatDays: const ['Mon'],
+          enabled: true,
+          sortKey: sortKey,
+          disabledUntil: DateTime.now().add(const Duration(days: 1)),
+        );
+
+    test('an evicted schedule cannot be the primary', () {
+      final r = resolveDay(datedEntry: null, recurringForDay: [
+        sched(id: 'live', sortKey: 1),
+        evicted('evicted', sortKey: 2),
+      ]);
+      expect(r.recurringPrimary!.id, 'live',
+          reason: 'newest-wins must not promote a schedule that will not arm');
+      expect(r.totalCount, 1);
+    });
+
+    test('a day covered only by an evicted schedule is EMPTY', () {
+      final r = resolveDay(
+        datedEntry: null,
+        recurringForDay: [evicted('x')],
+      );
+      expect(r.source, DaySource.none);
+    });
+
+    test('an expired eviction is live again', () {
+      final r = resolveDay(datedEntry: null, recurringForDay: [
+        ScheduleItem(
+          id: 'expired',
+          timeLabel: '8:00 PM',
+          actionLabel: 'Warm White',
+          repeatDays: const ['Mon'],
+          enabled: true,
+          sortKey: 1,
+          disabledUntil: DateTime.now().subtract(const Duration(days: 1)),
+        ),
+      ]);
+      expect(r.recurringPrimary!.id, 'expired');
+    });
+  });
 }

@@ -31,6 +31,7 @@ import 'package:nexgen_command/features/design/smart_presets/smart_presets_secti
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
+import 'package:nexgen_command/features/schedule/day_resolution.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
@@ -1333,7 +1334,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       final calEntry = calEntries[todayKey];
       final wd = today.weekday % 7;
       final recurring = schedules.where((s) {
-        if (!s.enabled) return false;
         final dl = s.repeatDays.map((e) => e.toLowerCase()).toSet();
         if (dl.contains('daily')) return true;
         const map = {
@@ -1347,13 +1347,17 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         };
         return (map[wd] ?? {}).any(dl.contains);
       }).toList();
-      // B3 (audit/MULTI_ENTRY_DISPLAY.md §2): NEWEST of the day, not oldest.
-      // sortKey is stamped max+1 per insert and both backends deliver ascending
-      // order (subcollection .orderBy(sortKey); legacy array appends), so the
-      // newest matching schedule is the LAST element. .first showed the oldest,
-      // so adding a schedule to an already-covered day changed nothing visible
-      // and read as a failed save. Precedence (calEntry ?? recurring) UNCHANGED.
-      final first = recurring.isNotEmpty ? recurring.last : null;
+      // B1 (audit/MULTI_ENTRY_DISPLAY.md §2): this card used to open-code the
+      // same resolution as the two schedule-screen surfaces, independently.
+      // resolveDay owns it now — precedence (a dated entry masks recurring,
+      // UNCHANGED) and newest-wins ordering (B3). The enabled filter moved into
+      // resolveDay with it, which is why the predicate above no longer checks it.
+      final day = resolveDay(datedEntry: calEntry, recurringForDay: recurring);
+      // `newestRecurring`, not `recurringPrimary`: `first` is used below both
+      // for time fall-through past a dated entry (onTime/offTime are nullable)
+      // and as the tap target, which has always opened the recurring
+      // ScheduleItem — a CalendarEntry is not editable in that editor.
+      final first = day.newestRecurring;
 
       // Route through the slug resolver so snake_case pattern slugs
       // (e.g. KC_Royals_Game_Day) render as display names, matching every
