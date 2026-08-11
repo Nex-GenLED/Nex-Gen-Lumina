@@ -290,3 +290,150 @@ existing rules permit.
 3. **The payload still has to be built from the set** — `applyChannelFilter` /
    `buildParticipatingSegArray` are Dart. The server needs an equivalent, and that is the other
    half of S3b's motivation that this pass does not address.
+
+---
+
+# THE PUBLISH GAP — scope, 2026-08-11. DESIGN ONLY, nothing implemented.
+
+## The problem, measured
+
+`publishParticipatingChannels` fires from exactly two client paths:
+
+| site | trigger | how often a customer does this |
+|---|---|---|
+| `game_day_autopilot_service.dart:451,472` via `evaluateConfigs` | autopilot evaluating a live config | needs the app FOREGROUNDED and on-LAN near game time |
+| `neighborhood_sync_engine.dart:685` | a sync run | needs an active sync group AND a deliberate trigger |
+
+Neither is routine. The 24-hour shadow (2026-08-10/11) showed five accounts at
+`never_resolved` with nothing changing for a full day, and the one account that
+DID resolve only did so because Tyler was asked to run a sync by hand.
+
+**Consequence:** the server-side planner depends on a field that only two
+rarely-exercised client paths ever write. Even after +68 reaches every tester,
+unattended Game Day would silently do nothing for most of the fleet — a
+September 14 that works for one house.
+
+## 1. What a publish actually requires
+
+```dart
+resolveParticipatingChannels({
+  required List<int>? explicit,          // config.participating_channel_indices — Firestore
+  required List<RooflineSegment> segments, // roofline_config — Firestore
+  required List<int> allDeviceChannelIds,  // THE DEVICE BUS LIST — /json/cfg
+})
+```
+
+**Two of the three inputs are already in Firestore.** Only `allDeviceChannelIds`
+requires the device, and it comes from the controller bus list over `/json/cfg`.
+
+**`/json/cfg` IS STILL LAN-ONLY — re-confirmed.** The bridge resolves its endpoint
+from three hardcoded pairs (`getState`→`/json/state`, `getInfo`→`/json/info`,
+default→POST `/json/state`); no branch can produce `/json/cfg`
+(audit/BASE_LADDER.md §5b). `CloudRelayRepository` cannot reach it either.
+
+> **This bounds every option below.** A publish can only ever happen while the
+> app is on the customer's home network. No amount of server work changes that,
+> because the one input the server lacks is the one input only the LAN exposes.
+
+## 2. Candidate trigger points
+
+| trigger | realistic frequency | has the inputs? | cost |
+|---|---|---|---|
+| **Controller connect (defaults healer)** | **every on-LAN app session** | **YES — already reads /json/cfg** | ~0 extra device I/O |
+| Ordinary app open on-LAN | every session, but needs its own cfg read | needs a NEW `/json/cfg` read | one extra LAN round-trip per launch |
+| Successful schedule sync | only when a schedule is saved/synced | yes — sync is already a LAN cfg operation | ~0, but rare: most customers set schedules once |
+| Installer wizard at commissioning | ONCE per install, ever | yes — wizard is on-LAN | ~0, but never re-fires; a channel change after install is never republished, and it does nothing for the existing fleet |
+
+The wizard option is worth naming only to reject it: it would fix future
+installs and leave every current account exactly where it is.
+
+## 3. The healer, assessed properly
+
+**It already has what the publish needs.** `controller_defaults_healer.dart` is
+documented LAN-ONLY at the top of the file — *"Every heal needs /json/cfg — to
+READ the current value (heal-only-broken)"* — so the bus list is already on hand
+each time it runs. **No new device read.**
+
+- **Fires on every on-LAN connect, for every customer**, with no new UI, no new
+  permission, and nothing for a customer to remember to do.
+- **Cost of the extra publish:** one small Firestore write per connect, and only
+  when the value CHANGED if gated the way the other defaults are.
+- **Readback gating applies naturally.** The healer's whole design is
+  heal-only-broken with surgical POSTs and a re-read; the same shape here is a
+  compare-then-write — a controller whose `participating_channels` already
+  matches receives **zero writes**. That matters because this would otherwise be
+  the healer's first unconditional write.
+
+**The one real objection:** the healer currently asserts DEVICE defaults
+(NTP/tz/coords/gamma/presets). Publishing participation is a FIRESTORE write
+about the device, not a device write — a different category of work in a file
+whose contract is "make the controller correct". That is a naming/ownership
+concern, not a functional one, and is cheaper to accept than a second on-connect
+hook that duplicates the cfg read.
+
+## 4. Staleness vs frequency
+
+`PARTICIPATION_MAX_AGE_MS` is **90 days**, chosen when publishes were assumed
+rare. Publishing on every on-LAN connect makes it **almost unreachable** — an
+account that opens the app at home even once a quarter never goes stale.
+
+That is the right direction, and it changes what the window is FOR: it stops
+being the primary freshness mechanism and becomes a **backstop for accounts that
+have stopped connecting** — which is exactly the population §5 describes. The 90
+days can stay; it would simply fire far less often.
+
+> ⚠️ **The reconciler → republish path has NEVER RUN.** It is the one piece of
+> S3b still unverified, and the entire staleness argument rests on it: if the bus
+> shape changes and the republish does not fire, a stale-but-recent value is
+> served with confidence. Frequent publishing MASKS this rather than fixing it —
+> a per-connect publish would overwrite the stale value on the next connect and
+> the reconciler bug would never surface. **Verify the reconciler BEFORE relying
+> on frequency**, or the bug goes latent instead of fixed.
+
+## 5. Accounts that never connect on-LAN — an honest limit
+
+**This population is real and is the point of the bridge.** A bridge-paired
+customer whose phone is rarely on the home network may never publish under ANY
+option above, because every option needs the LAN and the bridge cannot supply
+`/json/cfg`.
+
+Size: audit/BRIDGE_TRIAGE.md put unattended reach at ~40% of controller-owning
+accounts — but that measures bridges, not phone-on-LAN frequency, and **no
+measurement of the latter exists**. The honest statement is: the population is
+non-zero, probably small (most people are home sometimes), and **currently
+unmeasured**.
+
+**For that group, unattended Game Day is unavailable — not degraded, unavailable.**
+Without `participating_channels` the planner refuses rather than guessing, which
+is correct: guessing would light channels the customer excluded, or fall back to
+segment 0 and light a fraction of the house. **This is a limit to state to a
+customer, not a defect to fix.** The alternative — a bridge firmware branch for
+`/json/cfg` — is already owed for applyConfig and would be the only way to
+close it.
+
+## 6. Recommendation
+
+**Publish from the defaults healer on controller connect, compare-then-write.**
+
+It is the only candidate that already holds all three inputs, needs no new
+device I/O, fires often enough to matter, requires nothing of the customer, and
+reaches the EXISTING fleet rather than only new installs. Cost is one small
+conditional Firestore write per on-LAN connect.
+
+**Sequencing — does it gate `write_jobs`?**
+
+**No, and flipping first is defensible** — with one condition.
+
+- Flipping `write_jobs` with one resolved account drives exactly one house
+  (Tyler's bench). Every other account stays at `never_resolved` and the
+  planner refuses — so the blast radius of a flip is *smaller* now than it will
+  be after this ships, not larger.
+- That makes the current state a **better** live-fire test than a post-fix state:
+  one observable house instead of six.
+- **The condition:** the reconciler → republish verification (§4) should happen
+  before the healer publish ships, or frequency will hide it permanently.
+
+So: flip `write_jobs` when the shadow satisfies you, watch one house, and ship
+the healer publish after — deliberately, so the fleet arrives at participation
+AFTER the downstream paths have been exercised on a single controller rather
+than at the same moment.
