@@ -15,7 +15,7 @@ import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart'
     show CfgWriteUnsupportedException, WledRepository;
-import 'package:nexgen_command/features/wled/wled_service.dart' show WledService;
+import 'package:nexgen_command/features/wled/wled_service.dart' show WledService, PresetsRead;
 // P0-3.2: lease-timer provider so syncAll can MERGE active lease timers
 // (macro 26-41) and not stub-clobber them. Flag-gated → [] when leases inactive.
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
@@ -862,8 +862,28 @@ class ScheduleSyncService {
     // Preset defs come from the on-LAN HTTP service only (GET /presets.json);
     // for any other repo (cloud relay / mock) we treat presets as unknown and
     // fall back to writing — the capture/restore below still guards output.
-    final Map<int, Map<String, dynamic>> existingPresets =
-        activeRepo is WledService ? await activeRepo.fetchPresets() : const {};
+    // P1-52 / tri-state: distinguish "the controller has no presets" from "we
+    // could not read them". Rewriting the whole 1-5 + 10-25 block on an
+    // UNREADABLE read is the flash storm — each psave applies its inline state
+    // live, so a corrupt presets.json turned every Sync into a light show.
+    final PresetsRead presetsRead = activeRepo is WledService
+        ? await activeRepo.readPresets()
+        : const PresetsRead.deviceEmpty();
+    final Map<int, Map<String, dynamic>> existingPresets = presetsRead.presets;
+    final bool presetsUnreadable = !presetsRead.isKnown;
+    if (presetsUnreadable) {
+      // LEGIBLE, not silent. presetErrors renders as text in the sync status —
+      // this codebase has a long list of guards that reported success for work
+      // never done.
+      presetErrors.add(
+        'Could not read the presets saved on your controller '
+        '(${presetsRead.reason}). Your schedules were not re-saved, to avoid '
+        'overwriting them. Lights and existing schedules keep working; contact '
+        'support if this keeps happening.',
+      );
+      debugPrint('ScheduleSync: presets UNREADABLE (${presetsRead.reason}) — '
+          'refusing to rewrite the preset block');
+    }
     final Map<String, dynamic>? capturedLiveState = await activeRepo.getState();
     bool didWriteAnyPreset = false;
 
@@ -905,6 +925,13 @@ class ScheduleSyncService {
       required String name,
       required bool Function(Map<String, dynamic> existingDef) isSatisfied,
     }) async {
+      // REFUSE on an unreadable read. Counted as armable so a schedule whose
+      // preset we deliberately left alone is not also refused downstream — the
+      // preset is almost certainly still on the device; we just cannot see it.
+      if (presetsUnreadable) {
+        savedPresetIds.add(id);
+        return;
+      }
       final existing = existingPresets[id];
       if (existing != null && isSatisfied(existing)) {
         savedPresetIds.add(id);
@@ -1135,7 +1162,9 @@ class ScheduleSyncService {
     // slot vanished from presets.json). On-LAN only; cloud/mock can't enumerate
     // or delete, and the guard mirrors the fetchPresets read above. pdel does
     // NOT apply live state, so it never trips didWriteAnyPreset / restore.
-    if (activeRepo is WledService) {
+    // Never pdel on an unreadable read — we cannot tell an orphan from a slot
+    // we simply failed to see, and pdel is what corrupts presets.json (P1-52).
+    if (activeRepo is WledService && !presetsUnreadable) {
       for (var id = _firstSchedulePresetId; id <= _lastSchedulePresetId; id++) {
         if (existingPresets.containsKey(id) && !savedPresetIds.contains(id)) {
           final deleted = await activeRepo.deletePreset(id);

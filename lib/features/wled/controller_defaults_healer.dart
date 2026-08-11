@@ -572,12 +572,21 @@ class ControllerDefaultsHealer {
     for (var pass = 0; pass < 2; pass++) {
       Map<int, Map<String, dynamic>> presets;
       try {
-        presets = await svc.fetchPresets();
+        // Tri-state: an UNREADABLE read is not an un-synced controller. The old
+        // `presets.isEmpty` return could not tell them apart, so a corrupt
+        // presets.json made the healer silently inert (P1-52).
+        final read = await svc.readPresets();
+        if (!read.isKnown) {
+          report.log.add('on-preset heal SKIPPED — presets.json unreadable '
+              '(${read.reason}); cannot tell a broken preset from a missing one');
+          return;
+        }
+        presets = read.presets;
       } catch (e) {
-        report.log.add('on-preset master-power: fetchPresets failed: $e');
+        report.log.add('on-preset master-power: readPresets failed: $e');
         return;
       }
-      if (presets.isEmpty) return; // un-synced or unreadable — nothing to heal
+      if (presets.isEmpty) return; // genuinely un-synced — sync creates them
 
       // Live segment layout for the heal payload. Without it onPresetHealState
       // omits `seg` and the psave captures AMBIENT segment state — the exact

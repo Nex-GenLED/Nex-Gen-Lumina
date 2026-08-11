@@ -136,6 +136,64 @@ List<int> rgbToRgbw(int r, int g, int b, {int? explicitWhite, bool forceZeroWhit
   return [finalR, finalG, finalB, finalW];
 }
 
+
+/// Why a `/presets.json` read looks the way it does.
+///
+/// ⚠️ [unreadable] IS NOT [deviceEmpty]. Collapsing them is P1-52's amplifier:
+/// an unparseable presets.json made `psaveIfChanged` believe every slot was
+/// missing, so it re-saved the whole block — and each `psave` APPLIES its
+/// inline state live, flashing the lights on every sync. The on-connect healer
+/// went inert on the same signal, so nothing self-healed.
+///
+/// Same bug class as `activeLeaseTimers()` returning `[]` for both "no leases"
+/// and "don't know yet", which became P0-9a.
+///
+/// The name states the CAUSE, not a property of the data — the naming lesson
+/// from `BaseLayerStatus.absentInFirestore`. A test pins these members so a
+/// future tidy-up cannot quietly rename [unreadable] to something that reads
+/// like a legitimate empty.
+enum PresetsReadState {
+  /// Parsed, and the controller holds at least one preset.
+  available,
+
+  /// Parsed, and the controller genuinely holds none. A first write is
+  /// LEGITIMATE from this state.
+  deviceEmpty,
+
+  /// We do not know what the controller holds: non-2xx, unreachable, or an
+  /// unparseable body. Callers must REFUSE destructive work, not guess.
+  unreadable,
+}
+
+/// The result of a `/presets.json` read.
+class PresetsRead {
+  final PresetsReadState state;
+  final Map<int, Map<String, dynamic>> presets;
+
+  /// Why it was unreadable — `http`, `parse`, `shape`, `io`. Surfaced in the
+  /// user-facing warning so a support call has something to act on.
+  final String? reason;
+
+  const PresetsRead._(this.state, this.presets, this.reason);
+
+  const PresetsRead.deviceEmpty()
+      : state = PresetsReadState.deviceEmpty,
+        presets = const {},
+        reason = null;
+
+  const PresetsRead.unreadable(this.reason)
+      : state = PresetsReadState.unreadable,
+        presets = const {};
+
+  PresetsRead.available(this.presets)
+      : state = PresetsReadState.available,
+        reason = null;
+
+  /// True when the caller may act on [presets] as a complete picture of the
+  /// device. FALSE for [PresetsReadState.unreadable] — the whole point.
+  bool get isKnown => state != PresetsReadState.unreadable;
+}
+
 class WledService
     implements
         WledRepository,
@@ -881,10 +939,33 @@ class WledService
   /// filesystem. Schedule sync uses it to skip re-`psave`ing slots that already
   /// match (a `psave` applies its inline state live on this firmware, so the
   /// skip is what stops the strip flashing when a schedule is edited).
-  Future<Map<int, Map<String, dynamic>>> fetchPresets() async {
-    // No filesystem presets in sim mode — return empty so idempotence callers
-    // fall back to writing (matching pre-idempotence behavior under tests).
-    if (_simulate) return const {};
+  /// Legacy shape. Prefer [readPresets] — this collapses "unreadable" into an
+  /// empty map, which is the P1-52 amplifier (see [PresetsReadState]).
+  Future<Map<int, Map<String, dynamic>>> fetchPresets() async =>
+      (await _readPresetsHttp()).presets;
+
+  /// Read `/presets.json` and report WHY the result looks the way it does.
+  ///
+  /// The five conditions that used to collapse into one `const {}`:
+  /// sim mode and a genuinely empty controller → [PresetsReadState.deviceEmpty];
+  /// a non-2xx, an unreachable device, and an unparseable body →
+  /// [PresetsReadState.unreadable].
+  /// Tri-state read. Delegates to [fetchPresets] so a subclass that overrides
+  /// ONLY [fetchPresets] (every existing test fake) keeps working: an override
+  /// returning a map is a KNOWN answer by definition, since a fake cannot be
+  /// unreachable. Real HTTP work lives in [_readPresetsHttp].
+  Future<PresetsRead> readPresets() async {
+    final direct = await fetchPresets();
+    return direct.isEmpty
+        ? await _readPresetsHttp()
+        : PresetsRead.available(direct);
+  }
+
+  Future<PresetsRead> _readPresetsHttp() async {
+    // Sim mode has no filesystem presets. This is EMPTY, not unreadable — the
+    // device genuinely holds nothing, so a first write is legitimate and the
+    // pre-idempotence test behaviour is preserved.
+    if (_simulate) return const PresetsRead.deviceEmpty();
 
     try {
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
@@ -894,26 +975,43 @@ class WledService
       final body = await res.transform(utf8.decoder).join();
       client.close(force: true);
 
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        final decoded = jsonDecode(body);
-        if (decoded is Map) {
-          final result = <int, Map<String, dynamic>>{};
-          for (final entry in decoded.entries) {
-            final id = int.tryParse(entry.key.toString());
-            // Slot "0" is WLED's empty/scratch slot — skip it.
-            if (id != null && id > 0 && entry.value is Map) {
-              result[id] = Map<String, dynamic>.from(entry.value as Map);
-            }
-          }
-          debugPrint('📋 Fetched ${result.length} WLED preset definitions');
-          return result;
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        debugPrint('WLED readPresets: HTTP ${res.statusCode} — UNREADABLE');
+        return const PresetsRead.unreadable('http');
+      }
+
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(body);
+      } on FormatException catch (e) {
+        // P1-52: a `pdel` can leave presets.json with a stray byte, making the
+        // WHOLE file unparseable. This used to return {} and make the sync
+        // believe every slot was missing.
+        debugPrint('WLED readPresets: presets.json UNPARSEABLE — $e');
+        return const PresetsRead.unreadable('parse');
+      }
+      if (decoded is! Map) {
+        debugPrint('WLED readPresets: presets.json is not a Map — UNREADABLE');
+        return const PresetsRead.unreadable('shape');
+      }
+
+      final result = <int, Map<String, dynamic>>{};
+      for (final entry in decoded.entries) {
+        final id = int.tryParse(entry.key.toString());
+        // Slot "0" is WLED's empty/scratch slot — skip it.
+        if (id != null && id > 0 && entry.value is Map) {
+          result[id] = Map<String, dynamic>.from(entry.value as Map);
         }
       }
-      debugPrint('WLED fetchPresets status ${res.statusCode}');
+      debugPrint('📋 Fetched ${result.length} WLED preset definitions');
+      return result.isEmpty
+          ? const PresetsRead.deviceEmpty()
+          : PresetsRead.available(result);
     } catch (e) {
-      debugPrint('WLED fetchPresets error: $e');
+      // Timeout, socket failure, DNS — we do not know what the device holds.
+      debugPrint('WLED readPresets: $e — UNREADABLE');
+      return const PresetsRead.unreadable('io');
     }
-    return const {};
   }
 
   @override

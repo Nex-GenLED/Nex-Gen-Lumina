@@ -264,6 +264,24 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     stronger version returns a tri-state (`presets | empty | unreadable`) so `psaveIfChanged` can
     refuse to rewrite the world on an unreadable file. **Repairing the file from the app is a
     separate, larger question — this entry asks only that it be NAMED.**
+  - **DETECTION SHIPPED 2026-08-11 (tri-state).** `fetchPresets` folded FIVE
+    conditions into one `const {}` — sim mode, an empty controller, a non-2xx, an
+    unreachable device, and a `FormatException` on an unparseable body.
+    `WledService.readPresets()` now returns `PresetsRead` with
+    `available | deviceEmpty | unreadable` plus a cause
+    (`http`/`parse`/`shape`/`io`).
+    **Same bug class as `activeLeaseTimers()` returning `[]` for both "no leases"
+    and "do not know yet", which became P0-9a.**
+  - Behaviour on `unreadable`: the sync REFUSES to rewrite the preset block (this is
+    what stops the flash storm, since each psave applies its inline state live), refuses
+    the `pdel` orphan purge (never delete what you cannot see, and `pdel` is what
+    corrupts the file), and adds a user-visible `presetErrors` line naming the cause.
+    The healer distinguishes too: an unreadable read logs a SKIP instead of the old
+    silent `presets.isEmpty` return. `deviceEmpty` still permits a legitimate
+    first write.
+  - **The corrupt file is still NOT repaired from the app** — deliberately out of scope.
+    This names the problem so a support call can act on it; recovery still needs the
+    `/edit` upload used on the bench 2026-08-10.
   - Logged read-only per instruction; nothing fixed. Full incident write-up in
     `audit/BASE_LADDER.md` §6b.
 
