@@ -42,16 +42,35 @@ const FIRST_PITCH_UTC = '2026-08-12T02:10:00Z';
   if (!sum) {
     console.log('(no lastSummary — running pre-unconditional-log code)');
   } else {
+    // START phase only. END outcomes live in `endSkipped` and are a SEPARATE
+    // dimension: a config that plans a start still falls through to the end
+    // guards (it must — during a live game every config sits on
+    // start_already_planned and still has to reach decideEndSignal). Summing
+    // both against configsEnabled would double-count by design.
     const sk = sum.skipped || {};
+    const esk = sum.endSkipped || {};
     const skipTotal = Object.values(sk).reduce((a, b) => a + b, 0);
     const accounted = skipTotal + (sum.startsPlanned || 0);
+    const errs = sum.errors || 0;
     console.log('  usersScanned   :', sum.usersScanned);
     console.log('  configsEnabled :', sum.configsEnabled);
     console.log('  startsPlanned  :', sum.startsPlanned, '  endsPlanned:', sum.endsPlanned);
-    console.log('  espnErrors     :', sum.espnErrors, '  errors:', sum.errors);
-    console.log('  skipped        :', JSON.stringify(sk));
+    console.log('  espnErrors     :', sum.espnErrors, '  errors:', errs);
+    console.log('  skipped (START):', JSON.stringify(sk));
+    console.log('  endSkipped     :', JSON.stringify(esk));
+    // A config that THREW is counted in errors and may never have reached a
+    // bucket, so it can legitimately leave the sum short by up to `errors`.
+    const ok = accounted === sum.configsEnabled ||
+      (accounted < sum.configsEnabled && accounted + errs >= sum.configsEnabled);
     console.log('  RECONCILES     :', accounted, '/', sum.configsEnabled,
-      accounted === sum.configsEnabled ? '✓' : '✗ UNACCOUNTED CONFIGS');
+      accounted === sum.configsEnabled ? '✓'
+        : ok ? '✓ (short by ' + (sum.configsEnabled - accounted) + ', within errors=' + errs + ')'
+          : '✗ UNACCOUNTED CONFIGS');
+    if (sum.endSkipped === undefined) {
+      console.log('  NOTE: no endSkipped field — this doc predates the ' +
+        '2026-08-11 accounting fix; its skipped map may still carry stale ' +
+        'keys from the merge bug and will not reconcile.');
+    }
   }
 
   // ── the rows this window cares about ─────────────────────────────────

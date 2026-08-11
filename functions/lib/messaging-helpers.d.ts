@@ -25,6 +25,25 @@ export interface SendEmailParams {
     subject: string;
     htmlBody: string;
     textBody: string;
+    /**
+     * Optional sender override. Defaults to RESEND_FROM_EMAIL.
+     *
+     * WHY THIS EXISTS (2026-08-07). `nex-genled.com` has been registered with
+     * Resend since 2026-04-08 with status `not_started` — its DNS was never
+     * verified — so EVERY send from `hello@nex-genled.com` is refused 403. That
+     * blocks the S6 health digest, which needs to work now and goes to exactly
+     * one internal address, and it also blocks the customer welcome email.
+     *
+     * The override exists so the INTERNAL digest can use Resend's shared
+     * `onboarding@resend.dev` sender as an interim, WITHOUT repointing the global
+     * sender. That distinction is deliberate: a customer welcome email carrying a
+     * password-reset link, sent from `onboarding@resend.dev`, would read as
+     * phishing. Customer-facing mail must keep failing loudly until the domain is
+     * verified rather than quietly going out under a stranger's address.
+     *
+     * Remove the override once DNS verification lands.
+     */
+    fromEmail?: string;
 }
 /**
  * Send a transactional email via Resend. Throws on validation failure

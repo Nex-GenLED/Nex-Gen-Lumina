@@ -83,7 +83,21 @@ interface PlanStats {
   configsEnabled: number;
   startsPlanned: number;
   endsPlanned: number;
+  /**
+   * START-phase outcomes. **Exactly one bucket per enabled config**, so the
+   * invariant is `sum(skipped) + startsPlanned === configsEnabled` (less any
+   * config that threw — see `errors`).
+   *
+   * END outcomes are deliberately NOT in here. A config that plans a start
+   * then falls through to the end guards would increment twice and the sum
+   * would exceed configsEnabled. That fall-through is CORRECT and must not be
+   * `continue`d away: during a live game every config sits on
+   * `start_already_planned` and still has to reach `decideEndSignal` to fire
+   * its end. The two phases are separate accounting dimensions, not one.
+   */
   skipped: Record<string, number>;
+  /** END-phase outcomes. Reconciles against `endsPlanned`, not against START. */
+  endSkipped: Record<string, number>;
   espnErrors: number;
   errors: number;
 }
@@ -183,6 +197,7 @@ export async function runPlannerTick(
     startsPlanned: 0,
     endsPlanned: 0,
     skipped: {},
+    endSkipped: {},
     espnErrors: 0,
     errors: 0,
   };
@@ -218,6 +233,16 @@ export async function runPlannerTick(
       try {
         if (!controller) {
           bump(stats.skipped, "no_controller");
+          // ATTRIBUTABLE (2026-08-11): counter-only buckets were nameable but
+          // not attributable — "2 configs have no controller" with no way to
+          // say whose. Rows go through arrayUnion, which DEDUPES identical
+          // objects, so a row carrying no per-tick-varying field collapses to
+          // one entry for the whole day however many ticks run. Volume is
+          // bounded by DISTINCT (uid, teamSlug, reason) — at most
+          // configsEnabled rows/day from these three buckets, not
+          // ticks × configs. That is why no cap is needed; adding a timestamp
+          // here would defeat the dedupe and is exactly what not to do.
+          logRows.push({ uid, teamSlug, action: "skip", reason: "no_controller" });
           continue;
         }
 
@@ -235,6 +260,10 @@ export async function runPlannerTick(
         const game = gameCache.get(key) ?? null;
         if (!game) {
           bump(stats.skipped, "no_game");
+          // The biggest bucket (11 of 19 on 2026-08-11) and still bounded: one
+          // row per (uid, teamSlug), deduped by arrayUnion across every tick.
+          // No eventId exists here — there is no game to name.
+          logRows.push({ uid, teamSlug, action: "skip", reason: "no_game" });
           continue;
         }
 
@@ -357,6 +386,13 @@ export async function runPlannerTick(
           // participation resolved, it is simply further out than
           // PLAN_HORIZON_MS. It will plan on a later tick.
           bump(stats.skipped, "outside_horizon");
+          // Now attributable. fireAt is derived from the game start and the
+          // config's lead, so it is CONSTANT for a given game — the row dedupes
+          // across ticks instead of accumulating one per tick.
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: "outside_horizon",
+            fireAt: new Date(startFireAt).toISOString(),
+          });
         } else if (startInPast) {
           // Fire time already elapsed — a late deploy, a long outage, or a
           // start time that moved earlier. Distinct from beyond-horizon and
@@ -421,7 +457,10 @@ export async function runPlannerTick(
           }
           stats.endsPlanned++;
         } else if (decision.reason !== "not_final" && decision.reason !== "already_fired") {
-          bump(stats.skipped, `end:${decision.reason.split(":")[0]}`);
+          // endSkipped, NOT skipped: this config has already been counted once
+          // in the START dimension and counting it again there would break
+          // `sum(skipped) + startsPlanned === configsEnabled`.
+          bump(stats.endSkipped, `end:${decision.reason.split(":")[0]}`);
         }
       } catch (err) {
         stats.errors++;
@@ -459,7 +498,10 @@ export async function runPlannerTick(
     startsPlanned: stats.startsPlanned,
     endsPlanned: stats.endsPlanned,
     // Skip reasons by category — the field whose absence cost the most.
+    // START phase, one bucket per config. See PlanStats.skipped.
     skipped: stats.skipped,
+    // END phase, counted separately so the START sum stays exact.
+    endSkipped: stats.endSkipped,
     espnErrors: stats.espnErrors,
     errors: stats.errors,
   };
@@ -475,13 +517,33 @@ export async function runPlannerTick(
         ticks: admin.firestore.FieldValue.arrayUnion(
           JSON.parse(JSON.stringify({ ...summary, at: new Date(nowMs).toISOString() }))
         ),
-        lastSummary: summary,
         ...(logRows.length > 0
           ? { rows: admin.firestore.FieldValue.arrayUnion(...logRows) }
           : {}),
       },
       { merge: true }
     );
+
+  // lastSummary is written SEPARATELY, with update(), and that is load-bearing.
+  //
+  // ⚠️ THE 20/19 BUG (found 2026-08-11). It was written inside the set(...,
+  // {merge:true}) above, and Firestore merges nested maps KEY BY KEY. `bump()`
+  // only ever creates keys, so a bucket that stopped occurring was never
+  // cleared — it was frozen into lastSummary forever.
+  //
+  // Exactly what happened that day: for 31 ticks the Royals game sat beyond the
+  // horizon (`outside_horizon: 1`). At 19:40Z it came inside, the planner
+  // dropped that key and set `startsPlanned: 1` — but the stale
+  // `outside_horizon: 1` survived the merge and kept being added to the total.
+  // The checker read 20 of 19 and reported an "unaccounted config" that did not
+  // exist, and reported a config "waiting on the horizon" when none was.
+  //
+  // Every one of the 42 per-tick snapshots in `ticks` reconciled 19/19 — the
+  // planner's accounting was correct all along; only the merged view lied.
+  // update() on a top-level field REPLACES it, so a bucket that stops occurring
+  // now disappears. It runs after the set() above, which creates the doc, so
+  // there is no missing-document failure mode.
+  await db.collection(PLAN_LOG_COLLECTION).doc(day).update({ lastSummary: summary });
 
   const quiet = stats.configsEnabled === 0;
   if (!quiet) {

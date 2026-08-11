@@ -519,3 +519,110 @@ works. It also means the planner must LEARN the base boundaries — which, given
 (audit/S3B_CHANNELS.md publish gap). **The same on-LAN publish mechanism solves
 both**, and that is the strongest argument yet for putting it in the defaults
 healer.
+
+---
+
+# PLANNER ACCOUNTING — the 20/19 was the LOG lying, not the planner
+
+**Date:** 2026-08-11 · **Deployed:** `planGameDayFires` only. Flag untouched.
+
+## The reported defect, and why it was not the defect
+
+The checkpoint reader showed `RECONCILES: 20 / 19 ✗ UNACCOUNTED CONFIGS` and an
+`outside_horizon: 1` that would not clear. The obvious mechanism — the START
+if/else chain has no `continue` before the END block, so a config that plans a
+start falls through into `decideEndSignal` and increments twice — **is real but
+was NOT what produced those numbers.**
+
+`ticks` is `arrayUnion`ed as whole per-tick objects and is therefore the ground
+truth. **All 42 ticks that day reconcile 19/19.** The planner's per-config
+accounting was correct the entire time:
+
+```
+17:10Z … 19:35Z  (31 ticks)  starts=0  skipped={no_game:11, participation:5, no_controller:2, outside_horizon:1}  19/19 ok
+19:40Z … 20:35Z  (11 ticks)  starts=1  skipped={no_game:11, participation:5, no_controller:2}                      19/19 ok
+```
+
+At 19:40Z the Royals game came inside `PLAN_HORIZON_MS`. `outside_horizon`
+correctly stopped occurring and `startsPlanned` became 1.
+
+**The lie is in `lastSummary`.** It was written inside
+`set({...}, {merge: true})`, and **Firestore merges nested maps key by key**.
+`bump()` only ever creates keys, so a bucket that stops occurring is never
+cleared — the stale `outside_horizon: 1` was frozen into `lastSummary` at 19:35Z
+and kept being added to the total forever after. Hence 20 of 19, and hence a
+config reported as "waiting on the horizon" when no such config existed.
+
+This is the same class as the `orderBy("at")` miss recorded above: the surface
+was not broken, the **read of it** was. Both cost a wrong conclusion about a
+live shadow run.
+
+**Fix:** `lastSummary` is now written by a separate `update()`, which replaces a
+top-level field wholesale. It runs after the `set()` that creates the document,
+so there is no missing-doc failure mode.
+
+## The END fall-through — real, latent, and fixed a different way than asked
+
+A config CAN increment a START bucket and an END bucket in the same tick. It
+contributed nothing on 2026-08-11 (`endsPlanned: 0`, no `end:*` key), but it
+would break the invariant on any night a game goes final.
+
+**`continue` after the START chain would be a serious bug.** During a live game
+every config sits on `start_already_planned` — and it still has to reach
+`decideEndSignal` to fire its end. Cutting the fall-through would disable the
+end path for exactly the configs that need it.
+
+The fall-through is correct; the *invariant* was wrong. START and END are two
+accounting dimensions, not one. `end:*` outcomes now bump a separate
+`stats.endSkipped`, so:
+
+```
+sum(skipped) + startsPlanned === configsEnabled     ← START, one bucket per config
+endsPlanned + sum(endSkipped)                        ← END, independent
+```
+
+A config that throws is counted in `errors` and may never reach a bucket, so the
+sum can legitimately fall short by up to `errors`; the checker allows for that
+explicitly rather than reporting a false ✗.
+
+## Counter-only buckets are now attributable
+
+`no_game` (11), `outside_horizon` (1) and `no_controller` (2) bumped and
+`continue`d without pushing a row — countable but not attributable, which is the
+exact state `outside_horizon` was added to escape. All three now push
+`{uid, teamSlug, action:"skip", reason}`; `outside_horizon` also carries
+`eventId` and `fireAt`.
+
+**Volume needs no cap, and this is why:** rows persist via `arrayUnion`, which
+**dedupes identical objects**. A row carrying no per-tick-varying field collapses
+to ONE entry for the whole day however many ticks run. Volume is bounded by
+distinct `(uid, teamSlug, reason)` — at most `configsEnabled` rows/day from these
+three buckets, not `ticks × configs`. Adding a timestamp would defeat the dedupe
+and turn 11 rows into ~3,100; that is the thing not to do here.
+
+Still counter-only, deliberately, as they did not appear on 2026-08-11:
+`daylight_game`, `start_already_planned`, `start_time_passed`. **`start_time_passed`
+is the one worth doing next** — its own comment calls it "materially worse" than
+beyond-horizon, and it is currently as anonymous as the three just fixed.
+
+## ⚠️ FOR THE NEXT READER — rows accumulate; that is not a double-count
+
+`rows` is written with `arrayUnion(...logRows)`, so it **accumulates across every
+tick of the day** and dedupes identical objects. `lastSummary` is ONE tick.
+Comparing them will mislead you:
+
+- On 2026-08-11, `rows` held 11 `participation_never_resolved` entries while
+  `lastSummary.skipped` said 5. Both correct — 5 in the latest tick, 11 distinct
+  `(uid, team, eventId)` across the day, spanning two different games
+  (`…401816475` and `…401816490`).
+- One config, `wrQRUUKy/mlb_royals/gd_mlb_royals_401816490`, appears with BOTH a
+  `participation_never_resolved` row AND a `plan_start` row **for the same
+  game**. That looks like the planner skipping and planning the same config at
+  once. It is not, and it cannot be: `teamSlug = cfgDoc.id`, so a user has at
+  most one config per team, and the participation branch `continue`s.
+
+  **Those two rows are different ticks.** Participation was unresolved earlier in
+  the day and RESOLVED before the planning tick — S3b's publish landing for that
+  user. It is the good news in that log, not a bug.
+
+If you want per-tick truth, read `ticks`. Never reconstruct it from `rows`.

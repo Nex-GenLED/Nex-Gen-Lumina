@@ -133,7 +133,7 @@ async function sendEmail(params) {
         throw new Error("sendEmail: 'textBody' is required");
     }
     const apiKey = resendApiKey.value();
-    const fromEmail = resendFromEmail.value();
+    const fromEmail = params.fromEmail || resendFromEmail.value();
     const fromName = resendFromName.value();
     if (!apiKey || !fromEmail || !fromName) {
         throw new Error("sendEmail: Resend credentials not configured " +
