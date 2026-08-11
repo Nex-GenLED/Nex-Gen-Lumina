@@ -32,6 +32,9 @@
 
 import 'package:flutter/foundation.dart';
 
+import 'package:nexgen_command/features/schedule/timer_landing.dart'
+    show timerInstancesFromCfg;
+
 /// Capability interface for repositories that can read a controller's clock /
 /// timezone / location for the BUG-CLOCK-1 health check. Kept OFF
 /// [WledRepository] on purpose — like PerPixelWriter — so the many repository
@@ -121,6 +124,20 @@ class ControllerClockInfo {
   /// can refuse to reboot a controller whose lights are off.
   final bool? turnOnAtBoot;
 
+  /// Raw `cfg.timers.ins` rows — the controller's timer table.
+  ///
+  /// Not clock health. Carried here for the same reason [bootPresetId] is: this
+  /// is already the healer's one `/json/cfg` read, and the base-boundary
+  /// publisher needs these rows so a server-side planner can treat device
+  /// timers as fixed points (it has no other way to see them — the bridge
+  /// exposes no cfg endpoint). Reading them here costs nothing; a second fetch
+  /// would cost a LAN round-trip per connect.
+  ///
+  /// **Null means UNREADABLE, `[]` means read-and-empty.** WLED always
+  /// serializes this array, so null is relay mode or a failed cfg read — never
+  /// "this controller has no timers". Consumers must keep the two apart.
+  final List<Map<String, dynamic>>? timerRows;
+
   const ControllerClockInfo({
     this.deviceTime,
     this.tzIndex,
@@ -130,6 +147,7 @@ class ControllerClockInfo {
     this.ntpHost,
     this.bootPresetId,
     this.turnOnAtBoot,
+    this.timerRows,
   });
 
   /// True when timezone fields were readable (local mode). False in relay mode
@@ -141,6 +159,11 @@ class ControllerClockInfo {
 
   /// True when the NTP host field was readable (local mode only).
   bool get ntpHostKnown => ntpHost != null;
+
+  /// True when the timer table was readable. False in relay mode and on a
+  /// failed cfg read — the base-boundary publish is skipped rather than
+  /// publishing an empty table the planner would believe.
+  bool get timersKnown => timerRows != null;
 
   /// Build from the raw /json/info and (optional) /json/cfg maps.
   factory ControllerClockInfo.fromMaps(
@@ -187,6 +210,10 @@ class ControllerClockInfo {
       ntpHost: host,
       bootPresetId: bootPs,
       turnOnAtBoot: onAtBoot,
+      // Shared extractor — the same one WledService.fetchTimerInstances uses
+      // for schedule readback, so a timer row means the same thing to the
+      // publisher and to the sync verifier. Null-on-absent is load-bearing.
+      timerRows: timerInstancesFromCfg(cfg),
     );
   }
 }

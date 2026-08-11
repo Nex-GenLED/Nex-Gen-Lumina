@@ -40,6 +40,36 @@
 // landed) and restores the class's own stated policy: heal only what you can
 // verify. Restoring relay heals requires a bridge `applyConfig`/`getCfg`
 // command — a firmware change, and the bridge has no OTA.
+//
+// ── ONE NON-HEAL RESPONSIBILITY: PUBLISHING DEVICE-ONLY FACTS ───────────────
+//
+// This class also publishes two values to FIRESTORE — `participating_channels`
+// and `base_boundaries`. That is a write ABOUT the controller, not TO it, and
+// it widens a file whose contract was "make the controller correct". The
+// widening is deliberate and this is the argued-for home:
+//
+//   • Both values are LAN-ONLY reads. `/json/cfg` is the source of each, and
+//     the bridge resolves only /json/state and /json/info, so no server-side
+//     path can ever produce them.
+//   • This is the ONLY code path that is LAN-only, ALREADY holds a /json/cfg
+//     read, and fires on every on-LAN session for every customer. Publishing
+//     here needs no new device I/O, no new UI, and nothing a customer has to
+//     remember to do, and it reaches the EXISTING fleet rather than only new
+//     installs.
+//   • The two rejected alternatives: the installer wizard fires once per
+//     install ever (fixes future installs, leaves every current account where
+//     it is), and a fresh on-open cfg read duplicates the fetch this class
+//     already makes.
+//
+// The publish is UNAWAITED and NON-FATAL, and runs BEFORE the heals so a heal
+// failure — or the reboot at (g) — cannot skip it. It is bounded by the same
+// LAN gate as everything else here: a relay connect returns before it.
+//
+// HONEST COST: once per app session per controller, NOT zero-when-healthy. The
+// dedup memo is process-scoped and never reads Firestore, so the first publish
+// of every session goes out regardless of the controller's health. That is the
+// deliberate self-heal for a lost write; `*_publish_count` exists so the rate
+// is auditable rather than assumed. See audit/HEALER_PUBLISH.md.
 
 import 'dart:async';
 
@@ -47,11 +77,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/neighborhood/services/channel_participation_resolver.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/audioreactive_health.dart';
+import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
+import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart';
@@ -306,6 +342,19 @@ class ControllerHealReport {
   /// The ntp-host heal was written but the reboot was DEFERRED to the next
   /// natural boot (lights were on a non-boot look). The cfg write persists.
   bool rebootDeferred = false;
+
+  /// A device-facts publish was DISPATCHED this run. Not a heal, and
+  /// deliberately not part of [anyHealed]: it says the healer handed both
+  /// families to the publisher, which then applies its own dedup. The write is
+  /// unawaited, so it may still be in flight when this report is returned —
+  /// this flag is "we tried", never "it landed".
+  bool factsPublishDispatched = false;
+
+  /// Number of armed timer rows read from `timers.ins` and handed to the
+  /// publisher. Null when the timer table was unreadable (relay, failed cfg
+  /// read) — distinct from 0, which means read-and-empty.
+  int? baseBoundaryRowsRead;
+
   final List<String> log = [];
 
   bool get anyHealed =>
@@ -327,6 +376,7 @@ class ControllerHealReport {
       if (onPresetsHealed.isNotEmpty) 'on-presets${onPresetsHealed.join('/')}',
       if (rebooted) 'reboot',
       if (rebootDeferred) 'reboot-deferred',
+      if (factsPublishDispatched) 'facts-publish',
     ];
     return parts.isEmpty ? 'no-op' : parts.join('+');
   }
@@ -349,12 +399,43 @@ class ControllerDefaultsHealer {
   final ControllerHealContext ctx;
   final GammaSelfHealAction gammaAction;
 
+  /// Firestore document id of the controller being healed — the publish target.
+  /// Null (demo mode, cold start before discovery) disables the publish half;
+  /// every heal still runs.
+  final String? controllerId;
+
+  /// The controller's hardware BUS ids, and the participating-channel set
+  /// RESOLVED against them. **Both are supplied by the caller.**
+  ///
+  /// DECISION (2026-08-11): passed in as parameters, not read from a `ref` and
+  /// not derived here. This class is deliberately dependency-light and runs for
+  /// every controller on every connect; deriving the bus list internally would
+  /// duplicate the bus→[DeviceChannel] parsing that `deviceChannelsProvider`
+  /// already owns, and two implementations of that parsing would drift. The
+  /// resolution additionally needs the roofline segments, which is a second
+  /// provider — the caller holds both.
+  ///
+  /// [participatingChannels] null means "no opinion" and publishes nothing.
+  /// [deviceChannelIds] empty means the bus list has not loaded yet and also
+  /// publishes nothing (see `participationShapeIsKnown`) — the next connect
+  /// republishes.
+  final List<int>? participatingChannels;
+  final List<int> deviceChannelIds;
+
+  /// Where device-only facts go. Injected so this class stays testable without
+  /// Firestore.
+  final ControllerFactsPublisher publisher;
+
   const ControllerDefaultsHealer({
     required this.repo,
     required this.isLan,
     required this.controllerIp,
     required this.ctx,
     required this.gammaAction,
+    this.controllerId,
+    this.participatingChannels,
+    this.deviceChannelIds = const <int>[],
+    this.publisher = const FirestoreControllerFactsPublisher(),
   });
 
   Future<ControllerHealReport> run() async {
@@ -386,6 +467,20 @@ class ControllerDefaultsHealer {
       report.reachable = false;
       return report;
     }
+
+    // ── PUBLISH — device-only facts, before any heal ────────────────────────
+    //
+    // Not a heal: this writes to Firestore, not the controller. It runs here,
+    // first, for three reasons. (1) The cfg read above is the only source of
+    // both families and it has just succeeded. (2) Placing it before the heals
+    // means a heal that fails, or the reboot at (g), cannot skip it. (3) It is
+    // past the relay bail-out, so it can only ever fire on a LAN connect —
+    // which is the only place the inputs exist.
+    //
+    // Unawaited and never fatal. A Firestore write must not delay or fail a
+    // heal, and the publisher swallows its own errors (the memo stays
+    // uncommitted, so the next connect retries).
+    _dispatchFactsPublish(info, report);
 
     final now = ctx.now();
     final health = evaluateClockHealth(
@@ -533,6 +628,51 @@ class ControllerDefaultsHealer {
     }
 
     return report;
+  }
+
+  /// Hands both device-only fact families to the publisher in one call, so a
+  /// connect costs at most ONE Firestore write.
+  ///
+  /// Everything about WHETHER to write lives in the publisher and the two
+  /// denormalizers (null-vs-empty, dedup memos, unknown device shape). This
+  /// method only assembles inputs and records, synchronously, that it did — so
+  /// the report is deterministic even though the write is not awaited.
+  void _dispatchFactsPublish(
+    ControllerClockInfo info,
+    ControllerHealReport report,
+  ) {
+    final id = controllerId;
+    if (id == null || id.isEmpty) {
+      // Routine, not an anomaly (demo mode, cold start before discovery), so
+      // this stays OUT of report.log — that list is for heal problems worth a
+      // human's attention, and a per-connect entry would drown them.
+      debugPrint('[Healer] facts publish skipped — no controller id');
+      return;
+    }
+
+    // Belt and braces around a FIRE-AND-FORGET call: the real publisher
+    // swallows its own errors, but a synchronous throw here — or from an
+    // injected publisher — would escape into run() and abort the heals. A
+    // Firestore write must never be able to do that.
+    try {
+      // Straight from the cfg read above. NULL rows = the timer table was
+      // unreadable; the publisher leaves whatever is stored rather than telling
+      // the planner this house has no boundaries.
+      final rows = extractBaseBoundaries(info.timerRows);
+      report.baseBoundaryRowsRead = rows?.length;
+      report.factsPublishDispatched = true;
+
+      unawaited(publisher.publishDeviceFacts(
+        controllerId: id,
+        participation: participatingChannels,
+        deviceChannelIds: deviceChannelIds,
+        baseBoundaries: rows,
+        slotsRead: info.timerRows?.length ?? 0,
+        source: kHealerPublishSource,
+      ));
+    } catch (e) {
+      report.log.add('facts publish dispatch failed: $e');
+    }
   }
 
   /// Repairs system ON presets (1/3/4/5) that do not assert ROOT master power.
@@ -798,6 +938,13 @@ final gammaSelfHealActionProvider = Provider<GammaSelfHealAction>(
   (ref) => (ip) => pushGammaConfig(ip),
 );
 
+/// Test seam for the publish half. Overriding this with a recorder is how a
+/// widget/integration test observes a connect publishing without touching
+/// Firestore.
+final controllerFactsPublisherProvider = Provider<ControllerFactsPublisher>(
+  (ref) => const FirestoreControllerFactsPublisher(),
+);
+
 // ── Gamma watchdog ─────────────────────────────────────────────────────────
 
 /// Low-frequency cadence for [GammaWatchdog]. The connect-time heal fires ONCE
@@ -951,6 +1098,28 @@ final controllerDefaultsHealerProvider =
       ip = repo.controllerIp;
     }
 
+    // Publish inputs, resolved HERE and passed in — see the constructor doc for
+    // why the healer does not derive them. `deviceChannelsProvider` owns the
+    // bus→channel parsing; the resolver is the same pure function the Game Day
+    // and Neighborhood Sync publish sites call, so all three publish the same
+    // answer for the same device.
+    final deviceChannelIds =
+        ref.read(deviceChannelsProvider).map((c) => c.id).toList();
+    final rooflineAsync = ref.read(currentRooflineConfigProvider);
+    final segments = rooflineAsync.maybeWhen(
+      data: (c) => c?.segments ?? const <RooflineSegment>[],
+      orElse: () => const <RooflineSegment>[],
+    );
+    // `explicit: null` matches the other two publish sites: no channel picker
+    // writes participatingChannelIndices today, so the default policy is the
+    // only branch reachable. When a picker ships, all three sites need the
+    // explicit set threaded through together.
+    final participating = resolveParticipatingChannels(
+      explicit: null,
+      segments: segments,
+      allDeviceChannelIds: deviceChannelIds,
+    );
+
     final profile = ref.read(currentUserProfileProvider).valueOrNull;
     final nowFn = ref.read(healerPhoneNowProvider);
     final ctx = ControllerHealContext(
@@ -968,6 +1137,10 @@ final controllerDefaultsHealerProvider =
       controllerIp: ip,
       ctx: ctx,
       gammaAction: ref.read(gammaSelfHealActionProvider),
+      controllerId: ref.read(selectedControllerIdProvider),
+      participatingChannels: participating,
+      deviceChannelIds: deviceChannelIds,
+      publisher: ref.read(controllerFactsPublisherProvider),
     );
 
     final report = await healer.run();

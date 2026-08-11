@@ -25,8 +25,9 @@
 // resolver is untouched; this only publishes its answer.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+
+import 'package:nexgen_command/features/wled/controller_facts_writer.dart';
 
 /// Firestore field names. snake_case, matching the user/controller doc
 /// convention (`controller_ips`, `dealer_code`, `display_name`).
@@ -118,6 +119,70 @@ void rememberPublishedParticipation(String controllerId, List<int> resolved) {
   publishedParticipationMemo[controllerId] = List<int>.from(resolved);
 }
 
+/// True when a resolution is safe to publish given the device shape it was
+/// computed against.
+///
+/// An EMPTY [deviceChannelIds] means the bus list has not loaded yet —
+/// `deviceHardwareConfigProvider` is a FutureProvider fed by the same
+/// `/json/cfg` and is routinely still in flight early in a session. Resolving
+/// against it yields `[]`, and publishing that records BOTH "light nothing" and
+/// a `_device_ids` of `[]` claiming we checked. The server cannot tell that
+/// apart from a customer who genuinely excluded every channel, and `[]` is a
+/// usable verdict there, so it would fire nothing on a house that expected a
+/// show.
+///
+/// Skipping costs one interval: the next resolve, or the next connect,
+/// republishes once the bus list has landed.
+///
+/// TODO(participation-picker): when a channel picker ships, an EXPLICIT set is
+/// meaningful even with an unknown device shape (`resolveParticipatingChannels`
+/// returns it verbatim). This guard would then wrongly suppress it and must
+/// gain an explicit-source exemption. Today `explicit` is provably null at
+/// every call site, so the guard is exactly right.
+bool participationShapeIsKnown(List<int> deviceChannelIds) =>
+    deviceChannelIds.isNotEmpty;
+
+/// Build this family's contribution to a publish, or [PreparedFacts.none].
+///
+/// Refuses in three cases, each meaning "no opinion" rather than "no channels":
+/// a null resolution (the resolver could not determine a set), an unknown
+/// device shape (see [participationShapeIsKnown]), and a dedup hit. In all
+/// three, whatever is already stored is left alone — the server treats an
+/// absent field as unknown and skips, which is the correct outcome.
+PreparedFacts prepareParticipationFacts({
+  required String controllerId,
+  required List<int>? resolved,
+  required List<int> deviceChannelIds,
+  required String source,
+}) {
+  if (resolved == null) return PreparedFacts.none;
+  if (!participationShapeIsKnown(deviceChannelIds)) return PreparedFacts.none;
+
+  final last = publishedParticipationMemo[controllerId];
+  if (!shouldPublishParticipation(resolved: resolved, lastPublished: last)) {
+    return PreparedFacts.none;
+  }
+
+  final fields = buildParticipationDoc(
+    resolved: resolved,
+    deviceChannelIds: deviceChannelIds,
+    source: source,
+  );
+  stampFactFamily(
+    fields,
+    field: kParticipatingChannelsField,
+    source: source,
+    previous: last,
+    previousKnown: last != null,
+  );
+
+  final snapshot = List<int>.from(resolved);
+  return PreparedFacts(
+    fields,
+    () => rememberPublishedParticipation(controllerId, snapshot),
+  );
+}
+
 /// Publish the resolved set to
 /// `users/{uid}/controllers/{controllerId}.participating_channels`.
 ///
@@ -137,6 +202,11 @@ void rememberPublishedParticipation(String controllerId, List<int> resolved) {
 ///
 /// Silently does nothing when there is no signed-in user or no controller id;
 /// both are normal states (demo mode, cold start before controller discovery).
+///
+/// This is the SINGLE-FAMILY entry point, used by the two resolve sites that
+/// have participation and nothing else to say. The healer publishes
+/// participation and base boundaries together through
+/// `ControllerFactsPublisher`, which shares one write.
 Future<void> publishParticipatingChannels({
   required String? controllerId,
   required List<int>? resolved,
@@ -145,46 +215,19 @@ Future<void> publishParticipatingChannels({
   FirebaseFirestore? firestore,
   String? uidOverride,
 }) async {
-  try {
-    // A null resolution means "no opinion" — the resolver could not determine a
-    // set. Publishing that would be indistinguishable from "excluded
-    // everything". Leave whatever is already there; the server treats an absent
-    // field as unknown and skips, which is the correct outcome either way.
-    if (resolved == null) return;
-    if (controllerId == null || controllerId.isEmpty) return;
-
-    final uid = uidOverride ?? FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return;
-
-    if (!shouldPublishParticipation(
-      resolved: resolved,
-      lastPublished: publishedParticipationMemo[controllerId],
-    )) {
-      return;
-    }
-
-    final db = firestore ?? FirebaseFirestore.instance;
-    final doc = buildParticipationDoc(
-      resolved: resolved,
-      deviceChannelIds: deviceChannelIds,
-      source: source,
-    );
-    doc[kParticipatingChannelsAtField] = FieldValue.serverTimestamp();
-
-    await db
-        .collection('users')
-        .doc(uid)
-        .collection('controllers')
-        .doc(controllerId)
-        .set(doc, SetOptions(merge: true));
-
-    rememberPublishedParticipation(controllerId, resolved);
-    debugPrint(
-      '[Participation] published $resolved for $controllerId (source=$source)',
-    );
-  } catch (e) {
-    // Never throw. A failed publish costs S5 one stale day, not the customer
-    // anything — and the next resolve retries because the memo was not updated.
-    debugPrint('[Participation] publish failed: $e');
-  }
+  if (controllerId == null || controllerId.isEmpty) return;
+  await writeControllerFacts(
+    controllerId: controllerId,
+    families: [
+      prepareParticipationFacts(
+        controllerId: controllerId,
+        resolved: resolved,
+        deviceChannelIds: deviceChannelIds,
+        source: source,
+      ),
+    ],
+    label: 'participation/$source',
+    firestore: firestore,
+    uidOverride: uidOverride,
+  );
 }
