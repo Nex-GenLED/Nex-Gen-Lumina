@@ -102,6 +102,41 @@ different collection, the specific field, a later sample.
 
 ---
 
+### ⚠️ EIGHTH INSTANCE — 2026-08-11, and the most expensive
+
+**A Firestore `orderBy` on a field some documents lack returns a SILENTLY
+TRUNCATED result set, not an error.**
+
+`gameday_plan_log` was queried with `.orderBy("at")`. Those documents carry
+`updatedAt`, not `at`. Firestore excluded every document, the query returned
+0, and the collection was reported EMPTY. It had held data since 2026-08-08.
+
+What it cost, in order:
+
+1. A wrong hypothesis — "the planner is not identifying the game" — asserted
+   from a Cloud Logging line instead, when the log document said otherwise.
+2. A wrong diagnosis chain: two further hypotheses (ESPN date boundary,
+   `competitor.id` vs `team.id`) were raised and killed by measurement, both
+   downstream of a premise that was never true.
+3. **A code change justified by a problem that did not exist** — the
+   unconditional-log write was argued for on the grounds that the surface was
+   silent. It was not. The change is still worth keeping, but on a narrower
+   justification, and the comment in `planGameDayFires.ts` has been corrected
+   rather than left to mislead the next reader.
+
+**The standing check applies unchanged, and would have caught it:** *when a
+result disagrees with expectation, establish what the query OMITS before
+concluding what the data CONTAINS.* A `.get()` with no `orderBy` — one call —
+would have shown three documents immediately.
+
+**Generalisation worth carrying:** every previous instance was a field-NAME
+mismatch (`teamName` vs `team_name`, `displayName` vs `display_name`) where
+the wrong name produced an empty or wrong answer. This one is the same failure
+through a different door: the mismatch was in the `orderBy` CLAUSE rather than
+the projection, so it FILTERED rather than misread. **Index and ordering
+clauses are field-name surfaces too.**
+
+---
 ## B — THE `endsAt` COMPANION RESTORE — built
 
 The planner's end job previously sent `{"on": false}`. It now sends a **base restore**.

@@ -283,10 +283,20 @@ export async function runPlannerTick(
             : DEFAULT_LEAD_MINUTES) * 60_000;
         const startFireAt = game.startMs - lead;
 
+        // OBSERVABILITY (2026-08-11): every path out of this block must
+        // increment something. Before this, a config that passed participation
+        // and then failed the horizon test fell through with NO counter — the
+        // stats reconciled to 18 of 19 and "waiting for the horizon" was
+        // indistinguishable from "vanished". That is precisely the state being
+        // read during a live shadow run, so it must be nameable.
+        const startAlreadyPlanned = !!session.startPlannedAt;
+        const startInPast = startFireAt <= nowMs - 60_000;
+        const startBeyondHorizon = startFireAt >= nowMs + PLAN_HORIZON_MS;
+
         if (
-          !session.startPlannedAt &&
-          startFireAt > nowMs - 60_000 &&
-          startFireAt < nowMs + PLAN_HORIZON_MS
+          !startAlreadyPlanned &&
+          !startInPast &&
+          !startBeyondHorizon
         ) {
           const built = buildGameDayPayload({
             config: c,
@@ -338,6 +348,20 @@ export async function runPlannerTick(
               stats.startsPlanned++;
             }
           }
+        } else if (startAlreadyPlanned) {
+          // Not a skip in the error sense — the job already exists. Counted so
+          // a steady-state tick still reconciles.
+          bump(stats.skipped, "start_already_planned");
+        } else if (startBeyondHorizon) {
+          // THE ONE THAT WAS INVISIBLE. Correct behaviour: the game is real and
+          // participation resolved, it is simply further out than
+          // PLAN_HORIZON_MS. It will plan on a later tick.
+          bump(stats.skipped, "outside_horizon");
+        } else if (startInPast) {
+          // Fire time already elapsed — a late deploy, a long outage, or a
+          // start time that moved earlier. Distinct from beyond-horizon and
+          // materially worse, so it must not share a bucket.
+          bump(stats.skipped, "start_time_passed");
         }
 
         // ── END — the three guards ───────────────────────────────────────
@@ -408,20 +432,56 @@ export async function runPlannerTick(
 
   // The log-only surface. Written every tick that had anything to say, so a
   // full homestand can be reviewed before the flag is ever flipped.
-  if (logRows.length > 0) {
-    const day = new Date(nowMs).toISOString().slice(0, 10);
-    await db
-      .collection(PLAN_LOG_COLLECTION)
-      .doc(day)
-      .set(
-        {
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          writeJobs,
-          rows: admin.firestore.FieldValue.arrayUnion(...logRows),
-        },
-        { merge: true }
-      );
-  }
+  // WRITTEN UNCONDITIONALLY (2026-08-10).
+  //
+  // ⚠️ CORRECTED JUSTIFICATION 2026-08-11. The original comment here claimed
+  // the log was SILENT on a fully-skipped night and that this collection was
+  // empty. **That was wrong.** `gameday_plan_log` has held data since
+  // 2026-08-08 and was never empty: participation skips DO produce rows, so
+  // the old `logRows.length > 0` gate was satisfied on every real night. The
+  // collection only LOOKED empty because the query used `orderBy("at")` while
+  // these documents carry `updatedAt` — and Firestore silently DROPS documents
+  // missing the orderBy field rather than erroring. The surface was not silent;
+  // the query was wrong.
+  //
+  // The change is still worth keeping, on the narrower and true justification:
+  // a per-tick SUMMARY (counts + skip breakdown by category + espnErrors) beats
+  // reconstructing those numbers from Cloud Logging log lines, which is
+  // error-prone — the 12/5/2 breakdown was misread exactly that way. It also
+  // guarantees an artifact on a genuinely row-less tick.
+  //
+  // The summary is additive: per-row detail is still appended when rows exist.
+  const day = new Date(nowMs).toISOString().slice(0, 10);
+  const summary = {
+    at: admin.firestore.FieldValue.serverTimestamp(),
+    usersScanned: stats.usersScanned,
+    configsEnabled: stats.configsEnabled,
+    startsPlanned: stats.startsPlanned,
+    endsPlanned: stats.endsPlanned,
+    // Skip reasons by category — the field whose absence cost the most.
+    skipped: stats.skipped,
+    espnErrors: stats.espnErrors,
+    errors: stats.errors,
+  };
+  await db
+    .collection(PLAN_LOG_COLLECTION)
+    .doc(day)
+    .set(
+      {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        writeJobs,
+        // Every tick, planned or not. arrayUnion so a day accumulates the
+        // shape of the whole run rather than only its last tick.
+        ticks: admin.firestore.FieldValue.arrayUnion(
+          JSON.parse(JSON.stringify({ ...summary, at: new Date(nowMs).toISOString() }))
+        ),
+        lastSummary: summary,
+        ...(logRows.length > 0
+          ? { rows: admin.firestore.FieldValue.arrayUnion(...logRows) }
+          : {}),
+      },
+      { merge: true }
+    );
 
   const quiet = stats.configsEnabled === 0;
   if (!quiet) {

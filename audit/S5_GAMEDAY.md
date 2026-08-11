@@ -304,3 +304,67 @@ for a homestand before touching the flag.
 5. **The compositor before S5 and sync coexist** (finding 8).
 6. `tzOffsetHours` is hardcoded to −5 for the daylight filter; the user doc carries no timezone.
    A ±1 h error only matters within 30 minutes of sunset, but it should come from the profile.
+
+---
+
+# SHADOW-RUN CHECKPOINTS — copy-paste, 2026-08-11
+
+Two windows, hours apart. Run from the repo root. Read-only; neither command
+writes anything.
+
+> ⚠️ Both use a PLAIN `.get()` with NO `orderBy`. An `orderBy` on a field
+> some documents lack silently drops them — that is what made
+> `gameday_plan_log` look empty for two days (audit/S4_RESTORE.md, 8th instance).
+
+## WINDOW 1 — ~20:10 UTC / 3:10 PM CDT (game enters the 6h horizon)
+
+```bash
+cd "c:/Flutter Projects/Lumina V 1.6" && GOOGLE_APPLICATION_CREDENTIALS="C:/Users/honey/AppData/Roaming/gcloud/application_default_credentials.json" node scripts/_check_gameday.js start
+```
+
+**Expect:** `outside_horizon` drops to 0, and either `startsPlanned: 1` with a
+`plan_start` row, or a named skip. The command prints the computed fire time
+and how many minutes before first pitch (02:10 UTC) it lands.
+
+| result | what it means |
+|---|---|
+| `startsPlanned: 1` + a `plan_start` row | **Good.** Fire-time computation works — the first downstream path ever to execute. Check the lead time looks sane (default 15 min before first pitch). |
+| `outside_horizon: 1` still | Too early, or the game moved. Re-run in 20 min. Not a fault. |
+| `start_time_passed: 1` | **Bad, and worth waking up for.** The fire time already elapsed — the planner found the game too late to act. On a live run this is a MISSED START: the house never lights. Means the horizon opened while the function was failing, or ESPN moved the start earlier. |
+| `payload:*` or `unsafe_payload` | The design was refused. `payload:no_participating_channels` means participation regressed; `unsafe_payload` should be unreachable and is a real defect if seen. |
+| `RECONCILES ✗` | A config vanished from the counters again. The thing the horizon counter was added to prevent. |
+
+## WINDOW 2 — ~05:00–06:00 UTC (after ESPN reports final)
+
+```bash
+cd "c:/Flutter Projects/Lumina V 1.6" && GOOGLE_APPLICATION_CREDENTIALS="C:/Users/honey/AppData/Roaming/gcloud/application_default_credentials.json" node scripts/_check_gameday.js end
+```
+
+**Expect:** a `plan_end` row with its fire time, plus the guard state —
+`consecutiveFinalPolls` per session, which is how many finals ESPN reported
+before the end would have fired.
+
+| result | what it means |
+|---|---|
+| `plan_end` row + `consecutiveFinalPolls >= 2` | **Good.** The two-consecutive-finals guard held and the end signal fired on a real final — the first time end detection has ever run. |
+| `consecutiveFinalPolls: 1`, no `plan_end` | **Correct, mid-flight.** One final seen, waiting for the second. Re-run in 10 min. This is the guard doing its job. |
+| **No `plan_end` at all, hours after the final** | **The failure mode that matters.** On a live run the house stays lit until the base layer reclaims it. Check: did ESPN ever report final (`espnErrors`), did a session exist (`startPlannedAt` set), and did window 1 actually plan a start? **No start ⇒ no session ⇒ no end** — an absent `plan_end` is EXPECTED if window 1 planned nothing, and means nothing about end detection. |
+| `end:minimum_duration` | `minimumPlausibleDuration` REFUSED a final. Correct if the game was genuinely short/suspended; a defect if it ran normal length. This guard is the premature-final protection. |
+| `endFiredAt` set but no `plan_end` row | Already fired on an earlier tick — look at the previous day document. |
+
+## Both commands also confirm
+
+- `fire_jobs docs: 0` — `write_jobs` is OFF, so **nothing should ever be
+  written**. Any non-zero here means the flag got flipped and a real house
+  could be driven. That is the one line worth reading first.
+- `write_jobs: doc absent → LOG-ONLY`.
+- Skip breakdown reconciling to 19/19.
+
+## What tonight can and cannot prove
+
+Only ONE account (Trend Setter / `.150`) has resolved participation, so this
+exercises the planner half for a single account. It does **not** exercise the
+dispatcher (`write_jobs` is off, so no jobs are written for
+`dispatchFireJobs` to pick up), multi-account fan-out, or
+`minimumPlausibleDuration` as a rejection unless the game ends abnormally
+early. A normal-length game reaching a normal final proves the happy path only.
