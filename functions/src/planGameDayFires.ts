@@ -106,14 +106,77 @@ const bump = (m: Record<string, number>, k: string) => {
   m[k] = (m[k] ?? 0) + 1;
 };
 
-/** Read the write-jobs flag. Defaults FALSE — log-only until deliberately on. */
-async function writeJobsEnabled(db: admin.firestore.Firestore): Promise<boolean> {
+/**
+ * The write-jobs policy: globally armed, or armed for a named set of uids.
+ *
+ * `allowlist === null` means "no list" — every uid is armed once `write_jobs`
+ * is true. A non-null list arms ONLY those uids; everyone else stays log-only
+ * and still logs what WOULD have been planned, so the dry-run corpus keeps
+ * growing for the eventual global audit.
+ */
+export interface WriteJobsPolicy {
+  enabled: boolean;
+  allowlist: string[] | null;
+}
+
+export const WRITE_JOBS_OFF: WriteJobsPolicy = { enabled: false, allowlist: null };
+
+/**
+ * PURE. Derive the policy from the flag document's data.
+ *
+ * FAIL-SAFE IN EVERY DIRECTION — the four shapes, plus the malformed one:
+ *
+ *   doc absent / undefined data      -> OFF
+ *   write_jobs !== true              -> OFF regardless of any allowlist
+ *   write_jobs true, list present    -> armed for those uids ONLY
+ *   write_jobs true, list absent     -> armed globally
+ *   write_jobs true, list MALFORMED  -> OFF, loudly
+ *
+ * The malformed case is off rather than global on purpose. A `uid_allowlist`
+ * that is a string, an object, or an array with a non-string in it means
+ * somebody INTENDED to scope the flip and the scoping did not parse. Treating
+ * that as "global" would turn a typo into a fleet-wide arm — the opposite of
+ * what the author was reaching for. An empty array is NOT malformed: it is a
+ * deliberate "armed for nobody", and it is honoured as such.
+ */
+export function writeJobsPolicyFrom(
+  data: Record<string, unknown> | undefined
+): WriteJobsPolicy {
+  if (!data || data.write_jobs !== true) return WRITE_JOBS_OFF;
+
+  const raw = data.uid_allowlist;
+  if (raw === undefined || raw === null) {
+    return { enabled: true, allowlist: null }; // global
+  }
+  if (!Array.isArray(raw) || raw.some((u) => typeof u !== "string" || u === "")) {
+    logger.error(
+      "planGameDayFires: uid_allowlist is MALFORMED (expected string[]); " +
+        "refusing to write jobs. Fix or remove the field to arm. Value: " +
+        JSON.stringify(raw)
+    );
+    return WRITE_JOBS_OFF;
+  }
+  return { enabled: true, allowlist: raw as string[] };
+}
+
+/** True when THIS uid may have jobs written for it. */
+export function writesJobsFor(policy: WriteJobsPolicy, uid: string): boolean {
+  if (!policy.enabled) return false;
+  if (policy.allowlist === null) return true;
+  return policy.allowlist.includes(uid);
+}
+
+/** Read the write-jobs policy. Defaults OFF — log-only until deliberately on. */
+async function readWriteJobsPolicy(
+  db: admin.firestore.Firestore
+): Promise<WriteJobsPolicy> {
   try {
     const d = await db.collection("config").doc("gameday_planner").get();
-    return d.exists && d.data()?.write_jobs === true;
+    if (!d.exists) return WRITE_JOBS_OFF;
+    return writeJobsPolicyFrom(d.data());
   } catch (err) {
     logger.warn("planGameDayFires: flag read failed; staying LOG-ONLY", err);
-    return false;
+    return WRITE_JOBS_OFF;
   }
 }
 
@@ -188,9 +251,20 @@ export function eventIdFor(teamSlug: string, gameId: string): string {
 export async function runPlannerTick(
   db: admin.firestore.Firestore,
   nowMs: number,
-  opts: { onlyUid?: string; forceWriteJobs?: boolean } = {}
+  opts: {
+    onlyUid?: string;
+    forceWriteJobs?: boolean;
+    forcePolicy?: WriteJobsPolicy;
+  } = {}
 ): Promise<PlanStats & { logRows: Array<Record<string, unknown>> }> {
-  const writeJobs = opts.forceWriteJobs ?? (await writeJobsEnabled(db));
+  // Policy, not a boolean: `write_jobs` can be armed globally or scoped to a
+  // uid allowlist. forceWriteJobs is kept for existing callers/tests and means
+  // "globally armed".
+  const policy: WriteJobsPolicy =
+    opts.forcePolicy ??
+    (opts.forceWriteJobs === undefined
+      ? await readWriteJobsPolicy(db)
+      : { enabled: opts.forceWriteJobs, allowlist: null });
   const stats: PlanStats = {
     usersScanned: 0,
     configsEnabled: 0,
@@ -208,6 +282,11 @@ export async function runPlannerTick(
 
   for (const u of users.docs) {
     const uid = u.id;
+    // Per-uid arming. A scoped-out account still runs the whole planner and
+    // still logs what WOULD have been planned — the dry-run corpus must keep
+    // growing for the eventual global audit, which is the only thing that can
+    // clear F1 (the end path has never executed) fleet-wide.
+    const writeJobs = writesJobsFor(policy, uid);
     if (opts.onlyUid && uid !== opts.onlyUid) continue;
 
     const configs = await db
@@ -348,6 +427,11 @@ export async function runPlannerTick(
                 uid, teamSlug, eventId, action: "plan_start",
                 fireAt: new Date(startFireAt).toISOString(),
                 channels: part.channels, bytes: built.payload.length,
+                // Armed globally/for this uid, or held back by the allowlist.
+                // Without this a scoped-out row is indistinguishable from a
+                // log-only-era row, and the corpus stops being auditable the
+                // moment the flip is partial.
+                ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
               });
               if (writeJobs) {
                 await db
@@ -423,6 +507,7 @@ export async function runPlannerTick(
           logRows.push({
             uid, teamSlug, eventId, action: "plan_end",
             fireAt: new Date(nowMs).toISOString(), reason: decision.reason,
+            ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
           });
           if (writeJobs) {
             // S4: the end fire returns the house to BASE, not to off — a
@@ -511,7 +596,11 @@ export async function runPlannerTick(
     .set(
       {
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        writeJobs,
+        // Policy-level, not per-uid: `writeJobs` is whether the flag is armed
+        // at all, `writeJobsScope` names who it is armed FOR. A reader of this
+        // doc has to be able to tell a global arm from a scoped one.
+        writeJobs: policy.enabled,
+        writeJobsScope: policy.allowlist === null ? "global" : policy.allowlist,
         // Every tick, planned or not. arrayUnion so a day accumulates the
         // shape of the whole run rather than only its last tick.
         ticks: admin.firestore.FieldValue.arrayUnion(
@@ -548,7 +637,13 @@ export async function runPlannerTick(
   const quiet = stats.configsEnabled === 0;
   if (!quiet) {
     logger.info(
-      `planGameDayFires[${writeJobs ? "LIVE" : "LOG-ONLY"}]: ${JSON.stringify(stats)}`
+      `planGameDayFires[${
+        !policy.enabled
+          ? "LOG-ONLY"
+          : policy.allowlist === null
+            ? "LIVE"
+            : `LIVE:scoped(${policy.allowlist.length})`
+      }]: ${JSON.stringify(stats)}`
     );
   }
   return { ...stats, logRows };
