@@ -56,6 +56,12 @@ const DEFAULT_IP = '192.168.1.150';
 const PART = 'participating_channels';
 const BASE = 'base_boundaries';
 
+/// Shipped in +72. Written on EVERY facts-publish attempt including `offered`,
+/// so its ABSENCE means the running build predates the mirror (or the healer
+/// never attempted). That makes it a build-identity witness as well as an
+/// outcome witness.
+const DISP = 'participation_publish_disposition';
+
 function parseArgs(argv) {
   const a = {
     uid: DEFAULT_UID, controller: DEFAULT_CONTROLLER, ip: DEFAULT_IP,
@@ -175,6 +181,21 @@ function show(label, d) {
   console.log(`  ..._dow_bit0       : ${d[`${BASE}_dow_bit0`] ?? '—'}`);
   console.log(`  ..._source / _at   : ${d[`${BASE}_source`] ?? '—'} / ${d[`${BASE}_at`] ?? '—'}`);
   console.log(`  ..._publish_count  : ${d[`${BASE}_publish_count`] ?? '—'}`);
+  console.log('');
+  if (!has(DISP)) {
+    console.log(`  ${DISP}`);
+    console.log('      ABSENT — the healer has never attempted a publish here,');
+    console.log('      OR the running build PREDATES the +72 disposition mirror.');
+    console.log('      The mirror writes on EVERY attempt including "offered", so');
+    console.log('      an absent field on a build >= +72 is impossible.');
+  } else {
+    console.log(`  ${DISP}`);
+    console.log(`      ${d[DISP]}`);
+    console.log(`      at: ${d[`${DISP}_at`] ?? '—'}`);
+    if (String(d[DISP]).startsWith('SKIPPED')) {
+      console.log('      ^^ LEGIBLE RED. Diagnose from this label; do not re-run blindly.');
+    }
+  }
 }
 
 function crossCheck(d, timers) {
@@ -266,7 +287,18 @@ async function main() {
   crossCheck(doc, await readTimers(args.ip));
 
   if (args.before) {
-    diff(JSON.parse(fs.readFileSync(args.before, 'utf8')), doc);
+    const before = JSON.parse(fs.readFileSync(args.before, 'utf8'));
+    diff(before, doc);
+    const b = before[DISP] ?? '(absent)';
+    const a = doc[DISP] ?? '(absent)';
+    console.log(`  ${DISP}`);
+    console.log(`      ${b}  ->  ${a}`);
+    if (b === '(absent)' && a !== '(absent)') {
+      console.log('      -> FIRST MIRRORED OUTCOME. The running build carries +72.');
+    } else if (a === '(absent)') {
+      console.log('      -> still absent: the build that ran does NOT contain the');
+      console.log('         mirror, so it is NOT +72. Check the in-app version.');
+    }
   }
   if (args.save) {
     fs.writeFileSync(args.save, JSON.stringify(doc, null, 2));
