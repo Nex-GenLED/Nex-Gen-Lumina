@@ -762,7 +762,8 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     formatted as bare `HH:MM`. After ~22:30 local those wrap past midnight while the
     dateKey stays *today*, so the entry reads as "today at 00:15-01:15" — ~22 h in the
     past — and every assertion returns `LeaseOutcome.alreadyExpired`.
-  - Observed 2026-08-11 23:45 local: 5 tests red. Green again after midnight.
+  - **Empirically confirmed**: 5 red at 23:45 local; the SAME five green at 23:59 with
+    no code change, once now+90 stopped wrapping past midnight. Deterministic, not flaky.
   - Fix: roll `dateKey` forward with the wrap, or inject a fixed clock. The suite
     should not have a time-of-day-dependent result.
   - Files: `test/features/schedule/calendar_entry_lease_manager_integration_test.dart`.
