@@ -59,6 +59,19 @@ optional.
 - **A burned versionCode gets its own row**, marked DO NOT UPLOAD, with why.
   Silently skipping a number leaves the next person unable to tell a burn from a
   bookkeeping error.
+- **`git commit` commits the INDEX, and the index is shared between parallel
+  sessions.** Staging your own files does not exclude what another window has
+  already staged. A "docs-only" ledger commit on +71 swept in two file deletions
+  another session had staged mid-refactor and pushed them to `main`. Always
+  commit release/ledger changes with an explicit pathspec, which bypasses the
+  rest of the index entirely:
+
+  ```sh
+  git commit -m "…" -- docs/BUILD_LEDGER.md      # not `git add` + `git commit`
+  ```
+
+  And read `git show --stat --name-status HEAD` before pushing — the file list
+  is the only thing that catches this.
 - Archive `build/debug-info/<platform>/*.symbols` per build. Never commit them.
 
 ---
