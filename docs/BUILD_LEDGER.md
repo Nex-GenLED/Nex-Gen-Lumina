@@ -19,6 +19,57 @@ optional.
 
 ## Operational flags
 
+### F1 — CLOSED 2026-08-12. Full Game Day cycle on real hardware, first time anywhere.
+
+`mlb_twins` / `gd_mlb_twins_401816500`, bench `.150`, `2.5.10+73` build 292,
+`write_jobs` armed scoped(1).
+
+| time (UTC) | event |
+|---|---|
+| 15:55:16.682Z | `startPlannedAt` **SET** — the pairing key, written for the first time ever |
+| 17:10:00.000Z | start `fireAt` (first pitch 17:40 − `DEFAULT_LEAD_MINUTES` 30) |
+| 17:11:02Z | start **dispatched** |
+| 17:15:07Z | start **completed** — design running, `fx:52` blue→red |
+| ~20:27Z | ESPN final → `consecutiveFinalPolls` 0 → **1**, and it PERSISTED |
+| 20:30:34.247Z | counter → **2**, `REQUIRED_FINAL_POLLS` met, **GUARD 0 passed legitimately**, `plan_end reason="confirmed_final"` |
+| 20:30:36.893Z | `endFiredAt` SET; end job `{"ps":2}` dispatched → completed |
+| 20:31Z | bench `on=False`, both segments off — **restored to base** |
+
+**GUARD 0 discriminated in the same tick**: Twins (`startPlannedAt` SET) fired;
+stale Royals `...816490` (`startPlannedAt` ABSENT) refused, `end:no_start` still
+bucketed. A guard that only ever refuses proves nothing — this one said yes and
+no simultaneously, correctly.
+
+**Too-early guard clear by 50 min**: MLB minimum 2h, elapsed 2h50m.
+
+**Idempotency confirmed silently.** No second end fire: `endsPlanned` 0 on every
+later tick, exactly two `plan_end` rows all day, three fire jobs, and `errors: 0`
+throughout — a duplicate `create()` on the `_end` doc would have thrown and
+incremented `errors`.
+
+> **CORRECTION to the #66 record.** I described `{"ps":1}` as the harm. It was
+> not. `baseRestorePayload` is time-aware and was **right both times**: `{"ps":1}`
+> (NGL On) at 01:00 local, because the bench base state between the 20:23 ON and
+> 06:22 OFF rows genuinely is on; `{"ps":2}` (NGL Off) at 15:30 local, because
+> mid-afternoon it is off. **The harm in #66 was firing at all**, not what it
+> sent. "Return to base" means *what the everyday schedule would be doing now*,
+> not "turn off".
+
+**Open, and what each gates:**
+
+- **#67** — participation is advisory. The start fire lit BOTH channels despite
+  `channels:[0]`; the end restore darkened both only because preset 2 asserts
+  per-segment `on:false`. Product decision, not a bug.
+- **#65** — 7 of 10 Game-Day-enabled accounts have no base layer. **This is what
+  blocks the global arm, not F1.**
+- Base-layer gate rebuild — the gate is informational-only and has never fired
+  for anyone (all 10 enablements predate it).
+
+`write_jobs` stays **armed, scoped(1)** overnight per Tyler. Rollback unchanged:
+`write_jobs:false` or delete the doc; absent is false.
+
+
+
 ### `config/gameday_planner` — ARMED then DISARMED, 2026-08-12
 
 | | |
