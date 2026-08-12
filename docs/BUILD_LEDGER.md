@@ -55,6 +55,82 @@ functions:applySyncPattern`, so the planner keeps its existing revision.
 
 
 
+### §4 two-node fanout verification — 2026-08-12. Three runs, 3/4, and the feature does not work.
+
+Runbook step 4/5, group `8b25LBEhS51H65VHKGQ1`. A = bench controller `.150`
+(Tyler), B = stub endpoint + bridge simulator draining `nex-genadmin`'s queue.
+Recorded in full because each run failed differently and only the third failure
+was the product's.
+
+**Run 1 — 21:40Z, 0/4.** Every fanout returned 400 and the harness printed
+`reason=null` four times. The body carried no `initiatorUid`, which
+`applySyncPattern` rejects at the top of the handler — before the membership
+gate, the flag read, and the rate-limiter reservation. That last one is why
+fanout#2 reported `retryAfterMs=0`: no slot was ever reserved, so *both* the
+convergence and rate-limit failures were one defect wearing two costumes. The
+`reason=null` was its own bug — the CF names rejected fields in `error`, which
+the harness never read. Fixed in `44c7f17`; `initiatorUid` is derived from the
+`--a-token` rather than passed as a flag, because the CF asserts
+`decoded.uid === initiatorUid` and two sources for one fact is how the next
+mismatch gets written.
+
+**Run 2 — 21:40Z, 3/4. First cross-account propagation in the feature's
+history.** The command landed in a non-initiator's queue, the bridge-sim
+delivered it, B reflected `fx=88 pal=5` exactly, and fanout#2 was refused with
+`retryAfterMs=14669`. A did not converge. The server had already said why —
+`members=1 commands=1 skipped=1` — in three fields the harness discarded. A's
+member doc was `participationStatus:"paused"`, and since the fanout arm
+*returns*, the host-only self-write never runs when fanout is on, so a paused
+initiator's own house is never commanded (**#69**). A's evidence line read
+`A fx=0 pal=5` against a broadcast of `fx=88 pal=5` and looked like a partial
+apply; nothing had been applied at all — the rig rests on `pal=5` on both
+segments and one field coincided. A convergence assertion resting on a
+pre-existing value is not evidence, so the harness now snapshots A first and
+reports a pre-matching baseline as INCONCLUSIVE rather than passing it.
+
+**Run 3 — 22:03/22:04Z, 3/4 — and the real one.** A's member doc flipped to
+`participationStatus:"active"` (**permanent**; active is the correct resting
+state for the test crew). The flip worked exactly as intended:
+`served=2 wrote=2 skipped=0`. The rig still never moved:
+
+```
+controllerId: "192_168_1_150"   controllerIp: ""
+error: "ERROR: HTTP -1"          status: "failed"
+```
+
+`resolveMemberTargets` discards the IP for any member whose doc carries a
+denormalized `controllerId` array — the normal shape — so **every crew fanout
+command ever written names no destination** (**#70**, P1). Neighborhood Sync has
+never reached hardware. It survived three runs because the bridge-sim POSTs to
+its own stub and never reads `controllerIp`: it reported *delivered* for a
+command byte-identical to the one the real bridge refused. Closed harness-side
+in `0c5fd92` — a simulator more capable than the thing it simulates does not
+verify it.
+
+**Assertions, verified against raw evidence rather than the harness's
+self-report** (Firestore queues and `.150 /json/state` read directly):
+
+| # | Assertion | Verdict |
+|---|---|---|
+| 1 | CF wrote into a NON-initiator's queue | **PASS** — `served=2 wrote=2 skipped=0`, docs present in both queues |
+| 2 | B reflects the broadcast | **PASS for the stub, VOID for hardware** — same empty `controllerIp` a real bridge rejects |
+| 3 | A converges | **FAIL** — `#70`; A's commands `status=failed`, rig unchanged at `fx=0` |
+| 4 | 2nd fanout <18s refused | **PASS** — `retryAfterMs` 14826 / 14875 |
+
+**The gate held.** "Stop unless the non-initiator converges" was set to catch a
+non-working fanout, and the fanout *does* work — the CF's routing, membership
+verification, allowlist scoping, and rate limiting are all proven. What is
+broken is one line of address resolution beneath it.
+
+**Bench restored** to `on=false bri=200 ps=2`, identical to the post-end-fire
+baseline. Ellie's bridge `D4E9F4FA9D40` was never reachable: her crew
+`OqWsIyvNUwYjel6Dbzwl` is excluded by the `group_allowlist` above, and no
+command doc was written to any account outside the two test uids.
+
+**The global flip is blocked on #70.** Commits: `a60a808` (format only),
+`44c7f17` (initiatorUid + error surfacing), `1e5f07f` (#69), `3910a85` (poll for
+the real bridge), `0c5fd92` (empty-IP fidelity + #70 filed).
+
 ### F-3 — CLOSED 2026-08-12. Neighborhood reads scoped, crew join moved server-side.
 
 Deployed from `fix/f3-neighborhood-security` @ `a83193f` (worktree

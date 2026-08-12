@@ -844,6 +844,40 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Evaluate WLED version-pin (0.15.1, see SOP §2.0) before fleet scale.
   - Files: firmware/version-pin policy (no app fix).
 
+- [ ] **#70 — Every crew fanout command names an EMPTY controllerIp, so no real bridge can
+  execute it. Neighborhood Sync has never reached hardware.**
+  - Status: OPEN (found 2026-08-12, §4 two-node run) · Severity: **P1 — the feature does not
+    work in production** · Evidence: **hardware-proven**
+  - [applySyncPattern.ts:418-425](../functions/src/applySyncPattern.ts#L418): `resolveMemberTargets`
+    takes a denormalized branch whenever the member doc carries a `controllerId` **array**:
+    ```ts
+    if (denormIds.length > 0) {
+      return (denormIds as string[]).map((id) => ({ id, ip: "" }));   // ip DROPPED
+    }
+    ```
+    It returns early, so `/users/{uid}/controllers` — which holds the real address — is never
+    read. The `ip` is not unknown; it is discarded.
+  - Hardware evidence, A's command docs from the 22:03:45Z and 22:04:39Z fanouts:
+    ```
+    controllerId: "192_168_1_150"   controllerIp: ""
+    error: "ERROR: HTTP -1"          status: "failed"
+    ```
+    The rig never moved. Both bench member docs carry `controllerId` arrays
+    (`["192_168_1_150"]`, `["80_f3_da_b3_76_64"]`), so **both** members were affected.
+  - **This is not bench-specific.** Any member doc written with the denormalized array — the
+    normal shape — produces undeliverable commands. The self/host path is unaffected because it
+    resolves IPs from the controllers subcollection directly (`:206-240`).
+  - **Why it stayed hidden through three runs:** the harness bridge-sim POSTs to its own stub and
+    never reads `controllerIp`, so it reported *delivered* for a command byte-identical to the
+    one the real bridge refused. Closed harness-side in `0c5fd92`; assertion 2 now fails on an
+    empty IP.
+  - **Fix:** the denormalized branch must resolve each id against
+    `/users/{memberUid}/controllers/{id}` and use the stored `ip`, falling back to the full
+    subcollection read. An id that resolves to no ip must be **skipped and logged**, never
+    written as `ip:""` — a command that cannot be delivered should not be queued at all.
+  - Prerequisite for the global `sync_fanout` flip. Files:
+    `functions/src/applySyncPattern.ts:413-445`. Related **#69**, F-3.
+
 - [ ] **#69 — A PAUSED member who initiates a sync gets no command for their OWN house, and only
   when fanout is enabled**
   - Status: OPEN (found 2026-08-12 on the first successful two-node fanout run) · Severity:
