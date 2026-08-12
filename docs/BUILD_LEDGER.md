@@ -72,6 +72,20 @@ optional.
 
   And read `git show --stat --name-status HEAD` before pushing — the file list
   is the only thing that catches this.
+- **Test-channel distribution is a verification path, not an exposure.**
+  Pushing to **TestFlight** or a **Play internal track** does NOT violate a
+  hardware-gate hold, and a hold is not a reason to refuse one — a build that
+  cannot reach a device cannot clear the gate that is blocking it, which is
+  circular. What a hardware gate protects is **production exposure**:
+
+  | held by the gate | not held by the gate |
+  |---|---|
+  | flipping `config/gameday_planner.write_jobs` | TestFlight |
+  | public / open Play tracks, staged rollout | Play **internal** track |
+  | merging gated feature work into a shipping build | installing on the bench rig or a tester device |
+
+  Record the distribution in the row (`Uploaded: internal track only` is a
+  distinct and useful value from `NO` and from `YES`).
 - Archive `build/debug-info/<platform>/*.symbols` per build. Never commit them.
 
 ---
