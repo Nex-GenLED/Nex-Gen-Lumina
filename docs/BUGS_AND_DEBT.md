@@ -733,6 +733,35 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Evaluate WLED version-pin (0.15.1, see SOP §2.0) before fleet scale.
   - Files: firmware/version-pin policy (no app fix).
 
+- [ ] **#65 — No code path can create a non-primary roofline segment, so participation always resolves to ALL channels**
+  - Status: OPEN (recorded 2026-08-12) · Evidence: exhaustive grep of every
+    `RooflineSegment(` construction site
+  - Every real creation site — `roofline_setup_wizard.dart:97`,
+    `roofline_capture_logic.dart:105/118/131/233`,
+    `roofline_config_providers.dart:441`, `roofline_configuration.dart:453` —
+    omits `isPrimary`, taking the constructor default **`true`**. No UI, wizard or
+    importer emits `isPrimary: false`.
+  - Consequence: in `resolveParticipatingChannels`, `primaryChannels == tracedChannels`
+    always, so `primaries ∪ untraced` == **every device channel**, for every account.
+    The documented "traced but NOT primary → EXCLUDED" branch is **unreachable in
+    production**, and so is the `explicit` branch (no picker — see
+    `audit/S3B_CHANNELS.md` §4). Participation is currently a value that is always
+    "all channels".
+  - **Two consequences, opposite signs.** It LOWERS the risk of the `write_jobs`
+    flip — no channel can be wrongly excluded when the answer is always "all". It
+    also means the roofline-await guard (the superset hazard, +73) protects a path
+    no production account can currently exercise, and **no hardware test can
+    discriminate it** until a non-primary segment exists somewhere.
+  - Blocks §7.2d Leg B by app: the bench segment has to be written directly to
+    Firestore because the app cannot produce one.
+  - Decide: ship a way to mark a segment secondary (the exclusion feature this
+    machinery exists for), or retire the branch. Do not leave it half-built —
+    dead policy that looks live is what `audit/S3B_CHANNELS.md` §4 already flagged
+    for the sibling field.
+  - Files: `lib/models/roofline_segment.dart:559` (the default),
+    `lib/features/neighborhood/services/channel_participation_resolver.dart`,
+    every creation site above.
+
 - [ ] **#63 — `deviceHardwareConfigProvider` caches null permanently and collapses four causes into one**
   - Status: OPEN (recorded 2026-08-12, not fixed) · Evidence: **§7.2d on +72, build 291**
   - `wled_providers.dart:274-284` returns `null` when `repo == null` and `null` from
