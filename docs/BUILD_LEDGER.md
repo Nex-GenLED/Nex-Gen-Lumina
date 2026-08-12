@@ -19,7 +19,24 @@ optional.
 
 ## Operational flags
 
-### `config/gameday_planner` — SCOPED FLIP, 2026-08-12T05:45:21.359Z
+### `config/gameday_planner` — ARMED then DISARMED, 2026-08-12
+
+| | |
+|---|---|
+| **armed (scoped)** | `05:45:21.359Z` — `{write_jobs: true, uid_allowlist: [bench]}` |
+| **confirmed live** | `05:50:04Z` — `planGameDayFires[LIVE:scoped(1)]` |
+| **INCIDENT** | `05:55:04Z` — end fire without a start, bench lights ON at 01:00 local. See **#66** |
+| **DISARMED** | `13:16:34.680Z` — `write_jobs: false`. Confirmed `LOG-ONLY` at `13:22:35Z` |
+| **current state** | **DISARMED.** `uid_allowlist` retained — the shape is proven; only the arm state changed |
+| **rollback** | delete the document, or `write_jobs: false`. Absent is false; fails safe both ways |
+| **re-arm** | **Tyler's decision.** Guard shipped and deployed; see readiness below |
+
+The scoped flip did exactly its job. It was armed for ten minutes, produced a
+real incident on the one rig chosen to absorb it, and that incident was
+diagnosable from the corpus within minutes. Under the global arm originally
+requested it would have been ten houses at 1am, seven without a floor.
+
+### `config/gameday_planner` — original scoped-flip rationale, 05:45:21.359Z
 
 ```
 { write_jobs: true, uid_allowlist: ["wrQRUUKyXyc0deyuu0ORS6wsovO2"] }
