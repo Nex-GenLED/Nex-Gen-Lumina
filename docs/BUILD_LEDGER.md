@@ -19,6 +19,56 @@ optional.
 
 ## Operational flags
 
+### F-3 — CLOSED 2026-08-12. Neighborhood reads scoped, crew join moved server-side.
+
+Deployed from `fix/f3-neighborhood-security` @ `a83193f` (worktree
+`C:/Flutter Projects/lumina-f3`). **`firestore.rules` + the `joinNeighborhood`
+callable in ONE operation window** — rules alone makes joining impossible, the
+callable alone leaves the hole open.
+
+**Exposure at close: 3 demo crews / 0 street names / 0 coordinates / 0
+`controllerIp`s.** A latent P0 closed before a single real customer crew existed
+behind it.
+
+**Ruleset id: unavailable.** The Rules API returned 403 to the ADC token. The
+release is therefore **VERIFIED BY BEHAVIOUR**, which is the stronger evidence
+anyway — every assertion below ran against PRODUCTION with a **client**
+credential, never admin (admin bypasses rules and proves nothing):
+
+```
+c1  NON-MEMBER read group        HTTP 403   DENIED
+c2  MEMBER read group            HTTP 200   ALLOWED
+c2b NON-MEMBER read roster       HTTP 403   DENIED
+c3  SELF-INSERT into memberUids  HTTP 403   DENIED
+c4  callable, bad code           HTTP 404   NOT_FOUND, "No crew found for that
+                                            invite code" — no existence oracle
+c5  callable, good code          HTTP 200   ok:true, alreadyMember:false
+                                            memberUids 2 -> 3, joined
+                                            members/{uid} written in the SAME batch
+```
+
+The same `c1` read returned **200 before the deploy**, so these are not vacuous
+passes. The `c5` test join was fully reverted (`memberUids` back to 2, member doc
+deleted).
+
+**Bonus evidence, unplanned:** the per-caller **18s cooldown fired on production
+traffic** during verification — `429 RESOURCE_EXHAUSTED`, `retryAfterMs: 16562`,
+because `c4` and `c5` came from the same caller back to back. Re-run from a fresh
+caller for the real assertion.
+
+> **NOTE FOR FUTURE DEBUGGERS.** A newly-created 2nd-gen callable returns **401 on
+> the legacy `cloudfunctions.net` URL**. The Cloud Run URL
+> (`https://joinneighborhood-<hash>-uc.a.run.app`) and the SDK's `httpsCallable`
+> both work, and IAM was verified correct throughout (`allUsers` /
+> `roles/run.invoker`, identical to `initiateSyncSession`). **Do not conclude the
+> callable is broken** — check which URL the harness used.
+
+**Planner unaffected** (targeted deploy did not touch it): flag still
+`{write_jobs: true, uid_allowlist: [bench]}`, and the 21:05:09Z tick read
+`planGameDayFires[LIVE:scoped(1)]`.
+
+
+
 ### F1 — CLOSED 2026-08-12. Full Game Day cycle on real hardware, first time anywhere.
 
 `mlb_twins` / `gd_mlb_twins_401816500`, bench `.150`, `2.5.10+73` build 292,
@@ -231,6 +281,15 @@ resolved for the affected accounts.
   treating it as a change; and re-derive expectations when the operating mode
   changes rather than editing thresholds. If a watch fires three times without a
   real event, retire it — its alerts have stopped carrying information.
+- **A worktree does NOT inherit gitignored runtime files.** Building or deploying
+  from a fresh worktree silently lacks whatever `.gitignore` covers, and the
+  failure never names the real cause. **Third instance:** the signing keystore +
+  `google-services.json` (+71 Android build) and `functions/.env` (F-3 deploy —
+  which failed as "no value for ANTHROPIC_API_KEY…", twelve unrelated secrets,
+  with nothing pointing at the worktree). Before building or deploying from one,
+  copy across: `functions/.env`, `android/app/google-services.json`,
+  `android/key.properties`, `android/app/*.keystore`. They stay gitignored, so
+  the worktree remains clean.
 - Archive `build/debug-info/<platform>/*.symbols` per build. Never commit them.
 
 ---
