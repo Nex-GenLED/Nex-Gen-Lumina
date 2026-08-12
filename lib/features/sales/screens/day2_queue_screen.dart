@@ -85,11 +85,17 @@ class Day2QueueScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Role gate — bounce to installer PIN if no active installer session.
+    // Role gate — bounce to the unified staff PIN if no active installer
+    // session. Idle-timeout net, not a login path: the only user entry to
+    // this screen is the installer landing screen.
+    //
+    // Repointed from the legacy AppRoutes.installerPin 2026-08-11 — that
+    // screen landed re-authenticated installers in the customer setup
+    // wizard. See day1_queue_screen.dart and audit/INSTALLER_ENTRY.md.
     final installerModeActive = ref.watch(installerModeActiveProvider);
     if (!installerModeActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go(AppRoutes.installerPin);
+        if (context.mounted) context.go(AppRoutes.staffPin);
       });
       return const Scaffold(
         backgroundColor: NexGenPalette.matteBlack,

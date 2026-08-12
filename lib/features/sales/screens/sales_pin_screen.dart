@@ -8,7 +8,20 @@ import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Sales Mode PIN entry screen.
-/// Mirrors installer_pin_screen.dart exactly in structure and style.
+///
+/// Reached only from [SalesLandingScreen], which bounces here when the sales
+/// session lapses. It is NOT a login path — there is no gesture or button
+/// anywhere that opens it cold. Staff sign in at `/staff/pin`, which handles
+/// sales at branch 4 and lands on the same `salesLanding`.
+///
+/// This screen was modelled on the old `installer_pin_screen.dart`, which was
+/// DELETED 2026-08-11 along with `/installer/pin` and `/admin/pin` once the
+/// hidden Settings tap gestures were retired (audit/INSTALLER_ENTRY.md).
+/// `/sales/pin` survived only because of the landing-screen bounce above.
+///
+/// If that bounce is ever repointed at `/staff/pin` — as the Day 1 / Day 2
+/// queue gates were — this screen becomes orphaned and should follow the
+/// other two out.
 class SalesPinScreen extends ConsumerStatefulWidget {
   const SalesPinScreen({super.key});
 

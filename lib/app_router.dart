@@ -44,13 +44,11 @@ import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
 import 'package:nexgen_command/features/voice/voice_assistant_guide_screen.dart';
 import 'package:nexgen_command/features/properties/my_properties_screen.dart';
 import 'package:nexgen_command/features/auth/staff_pin_screen.dart';
-import 'package:nexgen_command/features/installer/installer_pin_screen.dart';
 import 'package:nexgen_command/features/installer/installer_setup_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_landing_screen.dart';
 import 'package:nexgen_command/features/installer/screens/existing_customer_screen.dart';
 import 'package:nexgen_command/features/installer/media_landing_screen.dart';
 import 'package:nexgen_command/features/installer/media_access_code_screen.dart';
-import 'package:nexgen_command/features/installer/admin/admin_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/admin/dealer_dashboard_screen.dart';
 import 'package:nexgen_command/features/installer/admin/brand_library_admin_screen.dart';
 import 'package:nexgen_command/features/sports_alerts/ui/sports_alerts_screen.dart';
@@ -363,13 +361,25 @@ class AppRouter {
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: RooflineSetupWizard()),
       ),
       // ===== STAFF PIN (root navigator) =====
-      // Unified PIN entry — reachable only via the hidden 5-tap gesture
-      // on the Lumina logo on the login screen. Routes the user to
-      // Corporate / Sales / Installer mode based on which PIN store
-      // matches. The legacy single-purpose PIN routes
-      // (/installer/pin, /sales/pin, /corporate/pin) remain registered
-      // below for now, but nothing on the login screen navigates to
-      // them directly anymore.
+      // Unified PIN entry. Routes the user to Corporate / Sales /
+      // Installer mode based on which PIN store matches.
+      //
+      // Reached from TWO places today (verified 2026-08-11,
+      // audit/INSTALLER_ENTRY.md) — do not re-assert "only one":
+      //   1. the hidden 5-tap gesture on the Lumina logo on the login
+      //      screen (login_page.dart);
+      //   2. the PERMANENTLY VISIBLE "Nex-Gen Professional Access"
+      //      panel on /link-account — the screen every fresh sign-up is
+      //      redirected to. Its "Installer" button pushes here with no
+      //      gesture at all. This is an open submission-review question,
+      //      not an oversight to silently fix.
+      //
+      // Legacy single-purpose PIN routes: /installer/pin and /admin/pin
+      // were DELETED 2026-08-11 once the Settings tap gestures were retired
+      // and the Day 1 / Day 2 queue bounces were repointed here. Only
+      // /sales/pin survives — sales_landing_screen.dart still bounces to it
+      // on session expiry. Do not resurrect the deleted two; this screen
+      // covers every role they did.
       GoRoute(
         path: AppRoutes.staffPin,
         name: 'staff-pin',
@@ -383,12 +393,6 @@ class AppRouter {
         name: 'installer-landing',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerLandingScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.installerPin,
-        name: 'installer-pin',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: InstallerPinScreen()),
       ),
       GoRoute(
         path: AppRoutes.zoneSetup,
@@ -527,7 +531,7 @@ class AppRouter {
       ),
       // Day 1 dispatch — electrician queue + per-job blueprint stub.
       // Both screens are role-gated behind installerModeActiveProvider
-      // and bounce to AppRoutes.installerPin if no session is active.
+      // and bounce to AppRoutes.staffPin if no session is active.
       GoRoute(
         path: AppRoutes.day1Queue,
         name: 'day1-queue',
@@ -600,12 +604,6 @@ class AppRouter {
         name: 'media-dashboard',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: MediaDashboardScreen()),
-      ),
-      GoRoute(
-        path: AppRoutes.adminPin,
-        name: 'admin-pin',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: AdminPinScreen()),
       ),
       GoRoute(
         path: AppRoutes.dealerDashboard,
@@ -1174,7 +1172,6 @@ class AppRoutes {
   static const String staffPin = '/staff/pin';
   // Installer mode routes
   static const String installerLanding = '/installer';
-  static const String installerPin = '/installer/pin';
   static const String installerWizard = '/installer/wizard';
   // Existing-customer search — installer impersonates the chosen customer
   // (sets installerAccessingCustomerProvider) and lands on the main
@@ -1209,7 +1206,6 @@ class AppRoutes {
   static const String mediaAccessCode = '/media/code';
   static const String mediaDashboard = '/media/dashboard';
   // Admin management routes
-  static const String adminPin = '/admin/pin';
   // Corporate-admin brand library management (Part 9)
   static const String adminBrandLibrary = '/admin/brand-library';
   static const String adminBrandCorrections = '/admin/brand-corrections';

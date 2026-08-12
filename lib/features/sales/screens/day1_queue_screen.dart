@@ -152,11 +152,20 @@ class Day1QueueScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Role gate — bounce to installer PIN if no active installer session.
+    // Role gate — bounce to the unified staff PIN if no active installer
+    // session. This fires on the 30-minute idle timeout, not on login: the
+    // only user entry to this screen is the installer landing screen, so
+    // whoever is here arrived holding an installer session.
+    //
+    // Repointed from the legacy AppRoutes.installerPin 2026-08-11. That
+    // screen landed a re-authenticated installer in /installer/wizard — the
+    // customer setup wizard, unrelated to the queue they were kicked out of.
+    // /staff/pin lands them on /installer, which carries the Day 1 Queue
+    // tile. See audit/INSTALLER_ENTRY.md.
     final installerModeActive = ref.watch(installerModeActiveProvider);
     if (!installerModeActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go(AppRoutes.installerPin);
+        if (context.mounted) context.go(AppRoutes.staffPin);
       });
       return const Scaffold(
         backgroundColor: NexGenPalette.matteBlack,

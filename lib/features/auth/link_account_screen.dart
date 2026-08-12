@@ -150,6 +150,28 @@ class LinkAccountScreen extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    // The "Media" button that used to sit beside this one was
+                    // removed 2026-08-11 (audit/INSTALLER_ENTRY.md). It pushed
+                    // AppRoutes.staffPin — a 4-digit staff PIN screen — while
+                    // MediaAccessCodeScreen expects a 6-character media code,
+                    // so it was a visible control that could not accept the
+                    // credential it implied, on the default path of every fresh
+                    // sign-up.
+                    //
+                    // Repointing it at AppRoutes.mediaAccessCode would NOT have
+                    // fixed it. That flow is not shippable today:
+                    //   • `media_codes` / `media_access_logs` have no
+                    //     firestore.rules coverage at all, so the code lookup
+                    //     default-denies for every caller (the hasMediaAccess()
+                    //     helper was dismantled in D3-S2);
+                    //   • `/media` is in no appRedirect allow-list, so an
+                    //     'unlinked' user — the only kind that reaches this
+                    //     screen — is bounced straight back here;
+                    //   • on success the screen fabricates an
+                    //     installerSessionProvider client-side with no minted
+                    //     token, so no staff claim backs any subsequent read.
+                    // Reviving media access is a feature decision, not a
+                    // one-line route fix.
                     Row(
                       children: [
                         Expanded(
@@ -157,15 +179,6 @@ class LinkAccountScreen extends ConsumerWidget {
                             icon: Icons.engineering_outlined,
                             label: 'Installer',
                             color: NexGenPalette.cyan,
-                            onTap: () => context.push(AppRoutes.staffPin),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _ProfessionalButton(
-                            icon: Icons.videocam_outlined,
-                            label: 'Media',
-                            color: NexGenPalette.magenta,
                             onTap: () => context.push(AppRoutes.staffPin),
                           ),
                         ),

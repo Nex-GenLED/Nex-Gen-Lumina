@@ -24,10 +24,24 @@ import 'package:nexgen_command/theme.dart';
 //   • Installer (master installer PIN OR per-installer PIN)
 //   • Sales (master sales PIN OR per-installer PIN reuse)
 //
-// Reachable only via the hidden 5-tap gesture on the Lumina logo on the
-// login screen. No visible entry point exists. The screen's title is the
-// generic "Staff Access" with no indication of which role is being
-// requested.
+// Reached from two places (verified 2026-08-11 —
+// audit/INSTALLER_ENTRY.md). Do not re-assert that this screen is
+// hidden; one of its callers is a plainly visible button:
+//
+//   1. The hidden 5-tap gesture on the Lumina logo on the login screen.
+//   2. The "Nex-Gen Professional Access" panel on /link-account, whose
+//      "Installer" button is permanently visible and requires no
+//      gesture. (The "Media" button beside it pushed here too and was
+//      removed in this same change — it offered a 6-character media
+//      code to a 4-digit staff PIN screen.) /link-account is the
+//      redirect target for
+//      every account with installation_role 'unlinked' — i.e. every
+//      fresh sign-up, including an App Store reviewer's. Whether that
+//      panel should stay is an open question; it is presumably how a
+//      dealer who is not yet staff gets in.
+//
+// The screen's title is the generic "Staff Access" with no indication
+// of which role is being requested.
 //
 // PIN validation is delegated entirely to the existing notifiers. This
 // screen never reads from Firestore directly — it just calls the

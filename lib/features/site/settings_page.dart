@@ -19,7 +19,6 @@ import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/properties/properties_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
-import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
@@ -543,16 +542,33 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                   },
                 ),
                 const Divider(height: 1),
-                // Hidden Installer Mode entry - revealed by rapid taps
+                // ── Footer: version, branding, copyright ──────────────
+                //
+                // THERE IS NO STAFF ENTRY ON THIS SCREEN. The three hidden
+                // tap gestures that used to live here — 5 on the version
+                // tile (installer), 6 on "Powered by Nex-Gen" (sales), 7 on
+                // the copyright line (admin) — were all retired 2026-08-11.
+                // See audit/INSTALLER_ENTRY.md.
+                //
+                // Do not reintroduce a staff entry here. Every one of them
+                // logged a signed-in customer out of their own account: each
+                // mode's exit does signOut() + signInAnonymously() and never
+                // restores the prior session. Staff enter via the 5-tap on
+                // the Lumina logo on the LOGIN screen, which reaches
+                // /staff/pin and handles all four roles in one prompt.
+                //
+                // The two tiles below still carry active-session EXIT
+                // affordances (installer, sales). Those are exits, not
+                // entries — they render only when a real minted staff token
+                // already exists.
                 Consumer(builder: (context, ref, _) {
                   if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
-                  return const _InstallerModeEntry();
+                  return const _VersionTile();
                 }),
                 Consumer(builder: (context, ref, _) {
                   if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
                   return const Divider(height: 1);
                 }),
-                // Hidden Sales Mode entry - revealed by rapid taps
                 Consumer(builder: (context, ref, _) {
                   if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
                   return const _SalesModeEntry();
@@ -561,7 +577,6 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                   if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
                   return const Divider(height: 1);
                 }),
-                // Hidden Admin Mode entry - revealed by rapid taps on copyright
                 Consumer(builder: (context, ref, _) {
                   if (ref.watch(demoBrowsingProvider)) return const SizedBox.shrink();
                   return const _AdminModeEntry();
@@ -577,36 +592,29 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
   }
 }
 
-/// Hidden installer mode entry - requires long press to reveal
-class _InstallerModeEntry extends ConsumerStatefulWidget {
-  const _InstallerModeEntry();
+/// Version readout — plus an EXIT affordance when an installer session is
+/// already active.
+///
+/// This tile used to hide a 5-rapid-tap gesture that revealed an "Installer
+/// Mode" entry pushing the legacy `/installer/pin` screen. That entry was an
+/// orphan of the incomplete `5841f43` migration to the unified `/staff/pin`
+/// screen, and it carried a live bug: entering installer mode from a
+/// signed-in customer session replaces that session with the staff one, and
+/// [InstallerModeNotifier.exitInstallerMode] then drops to anonymous without
+/// ever restoring the customer — silently logging them out of their own
+/// account. Staff enter via the 5-tap on the Lumina logo on the login screen.
+///
+/// Removed 2026-08-11. See audit/INSTALLER_ENTRY.md.
+///
+/// The active-session branch below is deliberately retained: it is an exit,
+/// not an entry, and it only renders once a real server-minted staff token
+/// exists ([installerModeActiveProvider] is set only by a successful
+/// `mintStaffToken` round-trip).
+class _VersionTile extends ConsumerWidget {
+  const _VersionTile();
 
   @override
-  ConsumerState<_InstallerModeEntry> createState() => _InstallerModeEntryState();
-}
-
-class _InstallerModeEntryState extends ConsumerState<_InstallerModeEntry> {
-  bool _revealed = false;
-  int _tapCount = 0;
-  DateTime? _lastTap;
-
-  void _onTap() {
-    final now = DateTime.now();
-    // Reset tap count if more than 2 seconds since last tap
-    if (_lastTap == null || now.difference(_lastTap!) > const Duration(seconds: 2)) {
-      _tapCount = 0;
-    }
-    _lastTap = now;
-    _tapCount++;
-
-    // Reveal after 5 rapid taps
-    if (_tapCount >= 5) {
-      setState(() => _revealed = true);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isInstallerMode = ref.watch(installerModeActiveProvider);
 
     // If already in installer mode, show exit option
@@ -643,67 +651,41 @@ class _InstallerModeEntryState extends ConsumerState<_InstallerModeEntry> {
       );
     }
 
-    // Hidden entry - show version info that reveals on rapid taps
-    if (!_revealed) {
-      return GestureDetector(
-        onTap: _onTap,
-        child: ListTile(
-          leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
-          title: Text('Version 1.6.0', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7))),
-          subtitle: Text('Build 2026.01', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5))),
-        ),
-      );
-    }
-
-    // Revealed installer mode entry
+    // Plain, non-interactive version readout. No gesture, no hidden entry.
     return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [NexGenPalette.violet, NexGenPalette.cyan],
-          ),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: const Icon(Icons.engineering, color: Colors.white, size: 18),
-      ),
-      title: const Text('Installer Mode'),
-      subtitle: const Text('Access professional setup tools'),
-      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-      onTap: () => context.push('/installer/pin'),
+      leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+      title: Text('Version 1.6.0', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7))),
+      subtitle: Text('Build 2026.01', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5))),
     );
   }
 }
 
-/// Hidden sales mode entry - revealed by 6 rapid taps on "Powered by Nex-Gen" text
-class _SalesModeEntry extends ConsumerStatefulWidget {
+/// "Powered by Nex-Gen" footer — plus an EXIT affordance when a sales
+/// session is already active.
+///
+/// This text used to hide a 6-rapid-tap gesture revealing a "Sales Mode"
+/// entry that pushed `/sales/pin`. Retired 2026-08-11 alongside the 5-tap
+/// installer and 7-tap admin gestures — see audit/INSTALLER_ENTRY.md.
+///
+/// Two reasons, neither of which was "it's a client-side flag": sales mode
+/// mints a real server-side token like the others. Rather —
+///   1. [SalesModeNotifier.exitSalesMode] is character-for-character the
+///      same as `exitInstallerMode()`: `signOut()` then
+///      `signInAnonymously()`, never restoring the customer. A signed-in
+///      customer who found this gesture was silently logged out of their
+///      own account. The bug was never installer-specific; it belongs to
+///      entering staff mode from a Settings screen reached as a customer.
+///   2. It unlocked nothing new. `/staff/pin` already tries all four roles
+///      and lands sales sessions on the same `salesLanding`, so this was a
+///      pure duplicate of the login-screen logo 5-tap.
+///
+/// The active-session branch is retained deliberately — it is an exit, not
+/// an entry, and only renders once a real minted token exists.
+class _SalesModeEntry extends ConsumerWidget {
   const _SalesModeEntry();
 
   @override
-  ConsumerState<_SalesModeEntry> createState() => _SalesModeEntryState();
-}
-
-class _SalesModeEntryState extends ConsumerState<_SalesModeEntry> {
-  bool _revealed = false;
-  int _tapCount = 0;
-  DateTime? _lastTap;
-
-  void _onTap() {
-    final now = DateTime.now();
-    if (_lastTap == null || now.difference(_lastTap!) > const Duration(seconds: 2)) {
-      _tapCount = 0;
-    }
-    _lastTap = now;
-    _tapCount++;
-
-    // Reveal after 6 rapid taps (different from installer's 5 and admin's 7)
-    if (_tapCount >= 6) {
-      setState(() => _revealed = true);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isSalesMode = ref.watch(salesModeActiveProvider);
 
     if (isSalesMode) {
@@ -739,135 +721,54 @@ class _SalesModeEntryState extends ConsumerState<_SalesModeEntry> {
       );
     }
 
-    if (!_revealed) {
-      return GestureDetector(
-        onTap: _onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-          child: Text(
-            'Powered by Nex-Gen',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
-              fontSize: 11,
-            ),
-            textAlign: TextAlign.center,
-          ),
+    // Plain, non-interactive branding footer. No gesture, no hidden entry.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Text(
+        'Powered by Nex-Gen',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
+          fontSize: 11,
         ),
-      );
-    }
-
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [NexGenPalette.cyan, NexGenPalette.violet],
-          ),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: const Icon(Icons.storefront, color: Colors.white, size: 18),
+        textAlign: TextAlign.center,
       ),
-      title: const Text('Sales Mode'),
-      subtitle: const Text('Field sales and estimate tools'),
-      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-      onTap: () => context.push(AppRoutes.salesPin),
     );
   }
 }
 
-/// Hidden admin mode entry - requires long press on installer mode entry to reveal
-class _AdminModeEntry extends ConsumerStatefulWidget {
+/// Copyright footer.
+///
+/// This text used to hide a 7-rapid-tap gesture revealing an "Admin Access"
+/// entry that pushed `/admin/pin` — the highest-privilege of the three
+/// Settings gestures. Retired 2026-08-11 with the 5-tap installer and 6-tap
+/// sales gestures; see audit/INSTALLER_ENTRY.md for the full rationale.
+///
+/// Unlike the installer and sales tiles there was **no exit branch to
+/// preserve**: the active-session branch pushed `corporateDashboard`, which
+/// is a navigation, not an exit. Admin sessions end via
+/// `AdminModeNotifier.signOut()` or the 30-minute idle timer, neither of
+/// which was reachable from this tile.
+///
+/// Retiring this gesture orphaned `/admin/pin` and `AdminPinScreen`
+/// entirely — both deleted in the same pass. Admin access is unaffected:
+/// `/staff/pin` authenticates admin PINs at branch 2 and lands on the same
+/// `corporateDashboard`.
+class _AdminModeEntry extends StatelessWidget {
   const _AdminModeEntry();
 
   @override
-  ConsumerState<_AdminModeEntry> createState() => _AdminModeEntryState();
-}
-
-class _AdminModeEntryState extends ConsumerState<_AdminModeEntry> {
-  bool _revealed = false;
-  int _tapCount = 0;
-  DateTime? _lastTap;
-
-  void _onTap() {
-    final now = DateTime.now();
-    // Reset tap count if more than 2 seconds since last tap
-    if (_lastTap == null || now.difference(_lastTap!) > const Duration(seconds: 2)) {
-      _tapCount = 0;
-    }
-    _lastTap = now;
-    _tapCount++;
-
-    // Reveal after 7 rapid taps (different from installer mode's 5)
-    if (_tapCount >= 7) {
-      setState(() => _revealed = true);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final isAdminMode = ref.watch(adminAuthenticatedProvider);
-
-    // If admin mode is active, show indicator
-    if (isAdminMode) {
-      return ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: Colors.amber.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: const Icon(Icons.admin_panel_settings, color: Colors.amber, size: 18),
+    // Plain, non-interactive copyright line. No gesture, no hidden entry.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      child: Text(
+        '© 2026 Nex-Gen Lighting Systems',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+          fontSize: 12,
         ),
-        title: const Text('Admin Dashboard'),
-        subtitle: const Text('Manage dealers and installers'),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.amber.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
-          ),
-          child: Text(
-            'Active',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.amber),
-          ),
-        ),
-        onTap: () => context.push(AppRoutes.corporateDashboard),
-      );
-    }
-
-    // Hidden entry - show copyright that reveals on rapid taps
-    if (!_revealed) {
-      return GestureDetector(
-        onTap: _onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          child: Text(
-            '© 2026 Nex-Gen Lighting Systems',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
-              fontSize: 12,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
-    // Revealed admin entry
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: Colors.amber.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: const Icon(Icons.admin_panel_settings, color: Colors.amber, size: 18),
+        textAlign: TextAlign.center,
       ),
-      title: const Text('Admin Access'),
-      subtitle: const Text('Manage dealers and installers'),
-      trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-      onTap: () => context.push(AppRoutes.adminPin),
     );
   }
 }
