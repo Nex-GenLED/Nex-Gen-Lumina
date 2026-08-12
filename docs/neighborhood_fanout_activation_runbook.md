@@ -1,10 +1,13 @@
 # Neighborhood Sync crew fanout — activation runbook (P1-44)
 
-**Status: PREP ONLY — fanout is NOT active.** The server-side crew fanout has
-never executed in production (`config/sync_fanout` doc absent → flag reads
-`false`; the foreground `fanoutAdHocSync` + CF fanout block have never run). This
-runbook is the safe path to turn it on. **Nothing here auto-deploys; the
-`enabled:true` flip is console-only.**
+**Status: STEPS 1–3 DONE — fanout is dormant by FLAG. Remaining: step 4 (two-node
+test) + step 5 (console flip).** The server-side crew fanout has still never
+executed in production, but the reason changed: as of **2026-08-12** the doc
+EXISTS at `{enabled:false}`, the rule (read **+** create) is live in ruleset
+`93c99c50-0b3d-4a72-b76f-eb6f3040550d`, and `applySyncPattern` is deployed
+current (`2026-07-25T19:55:32Z`, ACTIVE — no src commit since). So the flag reads
+`false` because it is *set* false, not because it is missing. **Nothing here
+auto-deploys; the `enabled:true` flip is console-only.**
 
 ## What fanout does
 When ON, the initiator's "Start" tap ALSO calls the Cloud Function
@@ -25,22 +28,35 @@ admin-only) delegating to the pure `evaluateRateLimit` ([:490]):
 - Wired at [applySyncPattern.ts:166], BEFORE `fanoutToCrew`; on reject writes
   nothing and returns `200 {ok:false, reason:"rate_limited", retryAfterMs}` and
   the app suppresses its broadcast too.
-- ⚠️ **Gap:** `evaluateRateLimit` is exported "for unit verification" but has NO
-  test file. Consider a unit test before activation (cooldown reject, ceiling
-  reject, accept-and-reserve, window trim).
+- ✅ **Tested** (was flagged as a gap; closed by `25baadb`, re-verified 2026-08-12):
+  `functions/test/unit/fanoutRateLimit.test.js` + `fanoutMutualMembership.test.js`,
+  **17/17 pass** against the tsc-compiled `lib/`. Run them with **`npx jest`** from
+  `functions/` — `node --test` fails with `describe is not defined` (the files use
+  jest globals and never import `node:test`).
 
 ## Ordered activation checklist
 
-- [ ] **1. Deploy the create-rule** (drafted, rules-tested, NOT deployed).
-      `config/sync_fanout` gains `allow create` (authed, `enabled==false` only);
-      `update`/`delete` stay denied (console-only flip). Rules-test passed
-      (create false ✓ / create true ✗ / update ✗ / read ✓ / unauth read ✗).
-      Deploy: confirm `firebase use icrt6menwsv2d8all8oijs021b06s5`, then
-      `firebase deploy --only firestore:rules`. **Manual — nothing auto-deploys.**
-- [ ] **2. Provision the doc with `enabled:false`** (see BOOTSTRAP options below).
-      Verify `config/sync_fanout` exists and reads `false` (flag still OFF).
-- [ ] **3. Deploy the CF** `applySyncPattern` (if not already current) so the
-      rate limiter + fanout block are live: `firebase deploy --only functions`.
+- [x] **1. Deploy the create-rule** — **DONE.** Live in ruleset
+      `93c99c50-0b3d-4a72-b76f-eb6f3040550d` (release `cloud.firestore`,
+      updateTime `2026-08-05T19:27:10Z`), verified by reading the deployed source:
+      `allow read: request.auth != null`; `allow create` gated on
+      `request.resource.data.enabled == false`; `allow update, delete: if false`.
+      Rode along with the command-safety/solar deploy.
+- [x] **2. Provision the doc with `enabled:false`** — **DONE.** `config/sync_fanout`
+      = `{enabled: false}` (admin read 2026-08-12). Provisioned out-of-band, i.e.
+      option (A) console create — `bootstrapSyncFanoutFlagDoc()` is still never
+      called, so option (B) remains unwired if fresh installs ever need to
+      self-provision.
+      ⚠️ **Existence ≠ client-readable.** This was an ADMIN read, which bypasses
+      rules. The deployed `allow read` above is the evidence for client
+      readability; if that is ever in doubt, re-verify with a NON-ADMIN client
+      token (the solar flag burned a day on exactly this distinction).
+- [x] **3. Deploy the CF** `applySyncPattern` — **DONE / current.** updateTime
+      `2026-07-25T19:55:32Z`, state ACTIVE. All SYNC-1/2 source predates it
+      (`7d71374` 2026-07-01, `76324ce` 2026-07-25T02:11Z, `25baadb`
+      2026-07-25T15:46Z) and nothing has touched
+      `functions/src/applySyncPattern.ts` since — deployed == current source.
+      Re-check this line before step 5 if that file has been edited.
 - [ ] **4. TWO-NODE VERIFICATION** (see below) — prove a fanout lands on a
       member that is NOT the initiator, on a test group, with `enabled:true`
       set ONLY in a test context (emulator or a throwaway group). Do not flip

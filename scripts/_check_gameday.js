@@ -1,7 +1,16 @@
 // Game Day shadow-run checkpoint reader. Read-only.
 //
-//   node scripts/_check_gameday.js start     ← window 1, ~20:10 UTC
-//   node scripts/_check_gameday.js end       ← window 2, ~05:00-06:00 UTC
+//   node scripts/_check_gameday.js start [firstPitchUTC]   ← window 1
+//   node scripts/_check_gameday.js end   [firstPitchUTC]   ← window 2
+//
+// `firstPitchUTC` is any Date-parsable instant (ISO 8601 preferred) and is used
+// ONLY to report the lead time of each planned start. It was hardcoded per run
+// and went stale every time; pass it instead:
+//
+//   node scripts/_check_gameday.js start 2026-08-12T17:40:00Z
+//
+// Omitting it falls back to DEFAULT_FIRST_PITCH_UTC below and prints a warning,
+// so a stale default can never masquerade as the real first pitch again.
 //
 // Run from the repo root with functions/node_modules on hand (the admin SDK
 // MUST come from functions/, not the root — two instances reject each other's
@@ -21,7 +30,24 @@ admin.initializeApp({
 const db = admin.firestore();
 
 const MODE = (process.argv[2] || 'start').toLowerCase();
-const FIRST_PITCH_UTC = '2026-08-12T02:10:00Z';
+
+// Today's Twins run. Used only for the lead-time report; pass argv[3] to override.
+const DEFAULT_FIRST_PITCH_UTC = '2026-08-12T17:40:00Z';
+
+const FIRST_PITCH_UTC = (() => {
+  const arg = process.argv[3];
+  if (!arg) {
+    console.log('NOTE: no firstPitchUTC argument — using default ' +
+      DEFAULT_FIRST_PITCH_UTC + '. Pass one to be sure it matches the run.');
+    return DEFAULT_FIRST_PITCH_UTC;
+  }
+  if (Number.isNaN(new Date(arg).getTime())) {
+    console.error('BAD firstPitchUTC: "' + arg + '" is not a parsable instant. ' +
+      'Expected e.g. 2026-08-12T17:40:00Z.');
+    process.exit(1);
+  }
+  return arg;
+})();
 
 (async () => {
   // ── plan log: PLAIN get, no orderBy ──────────────────────────────────

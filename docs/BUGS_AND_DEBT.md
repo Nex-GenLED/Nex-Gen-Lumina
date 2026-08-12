@@ -18,6 +18,18 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 - **Firestore project (source of truth):** `icrt6menwsv2d8all8oijs021b06s5`. NOT
   `nex-gen-lumina-22751`. Always `firebase use icrt6menwsv2d8all8oijs021b06s5` and confirm
   before any `firebase deploy`.
+- **SINGLE-OWNER PER STATE DOMAIN** (2026-08-12). When parallel sessions are open, each live
+  state domain has exactly ONE owning window; other windows read but never write. Established
+  when a Sync window read `config/gameday_planner` five minutes before the watch window armed
+  it and reported cleared blockers as live. Game Day domain = flags, configs, sessions, fire
+  jobs (`config/gameday_planner`, `game_day_sessions`, `fire_jobs`, `functions/`) → the watch
+  window. A stale cross-domain read is not evidence; ask the owner. Read-only diagnostic
+  scripts (all-`.get()`, e.g. `scripts/_check_gameday.js`) are exempt — they observe, not own.
+  Pairs with the shared-tree rule: commit with an explicit pathspec, never bare `git add`.
+- **Numbering hazard:** the live series (`#62`–`#68`) REUSES integers that the folded-in
+  `BUG_BACKLOG.md` also used. Old ones are re-labeled `P2-NN … (ex-#NN)` — so `#67`/`#68` below
+  are the NEW Game Day items, distinct from `P2-29 (ex-#67)` / `P2-30 (ex-#68)`. Always read
+  the `ex-` annotation before assuming a cross-reference.
 
 ---
 
@@ -518,6 +530,33 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - **DONE (partial):** read-only `match /config/sync_fanout` rule added to `firestore.rules`
     (hygiene — stops the fleet-wide per-launch permission-denied on the flag listen; flag stays
     absent/false). NOT deployed (rules deploy authorized separately).
+  - ⚠️ **STATE CORRECTION 2026-08-12 — the title and the 404 premise above are now STALE.**
+    Re-verified against live infra; four of the blockers recorded above have since cleared:
+    1. **Rule is DEPLOYED.** Live ruleset `93c99c50-0b3d-4a72-b76f-eb6f3040550d`
+       (release `cloud.firestore`, updateTime `2026-08-05T19:27:10Z`) contains the full
+       `match /config/sync_fanout` block — `allow read` **and** `allow create` (enabled==false),
+       `update/delete: if false`. It rode along with the 2026-08-05 command-safety/solar deploy.
+       So it is no longer "read-only, not deployed" — the create-rule is live too.
+    2. **The doc EXISTS.** `config/sync_fanout` = `{enabled: false}` (admin read, 2026-08-12).
+       Not 404. Runbook step 2 is satisfied. `bootstrapSyncFanoutFlagDoc()` is **still never
+       called**, so the doc was provisioned out-of-band (console) — the "double-dead" finding
+       holds for the *bootstrap function* but no longer for the *doc*.
+    3. **The CF is DEPLOYED and current.** `applySyncPattern` updateTime
+       `2026-07-25T19:55:32Z`, state ACTIVE. Every SYNC-1/2 source commit predates it
+       (`7d71374` rate limiter 2026-07-01; `76324ce` SYNC-1 2026-07-25T02:11Z; `25baadb`
+       2026-07-25T15:46Z) and **no commit has touched `functions/src/applySyncPattern.ts`
+       since** — so deployed == current source. Runbook step 3 is satisfied.
+    4. **`evaluateRateLimit` HAS tests.** `functions/test/unit/fanoutRateLimit.test.js` +
+       `fanoutMutualMembership.test.js` — **17/17 pass under jest** against the tsc-compiled
+       `lib/` (2026-08-12). The runbook's "NO test file" gap note is stale. NOTE: they need
+       `npx jest`; `node --test` fails with `describe is not defined` (no `node:test` import).
+    - Also resolves `audit/RELEASE_READINESS.md:180` ("SYNC-1 absent from the committed
+      `functions/lib/applySyncPattern.js`"): `lib/` is tracked, was rebuilt `be0b007`
+      2026-08-01, and now carries `verifyFanoutTarget` (×4) plus the correct constants
+      (5 / 18000 / 60000).
+    - **Net: fanout is dormant by FLAG, not by absence.** The only thing between here and live
+      is the two-node test (runbook step 4) and the console flip (step 5). Correct the title
+      when this item is next touched: it is no longer "unreadable".
   - Files: `firestore.rules` (read-only sync_fanout block added; create/flip still absent by design),
     `lib/features/neighborhood/sync_fanout_feature_flag.dart`, `neighborhood_service.dart:472`,
     `functions/src/applySyncPattern.ts:159-190,312-325`.
@@ -745,6 +784,44 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     real.
   - Files: `lib/features/schedule/schedule_sync.dart`, `lib/features/schedule/schedule_providers.dart`.
 
+- [ ] **#67 — `_GameStatusBadge` renders 'Today' from the raw ESPN schedule regardless of
+  server-side skip decisions — the client promises a fire the server refused**
+  - Status: OPEN (recorded 2026-08-12) · Severity: **P1** · Evidence: verified-by-source
+  - `_GameStatusBadge` ([game_day_screen.dart:1033](../lib/features/game_day/game_day_screen.dart#L1033))
+    branches on `game.status` and nothing else: live → `score`, final → `Final x-y`, **else →
+    `'Today'`**. Its data is `upcomingGameProvider`
+    ([game_day_providers.dart:170](../lib/features/game_day/game_day_providers.dart#L170)) — a raw
+    ESPN scoreboard read via `liveScoreFetcherProvider`. ESPN says a game exists; the badge says
+    "Today"; nothing in between consults our own planner.
+  - **The server decides separately, and none of its refusals reach the badge:** the
+    `skip_day_games` daylight filter
+    ([planGameDayFires.ts:366-386](../functions/src/planGameDayFires.ts#L366)), the
+    `startInPast` / `startBeyondHorizon` horizon tests (`:401-403`), the participation gate
+    (`:355-363`), and the #66 GUARD 0/0b end refusals. A daylight game the server dropped as
+    `daylight_game` still reads **'Today'** on the card.
+  - Customer-visible shape: user sees "Today", expects lights at first pitch, gets nothing, and
+    has no way to learn the system decided against it on purpose. This is the trust failure #66
+    was the mirror image of — there we fired without deciding to; here we decide not to fire and
+    still promise it.
+  - **Fix direction:** the pre-game promise must read plan/session state — `gameday_plan_log`
+    rows and `game_day_sessions.startPlannedAt` — not the schedule. `'Today'` should mean *a
+    start is planned*, with a distinct treatment (and reason) for *game today, no fire*.
+  - ⚠️ **CONSTRAINT — do not regress the frozen-badge fix.**
+    [game_day_providers.dart:164-169](../lib/features/game_day/game_day_providers.dart#L164)
+    deliberately chose a live-gated self-poll **over** the celebration coordinator's
+    `ScoreMonitorService`, because the coordinator polls only when celebrations are ARMED — so a
+    celebrations-off user, or a team with no autopilot config, saw a permanently frozen badge.
+    Repointing the whole badge at coordinator state reintroduces exactly that. **Split it:** the
+    live/final SCORE half keeps its own ESPN cadence; only the pre-game PROMISE half reads plan
+    state.
+  - **Ordering: #68 is a prerequisite for the daylight case.** A daylight skip currently writes
+    no plan-log row at all, so there is nothing for the badge to read — it cannot distinguish
+    "server skipped this" from "not planned yet". Land #68 first or this fix is blind for the
+    single most common skip reason.
+  - Files: `lib/features/game_day/game_day_screen.dart:1033-1090`,
+    `lib/features/game_day/game_day_providers.dart:112-200`,
+    `functions/src/planGameDayFires.ts` (read-only — decision source). Related **#68**, **#66**.
+
 ---
 
 ## P2 — hardening & platform
@@ -766,6 +843,35 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - cfg flash-saves black out controller network for minutes. App tolerates; nothing fixes.
     Evaluate WLED version-pin (0.15.1, see SOP §2.0) before fleet scale.
   - Files: firmware/version-pin policy (no app fix).
+
+- [ ] **#68 — Daylight skip increments a counter but writes NO plan-log row — skipped teams are
+  invisible in `gameday_plan_log`**
+  - Status: OPEN (recorded 2026-08-12) · Severity: **P2** (observability) · Evidence:
+    verified-by-source
+  - [planGameDayFires.ts:366-386](../functions/src/planGameDayFires.ts#L366): when
+    `isDaylightOnlyGame` is true the loop does `bump(stats.skipped, "daylight_game")` then bare
+    `continue`. Every **other** skip in the same loop also pushes a `logRows` row — participation
+    does, twelve lines up at `:358-361`. Daylight is the one path that increments and stays
+    silent.
+  - Consequence: the aggregate `lastSummary.skipped.daylight_game` tells you *three teams were
+    skipped* and nothing else — not which teams, which uids, which events, or what sunset was
+    computed. `scripts/_check_gameday.js` filters rows by `action`, so a daylight-skipped team
+    simply does not appear in any window's output. The count reconciles, which makes the
+    invisibility look like health.
+  - Same observability class as the disposition mirror and the 2026-08-11 horizon-counter fix
+    (`:395-400`, *"every path out of this block must increment something"*) — that fix added the
+    missing **counters** and left this path's missing **row**.
+  - **Fix:** push `{uid, teamSlug, eventId, action:"skip", reason:"daylight_game"}` alongside the
+    bump, carrying the decision inputs — `gameStartMs`, estimated end, computed sunset, lat/lon,
+    and the `tzOffsetHours` actually used.
+  - **Why the inputs matter, not just the row:** the filter hardcodes `tzOffsetHours: -5`
+    ("US Central is the fleet's reality today", `:376-379`), self-documented as accurate only
+    outside ±30 min of sunset. So every near-sunset call is a coin flip that **currently leaves
+    no trace to audit**. The row is what turns that limitation from invisible into reviewable.
+  - Files: `functions/src/planGameDayFires.ts:366-386`,
+    `functions/src/gameDayPlanning.ts:433` (`isDaylightOnlyGame`),
+    `scripts/_check_gameday.js` (reader — will surface the rows once written). Related **#67**
+    (badge needs these rows), **F1**.
 
 - [ ] **#65 — No code path can create a non-primary roofline segment, so participation always resolves to ALL channels**
   - Status: OPEN (recorded 2026-08-12) · Evidence: exhaustive grep of every
