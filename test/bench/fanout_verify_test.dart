@@ -32,6 +32,27 @@ ControllerSnapshot _matching() => const ControllerSnapshot(
       ],
     );
 
+/// A's real resting state on the bench: master OFF at base preset 2, seg0
+/// fx=0 — and pal=5, which is ALSO the broadcast's palette. Used as the
+/// default baseline so the tests exercise the coincidence the live run hit.
+ControllerSnapshot _resting() => const ControllerSnapshot(
+      on: false,
+      effectId: 0,
+      paletteId: 5,
+      colors: [
+        [0, 200, 255, 0],
+      ],
+    );
+
+/// A fanout#1 response that served both members and skipped nobody.
+FanoutResponse _served({int members = 2, int commands = 2, int skipped = 0}) =>
+    FanoutResponse.fromBody(200, {
+      'ok': true,
+      'memberCount': members,
+      'commandCount': commands,
+      'skipped': skipped,
+    });
+
 QueuedCommand _applyCmd({String id = 'c1', String status = 'pending'}) =>
     QueuedCommand(
       id: id,
@@ -254,9 +275,11 @@ void main() {
           bQueueAfterFanout: [_applyCmd()],
           initiatorUid: 'uid_A',
           nodeBUid: 'uid_B',
+          nodeABefore: _resting(),
           nodeAAfter: _matching(),
           nodeBAfter: _matching(),
           broadcast: _pattern,
+          firstFanout: _served(),
           secondFanout: FanoutResponse.fromBody(
               200, {'ok': false, 'reason': 'rate_limited'}),
         );
@@ -273,9 +296,11 @@ void main() {
         bQueueAfterFanout: const [],
         initiatorUid: 'uid_A',
         nodeBUid: 'uid_B',
+        nodeABefore: _resting(),
         nodeAAfter: _matching(),
         nodeBAfter: _matching(),
         broadcast: _pattern,
+        firstFanout: _served(),
         secondFanout: FanoutResponse.fromBody(
             200, {'ok': false, 'reason': 'rate_limited'}),
       );
@@ -290,9 +315,11 @@ void main() {
         bQueueAfterFanout: [_applyCmd()],
         initiatorUid: 'uid_SAME',
         nodeBUid: 'uid_SAME',
+        nodeABefore: _resting(),
         nodeAAfter: _matching(),
         nodeBAfter: _matching(),
         broadcast: _pattern,
+        firstFanout: _served(),
         secondFanout: FanoutResponse.fromBody(
             200, {'ok': false, 'reason': 'rate_limited'}),
       );
@@ -306,10 +333,12 @@ void main() {
         bQueueAfterFanout: [_applyCmd()],
         initiatorUid: 'uid_A',
         nodeBUid: 'uid_B',
+        nodeABefore: _resting(),
         nodeAAfter: _matching(),
         nodeBAfter:
             const ControllerSnapshot(on: true, effectId: 0, paletteId: 0),
         broadcast: _pattern,
+        firstFanout: _served(),
         secondFanout: FanoutResponse.fromBody(
             200, {'ok': false, 'reason': 'rate_limited'}),
       );
@@ -318,14 +347,80 @@ void main() {
       expect(checks[2].pass, isFalse); // convergence
     });
 
+    // THE 2026-08-12 RUN, as a regression. A's member doc was
+    // participationStatus:"paused", so fanoutToCrew skipped it silently and
+    // wrote no command for A. A stayed at base — fx=0, pal=5 — and because the
+    // broadcast's palette is ALSO 5, the evidence line read "A fx=0 pal=5" and
+    // looked like a half-applied pattern. Nothing had been applied at all.
+    test('a skipped initiator fails convergence and NAMES the skip', () {
+      final o = FanoutRunObservation(
+        bQueueAfterFanout: [_applyCmd()],
+        initiatorUid: 'uid_A',
+        nodeBUid: 'uid_B',
+        nodeABefore: _resting(),
+        nodeAAfter: _resting(), // never written to — unchanged
+        nodeBAfter: _matching(),
+        broadcast: _pattern,
+        firstFanout: _served(members: 1, commands: 1, skipped: 1),
+        secondFanout: FanoutResponse.fromBody(
+            200, {'ok': false, 'reason': 'rate_limited'}),
+      );
+      final checks = evaluateFanoutRun(o);
+      expect(checks[0].pass, isTrue); // server wrote to B
+      expect(checks[1].pass, isTrue); // B converged
+      expect(checks[2].pass, isFalse); // A did not
+      expect(checks[2].evidence, contains('skipped=1'));
+      expect(checks[2].evidence, contains('participationStatus'));
+      // The baseline is what makes "pal=5 was already there" legible.
+      expect(checks[2].evidence, contains('before fx=0 pal=5'));
+    });
+
+    // The other direction, and the more dangerous one: if A were already
+    // resting ON the broadcast pattern, a "converged" pass would be worthless.
+    test('a baseline that already matches is INCONCLUSIVE, never a pass', () {
+      final o = FanoutRunObservation(
+        bQueueAfterFanout: [_applyCmd()],
+        initiatorUid: 'uid_A',
+        nodeBUid: 'uid_B',
+        nodeABefore: _matching(), // already carrying the pattern
+        nodeAAfter: _matching(),
+        nodeBAfter: _matching(),
+        broadcast: _pattern,
+        firstFanout: _served(),
+        secondFanout: FanoutResponse.fromBody(
+            200, {'ok': false, 'reason': 'rate_limited'}),
+      );
+      final conv = evaluateFanoutRun(o)[2];
+      expect(conv.pass, isFalse);
+      expect(conv.evidence, contains('INCONCLUSIVE'));
+    });
+
+    test('server accounting is parsed off the fanout response', () {
+      final r = FanoutResponse.fromBody(
+          200, {'ok': true, 'memberCount': 1, 'commandCount': 1, 'skipped': 1});
+      expect(r.memberCount, 1);
+      expect(r.commandCount, 1);
+      expect(r.skipped, 1);
+    });
+
+    test('an absent accounting block stays null, not zero', () {
+      // null means "the server did not say"; 0 means "it said none". Collapsing
+      // them would invent a skip=0 claim the server never made.
+      final r = FanoutResponse.fromBody(200, {'ok': true});
+      expect(r.memberCount, isNull);
+      expect(r.skipped, isNull);
+    });
+
     test('an unlimited second fanout fails the rate-limit assertion', () {
       final o = FanoutRunObservation(
         bQueueAfterFanout: [_applyCmd()],
         initiatorUid: 'uid_A',
         nodeBUid: 'uid_B',
+        nodeABefore: _resting(),
         nodeAAfter: _matching(),
         nodeBAfter: _matching(),
         broadcast: _pattern,
+        firstFanout: _served(),
         secondFanout: FanoutResponse.fromBody(200, {'ok': true}),
       );
       expect(evaluateFanoutRun(o).last.pass, isFalse);

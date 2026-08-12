@@ -1,3 +1,4 @@
+import 'dart:convert';
 // Two-node fanout verification — PURE logic.
 //
 // Proves the claim the crew-fanout activation actually rests on: a sync
@@ -86,8 +87,9 @@ class ControllerSnapshot {
     final colors = <List<int>>[];
     if (rawCol is List) {
       for (final c in rawCol) {
-        if (c is List)
+        if (c is List) {
           colors.add(c.whereType<num>().map((n) => n.toInt()).toList());
+        }
       }
     }
 
@@ -193,6 +195,9 @@ class FanoutResponse {
     required this.ok,
     this.reason,
     this.retryAfterMs = 0,
+    this.memberCount,
+    this.commandCount,
+    this.skipped,
   });
 
   /// The rate limiter answers 200 with `{ok:false, reason:"rate_limited"}` —
@@ -202,12 +207,32 @@ class FanoutResponse {
   bool get isRateLimited =>
       statusCode == 200 && !ok && reason == 'rate_limited';
 
+  /// The fanout loop's own accounting: how many roster members it served, how
+  /// many command docs it wrote, and how many it SKIPPED. The 2026-08-12 run
+  /// returned `members=1 commands=1 skipped=1` and the harness discarded all
+  /// three, so a silently-skipped initiator surfaced only as an unexplained
+  /// convergence failure. A number the server volunteers is never dropped.
+  final int? memberCount;
+  final int? commandCount;
+  final int? skipped;
+
   static FanoutResponse fromBody(int statusCode, Map<String, dynamic> body) {
+    // A 400 MUST NOT be blind. The CF reports a rejected field in `error`, but
+    // this only ever read `reason` — so the 2026-08-12 run printed
+    // `reason=null` four times while the server was naming the exact problem
+    // ("Missing required field: initiatorUid.") in a field nobody looked at.
+    // Fall back to `error`, then to the whole body, so a failure can never be
+    // less informative than the response that caused it.
+    final r = body['reason'] as String?;
+    final e = body['error'] as String?;
     return FanoutResponse(
       statusCode: statusCode,
       ok: body['ok'] == true,
-      reason: body['reason'] as String?,
+      reason: r ?? e ?? (body.isEmpty ? null : jsonEncode(body)),
       retryAfterMs: (body['retryAfterMs'] as num?)?.toInt() ?? 0,
+      memberCount: (body['memberCount'] as num?)?.toInt(),
+      commandCount: (body['commandCount'] as num?)?.toInt(),
+      skipped: (body['skipped'] as num?)?.toInt(),
     );
   }
 }
@@ -234,12 +259,21 @@ class FanoutRunObservation {
   final String initiatorUid;
   final String nodeBUid;
 
+  /// A's state BEFORE the broadcast. Without a baseline, convergence cannot be
+  /// distinguished from a resting value that already happened to match — see
+  /// the inconclusive branch in [evaluateFanoutRun].
+  final ControllerSnapshot nodeABefore;
+
   /// Snapshots taken after the bridge-sim drained and applied.
   final ControllerSnapshot nodeAAfter;
   final ControllerSnapshot nodeBAfter;
 
   /// The pattern A broadcast.
   final PatternSpec broadcast;
+
+  /// Response to the FIRST fanout — carries the server's own member/skip
+  /// accounting, which explains a non-converging node without a log dive.
+  final FanoutResponse firstFanout;
 
   /// Response to a SECOND fanout fired inside the 18s initiator cooldown.
   final FanoutResponse secondFanout;
@@ -248,9 +282,11 @@ class FanoutRunObservation {
     required this.bQueueAfterFanout,
     required this.initiatorUid,
     required this.nodeBUid,
+    required this.nodeABefore,
     required this.nodeAAfter,
     required this.nodeBAfter,
     required this.broadcast,
+    required this.firstFanout,
     required this.secondFanout,
   });
 }
@@ -286,12 +322,36 @@ List<FanoutCheck> evaluateFanoutRun(FanoutRunObservation o) {
   ));
 
   // 3. CONVERGENCE — A shows it too, so the two nodes agree.
+  //
+  // Two traps this check learned the hard way on 2026-08-12:
+  //
+  //   (a) A's resting palette was ALREADY pal=5, the broadcast's palette. The
+  //       run reported "A fx=0 pal=5" and it read as a partial apply — palette
+  //       landed, effect didn't — when in truth NOTHING was delivered to A and
+  //       one field coincided. A convergence claim resting on a value that was
+  //       there beforehand is not evidence, in either direction, so a baseline
+  //       match is reported INCONCLUSIVE rather than passed or failed.
+  //   (b) The server had already said why, in `skipped`. Surfaced below.
   final aReflects = o.nodeAAfter.reflects(o.broadcast);
+  final aWasAlreadyThere = o.nodeABefore.reflects(o.broadcast);
+  final f = o.firstFanout;
+  final serverAccounting = f.memberCount == null
+      ? ''
+      : ' · server served=${f.memberCount} wrote=${f.commandCount} '
+          'skipped=${f.skipped}'
+          '${(f.skipped ?? 0) > 0 ? " (a SKIPPED member receives no command — "
+              "check participationStatus on the roster)" : ""}';
   checks.add(FanoutCheck(
     'convergence: A and B match',
-    aReflects && o.nodeBAfter.reflects(o.broadcast),
-    'A fx=${o.nodeAAfter.effectId} pal=${o.nodeAAfter.paletteId} · '
-        'B fx=${o.nodeBAfter.effectId} pal=${o.nodeBAfter.paletteId}',
+    !aWasAlreadyThere && aReflects && o.nodeBAfter.reflects(o.broadcast),
+    aWasAlreadyThere
+        ? 'INCONCLUSIVE: A already carried the broadcast pattern BEFORE the '
+            'fanout — pick a pattern A is not resting on$serverAccounting'
+        : 'A before fx=${o.nodeABefore.effectId} pal=${o.nodeABefore.paletteId} '
+            '-> after fx=${o.nodeAAfter.effectId} pal=${o.nodeAAfter.paletteId} · '
+            'B fx=${o.nodeBAfter.effectId} pal=${o.nodeBAfter.paletteId} · '
+            'want fx=${o.broadcast.effectId} pal=${o.broadcast.paletteId}'
+            '$serverAccounting',
   ));
 
   // 4. RATE LIMIT — a second fanout inside the cooldown is refused, and

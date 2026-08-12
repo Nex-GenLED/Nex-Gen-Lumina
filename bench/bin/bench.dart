@@ -498,8 +498,9 @@ Future<void> cmdChannelPower() async {
     final seg = s?['seg'];
     if (seg is List) {
       for (final e in seg) {
-        if (e is Map && e['on'] == true && e['id'] is int)
+        if (e is Map && e['on'] == true && e['id'] is int) {
           out.add(e['id'] as int);
+        }
       }
     }
     return out;
@@ -751,8 +752,9 @@ String? _flag(List<String> args, String name) {
 Object? _fsValue(Map<String, dynamic> v) {
   if (v.containsKey('stringValue')) return v['stringValue'];
   if (v.containsKey('booleanValue')) return v['booleanValue'];
-  if (v.containsKey('integerValue'))
+  if (v.containsKey('integerValue')) {
     return int.tryParse('${v['integerValue']}');
+  }
   if (v.containsKey('doubleValue')) return (v['doubleValue'] as num).toDouble();
   if (v.containsKey('nullValue')) return null;
   if (v.containsKey('arrayValue')) {
@@ -872,10 +874,32 @@ class _StubController {
   Future<void> stop() async => _server?.close(force: true);
 }
 
+/// A's uid, read from its OWN id token.
+///
+/// applySyncPattern asserts `decoded.uid === initiatorUid`, so deriving the uid
+/// from the token that authorizes the call makes a mismatch structurally
+/// impossible. Taking it as a separate --a-uid flag would reintroduce exactly
+/// the class of error that produced the 0/4 run: two sources for one fact.
+String? _uidFromIdToken(String jwt) {
+  final parts = jwt.split('.');
+  if (parts.length < 2) return null;
+  var p = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+  while (p.length % 4 != 0) {
+    p += '=';
+  }
+  try {
+    final m = jsonDecode(utf8.decode(base64.decode(p))) as Map<String, dynamic>;
+    return (m['user_id'] ?? m['sub']) as String?;
+  } catch (_) {
+    return null;
+  }
+}
+
 Future<FanoutResponse> _postFanout(
   String token,
   String groupId,
   Map<String, dynamic> payload,
+  String initiatorUid,
 ) async {
   final http = HttpClient();
   try {
@@ -884,6 +908,14 @@ Future<FanoutResponse> _postFanout(
     req.headers.contentType = ContentType.json;
     req.write(jsonEncode({
       'data': {
+        // REQUIRED. Omitted in the first cut, which is why the 2026-08-12 run
+        // was 0/4: applySyncPattern rejects at the top of the handler with
+        // `400 Missing required field: initiatorUid.` before the membership
+        // gate, before the flag read, before the rate-limiter reservation —
+        // which is why fanout#2 came back retryAfterMs=0. The CF also asserts
+        // decoded.uid === initiatorUid, so this must be A's OWN uid, matching
+        // the a-token.
+        'initiatorUid': initiatorUid,
         'groupId': groupId,
         'sessionId': '',
         'payload': payload,
@@ -897,7 +929,12 @@ Future<FanoutResponse> _postFanout(
     try {
       parsed = Map<String, dynamic>.from(jsonDecode(body));
     } catch (_) {}
-    return FanoutResponse.fromBody(res.statusCode, parsed);
+    final out = FanoutResponse.fromBody(res.statusCode, parsed);
+    // Raw body on every non-ok, always. See FanoutResponse.fromBody.
+    if (!out.ok) {
+      _log('  CF non-ok body: ${body.isEmpty ? "(empty)" : body}');
+    }
+    return out;
   } finally {
     http.close(force: true);
   }
@@ -918,6 +955,14 @@ Future<void> cmdFanoutVerify(List<String> args) async {
     if (bUid == null) '--b-uid',
     if (bToken == null) '--b-token',
   ];
+  final aUid = aToken == null ? null : _uidFromIdToken(aToken);
+  if (aToken != null && aUid == null) {
+    stderr.writeln('fanout-verify: could not read user_id from --a-token '
+        '(malformed JWT?). initiatorUid must match the token uid.');
+    client.close();
+    exit(2);
+  }
+
   if (missing.isNotEmpty) {
     stderr.writeln('fanout-verify needs: ${missing.join(", ")}');
     stderr.writeln('Prerequisites (both gated by Tyler):');
@@ -928,8 +973,16 @@ Future<void> cmdFanoutVerify(List<String> args) async {
     exit(2);
   }
 
-  // Fireworks in two contrasting colors: visually obvious and far from any
-  // resting state, so "converged" cannot be a coincidence.
+  // Fireworks in two contrasting colors: visually obvious, and fx=88 is far
+  // from any resting state.
+  //
+  // pal=5 is NOT far from resting — the bench rig sits on pal=5 on both
+  // segments (it is the palette the blocks boundary-blend work pinned). The
+  // earlier claim here that "converged cannot be a coincidence" was therefore
+  // only true of the effect, and the 2026-08-12 run duly produced a
+  // coincidental palette match that read as a partial apply. The baseline
+  // snapshot below is what actually makes coincidence detectable; this comment
+  // no longer pretends the pattern alone does it.
   const pattern = PatternSpec(
     effectId: 88,
     paletteId: 5,
@@ -945,9 +998,20 @@ Future<void> cmdFanoutVerify(List<String> args) async {
     final port = await stub.start(bPort);
     _log('  Node B stub on 127.0.0.1:$port');
 
-    final first = await _postFanout(aToken!, group!, pattern.toSegPayload());
+    // BASELINE, before anything is broadcast. Assertion 3 is unreadable
+    // without it: a field that already matched proves nothing.
+    final aBeforeState = await client.getState();
+    final aBefore = aBeforeState == null
+        ? const ControllerSnapshot(on: false)
+        : ControllerSnapshot.fromState(aBeforeState);
+    _log('  A baseline fx=${aBefore.effectId} pal=${aBefore.paletteId} '
+        'on=${aBefore.on}');
+
+    final first =
+        await _postFanout(aToken!, group!, pattern.toSegPayload(), aUid!);
     _log('  fanout#1 -> status=${first.statusCode} ok=${first.ok} '
-        'reason=${first.reason}');
+        'reason=${first.reason} served=${first.memberCount} '
+        'wrote=${first.commandCount} skipped=${first.skipped}');
 
     // Bridge-sim: poll, because the CF write and the queue read are not
     // synchronous — and the real bridge polls too.
@@ -964,7 +1028,8 @@ Future<void> cmdFanoutVerify(List<String> args) async {
     _log('  bridge-sim drained ${drained.length} command(s)');
 
     // Second fanout INSIDE the 18s cooldown — must be refused.
-    final second = await _postFanout(aToken, group, pattern.toSegPayload());
+    final second =
+        await _postFanout(aToken, group, pattern.toSegPayload(), aUid);
     _log('  fanout#2 -> status=${second.statusCode} ok=${second.ok} '
         'reason=${second.reason}');
 
@@ -977,9 +1042,11 @@ Future<void> cmdFanoutVerify(List<String> args) async {
       bQueueAfterFanout: drained,
       initiatorUid: 'A',
       nodeBUid: bUid!,
+      nodeABefore: aBefore,
       nodeAAfter: aSnap,
       nodeBAfter: stub.state,
       broadcast: pattern,
+      firstFanout: first,
       secondFanout: second,
     ));
     for (final c in checks) {
