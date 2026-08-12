@@ -62,6 +62,22 @@ resolved for the affected accounts.
   **not** from pubspec — they drift.
 - Fill the iOS build number **when the Codemagic build completes**, not when it
   is queued. `PENDING` is an honest value; a guess is not.
+- **Builds are TAG-DELIBERATE (from 2026-08-12, #62).** iOS no longer builds on
+  every push to `main`; it builds on a `build-*` tag
+  (`codemagic.yaml` `triggering:` + the Codemagic UI webhook, changed together —
+  the yaml cannot disable a trigger it does not own). **Record the tag alongside
+  the SHA in every future row.** A tag is a human-chosen identity for a build,
+  which the Codemagic build number is not (see P2-15) and the SHA alone is not
+  memorable enough to be.
+
+  ```sh
+  git tag build-74 && git push origin build-74   # one tag, one TestFlight build
+  ```
+
+  **The first tagged build will be `build-74` or later.** `2.5.10+73` /
+  Codemagic **292** predates the convention and has **no tag** — that is
+  expected, not a missing field. Do not backfill tags onto earlier rows; a tag
+  that never triggered a build would be a fiction.
 - **Never instruct "build iOS from `<sha>`".** Codemagic auto-builds the **tip of
   `main`** on push, and the ledger row naming the SHA is itself a commit on
   `main` — so the instruction invalidates itself the moment it is written, and
