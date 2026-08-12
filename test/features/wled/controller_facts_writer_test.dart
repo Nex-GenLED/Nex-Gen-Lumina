@@ -116,6 +116,62 @@ void main() {
     });
   });
 
+  group('STEP 6 — both families ride ONE set(merge:true)', () {
+    // Counted by DOCUMENT MUTATIONS, not by inspecting the result: a snapshot
+    // listener fires once per write, so two writes are visible even though
+    // they would leave the document looking identical. Until the ordering fix
+    // this was untestable in practice — participation always abstained, so a
+    // real connect only ever exercised one family.
+    Future<int> mutationsDuring(Future<void> Function() body) async {
+      var n = 0;
+      final sub = _doc(db).snapshots().listen((_) => n++);
+      await pumpEventQueue();
+      n = 0; // discard the initial emission
+      await body();
+      await pumpEventQueue();
+      await sub.cancel();
+      return n;
+    }
+
+    test('two populated families produce exactly ONE document mutation',
+        () async {
+      final n = await mutationsDuring(() => _publishBoth(db));
+      expect(n, 1, reason: 'one set(merge:true), not one per family');
+
+      final d = await _read(db);
+      expect(d[kParticipatingChannelsField], isNotNull);
+      expect(d[kBaseBoundariesField], isNotNull);
+      expect(d[factPublishCountField(kParticipatingChannelsField)], 1);
+      expect(d[factPublishCountField(kBaseBoundariesField)], 1);
+    });
+
+    test('both families share the SAME server timestamp', () async {
+      // Different timestamps would mean two writes even if the count matched.
+      await _publishBoth(db);
+      final d = await _read(db);
+      expect(d[factAtField(kParticipatingChannelsField)],
+          equals(d[factAtField(kBaseBoundariesField)]));
+    });
+
+    test('one family deduped still costs exactly one mutation, not zero and '
+        'not two', () async {
+      await _publishBoth(db);
+      final n = await mutationsDuring(
+          () => _publishBoth(db, participation: [0]));
+      expect(n, 1);
+      final d = await _read(db);
+      expect(d[factPublishCountField(kParticipatingChannelsField)], 2);
+      expect(d[factPublishCountField(kBaseBoundariesField)], 1,
+          reason: 'deduped — carried along by the write but not rewritten');
+    });
+
+    test('both deduped produces ZERO mutations', () async {
+      await _publishBoth(db);
+      final n = await mutationsDuring(() => _publishBoth(db));
+      expect(n, 0);
+    });
+  });
+
   group('publish history — part 3', () {
     test('the counter increments once per write, per family', () async {
       await _publishBoth(db);
@@ -283,14 +339,16 @@ void main() {
     });
 
     test('does nothing without a controller id', () async {
-      await const FirestoreControllerFactsPublisher().publishDeviceFacts(
+      final wrote = await const FirestoreControllerFactsPublisher()
+          .publishDeviceFacts(
         controllerId: null,
-        participation: const [0],
-        deviceChannelIds: const [0],
+        participation: const ParticipationInput(
+            resolved: [0], deviceChannelIds: [0]),
         baseBoundaries: const [],
         slotsRead: 10,
         source: kHealerPublishSource,
       );
+      expect(wrote, isFalse);
       // No throw, no Firestore touched (the real instance has no injected db;
       // reaching Firestore here would blow up on an uninitialized app).
     });

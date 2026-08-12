@@ -11,6 +11,8 @@
 // same process must NOT republish, and a relaunch MUST. Both are correct, and
 // getting them backwards would produce a bug report against working code.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
@@ -82,22 +84,21 @@ class _RecordingPublisher extends ControllerFactsPublisher {
   int writes = 0;
 
   @override
-  Future<void> publishDeviceFacts({
+  Future<bool> publishDeviceFacts({
     required String? controllerId,
-    required List<int>? participation,
-    required List<int> deviceChannelIds,
+    required ParticipationInput? participation,
     required List<BaseBoundaryRow>? baseBoundaries,
     required int slotsRead,
     required String source,
   }) async {
-    calls.add((participation: participation, rows: baseBoundaries));
+    calls.add((participation: participation?.resolved, rows: baseBoundaries));
     final id = controllerId;
-    if (id == null) return;
+    if (id == null) return false;
     final families = [
       prepareParticipationFacts(
         controllerId: id,
-        resolved: participation,
-        deviceChannelIds: deviceChannelIds,
+        resolved: participation?.resolved,
+        deviceChannelIds: participation?.deviceChannelIds ?? const <int>[],
         source: source,
       ),
       prepareBaseBoundaryFacts(
@@ -108,11 +109,12 @@ class _RecordingPublisher extends ControllerFactsPublisher {
       ),
     ];
     final pending = families.where((f) => !f.isEmpty).toList();
-    if (pending.isEmpty) return;
+    if (pending.isEmpty) return false;
     writes++;
     for (final f in pending) {
       f.commit();
     }
+    return true;
   }
 }
 
@@ -120,10 +122,9 @@ class _RecordingPublisher extends ControllerFactsPublisher {
 /// own — an async throw would just become an unhandled future.
 class _ThrowingPublisher extends ControllerFactsPublisher {
   @override
-  Future<void> publishDeviceFacts({
+  Future<bool> publishDeviceFacts({
     required String? controllerId,
-    required List<int>? participation,
-    required List<int> deviceChannelIds,
+    required ParticipationInput? participation,
     required List<BaseBoundaryRow>? baseBoundaries,
     required int slotsRead,
     required String source,
@@ -177,6 +178,9 @@ ControllerHealContext _ctx() => ControllerHealContext(
       phoneUtcOffset: const Duration(hours: -5),
     );
 
+/// [participating] null models "the caller could not determine the device
+/// shape" (the future resolves to null); [inputs] overrides the whole future so
+/// a test can supply a slow or throwing one.
 ControllerDefaultsHealer _healer(
   _Repo repo,
   _RecordingPublisher pub, {
@@ -184,6 +188,8 @@ ControllerDefaultsHealer _healer(
   String? controllerId = '192_168_1_150',
   List<int>? participating = const [0, 1],
   List<int> deviceChannelIds = const [0, 1],
+  Future<ParticipationInput?>? inputs,
+  bool noInputs = false,
 }) =>
     ControllerDefaultsHealer(
       repo: repo,
@@ -192,10 +198,26 @@ ControllerDefaultsHealer _healer(
       ctx: _ctx(),
       gammaAction: (ip) async => WledConfigPushResult.skipped('already correct'),
       controllerId: controllerId,
-      participatingChannels: participating,
-      deviceChannelIds: deviceChannelIds,
+      participationInputs: noInputs
+          ? null
+          : (inputs ??
+              Future<ParticipationInput?>.value(participating == null
+                  ? null
+                  : ParticipationInput(
+                      resolved: participating,
+                      deviceChannelIds: deviceChannelIds,
+                    ))),
       publisher: pub,
     );
+
+/// Runs the healer and AWAITS the fire-and-forget publish, so assertions are
+/// deterministic rather than dependent on event-queue pumping.
+Future<({ControllerHealReport report, FactsPublishOutcome? outcome})> _run(
+    ControllerDefaultsHealer h) async {
+  final report = await h.run();
+  final outcome = await report.factsPublish;
+  return (report: report, outcome: outcome);
+}
 
 void main() {
   late _RecordingPublisher pub;
@@ -212,7 +234,7 @@ void main() {
       // an autopilot evaluation or a hand-run sync, so five accounts sat at
       // never_resolved through a 24-hour shadow. Health is irrelevant — the
       // publish is not a heal.
-      final report = await _healer(_Repo(_healthy()), pub).run();
+      final report = (await _run(_healer(_Repo(_healthy()), pub))).report;
 
       expect(report.anyHealed, isFalse, reason: 'nothing was broken');
       expect(report.factsPublishDispatched, isTrue);
@@ -221,14 +243,13 @@ void main() {
     });
 
     test('the resolved set is passed THROUGH, not re-derived', () async {
-      await _healer(_Repo(_healthy()), pub,
-              participating: const [2], deviceChannelIds: const [0, 1, 2])
-          .run();
+      await _run(_healer(_Repo(_healthy()), pub,
+          participating: const [2], deviceChannelIds: const [0, 1, 2]));
       expect(pub.calls.single.participation, [2]);
     });
 
     test('a null resolution reaches the publisher as "no opinion"', () async {
-      await _healer(_Repo(_healthy()), pub, participating: null).run();
+      await _run(_healer(_Repo(_healthy()), pub, participating: null));
       expect(pub.calls.single.participation, isNull);
       expect(pub.writes, 1,
           reason: 'base boundaries still publish on their own');
@@ -237,7 +258,7 @@ void main() {
 
   group('base boundaries come from the cfg read the healer already does', () {
     test('the rig table is published verbatim — four armed rows', () async {
-      await _healer(_Repo(_healthy()), pub).run();
+      await _run(_healer(_Repo(_healthy()), pub));
       final rows = pub.calls.single.rows!;
       expect(rows.length, 4);
 
@@ -266,7 +287,7 @@ void main() {
       // call the healer already makes. If this ever needs its own fetch, the
       // whole cost argument for putting the publish here collapses.
       final repo = _Repo(_healthy());
-      await _healer(repo, pub).run();
+      await _run(_healer(repo, pub));
       expect(repo.configPosts, isEmpty, reason: 'healthy → zero cfg writes');
       expect(pub.calls.single.rows, isNotNull);
     });
@@ -283,7 +304,7 @@ void main() {
         ntpHost: kHealNtpHost,
         timerRows: null,
       );
-      await _healer(_Repo(info), pub).run();
+      await _run(_healer(_Repo(info), pub));
       expect(pub.calls.single.rows, isNull);
       expect(pub.writes, 1, reason: 'participation still published');
     });
@@ -291,7 +312,7 @@ void main() {
     test('a readable but EMPTY table publishes [] — a real answer', () async {
       final timers = List.generate(
           10, (_) => {'en': 0, 'hour': 0, 'min': 0, 'macro': 0, 'dow': 0});
-      await _healer(_Repo(_healthy(timers: timers)), pub).run();
+      await _run(_healer(_Repo(_healthy(timers: timers)), pub));
       expect(pub.calls.single.rows, isEmpty);
     });
   });
@@ -299,7 +320,7 @@ void main() {
   group('the publish cannot be skipped by a heal', () {
     test('it survives a heal that FAILS', () async {
       final repo = _Repo(_clockUnset(), applyConfigResult: false);
-      final report = await _healer(repo, pub).run();
+      final report = (await _run(_healer(repo, pub))).report;
       expect(report.ntpHostHealed, isFalse, reason: 'the POST was refused');
       expect(report.factsPublishDispatched, isTrue);
       expect(pub.writes, 1);
@@ -307,7 +328,7 @@ void main() {
 
     test('it survives a run that REBOOTS the controller', () async {
       final repo = _Repo(_clockUnset());
-      final report = await _healer(repo, pub).run();
+      final report = (await _run(_healer(repo, pub))).report;
       expect(report.rebooted, isTrue);
       expect(report.factsPublishDispatched, isTrue);
       expect(pub.writes, 1);
@@ -318,20 +339,20 @@ void main() {
     test('a RELAY connect publishes nothing — the inputs do not exist there',
         () async {
       final report =
-          await _healer(_Repo(_healthy()), pub, isLan: false).run();
+          (await _run(_healer(_Repo(_healthy()), pub, isLan: false))).report;
       expect(report.factsPublishDispatched, isFalse);
       expect(pub.calls, isEmpty);
     });
 
     test('an unreachable controller publishes nothing', () async {
-      final report = await _healer(_Repo(null), pub).run();
+      final report = (await _run(_healer(_Repo(null), pub))).report;
       expect(report.reachable, isFalse);
       expect(pub.calls, isEmpty);
     });
 
     test('no controller id → no publish, and the heals still run', () async {
       final repo = _Repo(_clockUnset());
-      final report = await _healer(repo, pub, controllerId: null).run();
+      final report = (await _run(_healer(repo, pub, controllerId: null))).report;
       expect(pub.calls, isEmpty);
       expect(report.factsPublishDispatched, isFalse);
       expect(report.ntpHostHealed, isTrue);
@@ -340,8 +361,8 @@ void main() {
 
   group('SESSION SEMANTICS — pinned deliberately', () {
     test('a SECOND connect in the same session does NOT republish', () async {
-      await _healer(_Repo(_healthy()), pub).run();
-      await _healer(_Repo(_healthy()), pub).run();
+      await _run(_healer(_Repo(_healthy()), pub));
+      await _run(_healer(_Repo(_healthy()), pub));
 
       expect(pub.calls.length, 2, reason: 'dispatched both times');
       expect(pub.writes, 1, reason: 'the second was deduped by the memos');
@@ -351,39 +372,123 @@ void main() {
       // This is CORRECT BY DESIGN and must not be "fixed": the memo is never
       // read from Firestore, so a cold start republishes once and thereby
       // repairs a write that was lost in a prior session, with no read-back.
-      await _healer(_Repo(_healthy()), pub).run();
+      await _run(_healer(_Repo(_healthy()), pub));
       expect(pub.writes, 1);
 
       resetParticipationMemo();
       resetBaseBoundariesMemo(); // ← the relaunch
 
-      await _healer(_Repo(_healthy()), pub).run();
+      await _run(_healer(_Repo(_healthy()), pub));
       expect(pub.writes, 2);
     });
 
     test('a base row that MOVES republishes within the same session', () async {
-      await _healer(_Repo(_healthy()), pub).run();
+      await _run(_healer(_Repo(_healthy()), pub));
       expect(pub.writes, 1);
 
       final moved = _rigTimers()..[0]['hour'] = 21;
-      await _healer(_Repo(_healthy(timers: moved)), pub).run();
+      await _run(_healer(_Repo(_healthy(timers: moved)), pub));
       expect(pub.writes, 2, reason: 'the boundary changed — a real update');
     });
 
     test('a CHANNEL change republishes within the same session', () async {
-      await _healer(_Repo(_healthy()), pub, participating: const [0, 1]).run();
-      await _healer(_Repo(_healthy()), pub, participating: const [0]).run();
+      await _run(_healer(_Repo(_healthy()), pub, participating: const [0, 1]));
+      await _run(_healer(_Repo(_healthy()), pub, participating: const [0]));
       expect(pub.writes, 2);
+    });
+  });
+
+  group('THE ORDERING REGRESSION — inputs arrive late, not at t=0', () {
+    test('a SLOW bus list still publishes participation', () async {
+      // The bug this fix exists for. deviceHardwareConfigProvider is a
+      // FutureProvider doing its own /json/cfg GET, so at connect time it has
+      // NOT resolved. Sampling it (the old snapshot param) meant participation
+      // was refused on EVERY connect and the feature never worked in
+      // production — base boundaries published, participation never did.
+      final slow = Future<ParticipationInput?>.delayed(
+        const Duration(milliseconds: 120),
+        () => const ParticipationInput(resolved: [0, 1], deviceChannelIds: [0, 1]),
+      );
+      final res = await _run(_healer(_Repo(_healthy()), pub, inputs: slow));
+      expect(res.outcome!.participation, ParticipationDisposition.offered);
+      expect(pub.calls.single.participation, [0, 1]);
+      expect(pub.writes, 1);
+    });
+
+    test('inputs that resolve NULL are refused as shape-unknown, and say so',
+        () async {
+      // An empty bus list must never publish [] — the server reads that as a
+      // usable "light nothing".
+      final res = await _run(_healer(_Repo(_healthy()), pub, participating: null));
+      expect(res.outcome!.participation, ParticipationDisposition.shapeUnknown);
+      expect(res.outcome!.describe(), contains('shape unknown'));
+      expect(pub.calls.single.participation, isNull);
+      expect(pub.writes, 1, reason: 'base boundaries still publish alone');
+    });
+
+    test('inputs that never resolve TIME OUT, and base boundaries publish '
+        'alone', () async {
+      final never = Completer<ParticipationInput?>().future;
+      final res = await _run(_healer(_Repo(_healthy()), pub, inputs: never));
+      expect(res.outcome!.participation,
+          ParticipationDisposition.inputsTimedOut);
+      expect(res.outcome!.baseBoundariesOffered, isTrue);
+      expect(res.outcome!.wrote, isTrue,
+          reason: 'the timeout must not cost base boundaries their publish');
+      expect(pub.calls.single.participation, isNull);
+    }, timeout: const Timeout(Duration(seconds: 60)));
+
+    test('inputs that THROW are recorded, not swallowed', () async {
+      // Delayed rather than pre-failed: a Future.error with no listener yet is
+      // reported as an UNHANDLED async error by the test zone before the healer
+      // can attach. Production closes that same window with `.ignore()` on the
+      // provider side — see resolveParticipationInputs' call site.
+      final boom = Future<ParticipationInput?>.delayed(
+          const Duration(milliseconds: 30),
+          () => throw StateError('cfg blew up'));
+      final res = await _run(_healer(_Repo(_healthy()), pub, inputs: boom));
+      expect(res.outcome!.participation, ParticipationDisposition.inputsFailed);
+      expect(res.outcome!.wrote, isTrue, reason: 'base boundaries unaffected');
+    });
+
+    test('no inputs supplied at all is its own, named outcome', () async {
+      final res = await _run(_healer(_Repo(_healthy()), pub, noInputs: true));
+      expect(res.outcome!.participation, ParticipationDisposition.inputsAbsent);
+    });
+
+    test('THE SILENCE IS THE DEFECT — every disposition describes itself', () {
+      // A skipped publish used to leave no trace anywhere, which is why the
+      // bench caught this and no log line did. Every outcome must be legible.
+      for (final d in ParticipationDisposition.values) {
+        final line = FactsPublishOutcome(
+          participation: d,
+          baseBoundariesOffered: false,
+          wrote: false,
+        ).describe();
+        expect(line, contains('participation='));
+        expect(line, contains('wrote=false'));
+        if (d != ParticipationDisposition.offered) {
+          expect(line, contains('SKIPPED'),
+              reason: '$d must announce that it did nothing');
+        }
+      }
+    });
+
+    test('the bound exceeds the WledService HTTP timeout it waits on', () {
+      // Below 15s this would abandon a /json/cfg GET that is still legitimately
+      // in flight — the same too-aggressive-timeout mistake one layer up.
+      expect(kParticipationInputTimeout.inSeconds, greaterThan(15));
+      expect(kParticipationInputTimeout.inSeconds, lessThanOrEqualTo(30));
     });
   });
 
   group('report', () {
     test('records how many armed rows were read, null when unreadable',
         () async {
-      var r = await _healer(_Repo(_healthy()), pub).run();
+      var r = (await _run(_healer(_Repo(_healthy()), pub))).report;
       expect(r.baseBoundaryRowsRead, 4);
 
-      r = await _healer(
+      r = (await _run(_healer(
         _Repo(ControllerClockInfo(
           deviceTime: _now,
           tzIndex: 5,
@@ -392,15 +497,16 @@ void main() {
           ntpHost: kHealNtpHost,
         )),
         _RecordingPublisher(),
-      ).run();
+      ))).report;
       expect(r.baseBoundaryRowsRead, isNull);
     });
 
     test('a publisher that THROWS cannot abort the heals', () async {
       // Fire-and-forget means fire-and-forget. A Firestore problem must never
-      // take out the NTP heal running behind it.
+      // take out the NTP heal running behind it, and must not escape as an
+      // unhandled async error either.
       final repo = _Repo(_clockUnset());
-      final r = await ControllerDefaultsHealer(
+      final healer = ControllerDefaultsHealer(
         repo: repo,
         isLan: true,
         controllerIp: '192.168.1.150',
@@ -408,21 +514,25 @@ void main() {
         gammaAction: (ip) async =>
             WledConfigPushResult.skipped('already correct'),
         controllerId: '192_168_1_150',
-        participatingChannels: const [0, 1],
-        deviceChannelIds: const [0, 1],
+        participationInputs: Future<ParticipationInput?>.value(
+          const ParticipationInput(resolved: [0, 1], deviceChannelIds: [0, 1]),
+        ),
         publisher: _ThrowingPublisher(),
-      ).run();
+      );
+      final r = await healer.run();
+      final outcome = await r.factsPublish;
 
       expect(r.ntpHostHealed, isTrue);
       expect(r.rebooted, isTrue);
-      expect(r.log.any((l) => l.contains('facts publish dispatch failed')),
-          isTrue);
+      expect(outcome!.wrote, isFalse);
+      expect(outcome.participation, ParticipationDisposition.offered,
+          reason: 'the inputs were fine — it was the WRITE that failed');
     });
 
     test('a publish alone does not make a healthy run look healed', () async {
       // anyHealed drives the "did we touch this controller" log line. A publish
       // is a Firestore write, not a device write, and must not read as a heal.
-      final r = await _healer(_Repo(_healthy()), pub).run();
+      final r = (await _run(_healer(_Repo(_healthy()), pub))).report;
       expect(r.anyHealed, isFalse);
       expect(r.toString(), 'facts-publish');
     });

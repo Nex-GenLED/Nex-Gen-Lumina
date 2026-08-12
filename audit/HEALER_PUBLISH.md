@@ -1,7 +1,7 @@
 # HEALER PUBLISH — participation and base boundaries, one mechanism
 
 **Date:** 2026-08-11 · **Branch:** `main` (working tree, on top of `ec9db58`)
-**Status: IMPLEMENTED. DEVICE-SIDE BENCH-VERIFIED 2026-08-11 (steps 2/3/4 PASS, one real defect found and fixed). APP-SIDE OWED — §7.2b. BUILT AS `2.5.10+69`. NOT DEPLOYED, NOT UPLOADED.**
+**Status: IMPLEMENTED. `2.5.10+69` BENCH-RUN ON HARDWARE 2026-08-11 — base boundaries PASS, participation FAILED (ordering defect, root-caused and fixed). REBUILT AS `2.5.10+70`; participation re-verification OWED — §7.2c. NOT DEPLOYED, NOT UPLOADED.**
 
 Closes the publish gap scoped in [audit/S3B_CHANNELS.md](S3B_CHANNELS.md) and the
 input half of the base-row collision scoped in [audit/S5_GAMEDAY.md](S5_GAMEDAY.md).
@@ -76,15 +76,44 @@ that parsing that can drift. The caller — `controllerDefaultsHealerProvider` �
 already holds the provider, and it also holds the roofline segments the resolver
 needs, so it resolves and passes both:
 
-```dart
-final deviceChannelIds = ref.read(deviceChannelsProvider).map((c) => c.id).toList();
-final participating = resolveParticipatingChannels(
-  explicit: null, segments: segments, allDeviceChannelIds: deviceChannelIds);
-```
-
 `explicit: null` matches the other two publish sites; no channel picker writes
 `participatingChannelIndices` today. When one ships, **all three sites** need the
 explicit set threaded together — noted at each.
+
+### The parameter is a FUTURE, not a snapshot (corrected after the +69 bench run)
+
+The decision above is unchanged — the caller still owns the derivation and the
+healer still holds no `ref`. What changed is the *type*.
+
+A snapshot published participation **never**, on any connect. Both inputs are
+asynchronous and neither is ready when the healer fires from
+`ref.listen(wledRepositoryProvider, …, fireImmediately: true)` at t=0:
+
+| input | provider | value at t=0 | consequence |
+|---|---|---|---|
+| bus list | `deviceHardwareConfigProvider` — FutureProvider, own `GET /json/cfg` | `null` → `const []` | `participationShapeIsKnown` refuses. **Correctly**, and permanently. |
+| roofline | `currentRooflineConfigProvider` — **StreamProvider** | no segments | `segments.isEmpty` reads as *untraced install ⇒ every channel participates* → would publish a **SUPERSET** |
+
+The second is the quieter and worse of the two: it does not refuse, it publishes
+a wrong answer that looks right. Both are now awaited by
+`resolveParticipationInputs`, which the caller hands over as a
+`Future<ParticipationInput?>`:
+
+```dart
+final participationInputs = resolveParticipationInputs(ref);
+participationInputs.ignore();   // see below
+```
+
+`ParticipationInput` pairs the resolved set with the bus list it was resolved
+against, so one cannot be published without the other. Null means "device shape
+unknown" — never `[]`.
+
+**Why `.ignore()`.** The healer cannot attach its `await` until after its own
+`/json/cfg` read, so there is a window — one network round trip — in which this
+future has no listener. A failure inside that window would surface as an
+UNHANDLED async error and be reported as a crash, for a fire-and-forget publish
+designed to fail quietly. `ignore()` marks it handled without consuming it: the
+later `await` still receives the error and records `inputsFailed`.
 
 ---
 
@@ -226,7 +255,7 @@ branch already owed.
 
 | suite | result |
 |---|---|
-| `flutter test` (full) | **2137 passed, 3 skipped, 1 failed** |
+| `flutter test` (full) | **2148 passed, 3 skipped, 1 failed** |
 | `functions` `npx jest test/unit` | **8 suites, 237 tests, all passed** |
 | `flutter analyze lib/ test/` | **no errors; nothing new on any touched file** |
 
@@ -235,7 +264,7 @@ The single Dart failure is `test/hardware/base_ladder_repair_live_test.dart`
 **Confirmed pre-existing** — stashed this branch's changes and reproduced the
 identical failure at baseline.
 
-New tests, 68 across three files:
+New tests, 79 across three files:
 
 - `base_boundary_denormalizer_test.dart` (42) — null-vs-empty; the bench rig's
   exact table; solar by slot position; the negative-offset fold and that clock
@@ -244,14 +273,14 @@ New tests, 68 across three files:
   refusal to guess on a gap; the **drift guard** binding the pure range table to
   `ScheduleSyncService.kOnPresetSpecs` / `kNglOffPresetId` / the solar slots;
   `timerInstancesFromCfg`; `ControllerClockInfo.timersKnown`.
-- `controller_facts_writer_test.dart` (25, against `fake_cloud_firestore`) — one
+- `controller_facts_writer_test.dart` (29, against `fake_cloud_firestore`) — one
   write carrying both families; a family abstaining without blocking the other;
   zero writes when both abstain; the counter incrementing per family and **not**
   incrementing on a dedup; `_previous` carried, absent on a session's first
   write, and cleared rather than left stale; the memo committing only on a
   successful write; the empty-bus-list refusal; a throwing commit neither failing
   the write nor skipping a sibling.
-- `controller_defaults_healer_publish_test.dart` (19) — a **healthy** controller
+- `controller_defaults_healer_publish_test.dart` (26) — a **healthy** controller
   publishing on connect with zero heals; no extra device read; the rig table
   arriving intact through the healer; publish surviving a failed heal and
   surviving a reboot; relay/unreachable/no-controller-id gating; a publisher that throws not aborting the heals;
@@ -348,7 +377,7 @@ fires into nothing every Wednesday at 20:40. Pre-existing rig state, outside thi
 change scope, and worth noting that publishing base boundaries is what made it
 visible at all.
 
-### 7.2b App-side — OWED. Phone on home Wi-Fi, `2.5.10+69`.
+### 7.2b App-side protocol — phone on home Wi-Fi (RUN on +69, see 7.2c)
 
 The bench tablet is unavailable, so the trigger is **opening the app on a phone
 joined to the home network** rather than an ADB command. The steps are otherwise
@@ -395,6 +424,113 @@ Steps 5 and 6 are the pair that pins the session semantics on hardware.
 does not care that it is not the tablet. If that phone has never opened this
 account on-LAN before, step 1 `_publish_count` starts at 1 rather than
 incrementing — read the absolute value, not the delta, on the first run.
+
+### 7.2c `2.5.10+69` ON HARDWARE — 2026-08-11. Participation FAILED.
+
+Tyler updated his iPhone and opened the app on home Wi-Fi; the healer ran on
+connect to `.150`. Read back with a **client credential** via
+`scripts/_verify_healer_publish.js`.
+
+**Segment state, recorded first:** one segment (id 0, 0-128), **two buses**
+(0-128 pin 2, 128-290 pin 14). Participation should therefore resolve `[0,1]`;
+`[0]` would have been the regression. Unchanged from §7.2.
+
+| # | step | result |
+|---|---|---|
+| 1 | participation published by the healer | **FAIL — nothing written** |
+| 2 | base boundaries match `timers.ins` | **PASS** — 4/4 rows exact |
+| 3 | `gc.col` still 2.8 | **PASS** |
+| 4 | ladder intact | **PASS** — 1/3/4/5 root on + `s0:on s1:on`; 2 root off + `s0:OFF s1:OFF` |
+| 5 | publish history / `_previous` deleted | **PASS** — `base_boundaries_publish_count: 1`, `base_boundaries_previous` ABSENT |
+| 6 | one `set(merge:true)` carried both | **NOT DEMONSTRATED** — only one family had content |
+
+Base boundaries landed with `_source: "healer"`, `_at: 21:59:24.871Z`,
+`slots_read: 4`, `indices_are_slots: false`, `dow_bit0: "monday"`, and the solar
+row carrying keys `[dow, index, kind, macro, offset_minutes, role]` — **no
+`minute`, no `hour`**, as designed.
+
+`participating_channels` was untouched: still `_source: "neighborhood_sync"`,
+`_at: 18:20:14.409Z` (Tyler's hand-run sync), and no `publish_count` at all.
+
+#### Root cause — by elimination, not inspection
+
+`resolveParticipatingChannels` cannot return null, so `participatingChannels`
+was non-null and the only remaining abstain path was
+`participationShapeIsKnown(deviceChannelIds) == false` — **the bus list was
+empty**. Base boundaries published on the *same call*, which proves the
+controller id, the LAN gate and the healer itself were all fine; the two
+families differ only in input source. Base boundaries ride the healer's **own**
+cfg read; participation depended on a **different provider's** async fetch that
+had not landed. See §2 for the corrected design.
+
+The guard I had flagged as a behaviour change is what turned a silently-wrong
+write into a silently-absent one. Right call, wrong ordering — and the feature
+was inert on every connect, fleet-wide.
+
+#### The silence was its own defect — the eleventh instance
+
+A skipped publish left **no trace anywhere**: no log line, no field, no report
+entry. That is why a bench run caught it rather than a log. Fixed structurally,
+not by adding one print:
+
+- `ParticipationDisposition` enumerates every reason participation can be
+  skipped — `offered`, `shapeUnknown`, `inputsTimedOut`, `inputsFailed`,
+  `inputsAbsent`.
+- `FactsPublishOutcome.describe()` renders **one line, always**, and every
+  non-`offered` disposition contains the word `SKIPPED`. A test iterates the
+  enum and asserts that, so a future disposition cannot be added silently.
+- `ControllerHealReport.factsPublish` exposes the outcome as an awaitable, so
+  the result is observable rather than inferred — and tests await it instead of
+  pumping the event queue.
+
+#### The bound
+
+`kParticipationInputTimeout = 20s`. It **must exceed 15s**: the inputs come from
+a `GET /json/cfg` through `WledService`, whose HTTP timeouts are 15 seconds by
+mandate (the "System Offline" false-alarm fix — shorter values *were* the
+original defect). A shorter bound would abandon a fetch still legitimately in
+flight, repeating that mistake one layer up. 20s = the full allowance plus 5s
+for provider machinery and the roofline stream's first emission. A test pins
+`> 15s`.
+
+**On expiry, and it is not silent:** base boundaries publish **alone** — today's
+behaviour, not a regression — and the run logs
+`participation=SKIPPED(inputs timed out after 20s)`. Nothing is written for
+participation, so the next connect retries against a cold memo.
+
+**The cost, stated honestly:** the publish is unawaited, so no heal and no UI is
+delayed. But because both families ride one write, base boundaries also wait for
+the bound in the failure case. In practice the bus list resolves in well under a
+second — its fetch starts at t=0 alongside the healer's own — so the wait is the
+pathological path only. Residual risk: a session ending inside that window
+publishes nothing at all, which is already a session where the controller is
+barely reachable.
+
+#### Step 6 is now testable, and pinned
+
+With both families carrying content the one-write claim can finally be
+exercised. `controller_facts_writer_test.dart` counts **document mutations** via
+a snapshot listener rather than inspecting the result, because two writes leave
+a document that looks identical to one:
+
+- two populated families → exactly **1** mutation, both `_publish_count`s at 1
+- both families share the **same** server timestamp
+- one family deduped → still exactly 1 mutation, only the changed counter moves
+- both deduped → **0** mutations
+
+### 7.2d `2.5.10+70` — OWED
+
+Re-run §7.2b steps 1, 2, 5 and 6 on `+70`. Step 1 is the one that failed and is
+the whole point. Expected on the first connect of a fresh install:
+
+- `participating_channels: [0, 1]`, `_device_ids: [0, 1]`, `_source: "healer"`
+- `participating_channels_publish_count: 1` (currently **absent**)
+- `participating_channels_at` **equal to** `base_boundaries_at` — same write
+- `base_boundaries_publish_count: 1 → 2`, rows unchanged
+
+`scripts/_verify_healer_publish.js --before=<baseline>` reports all of it and
+labels the counter deltas, since 0 and 1 are both correct depending on whether
+the app was relaunched.
 
 ### 7.3 Still unresolved from the reconciler work
 
@@ -451,5 +587,8 @@ that drove the parameter decision in §2:
 | 4 | **`base_boundaries_dow_bit0` is written per document.** Redundant to anyone who reads the code, insurance against a future server author who cannot. Lumina already shipped the wrong convention once | Design |
 | 5 | **Publish history is two fields, not an audit log.** The counter answers "did dedup hold"; `_previous` answers "what did the last write change", with an honest gap on a session's first write | Design |
 | 6 | **Nothing reads `base_boundaries` yet.** Publishing inputs is the whole scope; the arbitration is deliberately absent and still owed | By design |
-| 7 | **Bench verification is owed** (§7.2), specifically steps 5/6, which are the only on-hardware evidence of the session semantics | **Owed** |
+| 7 | **The snapshot parameter published participation NEVER** — both inputs are async and neither is ready when the healer fires at t=0. Base boundaries worked because they ride the healer's own cfg read. Fixed by passing a future; found only by a bench run | **Was shipped broken in +69** |
+| 7b | **An unresolved ROOFLINE is worse than an unresolved bus list** — it does not refuse, it makes `segments.isEmpty` read as "untraced install" and publishes a SUPERSET. Same class, quieter failure. Now awaited too | **Latent, fixed before it shipped** |
+| 7c | **The skipped publish left no trace anywhere** — no log, no field, no report entry. The eleventh instance of this pattern. Fixed with an enumerated disposition, a one-line always-log, and an awaitable outcome | **Process defect** |
+| 7d | **Participation re-verification owed on +70** (§7.2d) | **Owed** |
 | 8 | Whether the reconciler dedups on a **design-only** change is still open — but now cheaply observable via `participating_channels_publish_count` | Open |
