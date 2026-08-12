@@ -17,6 +17,43 @@ name and code from pubspec. So **the git SHA is the only identifier common to
 both platforms** — it is the join key, and it is why this ledger is not
 optional.
 
+## Operational flags
+
+### `config/gameday_planner` — SCOPED FLIP, 2026-08-12T05:45:21.359Z
+
+```
+{ write_jobs: true, uid_allowlist: ["wrQRUUKyXyc0deyuu0ORS6wsovO2"] }
+```
+
+**Blast radius: the bench account only.** Confirmed live at 05:50:04Z —
+`planGameDayFires[LIVE:scoped(1)]`.
+
+**ROLLBACK:** delete the document, or set `write_jobs: false`. Absent is false
+(`planGameDayFires.ts:113` → `writeJobsPolicyFrom`), so it fails safe in both
+directions.
+
+**Why scoped and not global** — the S5 log-only audit (`gameday_plan_log`, 4
+days, 3 plan rows) produced three findings:
+
+- **F1** — the end-fire path has **never planned and cannot in log-only mode**.
+  `startPlannedAt` is written only inside `if (writeJobs)`, and the
+  consecutive-final counter persists only when
+  `writeJobs || session.startPlannedAt`, so `consecutiveFinalPolls` never
+  advances past 1 and `REQUIRED_FINAL_POLLS = 2` is unreachable. `endsPlanned:
+  0` across the whole corpus is structural. `baseRestorePayload` executes for
+  the first time in production.
+- **F2** — a global flip would have driven a real customer immediately, not
+  just the bench: `ecochran08@yahoo.com` had a `plan_start` for the same event.
+- **F3** — that customer has **no base layer**, and a census found **7 of 10**
+  Game-Day-enabled accounts in the same state. No floor if the never-executed
+  end fire fails.
+
+**Global arm is deliberately unreachable** until `uid_allowlist` is removed,
+which should not happen until the end path has executed on the bench and F3 is
+resolved for the affected accounts.
+
+---
+
 ## Conventions
 
 - **Never edit a row after the build is uploaded.** Append a correction row instead.
