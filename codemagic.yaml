@@ -3,6 +3,30 @@ workflows:
     name: iOS Release
     instance_type: mac_mini_m2
     max_build_duration: 60
+    # BUILD TRIGGER — tag-deliberate, not push-driven (#62).
+    #
+    # `submit_to_testflight: true` below auto-submits every GREEN build. That was
+    # harmless when main moved once a day; main now moves several times a night,
+    # so every docs commit shipped a TestFlight build. On 2026-08-11 that put two
+    # artifacts into TestFlight carrying +72 code under a +71 telemetry stamp,
+    # with no ledger row able to identify either — and TestFlight served a stale
+    # build 288 ahead of 291 during a hardware verification, which is the failure
+    # this guards against.
+    #
+    # A tag is now the deliberate act: `git tag build-74 && git push origin
+    # build-74` produces exactly one TestFlight build from exactly one SHA.
+    #
+    # ⚠️ THIS BLOCK ALONE IS NOT THE FIX. The push trigger lived in the Codemagic
+    # UI webhook, not in this file, so a yaml-only change would read as fixed
+    # while pushes kept building. The UI was switched to tag-only in the same
+    # session as this commit. If push-builds ever reappear, check the UI FIRST —
+    # this file cannot disable a trigger it does not own.
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'build-*'
+          include: true
     integrations:
       app_store_connect: NexGen
     environment:
