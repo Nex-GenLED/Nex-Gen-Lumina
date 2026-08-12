@@ -19,7 +19,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:nexgen_command/features/schedule/timer_landing.dart';
-import 'package:nexgen_command/features/schedule/cfg_payload_builder.dart' as cfg;
+import 'package:nexgen_command/features/schedule/cfg_payload_builder.dart'
+    as cfg;
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/channel_power_payload.dart';
@@ -74,7 +75,8 @@ Future<void> cmdProbe({bool update = false}) async {
   final info = await client.getInfo();
   final cfg = await client.getCfg();
   if (info == null || cfg == null) {
-    _record(const CheckResult('probe reachable', false, 'no /json/info or /json/cfg'));
+    _record(const CheckResult(
+        'probe reachable', false, 'no /json/info or /json/cfg'));
     return;
   }
   final ver = info['ver'];
@@ -85,7 +87,8 @@ Future<void> cmdProbe({bool update = false}) async {
       'layout=${live.totalLeds} LEDs, ${live.buses.length} buses '
       '${live.buses.map((b) => '[${b.start},${b.len}]').join(' ')}');
 
-  final known = layoutFromJson(_loadJsonFile('$_benchDir/known_layout.json', const {}));
+  final known =
+      layoutFromJson(_loadJsonFile('$_benchDir/known_layout.json', const {}));
   final drift = detectLayoutDrift(known, live);
   if (drift == null) {
     _record(CheckResult('layout matches known_layout.json', true,
@@ -95,9 +98,10 @@ Future<void> cmdProbe({bool update = false}) async {
     out['_comment'] =
         'Last-confirmed hw.led layout for P1-42 drift detection (updated by probe --update).';
     out['confirmedAt'] = DateTime.now().toIso8601String().split('T').first;
-    File('$_benchDir/known_layout.json')
-        .writeAsStringSync('${const JsonEncoder.withIndent('  ').convert(out)}\n');
-    _record(CheckResult('layout drift → known_layout.json UPDATED', true, drift.summary));
+    File('$_benchDir/known_layout.json').writeAsStringSync(
+        '${const JsonEncoder.withIndent('  ').convert(out)}\n');
+    _record(CheckResult(
+        'layout drift → known_layout.json UPDATED', true, drift.summary));
   } else {
     _record(CheckResult('layout drift (P1-42)', false,
         '${drift.summary} — run `probe --update` to confirm'));
@@ -110,10 +114,12 @@ Future<String?> cmdSnapshot() async {
   final cfg = await client.getCfg();
   final presets = await client.getPresets();
   if (state == null || cfg == null) {
-    _record(const CheckResult('snapshot captured', false, 'state/cfg unreadable'));
+    _record(
+        const CheckResult('snapshot captured', false, 'state/cfg unreadable'));
     return null;
   }
-  final ts = DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
+  final ts =
+      DateTime.now().toIso8601String().replaceAll(':', '-').split('.').first;
   final dir = Directory('$_benchDir/snapshots')..createSync(recursive: true);
   final path = '${dir.path}/snap-$ts.json';
   final snap = {
@@ -123,7 +129,8 @@ Future<String?> cmdSnapshot() async {
     'timers': timerInsFrom(cfg),
     'presets': presets ?? {},
   };
-  File(path).writeAsStringSync(const JsonEncoder.withIndent('  ').convert(snap));
+  File(path)
+      .writeAsStringSync(const JsonEncoder.withIndent('  ').convert(snap));
   _record(CheckResult('snapshot captured', true,
       '${timerInsFrom(cfg).length} timers, ${(presets ?? {}).length} presets → ${path.split('/').last}'));
   return path;
@@ -135,8 +142,11 @@ Future<List<Map<String, dynamic>>> _captureTimers() async {
   return cfg == null ? const [] : timerInsFrom(cfg);
 }
 
-Future<void> _restoreTimers(List<Map<String, dynamic>> ins, {String label = 'restore timers'}) async {
-  final ok = await client.postCfg({'timers': {'ins': ins}});
+Future<void> _restoreTimers(List<Map<String, dynamic>> ins,
+    {String label = 'restore timers'}) async {
+  final ok = await client.postCfg({
+    'timers': {'ins': ins}
+  });
   final v = await client.patientVerify(
     confirm: () async {
       final cfg = await client.getCfg();
@@ -144,7 +154,8 @@ Future<void> _restoreTimers(List<Map<String, dynamic>> ins, {String label = 'res
     },
     onPoll: (s) => _log('    …restoring, controller recovering (${s}s)'),
   );
-  _record(CheckResult(label, v.confirmed, 'post=$ok, verified=${v.confirmed} (${v.stallSeconds}s)'));
+  _record(CheckResult(label, v.confirmed,
+      'post=$ok, verified=${v.confirmed} (${v.stallSeconds}s)'));
 }
 
 Future<void> cmdCfgTruth() async {
@@ -175,7 +186,11 @@ Future<void> cmdCfgTruth() async {
         }
       });
       await Future<void>.delayed(const Duration(milliseconds: 1500));
-      await client.postCfg({'timers': {'ins': [scratch(en)]}});
+      await client.postCfg({
+        'timers': {
+          'ins': [scratch(en)]
+        }
+      });
       Object? stored;
       // Short settle-poll (0.15.1 commits fast; no minutes-long stall). The int
       // scratch should appear; a dropped (disabled) scratch stays absent → null.
@@ -215,7 +230,8 @@ Future<void> cmdCfgTruth() async {
 }
 
 Future<void> cmdSyncSim() async {
-  _log('▶ sync-sim (REAL buildCfgPayload → post → patient verify → timersInsLanded)');
+  _log(
+      '▶ sync-sim (REAL buildCfgPayload → post → patient verify → timersInsLanded)');
   final captured = await _captureTimers();
   var postCount = 0;
   try {
@@ -241,7 +257,8 @@ Future<void> cmdSyncSim() async {
     final v = await client.patientVerify(
       confirm: () async {
         final cfgBack = await client.getCfg();
-        return cfgBack != null && timersInsLanded(sentIns, timerInsFrom(cfgBack));
+        return cfgBack != null &&
+            timersInsLanded(sentIns, timerInsFrom(cfgBack));
       },
       onPoll: (s) => _log('    …verifying through stall (${s}s)'),
     );
@@ -256,7 +273,8 @@ Future<void> cmdPresetVerify({bool functional = true}) async {
   _log('▶ preset-verify (on-device invariants)');
   final body = await client.getPresets();
   if (body == null) {
-    _record(const CheckResult('presets readable', false, '/presets.json unreadable'));
+    _record(const CheckResult(
+        'presets readable', false, '/presets.json unreadable'));
     return;
   }
   final presets = parsePresets(body);
@@ -289,7 +307,8 @@ Future<void> cmdPresetVerify({bool functional = true}) async {
 /// It cannot be faked by a firmware change in mechanism, and it is the exact
 /// manual test that exposed the defect the static check had been passing on.
 /// MUTATING: toggles master power, so it captures and restores.
-Future<void> _functionalPresetGuard(Map<int, Map<String, dynamic>> presets) async {
+Future<void> _functionalPresetGuard(
+    Map<int, Map<String, dynamic>> presets) async {
   final onPresets = [1, 3, 4, 5].where(presets.containsKey).toList();
   if (onPresets.isEmpty) {
     _record(const CheckResult('functional preset guard', true,
@@ -354,9 +373,11 @@ Future<void> cmdFireTest() async {
       final skew = ctrlNow.difference(hostNow).inSeconds.abs();
       _log('    controller time=$ctrlNow host=$hostNow skew=${skew}s');
       if (skew > 60) {
-        _record(CheckResult('fire-test precondition: clock skew < 60s', false,
+        _record(CheckResult(
+            'fire-test precondition: clock skew < 60s',
+            false,
             'controller/host skew ${skew}s — arming would target the wrong '
-            'minute. Fix NTP before trusting a fire result.'));
+                'minute. Fix NTP before trusting a fire result.'));
       }
     }
     final now = ctrlNow ?? hostNow;
@@ -376,12 +397,21 @@ Future<void> cmdFireTest() async {
     };
 
     await client.postState({'on': false}); // start dark
-    await client.postCfg({'timers': {'ins': [scratch]}});
-    final armed = await client.patientVerify(confirm: () async {
-      final cfgBack = await client.getCfg();
-      return cfgBack != null && timersInsLanded([scratch], timerInsFrom(cfgBack));
-    }, onPoll: (s) => _log('    …arming scratch timer (${s}s)'));
-    _record(CheckResult('fire-test: scratch timer armed', armed.confirmed,
+    await client.postCfg({
+      'timers': {
+        'ins': [scratch]
+      }
+    });
+    final armed = await client.patientVerify(
+        confirm: () async {
+          final cfgBack = await client.getCfg();
+          return cfgBack != null &&
+              timersInsLanded([scratch], timerInsFrom(cfgBack));
+        },
+        onPoll: (s) => _log('    …arming scratch timer (${s}s)'));
+    _record(CheckResult(
+        'fire-test: scratch timer armed',
+        armed.confirmed,
         armed.confirmed
             ? 'scratch landed on /json/cfg readback (${armed.stallSeconds}s)'
             : 'scratch did not land on /json/cfg readback'));
@@ -410,15 +440,18 @@ Future<void> cmdFireTest() async {
       _log('    ⚠ could not park ps away from the scratch macro '
           '(ps=$psBefore) — fire-test A will report INCONCLUSIVE');
     }
-    _log('  scratch timer armed for ${target.hour}:${target.minute.toString().padLeft(2, '0')} '
+    _log(
+        '  scratch timer armed for ${target.hour}:${target.minute.toString().padLeft(2, '0')} '
         '(dow bit $dowBit); master off; ps=$psBefore; waiting for fire…');
 
     // Wait until ~65s past the target minute.
-    final fireDeadline = DateTime(target.year, target.month, target.day, target.hour, target.minute)
+    final fireDeadline = DateTime(
+            target.year, target.month, target.day, target.hour, target.minute)
         .add(const Duration(seconds: 90));
     while (DateTime.now().isBefore(fireDeadline)) {
       await Future<void>.delayed(const Duration(seconds: 10));
-      _log('    …waiting (${DateTime.now().difference(now).inSeconds}s elapsed)');
+      _log(
+          '    …waiting (${DateTime.now().difference(now).inSeconds}s elapsed)');
     }
     // AUDIT FIX — the single conflated assertion is split in two. The old check
     // (`state.on == true`) failed IDENTICALLY when the timer never fired
@@ -444,7 +477,8 @@ Future<void> cmdChannelPower() async {
   _log('▶ channel-power (P1-43 four shapes via buildChannelPowerPayload)');
   final cfgBody = await client.getCfg();
   if (cfgBody == null) {
-    _record(const CheckResult('channel-power precondition', false, 'cfg unreadable'));
+    _record(const CheckResult(
+        'channel-power precondition', false, 'cfg unreadable'));
     return;
   }
   final channels = deviceChannelsFromConfig(parseHwLedFromCfg(cfgBody));
@@ -464,13 +498,15 @@ Future<void> cmdChannelPower() async {
     final seg = s?['seg'];
     if (seg is List) {
       for (final e in seg) {
-        if (e is Map && e['on'] == true && e['id'] is int) out.add(e['id'] as int);
+        if (e is Map && e['on'] == true && e['id'] is int)
+          out.add(e['id'] as int);
       }
     }
     return out;
   }
 
-  Future<Map<String, dynamic>?> applyAndRead(Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>?> applyAndRead(
+      Map<String, dynamic> payload) async {
     await client.postState(payload);
     await Future<void>.delayed(const Duration(milliseconds: 400));
     return client.getState();
@@ -482,20 +518,32 @@ Future<void> cmdChannelPower() async {
     await client.postState({'on': false});
     await Future<void>.delayed(const Duration(milliseconds: 300));
     final p3 = buildChannelPowerPayload(
-        channelId: a, on: true, masterOn: false, litChannelIds: {}, channels: channels);
+        channelId: a,
+        on: true,
+        masterOn: false,
+        litChannelIds: {},
+        channels: channels);
     final emitted3ok = p3['on'] == true &&
         (p3['seg'] as List).length == channels.length &&
         (p3['seg'] as List).any((s) => s['id'] == a && s['on'] == true) &&
         (p3['seg'] as List).any((s) => s['id'] == b && s['on'] == false);
     final s3 = await applyAndRead(p3);
     final lit3 = litFromState(s3);
-    _record(CheckResult('P1-43 case 3: master-off → chan $a on = ONE post, only $a lit',
-        emitted3ok && s3?['on'] == true && lit3.contains(a) && !lit3.contains(b),
+    _record(CheckResult(
+        'P1-43 case 3: master-off → chan $a on = ONE post, only $a lit',
+        emitted3ok &&
+            s3?['on'] == true &&
+            lit3.contains(a) &&
+            !lit3.contains(b),
         'emitted={on:${p3['on']},segs:${(p3['seg'] as List).length}}; state on=${s3?['on']} lit=$lit3'));
 
     // CASE 4: channel B on while master already on → seg-only (no top-level on).
     final p4 = buildChannelPowerPayload(
-        channelId: b, on: true, masterOn: true, litChannelIds: {a}, channels: channels);
+        channelId: b,
+        on: true,
+        masterOn: true,
+        litChannelIds: {a},
+        channels: channels);
     final emitted4ok = !p4.containsKey('on') &&
         (p4['seg'] as List).single['id'] == b &&
         (p4['seg'] as List).single['on'] == true;
@@ -504,13 +552,18 @@ Future<void> cmdChannelPower() async {
     // AUDIT FIX: `lit` means "segment flagged on", NOT "physically lit". Without
     // asserting master power too, this passed when the master was off and both
     // segments merely carried on:true — i.e. a dark strip reported as correct.
-    _record(CheckResult('P1-43 case 4: chan $b on while master on = seg-only, $a undisturbed',
+    _record(CheckResult(
+        'P1-43 case 4: chan $b on while master on = seg-only, $a undisturbed',
         emitted4ok && s4?['on'] == true && lit4.contains(a) && lit4.contains(b),
         'emitted noMasterKey=${!p4.containsKey('on')}; master on=${s4?['on']} (want true); state lit=$lit4'));
 
     // CASE 1: channel A off while B still lit → seg off, NO master key.
     final p1 = buildChannelPowerPayload(
-        channelId: a, on: false, masterOn: true, litChannelIds: {a, b}, channels: channels);
+        channelId: a,
+        on: false,
+        masterOn: true,
+        litChannelIds: {a, b},
+        channels: channels);
     final emitted1ok = !p1.containsKey('on') &&
         (p1['seg'] as List).single['id'] == a &&
         (p1['seg'] as List).single['on'] == false;
@@ -518,16 +571,25 @@ Future<void> cmdChannelPower() async {
     final lit1 = litFromState(s1);
     // Same audit fix as case 4 — master must remain ON for "only $a dies" to
     // mean anything physically.
-    _record(CheckResult('P1-43 case 1: chan $a off (others lit) = seg-off no master, only $a dies',
-        emitted1ok && s1?['on'] == true && !lit1.contains(a) && lit1.contains(b),
+    _record(CheckResult(
+        'P1-43 case 1: chan $a off (others lit) = seg-off no master, only $a dies',
+        emitted1ok &&
+            s1?['on'] == true &&
+            !lit1.contains(a) &&
+            lit1.contains(b),
         'emitted noMasterKey=${!p1.containsKey('on')}; master on=${s1?['on']} (want true); state lit=$lit1'));
 
     // CASE 2: channel B off (last lit) → master follows off.
     final p2 = buildChannelPowerPayload(
-        channelId: b, on: false, masterOn: true, litChannelIds: {b}, channels: channels);
+        channelId: b,
+        on: false,
+        masterOn: true,
+        litChannelIds: {b},
+        channels: channels);
     final emitted2ok = p2['on'] == false && !p2.containsKey('seg');
     final s2 = await applyAndRead(p2);
-    _record(CheckResult('P1-43 case 2: chan $b off (last lit) = master off',
+    _record(CheckResult(
+        'P1-43 case 2: chan $b off (last lit) = master off',
         emitted2ok && s2?['on'] == false,
         'emitted={on:${p2['on']}}; state on=${s2?['on']} (want false)'));
   } finally {
@@ -544,15 +606,23 @@ Future<void> cmdRestore() async {
     _record(const CheckResult('restore', false, 'no snapshots/ dir'));
     return;
   }
-  final snaps = dir.listSync().whereType<File>().where((f) => f.path.endsWith('.json')).toList()
+  final snaps = dir
+      .listSync()
+      .whereType<File>()
+      .where((f) => f.path.endsWith('.json'))
+      .toList()
     ..sort((a, b) => a.path.compareTo(b.path));
   if (snaps.isEmpty) {
     _record(const CheckResult('restore', false, 'no snapshot files'));
     return;
   }
-  final snap = jsonDecode(snaps.last.readAsStringSync()) as Map<String, dynamic>;
-  final ins = (snap['timers'] as List).map((e) => (e as Map).cast<String, dynamic>()).toList();
-  await _restoreTimers(ins, label: 'restore timers from ${snaps.last.path.split('/').last}');
+  final snap =
+      jsonDecode(snaps.last.readAsStringSync()) as Map<String, dynamic>;
+  final ins = (snap['timers'] as List)
+      .map((e) => (e as Map).cast<String, dynamic>())
+      .toList();
+  await _restoreTimers(ins,
+      label: 'restore timers from ${snaps.last.path.split('/').last}');
   final state = snap['state'];
   if (state is Map && state['on'] is bool) {
     // AUDIT FIX: was a HARDCODED `true` — it posted and asserted nothing, so a
@@ -633,7 +703,8 @@ Future<void> main(List<String> args) async {
 
   final failed = _results.where((r) => !r.pass).toList();
   _log('');
-  _log('══ ${_results.length - failed.length}/${_results.length} checks passed ══');
+  _log(
+      '══ ${_results.length - failed.length}/${_results.length} checks passed ══');
   if (failed.isNotEmpty) {
     _log('FAILURES:');
     for (final f in failed) {
@@ -680,7 +751,8 @@ String? _flag(List<String> args, String name) {
 Object? _fsValue(Map<String, dynamic> v) {
   if (v.containsKey('stringValue')) return v['stringValue'];
   if (v.containsKey('booleanValue')) return v['booleanValue'];
-  if (v.containsKey('integerValue')) return int.tryParse('${v['integerValue']}');
+  if (v.containsKey('integerValue'))
+    return int.tryParse('${v['integerValue']}');
   if (v.containsKey('doubleValue')) return (v['doubleValue'] as num).toDouble();
   if (v.containsKey('nullValue')) return null;
   if (v.containsKey('arrayValue')) {
@@ -850,7 +922,8 @@ Future<void> cmdFanoutVerify(List<String> args) async {
     stderr.writeln('fanout-verify needs: ${missing.join(", ")}');
     stderr.writeln('Prerequisites (both gated by Tyler):');
     stderr.writeln('  1. F-3 rules deployed');
-    stderr.writeln('  2. config/sync_fanout.enabled = true for the test context');
+    stderr
+        .writeln('  2. config/sync_fanout.enabled = true for the test context');
     client.close();
     exit(2);
   }

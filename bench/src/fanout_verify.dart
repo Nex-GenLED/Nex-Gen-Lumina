@@ -86,7 +86,8 @@ class ControllerSnapshot {
     final colors = <List<int>>[];
     if (rawCol is List) {
       for (final c in rawCol) {
-        if (c is List) colors.add(c.whereType<num>().map((n) => n.toInt()).toList());
+        if (c is List)
+          colors.add(c.whereType<num>().map((n) => n.toInt()).toList());
       }
     }
 
@@ -146,10 +147,9 @@ List<QueuedCommand> executableCommands(List<QueuedCommand> queue) {
       .where((c) => c.type == 'applyJson')
       .where((c) => c.payload.isNotEmpty)
       .where((c) {
-        final seg = c.payload['seg'];
-        return !(seg is List && seg.isEmpty);
-      })
-      .toList();
+    final seg = c.payload['seg'];
+    return !(seg is List && seg.isEmpty);
+  }).toList();
 }
 
 /// Applies an `applyJson` payload to a snapshot — the stub controller's model

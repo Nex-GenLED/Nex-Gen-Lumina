@@ -46,7 +46,14 @@ void main() {
       final s = ControllerSnapshot.fromState({
         'on': true,
         'seg': [
-          {'fx': 88, 'pal': 5, 'col': [[255, 0, 0], [0, 0, 255]]}
+          {
+            'fx': 88,
+            'pal': 5,
+            'col': [
+              [255, 0, 0],
+              [0, 0, 255]
+            ]
+          }
         ],
       });
       expect(s.on, isTrue);
@@ -61,7 +68,13 @@ void main() {
       final s = ControllerSnapshot.fromState({
         'on': true,
         'seg': {
-          '0': {'fx': 88, 'pal': 5, 'col': [[255, 0, 0]]}
+          '0': {
+            'fx': 88,
+            'pal': 5,
+            'col': [
+              [255, 0, 0]
+            ]
+          }
         },
       });
       expect(s.effectId, 88);
@@ -230,7 +243,8 @@ void main() {
     });
 
     test('200 with a different reason is NOT a rate-limit refusal', () {
-      final r = FanoutResponse.fromBody(200, {'ok': false, 'reason': 'no_members'});
+      final r =
+          FanoutResponse.fromBody(200, {'ok': false, 'reason': 'no_members'});
       expect(r.isRateLimited, isFalse);
     });
   });
@@ -262,8 +276,8 @@ void main() {
         nodeAAfter: _matching(),
         nodeBAfter: _matching(),
         broadcast: _pattern,
-        secondFanout:
-            FanoutResponse.fromBody(200, {'ok': false, 'reason': 'rate_limited'}),
+        secondFanout: FanoutResponse.fromBody(
+            200, {'ok': false, 'reason': 'rate_limited'}),
       );
       expect(evaluateFanoutRun(o).first.pass, isFalse);
     });
@@ -279,8 +293,8 @@ void main() {
         nodeAAfter: _matching(),
         nodeBAfter: _matching(),
         broadcast: _pattern,
-        secondFanout:
-            FanoutResponse.fromBody(200, {'ok': false, 'reason': 'rate_limited'}),
+        secondFanout: FanoutResponse.fromBody(
+            200, {'ok': false, 'reason': 'rate_limited'}),
       );
       final server = evaluateFanoutRun(o).first;
       expect(server.pass, isFalse);
@@ -293,10 +307,11 @@ void main() {
         initiatorUid: 'uid_A',
         nodeBUid: 'uid_B',
         nodeAAfter: _matching(),
-        nodeBAfter: const ControllerSnapshot(on: true, effectId: 0, paletteId: 0),
+        nodeBAfter:
+            const ControllerSnapshot(on: true, effectId: 0, paletteId: 0),
         broadcast: _pattern,
-        secondFanout:
-            FanoutResponse.fromBody(200, {'ok': false, 'reason': 'rate_limited'}),
+        secondFanout: FanoutResponse.fromBody(
+            200, {'ok': false, 'reason': 'rate_limited'}),
       );
       final checks = evaluateFanoutRun(o);
       expect(checks[1].pass, isFalse); // delivery
