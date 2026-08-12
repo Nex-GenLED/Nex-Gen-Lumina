@@ -86,8 +86,10 @@ optional.
 | **Android versionCode** | **71** — merged manifest (`android:versionCode="71"`, `android:versionName="2.5.10"`) |
 | **Android artifact** | `app-release.aab` · 68,296,168 bytes · built 2026-08-11 19:11 · `jarsigner -verify` → **jar verified** |
 | **Built from** | **An isolated `git worktree` checked out at `01ab2b4`**, not the main working tree — see the +70 row. Worktree `git status` was empty before and after the build, so no in-flight edit could reach the artifact. |
-| **iOS** | **NOT YET TRIGGERED.** Build number `PENDING`. Build from the tip of `main` once `01ab2b4` is pushed. |
-| **Uploaded** | NO |
+| **iOS** | **TRIGGERED 2026-08-11 from `aa8298b`** (the push is the trigger). Build number **`PENDING`** — fill it when Codemagic completes, not now. `aa8298b` differs from the app-bytes SHA `01ab2b4` by `docs/BUILD_LEDGER.md` and one **test-only** file, verified by tree comparison: `lib`, `assets`, `pubspec.yaml`, `pubspec.lock`, `android`, `ios` all identical. **So the IPA and the +71 AAB are the same build.** |
+| **iOS build number ≠ 71, by design** | `codemagic.yaml` takes only the version *name* (`2.5.10`) from pubspec and overwrites the build number with its own `PROJECT_BUILD_NUMBER`. The git SHA is the join key; a build-number mismatch here is expected and is not a defect. |
+| **Sibling artifact** | Android **`2.5.10+71`** — `app-release.aab`, **68,296,168 bytes**, `jarsigner -verify` → *jar verified*, built 2026-08-11 19:11 from an isolated worktree at `01ab2b4`. **Built, NOT uploaded.** |
+| **Uploaded** | NO — neither platform |
 
 **Contents since +69**
 
@@ -111,6 +113,20 @@ optional.
 baseline), run **inside the clean worktree**. `flutter analyze lib/ test/` no
 errors. Step 6 (both families in one `set(merge:true)`) is now pinned by counting
 document mutations via a snapshot listener.
+
+**Pre-flight for the iOS counterpart (2026-08-11):** production Firebase
+(`icrt6menwsv2d8all8oijs021b06s5`); `kSimulationMode = false`;
+`kStaffTokenSafetyMargin = 50 min`; `debugPrint` nulled under `kReleaseMode` in
+`main.dart:129`; no `192.168.1.150` on an executable path (four hits in `lib/`,
+all doc comments); no strip-before-release markers; **`PrivacyInfo.xcprivacy`
+traced into the Runner target's `PBXResourcesBuildPhase` (`97C146EC…`)** — not
+merely a group member, so it actually ships.
+
+**Added after the AAB, test-only** (`aa8298b`): a regression guard pinning the
+`currentRooflineConfigProvider` **await**. Mutation-verified — swapping the await
+for `.valueOrNull` reproduces `ParticipationInput([0, 1] of [0, 1])` where `[0]`
+is correct, i.e. the untraced-install superset. Suite with it: **2153 passed · 3
+skipped · 1 pre-existing**.
 
 **Participation re-verification on hardware is OWED** — `audit/HEALER_PUBLISH.md`
 §7.2d. +69 proved base boundaries; participation has never once published from
