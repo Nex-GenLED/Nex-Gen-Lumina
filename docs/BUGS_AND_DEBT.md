@@ -733,6 +733,40 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Evaluate WLED version-pin (0.15.1, see SOP §2.0) before fleet scale.
   - Files: firmware/version-pin policy (no app fix).
 
+- [ ] **#63 — `deviceHardwareConfigProvider` caches null permanently and collapses four causes into one**
+  - Status: OPEN (recorded 2026-08-12, not fixed) · Evidence: **§7.2d on +72, build 291**
+  - `wled_providers.dart:274-284` returns `null` when `repo == null` and `null` from
+    its `catch`, then **caches** it. So no-repo / unreachable / parse-failed /
+    no-buses are one indistinguishable value, and `await`ing `.future` later returns
+    the completed stale null — **an await on an already-completed future waits for
+    nothing.**
+  - Proof: `participation_publish_disposition = "SKIPPED(bus list resolved empty —
+    shape unknown)"` at `2026-08-12T04:19:08.171Z`, the *same instant* the healer's
+    own `/json/cfg` read succeeded and returned three timer rows. Same endpoint, same
+    moment, two answers.
+  - **Third instance of the null-vs-unknown class this week** (after `fetchPresets`
+    tri-state `6a37186` and the base-boundary null-vs-empty discipline). *The class
+    is the bug*, not the individual sites.
+  - Healer no longer depends on it (+73 sources buses from its own cfg via
+    `hardwareConfigFromCfg`), so this is now latent rather than active — **audit the
+    provider's OTHER consumers when picked up**; they still take a cached null as
+    "no buses".
+  - Files: `lib/features/wled/wled_providers.dart:274-284` and every `ref.watch`er.
+    Cross-ref **#62** / **P2-15** — build-identity-adjacent observability debt.
+
+- [ ] **#64 — Lease integration test fails in the 90 minutes before local midnight**
+  - Status: OPEN (recorded 2026-08-12) · Evidence: reproduced, and reproduced at
+    pre-change HEAD, so it is NOT caused by the +73 work
+  - `calendar_entry_lease_manager_integration_test.dart:55-70` builds an entry with
+    `dateKey: todayDateKey()` but `onTime = now + 30 min` / `offTime = now + 90 min`
+    formatted as bare `HH:MM`. After ~22:30 local those wrap past midnight while the
+    dateKey stays *today*, so the entry reads as "today at 00:15-01:15" — ~22 h in the
+    past — and every assertion returns `LeaseOutcome.alreadyExpired`.
+  - Observed 2026-08-11 23:45 local: 5 tests red. Green again after midnight.
+  - Fix: roll `dateKey` forward with the wrap, or inject a fixed clock. The suite
+    should not have a time-of-day-dependent result.
+  - Files: `test/features/schedule/calendar_entry_lease_manager_integration_test.dart`.
+
 - [ ] **#62 — Codemagic auto-submits every green `main` build to TestFlight**
   - Status: OPEN (recorded 2026-08-11, not acted on) · Evidence: `codemagic.yaml:131`
   - `submit_to_testflight: true` with a push trigger on `main`. Harmless when `main`
