@@ -844,6 +844,38 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Evaluate WLED version-pin (0.15.1, see SOP §2.0) before fleet scale.
   - Files: firmware/version-pin policy (no app fix).
 
+- [ ] **#69 — A PAUSED member who initiates a sync gets no command for their OWN house, and only
+  when fanout is enabled**
+  - Status: OPEN (found 2026-08-12 on the first successful two-node fanout run) · Severity:
+    **P2** · Evidence: verified-by-source + live run
+  - [applySyncPattern.ts:174-201](../functions/src/applySyncPattern.ts#L174): the `if
+    (fanoutEnabled)` arm **returns**. The host-only path below it — the one that writes the
+    initiator's own command — is therefore a *fallback*, not an additional step. With fanout on,
+    the initiator's command can come from exactly one place: the fanout loop, iterating the
+    roster.
+  - That loop skips any member whose `participationStatus` is `paused`/`optedOut`
+    ([`isMemberSkipped`, :292](../functions/src/applySyncPattern.ts#L292)) — and it does **not**
+    exempt the initiator, because it has no concept of one. So a paused member who presses
+    broadcast lights up the whole crew and not their own house.
+  - **The behavior is flag-dependent, which is the part that will confuse someone.** With fanout
+    OFF the host path never consults `participationStatus`, so the same user action works. Turning
+    fanout on silently changes what a paused member's own button does.
+  - Observed live: bench group `8b25LBEhS51H65VHKGQ1`, A = `wrQRUUKy…` (initiator) with
+    `participationStatus:"paused"`, B = `KOerj0ui…` with `"active"`. Server logged
+    `members=1 commands=1 skipped=1`; B converged, A was never written to.
+  - **Product decision, not a mechanical fix.** "Paused" plausibly means *the crew does not drive
+    my lights* — it does not obviously mean *my own deliberate action does not drive my lights
+    either*. Recommend the initiator bypass `isMemberSkipped` for their own uid; whoever decides
+    otherwise should record why, because the flag-dependence above will otherwise read as a bug
+    forever.
+  - Also noted while reading the roster: A is `participationStatus:"paused"` with
+    `isParticipating:true`, B is `"active"` with `isParticipating:false`. Both docs carry
+    contradictory pairs. `isParticipating` is documented as a not-yet-wired STOP-path gate
+    (`:289`), so nothing reads it today — but it will be read eventually, and it currently
+    disagrees with the field that governs.
+  - Files: `functions/src/applySyncPattern.ts:174-201` (the returning arm), `:292`
+    (`isMemberSkipped`), `:517-534` (the loop). Related **F-3**, the scoped `sync_fanout` flag.
+
 - [ ] **#68 — Daylight skip increments a counter but writes NO plan-log row — skipped teams are
   invisible in `gameday_plan_log`**
   - Status: OPEN (recorded 2026-08-12) · Severity: **P2** (observability) · Evidence:
