@@ -1033,10 +1033,21 @@ Future<void> cmdFanoutVerify(List<String> args) async {
     _log('  fanout#2 -> status=${second.statusCode} ok=${second.ok} '
         'reason=${second.reason}');
 
-    final aState = await client.getState();
-    final aSnap = aState == null
-        ? const ControllerSnapshot(on: false)
-        : ControllerSnapshot.fromState(aState);
+    // A converges via the REAL ESP32 bridge polling /users/{A}/commands —
+    // not the in-process stub B uses. Bridge round-trip is 5-10s typical with
+    // a 30-45s tail, so a single read here is a race that would report a
+    // late-but-correct delivery as a convergence failure. Poll to the tail,
+    // and stop early the moment it lands.
+    ControllerSnapshot aSnap = aBefore;
+    for (var i = 0; i < 24; i++) {
+      final s = await client.getState();
+      if (s != null) aSnap = ControllerSnapshot.fromState(s);
+      if (aSnap.reflects(pattern)) {
+        _log('  A converged after ~${i * 2}s (real bridge)');
+        break;
+      }
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
 
     final checks = evaluateFanoutRun(FanoutRunObservation(
       bQueueAfterFanout: drained,
