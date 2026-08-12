@@ -170,19 +170,86 @@ produced this result if `deviceHardwareConfigProvider` happened to be warm, whic
 is exactly the timing luck +73 removes. Build **292** (≠ 291) is what makes this
 attributable.
 
-#### Known limit — this rig is NOT the production analogue for the roofline leg
+#### Leg A — DEDUP ON HARDWARE: **GREEN**
 
-With channel 1 **untraced**, an unresolved roofline (`segments.isEmpty` ⇒ all
-channels) and a correctly-resolved roofline both yield `[0, 1]`. The two are
-indistinguishable on this hardware. The **bus** leg is discriminating here
-(empty vs `[0,1]`); the **roofline** leg is not, and remains pinned only by the
-mutation test.
+Second heal via a Wi-Fi cycle (endpoint key change — a genuine healer re-run, not
+a backgrounding, which would not re-fire the listener and would pass vacuously).
+App process kept alive throughout.
 
-To make the bench discriminating: add a channel-1 segment with
-`isPrimary: false` — correct becomes `[0]`, sampled-empty stays `[0, 1]`.
+```
+participating_channels             publish_count 1 -> 1  (+0)   value changed: no
+base_boundaries                    publish_count 4 -> 4  (+0)   value changed: no
+participation_publish_disposition  offered -> offered
+all _at unchanged at 05:04:23.001Z
+```
 
-**Still owed:** the on-hardware dedup pass (a second back-to-back heal with no
-relaunch; expect **0** mutations and no counter movement).
+**Zero mutations.** All three memos held — including the disposition memo, which
+is the one that would have silently turned this from a 0-write pass into a
+1-write regression when the mirror shipped.
+
+#### Leg B — ROOFLINE DISCRIMINATION: **GREEN**. `[0]`, first ever.
+
+The rig was made discriminating first. **Live source determined from code, not
+assumed:** `currentRooflineConfigProvider` maps
+`streamPixelMapChannels(uid, controllerId)` through
+`aggregatePixelMapChannelsToConfig`, so the live collection is **`pixelMap`** —
+`roofline_config` is legacy migration-only and writing there would have changed
+nothing.
+
+Written (permanent, per Tyler) to
+`users/wrQRUUKyXyc0deyuu0ORS6wsovO2/controllers/192_168_1_150/pixelMap/1`,
+which did not previously exist:
+
+```json
+{"channel_index": 1, "source_pixel_count": 162, "map_version": 1,
+ "is_stale": false, "name": "Bench ch1 (secondary)",
+ "segments": [{"id": "ch1-secondary", "channel_index": 1,
+               "is_primary": false, "pixel_count": 10, "points": [], ...}]}
+```
+
+Every field was checked against `RooflineSegment.fromJson` before writing — all
+default safely, so no other consumer breaks. `source_pixel_count: 162` matches
+bus 1's real length, so `pixelMapStalenessProvider` does not flag it.
+
+Result after a Wi-Fi cycle:
+
+```
+participating_channels                 [0]          <- was [0, 1]
+participating_channels_device_ids      [0, 1]       <- device shape still both buses
+participating_channels_previous        [0, 1]       <- FIRST time this field has been written
+participating_channels_publish_count   1 -> 2
+participating_channels_at              05:21:54.099Z
+base_boundaries                        DEDUPED (count 4, _at still 05:04:23.001Z)
+participation_publish_disposition      offered, DEDUPED (_at still 05:04:23.001Z)
+```
+
+`tracedChannels {0,1}`, `primaryChannels {0}`, `untraced {}` ⇒ `[0]`. **The
+"traced but NOT primary ⇒ EXCLUDED" branch executed against real hardware for
+the first time anywhere**, and the roofline await demonstrably held — a sampled
+(unresolved) roofline would have produced `[0, 1]`.
+
+`_previous: [0, 1]` is also its first hardware exercise: an in-session change,
+so the memo was warm and the superseded value was recorded rather than deleted.
+
+**The bench rig is now discriminating for the roofline leg** and the segment
+stays in place. Cross-ref **#65**: this branch remains **unreachable in
+production** until some code path can set `is_primary: false` — so this proves
+the resolver and the await, not that any customer is in this state.
+
+#### Single-write property — the accurate count
+
+Two hardware confirmations of families sharing one `_at`, not four:
+
+| run | families in the write | shared `_at` |
+|---|---|---|
+| 04:19:08.171Z (+72) | base boundaries + disposition | **yes** |
+| 05:04:23.001Z (+73) | participation + base boundaries + disposition | **yes** |
+| Leg A | none — all deduped | n/a (0 writes) |
+| Leg B | participation only | n/a (1 family) |
+
+Legs A and B confirm the complementary property — that non-writing families are
+**not** dragged into a write — which is what makes the shared-`_at` result
+meaningful rather than incidental.
 
 ---
 
