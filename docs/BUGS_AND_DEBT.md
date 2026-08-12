@@ -873,6 +873,37 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `scripts/_check_gameday.js` (reader — will surface the rows once written). Related **#67**
     (badge needs these rows), **F1**.
 
+- [ ] **#67 — A fire NAMES participating segments but never excludes the others, so participation is advisory**
+  - Status: OPEN (found 2026-08-12 on the first real start fire) · Product decision,
+    not a code bug
+  - Observed on the bench Twins fire, 17:10:00Z. Participation resolved `[0]`, the
+    plan row said `channels:[0]`, and the dispatched payload carried exactly one
+    segment:
+    `{"on":true,"bri":200,"seg":[{"id":0,"on":true,"fx":52,...}]}`.
+    **Both channels lit.** Planner and dispatcher were correct end to end.
+  - Mechanism: root `"on":true` powers the master, which lights every segment whose
+    own `on` is true. A `seg` array naming only `id:0` leaves segment 1 **untouched**
+    — not off. So excluding a channel currently prevents it from *changing*, not
+    from *lighting*.
+  - **The decision**: should a Game Day fire assert `on:false` on non-participating
+    segments? Doing so makes participation mean what a customer will assume it
+    means. Not doing so means the exclusion is advisory and the customer's patio
+    lights anyway — in whatever look it already had.
+  - This is the START-side twin of the S4 "what does a fire actually send" question.
+    Whatever is decided should apply to both fires and to the base restore.
+  - **Currently unobservable in production** because of **#65**: no account can
+    produce a non-participating channel. The bench can only show it because of the
+    `is_primary:false` segment written for §7.2d Leg B. Fixing #65 without deciding
+    #67 would make this customer-visible on the same day.
+  - Unresolved side note, recorded rather than guessed: seg 1 came up
+    **byte-identical** to seg 0 (same fx/sx/ix/pal/colours). Pre-existing state
+    alone does not explain that — it points at WLED propagating segment properties
+    beyond the named id, or seg 1 having been created as a copy. Not settled from
+    outside the firmware; seg 1 did not exist at 13:2x and no reboot occurred.
+  - Files: `functions/src/planGameDayFires.ts` (`buildParticipatingSegArray` call
+    site), `functions/src/gameDayPlanning.ts` (`baseRestorePayload`). Related
+    **#65**, S4.
+
 - [ ] **#65 — No code path can create a non-primary roofline segment, so participation always resolves to ALL channels**
   - Status: OPEN (recorded 2026-08-12) · Evidence: exhaustive grep of every
     `RooflineSegment(` construction site
