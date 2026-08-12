@@ -473,8 +473,8 @@ resolved for the affected accounts.
 | **App-bytes ancestry** | `1d95104` (+73) **+** the #66 end-guard, F-3 security, the #70 fanout fix, and the staff-entry retirement. |
 | **Ledger SHA (tagged)** | The `build-74` tag, docs-only on top of `850c0db`. Verified with a tree comparison, not a grep — `git diff --stat 850c0db build-74 -- . ':(exclude)docs'` is EMPTY, so the tag builds byte-identical app code. Deliberately named by TAG, not by hash: a commit cannot state its own SHA (amending to insert it changes it), and that self-invalidating reference has bitten this ledger before. |
 | **Version name** | `2.5.10` |
-| **Android versionCode** | **74** — `kStaffAuthTelemetryAppVersion` moved to `2.5.10+74` in the same commit; they are one fact in two files. |
-| **Android artifact** | `<PENDING>` — built locally from an isolated worktree at the tag. |
+| **Android versionCode** | **74** — merged manifest (`android:versionCode="74"`, `android:versionName="2.5.10"`), read from the manifest and not from pubspec. `kStaffAuthTelemetryAppVersion` moved to `2.5.10+74` in the same commit; they are one fact in two files. |
+| **Android artifact** | `app-release.aab` · **68,271,666 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-12 from isolated worktree `lumina-b74` at tag `build-74`, `git status` empty before **and** after. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64) — archive, never commit. **versionCode 74 is now CONSUMED: a built AAB consumes its code even if never uploaded.** |
 | **iOS** | `<PENDING>` — Codemagic build number to be filled **when the build completes**, not when queued. |
 | **Uploaded** | `<PENDING>` |
 | **Supersedes** | **+73** |
