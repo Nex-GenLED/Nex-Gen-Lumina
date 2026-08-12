@@ -23,6 +23,40 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P0 — customer-visible, blocks "sell with certainty"
 
+- [x] **#66 — END FIRE WITHOUT A START. Lights on at 1am. FIXED + DEPLOYED 2026-08-12.**
+  - Status: **FIXED** (GUARD 0 + 0b, deployed) · Severity: **P0** · Blast radius as
+    it happened: bench only, because the flip was scoped
+  - **Timeline** — `05:45:21.359Z` flag armed (bench-scoped) → `05:50:04Z` the
+    `writeJobs || startPlannedAt` gate at `planGameDayFires:499` opens,
+    `consecutiveFinalPolls` 0→1 → `05:55:04.001Z` counter→2,
+    `REQUIRED_FINAL_POLLS` met, `plan_end reason="confirmed_final"`, job
+    `gd_mlb_royals_401816490_end` written, dispatched, **COMPLETED**, payload
+    `{"ps":1}` = preset "NGL On" → `05:58:50Z` `endsPlanned: 1` → **bench strip ON
+    at 01:00 local**, for a game finished hours earlier whose START this system
+    never fired. Ten minutes, two ticks, after arming.
+  - **Root cause** — `decideEndSignal` verified `endFiredAt`, `espnIsFinal`,
+    `gameStartMs`, minimum duration and two consecutive finals. **Every one passed
+    honestly.** None asked whether we started the show. The counter had been
+    pinned at 0 for the whole log-only era; arming released it.
+  - **Counterfactual** — under a **global** flip this was a simultaneous 1am
+    `{"ps":1}` across **all ten** Game-Day-enabled accounts, **seven of them with
+    no base layer** (#65) to correct it. The scoped flip is the only reason this
+    was one rig instead of a fleet incident.
+  - **Fix** — GUARD 0 (`startPlannedAt` required, checked *before* `already_fired`)
+    + GUARD 0b (`startJobConfirmsFired`: the start job must read
+    `dispatched|completed`). Refusals log as `end_skipped_no_start` /
+    `end_skipped_start_never_dispatched`. 11 regression tests.
+  - **Start path audited, no mirror-image hole**: it gates on `startFireAt` vs
+    `nowMs` recomputed each tick, not on a persisted accumulator, so arming
+    unlocks nothing there.
+  - **PROCESS LESSON, the one worth keeping**: a first live arm should be scoped
+    to a rig you can inspect, even when the dry-run evidence looks clean — the
+    dry run *structurally could not* exercise this path (F1), so its cleanliness
+    was not evidence of anything.
+  - Files: `functions/src/gameDayPlanning.ts` (GUARD 0/0b),
+    `functions/src/planGameDayFires.ts`. Related **#65** (no floor), **F1**.
+
+
 - [ ] **P0-1 — AI intent applies scheduled commands IMMEDIATELY (Symptom B)**
   - Status: OPEN · Evidence: bench-proven
   - "warm white 2:25–2:30" changed lights instantly and wrote **zero** timers. The AI
