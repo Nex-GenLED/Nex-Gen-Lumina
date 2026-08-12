@@ -69,6 +69,97 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `functions/src/planGameDayFires.ts`. Related **#65** (no floor), **F1**.
 
 
+- [ ] **F-3 — Neighborhood Sync: fleet-wide read of home coordinates + uninvited crew join.
+  CODE COMPLETE on `fix/f3-neighborhood-security`, NOT DEPLOYED.**
+  - Status: **FIX WRITTEN + TESTED, awaiting Tyler's deploy gate** · Severity: **P0** ·
+    Evidence: verified-by-deployed-state (deployed ruleset read 2026-08-12) + census
+  - **The defect, re-confirmed live 2026-08-12** against ruleset
+    `93c99c50-0b3d-4a72-b76f-eb6f3040550d` (not just the repo copy):
+    `/neighborhoods/{groupId}` was `allow read: if request.auth != null`, exposing
+    `streetName`, `city`, `latitude`, `longitude` and `inviteCode` to any authenticated —
+    including anonymous — token. The members subcollection was equally open and carries
+    `displayName` + `controllerIp`. Group `update` additionally accepted
+    `request.auth.uid in request.resource.data.memberUids` ("enforced app-side"), so a
+    stranger could join any crew with NO credential, satisfy `isGroupMemberLookup()`, and
+    unlock its commands/schedules/syncEvents. That last limb also went around **SYNC-1**: a
+    self-joined attacker is in `memberUids[]` legitimately, so `verifyFanoutTarget` waves
+    them through — light control was held shut ONLY by `config/sync_fanout.enabled == false`.
+  - **EXPOSURE, MEASURED (not guessed) — census 2026-08-12, `/neighborhoods`:**
+    | metric | count |
+    |---|---|
+    | groups | **3** |
+    | `isPublic=true` | **0** (all 3 private) |
+    | carrying a street name | **0** |
+    | carrying lat/lon | **0** |
+    | carrying `inviteCode` | **3** |
+    | member docs | **6** (0 with `controllerIp`) |
+    | `isParticipating=true` | **1** (in 1 group) |
+    | distinct household uids | **3** |
+    - All three are bench/demo crews ("demo test", "demo", "Let's Hope This Works").
+    - **So the REALIZED leak today is 3 demo group names + 3 invite codes + 6 member
+      display names — no addresses, no coordinates, no controller IPs.** The rule is wide
+      open, but nothing has yet been put behind it. This is a latent P0 that becomes a real
+      one the moment a customer creates a crew with an address, and it means the fix can
+      ship without a data-migration scramble.
+    - Second-order: 0 public groups ⇒ `findNearbyGroups` returns nothing today, so the
+      discovery path could be re-pointed at a projection with no user-visible regression.
+  - **THE FIX (three parts):**
+    1. **Rules** — group read is now `isGroupMember() || isGroupCreator()`; the members
+       roster is `isGroupMemberLookup()` (matching its sibling subcollections); the
+       self-insertion clause is DELETED from `allow update`.
+    2. **`joinNeighborhood` callable** (`functions/src/joinNeighborhood.ts`) — validates the
+       invite code SERVER-side with the admin SDK, enforces a crew ceiling
+       (`MAX_CREW_SIZE = 24`; there is no per-group capacity field), and writes `memberUids`
+       + `members/{uid}` in ONE batch (the old client path wrote them independently, and the
+       resulting orphan shape is exactly what SYNC-1 had to defend against). Rate-limited
+       per CALLER on the SYNC-2 envelope (18s cooldown / 5 per 60s), because a brute-forcer
+       rotates codes and supplies no groupId, so a per-group limit would not see the
+       attempts as related. `invalid_code` and `group_not_found` both surface as `not-found`
+       so the callable is not an existence oracle.
+    3. **`/neighborhood_public` projection** — discovery genuinely needs one cross-tenant
+       read, so it gets a narrow one: name, description, memberCount, and COARSE coords
+       (2dp ≈ 1.1 km). The rule enforces the SHAPE (`hasAny(['inviteCode','streetName',
+       'latitude','longitude','memberUids',...])` is rejected), so a future writer bug fails
+       loudly instead of leaking. Precision is decided in
+       `NeighborhoodService.coarsenCoordinate` — the rule cannot catch a loosening there,
+       noted at both sites.
+  - **TESTS (all green, this branch):**
+    - Emulator rules suite **193/193, 12/12 suites** — including 20 new F-3 cases and the
+      pre-existing SYNC-1 `neighborhoodMembersRules` suite, which still passes.
+    - `joinNeighborhood` unit tests **22/22**.
+    - Full Dart suite **2191/3/0** — 2165 pre-existing + the 26 new `fanout_verify` harness
+      tests. Main baseline is 2164/3/1; the absent failure is #64's clock caveat, which only
+      fires in the 90 min before local midnight (this ran at ~13:00 CDT), NOT a fix.
+    - `flutter analyze` on all changed areas: **0 errors**.
+  - ⚠️ **The JDK-21 emulator blocker was a JAVA_HOME problem, not a missing JDK.**
+    `jdk-25.0.1.8-hotspot` is installed alongside 17; `JAVA_HOME` simply points at 17. Set
+    `JAVA_HOME=/c/Program Files/Eclipse Adoptium/jdk-25.0.1.8-hotspot` (Git Bash needs the
+    `/c/...` form in PATH, not `C:/...`) and the whole emulator suite runs. The
+    "differential rules test" substitute in `scripts/_test_rules_diff.js` is no longer the
+    only option.
+  - **DEPLOY IS GATED (Tyler), in this order:** end-fire completes → F-3 rules **and**
+    functions deploy (they must land TOGETHER — deploying rules without the callable makes
+    joining impossible; deploying the callable without rules leaves the hole open) → scoped
+    fanout allowlist → two-node run → **P1-44** #7 flip decision.
+  - **Coordination with `fix/neighborhood-join-membership` (002b0b7):** the typed-code join
+    sequence survives UNCHANGED — the callable slots under `NeighborhoodService.joinGroup`
+    and preserves the null-vs-throw contract that `_performJoin` branches on. The
+    NEARBY-groups join needs ONE line changed (`joinGroup(group.inviteCode)` →
+    `joinPublicGroup(group.id)`), in a method 002b0b7 also edited, so expect a one-line
+    merge conflict there and nowhere else.
+  - Files: `firestore.rules` (neighborhoods read/update, members read, new
+    `/neighborhood_public`), `functions/src/joinNeighborhood.ts`, `functions/index.js`,
+    `lib/features/neighborhood/neighborhood_service.dart`, `neighborhood_providers.dart`,
+    `neighborhood_sync_screen.dart`. Tests: `functions/test/emulator/neighborhoodF3Rules.
+    emulator.test.ts`, `functions/test/unit/joinNeighborhood.test.js`. Related **P1-44**
+    (the flip this unblocks), **SYNC-1**.
+  - **SIBLING FINDING, not fixed here:** `game_day_crews` has NO rules block and no
+    catch-all, so it is default-DENIED — `GameDayCrewService.joinCrew`
+    (`lib/features/game_day/game_day_crew_service.dart:88`) queries it by `invite_code` and
+    cannot ever succeed in production. Same invite-code-as-client-query shape as F-3, but
+    currently inert rather than leaking. File separately before that collection is opened.
+
+
 - [ ] **P0-1 — AI intent applies scheduled commands IMMEDIATELY (Symptom B)**
   - Status: OPEN · Evidence: bench-proven
   - "warm white 2:25–2:30" changed lights instantly and wrote **zero** timers. The AI

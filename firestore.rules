@@ -1889,11 +1889,26 @@ service cloud.firestore {
                exists(/databases/$(database)/documents/neighborhoods/$(groupId)/members/$(request.auth.uid));
       }
 
-      // Any authenticated user can read groups so they can:
-      //   - list groups they belong to (memberUids contains-uid query)
-      //   - look up a group by inviteCode when joining
-      //   - discover nearby public groups
-      allow read: if request.auth != null;
+      // F-3 FIX (2026-08-12) — READ IS MEMBERSHIP-SCOPED.
+      //
+      // WAS `if request.auth != null`, which let ANY authenticated token —
+      // including an anonymous one — list every crew in the fleet along with
+      // `streetName`, `city`, `latitude`, `longitude` and `inviteCode`. That is
+      // block-level residence coordinates tied to named residents, readable
+      // cross-tenant. Audited as F-3 (P0) in audit/COMPLIANCE_AND_SECURITY.md.
+      //
+      // The old comment justified the open read with three needs. Each is now
+      // served without it:
+      //   - "list groups they belong to" → the `memberUids arrayContains uid`
+      //     query still works: membership is exactly what this rule allows.
+      //   - "look up a group by inviteCode when joining" → NO LONGER A CLIENT
+      //     READ. Joins go through the `joinNeighborhood` callable, which
+      //     resolves the code with the admin SDK. A client that cannot read a
+      //     group it does not belong to also cannot harvest invite codes.
+      //   - "discover nearby public groups" → served by the
+      //     /neighborhood_public projection (below), which carries NO
+      //     inviteCode, NO street and only COARSE coordinates.
+      allow read: if isGroupMember() || isGroupCreator();
 
       // Only the authenticated creator may create a group, and they must
       // include themselves as creatorUid + first memberUids entry.
@@ -1901,14 +1916,22 @@ service cloud.firestore {
                        request.resource.data.creatorUid == request.auth.uid &&
                        request.auth.uid in request.resource.data.memberUids;
 
-      // Updates allowed for: creator (any field), or any authenticated user
-      // joining/leaving (toggling memberUids only — enforced app-side).
-      allow update: if request.auth != null && (
-        isGroupCreator() ||
-        isGroupMember() ||
-        // Allow joining via invite code: writer adds themselves to memberUids
-        request.auth.uid in request.resource.data.memberUids
-      );
+      // F-3 FIX — SELF-INSERTION INTO memberUids IS NO LONGER ACCEPTED.
+      //
+      // The removed clause was `request.auth.uid in request.resource.data.memberUids`
+      // with the comment "enforced app-side", which is not enforcement: any
+      // authenticated caller could append their own uid to any crew's memberUids
+      // and thereby satisfy isGroupMemberLookup(), unlocking that crew's
+      // commands / schedules / syncEvents. It also defeated SYNC-1 — a
+      // self-joined attacker is in memberUids[] *legitimately*, so
+      // verifyFanoutTarget waves them through, and the only thing holding light
+      // control shut was config/sync_fanout.enabled == false.
+      //
+      // Joins now happen exclusively in the `joinNeighborhood` callable, which
+      // validates the invite code SERVER-SIDE and writes with the admin SDK
+      // (rules do not apply to it). Existing members retain update so they can
+      // maintain group state; leaving is a member-scoped memberUids edit.
+      allow update: if isGroupCreator() || isGroupMember();
 
       // Only the creator may delete the group document.
       allow delete: if isGroupCreator();
@@ -1916,8 +1939,15 @@ service cloud.firestore {
       // Members subcollection: each member's local config (display name,
       // LED count, position, online status, participation).
       match /members/{memberUid} {
-        // Any group member can read the member roster.
-        allow read: if request.auth != null;
+        // F-3 FIX — the roster is CREW-ONLY.
+        //
+        // The comment already said "any group member", but the condition was
+        // bare `request.auth != null`: any authenticated token could read every
+        // member doc in the fleet, which carry `displayName` and `controllerIp`.
+        // isGroupMemberLookup() is the null-safe membership signal used by the
+        // sibling subcollections (commands/schedules/syncEvents), so the roster
+        // now matches them.
+        allow read: if isGroupMemberLookup();
 
         // CREATE is SELF-ONLY (SYNC-1): a member doc may only be brought into
         // existence by that user joining (request.auth.uid == memberUid). The
@@ -1971,6 +2001,48 @@ service cloud.firestore {
       match /game_day_autopilot/{configId} {
         allow read, create, update, delete: if isGroupMemberLookup();
       }
+    }
+
+    // ── Neighborhood PUBLIC PROJECTION (F-3) ─────────────────────
+    // Discovery-only mirror of the opted-in subset of /neighborhoods.
+    // Exists because "find nearby public groups" genuinely needs a
+    // cross-tenant read, while the full group doc carries three things
+    // that must never be cross-tenant readable: `inviteCode` (a
+    // credential), `streetName`, and EXACT `latitude`/`longitude`.
+    //
+    // A projection doc therefore carries ONLY: groupId, name,
+    // description, memberCount, isPublic, and COARSE coordinates
+    // (`latCoarse`/`lonCoarse`, rounded to 2 decimal places ≈ 1.1 km).
+    // Coarse is deliberate — proximity search needs a range filter, so
+    // some geography must be readable; 2dp locates a neighborhood, not a
+    // house. The writer is responsible for the rounding; the rule below
+    // enforces the SHAPE so a future writer bug cannot leak the precise
+    // fields by simply adding them.
+    //
+    // Only a group whose owner set isPublic == true gets a projection,
+    // and the creator is the only client author (writes are mirrored
+    // from setGroupPublic / createGroup). Deleting the projection is how
+    // a group goes private again.
+    match /neighborhood_public/{groupId} {
+      function isProjectionShapeSafe() {
+        return !request.resource.data.keys().hasAny(
+                 ['inviteCode', 'streetName', 'latitude', 'longitude',
+                  'memberUids', 'city', 'address']) &&
+               request.resource.data.isPublic == true;
+      }
+      function ownsParentGroup() {
+        return request.auth != null &&
+               exists(/databases/$(database)/documents/neighborhoods/$(groupId)) &&
+               get(/databases/$(database)/documents/neighborhoods/$(groupId))
+                 .data.creatorUid == request.auth.uid;
+      }
+
+      // Discovery read — this is the ONE deliberately cross-tenant read in
+      // the feature, and it is why the shape guard above is not optional.
+      allow read: if request.auth != null;
+
+      allow create, update: if ownsParentGroup() && isProjectionShapeSafe();
+      allow delete: if ownsParentGroup();
     }
 
     // ── Brand Library ────────────────────────────────────────────

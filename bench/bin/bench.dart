@@ -25,6 +25,7 @@ import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/channel_power_payload.dart';
 
 import '../src/bench_core.dart';
+import '../src/fanout_verify.dart';
 import '../src/wled_client.dart';
 
 late WledClient client;
@@ -615,6 +616,9 @@ Future<void> main(List<String> args) async {
       case 'restore':
         await cmdRestore();
         break;
+      case 'fanout-verify':
+        await cmdFanoutVerify(args);
+        break;
       case 'all':
         await cmdAll();
         break;
@@ -637,4 +641,279 @@ Future<void> main(List<String> args) async {
     }
   }
   exit(failed.isEmpty ? 0 : 1);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// fanout-verify — two-node crew fanout (runbook step 4)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Proves a sync initiated by A lands on B's controller while B never runs the
+// app. Node A is this bench controller; Node B is a stub WLED endpoint served
+// in-process, fed by a bridge simulator that drains B's Firestore command queue
+// exactly as the ESP32 does. No second house, no second phone.
+//
+// NOT RUNNABLE YET: needs the F-3 rules deploy AND config/sync_fanout enabled
+// for the test context. Both are Tyler's gates; this exits 2 naming what is
+// missing rather than producing a meaningless result.
+//
+//   dart run bench/bin/bench.dart fanout-verify \
+//     --group <groupId> --a-token <A idToken> \
+//     --b-uid <B uid> --b-token <B idToken> [--b-port 8099]
+//
+// TWO tokens, deliberately: A initiates (its token authorizes applySyncPattern)
+// and B's own token is what the bridge-sim drains B's queue with. A cannot read
+// B's commands — that separation is what makes a pass mean "fanout", rather
+// than "A wrote to itself".
+
+const String _fnBase =
+    'https://us-central1-icrt6menwsv2d8all8oijs021b06s5.cloudfunctions.net';
+const String _fsBase = 'https://firestore.googleapis.com/v1/projects/'
+    'icrt6menwsv2d8all8oijs021b06s5/databases/(default)/documents';
+
+String? _flag(List<String> args, String name) {
+  final i = args.indexOf('--$name');
+  if (i < 0 || i + 1 >= args.length) return null;
+  return args[i + 1];
+}
+
+/// Decodes a Firestore REST typed value into plain Dart.
+Object? _fsValue(Map<String, dynamic> v) {
+  if (v.containsKey('stringValue')) return v['stringValue'];
+  if (v.containsKey('booleanValue')) return v['booleanValue'];
+  if (v.containsKey('integerValue')) return int.tryParse('${v['integerValue']}');
+  if (v.containsKey('doubleValue')) return (v['doubleValue'] as num).toDouble();
+  if (v.containsKey('nullValue')) return null;
+  if (v.containsKey('arrayValue')) {
+    final vals = (v['arrayValue']['values'] as List?) ?? const [];
+    return vals.map((e) => _fsValue(Map<String, dynamic>.from(e))).toList();
+  }
+  if (v.containsKey('mapValue')) {
+    final f = (v['mapValue']['fields'] as Map?) ?? const {};
+    return f.map((k, e) =>
+        MapEntry(k as String, _fsValue(Map<String, dynamic>.from(e))));
+  }
+  return null;
+}
+
+/// [CommandQueue] over the Firestore REST API using B's OWN id token — the
+/// same authority the real bridge has, so rules apply exactly as in production.
+class _RestCommandQueue implements CommandQueue {
+  _RestCommandQueue(this.idToken);
+  final String idToken;
+  final HttpClient _http = HttpClient();
+
+  @override
+  Future<List<QueuedCommand>> pending(String uid) async {
+    final req = await _http.getUrl(Uri.parse('$_fsBase/users/$uid/commands'));
+    req.headers.set('Authorization', 'Bearer $idToken');
+    final res = await req.close();
+    final body = await res.transform(utf8.decoder).join();
+    if (res.statusCode != 200) {
+      _log('  queue read failed ${res.statusCode}: $body');
+      return const [];
+    }
+    final docs = (jsonDecode(body)['documents'] as List?) ?? const [];
+    final out = <QueuedCommand>[];
+    for (final d in docs) {
+      final m = Map<String, dynamic>.from(d);
+      final fields = Map<String, dynamic>.from(m['fields'] ?? {});
+      final decoded = fields
+          .map((k, v) => MapEntry(k, _fsValue(Map<String, dynamic>.from(v))));
+      final name = (m['name'] as String? ?? '').split('/').last;
+      // fanoutToCrew writes the WLED body as a JSON STRING; decode it back.
+      Map<String, dynamic> payload = {};
+      final raw = decoded['payload'];
+      if (raw is String && raw.isNotEmpty) {
+        try {
+          payload = Map<String, dynamic>.from(jsonDecode(raw));
+        } catch (_) {}
+      } else if (raw is Map) {
+        payload = Map<String, dynamic>.from(raw);
+      }
+      out.add(QueuedCommand(
+        id: name,
+        type: decoded['type'] as String? ?? 'applyJson',
+        status: decoded['status'] as String? ?? 'pending',
+        payload: payload,
+      ));
+    }
+    return out;
+  }
+
+  @override
+  Future<void> markComplete(String uid, String commandId) async {
+    final uri = Uri.parse(
+        '$_fsBase/users/$uid/commands/$commandId?updateMask.fieldPaths=status');
+    final req = await _http.patchUrl(uri);
+    req.headers.set('Authorization', 'Bearer $idToken');
+    req.headers.contentType = ContentType.json;
+    req.write(jsonEncode({
+      'fields': {
+        'status': {'stringValue': 'completed'}
+      }
+    }));
+    await (await req.close()).drain<void>();
+  }
+
+  void close() => _http.close(force: true);
+}
+
+/// Node B: a stub WLED endpoint. GET /json/state reports, POST applies.
+class _StubController {
+  ControllerSnapshot state = const ControllerSnapshot(
+    on: true,
+    effectId: 0,
+    paletteId: 0,
+    colors: [
+      [0, 0, 0]
+    ],
+  );
+  HttpServer? _server;
+
+  Future<int> start(int port) async {
+    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+    _server!.listen((req) async {
+      if (req.method == 'POST') {
+        // HttpRequest is Stream<Uint8List>, so bind the decoder rather than
+        // transform() (which wants a StreamTransformer<Uint8List, _>).
+        final body = await utf8.decoder.bind(req).join();
+        try {
+          state =
+              applyPayload(state, Map<String, dynamic>.from(jsonDecode(body)));
+        } catch (_) {}
+        req.response.statusCode = 200;
+        await req.response.close();
+        return;
+      }
+      req.response.headers.contentType = ContentType.json;
+      req.response.write(jsonEncode({
+        'on': state.on,
+        'seg': [
+          {'fx': state.effectId, 'pal': state.paletteId, 'col': state.colors}
+        ],
+      }));
+      await req.response.close();
+    });
+    return _server!.port;
+  }
+
+  Future<void> stop() async => _server?.close(force: true);
+}
+
+Future<FanoutResponse> _postFanout(
+  String token,
+  String groupId,
+  Map<String, dynamic> payload,
+) async {
+  final http = HttpClient();
+  try {
+    final req = await http.postUrl(Uri.parse('$_fnBase/applySyncPattern'));
+    req.headers.set('Authorization', 'Bearer $token');
+    req.headers.contentType = ContentType.json;
+    req.write(jsonEncode({
+      'data': {
+        'groupId': groupId,
+        'sessionId': '',
+        'payload': payload,
+        'fanout': true,
+        'source': 'bench_fanout_verify',
+      }
+    }));
+    final res = await req.close();
+    final body = await res.transform(utf8.decoder).join();
+    Map<String, dynamic> parsed = {};
+    try {
+      parsed = Map<String, dynamic>.from(jsonDecode(body));
+    } catch (_) {}
+    return FanoutResponse.fromBody(res.statusCode, parsed);
+  } finally {
+    http.close(force: true);
+  }
+}
+
+Future<void> cmdFanoutVerify(List<String> args) async {
+  _log('> fanout-verify (A=bench controller, B=stub + bridge-sim)');
+
+  final group = _flag(args, 'group');
+  final aToken = _flag(args, 'a-token');
+  final bUid = _flag(args, 'b-uid');
+  final bToken = _flag(args, 'b-token');
+  final bPort = int.tryParse(_flag(args, 'b-port') ?? '') ?? 8099;
+
+  final missing = <String>[
+    if (group == null) '--group',
+    if (aToken == null) '--a-token',
+    if (bUid == null) '--b-uid',
+    if (bToken == null) '--b-token',
+  ];
+  if (missing.isNotEmpty) {
+    stderr.writeln('fanout-verify needs: ${missing.join(", ")}');
+    stderr.writeln('Prerequisites (both gated by Tyler):');
+    stderr.writeln('  1. F-3 rules deployed');
+    stderr.writeln('  2. config/sync_fanout.enabled = true for the test context');
+    client.close();
+    exit(2);
+  }
+
+  // Fireworks in two contrasting colors: visually obvious and far from any
+  // resting state, so "converged" cannot be a coincidence.
+  const pattern = PatternSpec(
+    effectId: 88,
+    paletteId: 5,
+    colors: [
+      [255, 0, 0],
+      [0, 0, 255]
+    ],
+  );
+
+  final stub = _StubController();
+  final queue = _RestCommandQueue(bToken!);
+  try {
+    final port = await stub.start(bPort);
+    _log('  Node B stub on 127.0.0.1:$port');
+
+    final first = await _postFanout(aToken!, group!, pattern.toSegPayload());
+    _log('  fanout#1 -> status=${first.statusCode} ok=${first.ok} '
+        'reason=${first.reason}');
+
+    // Bridge-sim: poll, because the CF write and the queue read are not
+    // synchronous — and the real bridge polls too.
+    var drained = <QueuedCommand>[];
+    for (var i = 0; i < 10; i++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      drained = executableCommands(await queue.pending(bUid!));
+      if (drained.isNotEmpty) break;
+    }
+    for (final c in drained) {
+      stub.state = applyPayload(stub.state, c.payload);
+      await queue.markComplete(bUid!, c.id);
+    }
+    _log('  bridge-sim drained ${drained.length} command(s)');
+
+    // Second fanout INSIDE the 18s cooldown — must be refused.
+    final second = await _postFanout(aToken, group, pattern.toSegPayload());
+    _log('  fanout#2 -> status=${second.statusCode} ok=${second.ok} '
+        'reason=${second.reason}');
+
+    final aState = await client.getState();
+    final aSnap = aState == null
+        ? const ControllerSnapshot(on: false)
+        : ControllerSnapshot.fromState(aState);
+
+    final checks = evaluateFanoutRun(FanoutRunObservation(
+      bQueueAfterFanout: drained,
+      initiatorUid: 'A',
+      nodeBUid: bUid!,
+      nodeAAfter: aSnap,
+      nodeBAfter: stub.state,
+      broadcast: pattern,
+      secondFanout: second,
+    ));
+    for (final c in checks) {
+      _record(CheckResult(c.name, c.pass, c.evidence));
+    }
+  } finally {
+    queue.close();
+    await stub.stop();
+  }
 }

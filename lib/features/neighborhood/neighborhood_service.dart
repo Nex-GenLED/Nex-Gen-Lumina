@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' show Random, cos, sin, sqrt, atan2, pi;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -72,6 +73,11 @@ class NeighborhoodService {
 
   CollectionReference<Map<String, dynamic>> get _neighborhoodsRef =>
       _firestore.collection('neighborhoods');
+
+  /// F-3 public projection — the ONLY cross-tenant-readable view of a crew.
+  /// See [publishPublicProjection] for the shape and why it is narrow.
+  CollectionReference<Map<String, dynamic>> get _publicProjectionRef =>
+      _firestore.collection('neighborhood_public');
 
   String? get _currentUid => _auth.currentUser?.uid;
 
@@ -185,58 +191,117 @@ class NeighborhoodService {
       rethrow;
     }
 
+    // F-3: a crew created as public needs its discovery projection, or it is
+    // flagged public and listed nowhere. Best-effort — a projection failure
+    // must not roll back a successfully created group.
+    if (group.isPublic) {
+      try {
+        await publishPublicProjection(group);
+      } catch (e) {
+        debugPrint('🏘️ [NeighborhoodService] projection publish failed: $e');
+      }
+    }
+
     debugPrint('🏘️ Created neighborhood group: ${group.name} (${group.inviteCode})');
     return group;
   }
 
   /// Joins an existing group using an invite code.
-  Future<NeighborhoodGroup?> joinGroup(String inviteCode, {String? displayName}) async {
+  Future<NeighborhoodGroup?> joinGroup(String inviteCode, {String? displayName}) =>
+      _callJoin(inviteCode: inviteCode, displayName: displayName);
+
+  /// Joins a PUBLIC crew discovered through [findNearbyGroups].
+  ///
+  /// Discovery results come from the `/neighborhood_public` projection, which
+  /// deliberately carries no invite code — so a public join is identified by
+  /// group id and authorized by the group's own `isPublic` flag, server-side.
+  Future<NeighborhoodGroup?> joinPublicGroup(String groupId,
+          {String? displayName}) =>
+      _callJoin(groupId: groupId, displayName: displayName);
+
+  /// F-3: joining is a SERVER operation now.
+  ///
+  /// This used to be a client transaction — query `/neighborhoods` by invite
+  /// code, append our own uid to `memberUids`, write our own member doc. All
+  /// three steps are denied to clients after F-3: the group read is
+  /// membership-scoped, and self-insertion into `memberUids` is refused. The
+  /// `joinNeighborhood` callable validates the code with the admin SDK and
+  /// writes both docs in one batch.
+  ///
+  /// ⚠️ CONTRACT — the null-vs-throw distinction is load-bearing and predates
+  /// this change (commit 002b0b7). The UI branches on it: a null WITHOUT an
+  /// error means "that code matched nothing", and the rejoin shortcut drops its
+  /// saved entry only in that case; any other failure must PRESERVE the error so
+  /// a real outage is not mistaken for a bad code and silently discarded. So:
+  ///   • callable `not-found`  → return null   (no such code / no such group)
+  ///   • anything else         → rethrow       (auth, rate limit, full, network)
+  Future<NeighborhoodGroup?> _callJoin({
+    String? inviteCode,
+    String? groupId,
+    String? displayName,
+  }) async {
     final uid = _currentUid;
     if (uid == null) throw Exception('User not authenticated');
 
-    // Find group by invite code
-    final query = await _neighborhoodsRef
-        .where('inviteCode', isEqualTo: inviteCode.toUpperCase())
-        .limit(1)
-        .get();
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('joinNeighborhood');
+      final result = await callable.call<Map<String, dynamic>>({
+        if (inviteCode != null) 'inviteCode': inviteCode,
+        if (groupId != null) 'groupId': groupId,
+        if (displayName != null && displayName.trim().isNotEmpty)
+          'displayName': displayName.trim(),
+        // Denormalized so the server-side fanout (SYNC-1) can resolve this
+        // member's controllers without a cross-collection read.
+        'controllerId': await _ownControllerIds(),
+      });
 
-    if (query.docs.isEmpty) {
-      debugPrint('No group found with invite code: $inviteCode');
-      return null;
-    }
-
-    final doc = query.docs.first;
-    final group = NeighborhoodGroup.fromFirestore(doc);
-
-    // Check if already a member
-    if (group.memberUids.contains(uid)) {
-      debugPrint('Already a member of group: ${group.name}');
+      final data = Map<String, dynamic>.from(result.data);
+      final groupData = data['group'];
+      if (groupData is! Map) {
+        debugPrint('joinNeighborhood: malformed response, no group');
+        return null;
+      }
+      final group = _groupFromCallable(Map<String, dynamic>.from(groupData));
+      debugPrint('Joined neighborhood group: ${group.name} '
+          '(alreadyMember=${data['alreadyMember'] == true})');
       return group;
+    } on FirebaseFunctionsException catch (e) {
+      // The ONLY code that means "nothing matched". Everything else is a real
+      // failure and must reach the caller with its error intact.
+      if (e.code == 'not-found') {
+        debugPrint('No crew found for that invite code');
+        return null;
+      }
+      debugPrint('joinNeighborhood failed: ${e.code} ${e.message}');
+      rethrow;
     }
+  }
 
-    // Add user to member list
-    await doc.reference.update({
-      'memberUids': FieldValue.arrayUnion([uid]),
-    });
-
-    // Get current member count for position
-    final membersSnapshot = await doc.reference.collection('members').get();
-    final positionIndex = membersSnapshot.docs.length;
-
-    // Add member document. Denormalize the joiner's own controller ids onto
-    // the member doc (Slice 1) for server-fanout target resolution.
-    final member = NeighborhoodMember(
-      oderId: uid,
-      displayName: displayName ?? 'Home #${positionIndex + 1}',
-      positionIndex: positionIndex,
-      lastSeen: DateTime.now(),
-      isOnline: true,
-      controllerId: await _ownControllerIds(),
+  /// Rebuilds a [NeighborhoodGroup] from the callable's JSON. The callable
+  /// returns `createdAtMs` rather than a Timestamp because callable responses
+  /// are plain JSON.
+  NeighborhoodGroup _groupFromCallable(Map<String, dynamic> g) {
+    return NeighborhoodGroup(
+      id: g['id'] as String? ?? '',
+      name: g['name'] as String? ?? '',
+      description: g['description'] as String?,
+      streetName: g['streetName'] as String?,
+      city: g['city'] as String?,
+      isPublic: g['isPublic'] == true,
+      inviteCode: g['inviteCode'] as String? ?? '',
+      creatorUid: g['creatorUid'] as String? ?? '',
+      createdAt: g['createdAtMs'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(g['createdAtMs'] as int)
+          : DateTime.now(),
+      memberUids: (g['memberUids'] as List?)?.whereType<String>().toList() ?? [],
+      isActive: g['isActive'] == true,
+      activePatternId: g['activePatternId'] as String?,
+      activePatternName: g['activePatternName'] as String?,
+      activeSyncType: SyncTypeExtension.fromJson(g['activeSyncType'] as String?),
+      latitude: (g['latitude'] as num?)?.toDouble(),
+      longitude: (g['longitude'] as num?)?.toDouble(),
     );
-    await doc.reference.collection('members').doc(uid).set(member.toFirestore());
-
-    debugPrint('Joined neighborhood group: ${group.name}');
-    return group.copyWith(memberUids: [...group.memberUids, uid]);
   }
 
   /// Leaves a neighborhood group.
@@ -924,17 +989,24 @@ class NeighborhoodService {
     final latDelta = radiusKm / 111.0;
     final lngDelta = radiusKm / (111.0 * cos(latitude * pi / 180.0));
 
-    // Query public groups within bounding box
-    final query = await _neighborhoodsRef
+    // F-3: discovery reads the PUBLIC PROJECTION, never /neighborhoods.
+    //
+    // This query used to run against the full group docs, which is why the
+    // group read rule had to be open to every authenticated token — and that
+    // open read is what exposed `streetName`, exact coordinates and
+    // `inviteCode` fleet-wide. The projection carries only what discovery
+    // actually needs, and its coordinates are COARSE (2dp ≈ 1.1 km), so a
+    // result set locates a neighborhood rather than a house.
+    final query = await _publicProjectionRef
         .where('isPublic', isEqualTo: true)
-        .where('latitude', isGreaterThanOrEqualTo: latitude - latDelta)
-        .where('latitude', isLessThanOrEqualTo: latitude + latDelta)
+        .where('latCoarse', isGreaterThanOrEqualTo: latitude - latDelta)
+        .where('latCoarse', isLessThanOrEqualTo: latitude + latDelta)
         .get();
 
     // Filter by longitude and calculate actual distance
     final results = <NeighborhoodGroup>[];
     for (final doc in query.docs) {
-      final group = NeighborhoodGroup.fromFirestore(doc);
+      final group = _groupFromProjection(doc);
       if (group.longitude == null) continue;
 
       // Check longitude bounds
@@ -943,7 +1015,9 @@ class NeighborhoodService {
         continue;
       }
 
-      // Calculate actual distance using Haversine
+      // Distance is computed from the coarse pair, so it is accurate to about
+      // a kilometre. That is the right resolution for "crews near me" and is
+      // the deliberate cost of not publishing exact coordinates.
       final distance = _calculateDistanceKm(
         latitude,
         longitude,
@@ -1003,7 +1077,93 @@ class NeighborhoodService {
   /// Updates a group's public visibility.
   Future<void> setGroupPublic(String groupId, bool isPublic) async {
     await _neighborhoodsRef.doc(groupId).update({'isPublic': isPublic});
+    // F-3: the projection IS the listing. Publishing/removing it is what makes
+    // a crew discoverable, so the flag and the projection move together.
+    if (isPublic) {
+      final doc = await _neighborhoodsRef.doc(groupId).get();
+      if (doc.exists) {
+        await publishPublicProjection(NeighborhoodGroup.fromFirestore(doc));
+      }
+    } else {
+      await removePublicProjection(groupId);
+    }
     debugPrint('Set group public: $isPublic');
+  }
+
+  /// Coarsens a coordinate to 2 decimal places (~1.1 km).
+  ///
+  /// This is the privacy boundary of the whole discovery feature: proximity
+  /// search needs SOME geography to be cross-tenant readable, and 2dp names a
+  /// neighborhood without naming a house. The rules enforce the projection's
+  /// SHAPE (no `latitude`/`longitude` keys at all), but only this function
+  /// decides the PRECISION — so if it is ever loosened, the rule will not
+  /// catch it. Keep them in sync.
+  static double? coarsenCoordinate(double? value) {
+    if (value == null) return null;
+    return (value * 100).roundToDouble() / 100;
+  }
+
+  /// Writes the public projection for [group].
+  ///
+  /// Deliberately narrow: name, description, member count, coarse coordinates.
+  /// NEVER `inviteCode` (a credential), `streetName`, exact coordinates, or
+  /// `memberUids`. The rule at `/neighborhood_public/{groupId}` rejects a write
+  /// carrying any of those, so a future edit to this method fails loudly
+  /// instead of leaking.
+  Future<void> publishPublicProjection(NeighborhoodGroup group) async {
+    final lat = coarsenCoordinate(group.latitude);
+    final lon = coarsenCoordinate(group.longitude);
+    if (lat == null || lon == null) {
+      // Without coordinates the crew cannot appear in a proximity search, and
+      // publishing a coordinate-less row would just be an unsearchable name.
+      debugPrint('Skipping public projection for ${group.id}: no coordinates');
+      return;
+    }
+    await _publicProjectionRef.doc(group.id).set({
+      'groupId': group.id,
+      'name': group.name,
+      'description': group.description,
+      'memberCount': group.memberUids.length,
+      'isPublic': true,
+      'latCoarse': lat,
+      'lonCoarse': lon,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    debugPrint('Published public projection for ${group.id}');
+  }
+
+  /// Removes the public projection — how a crew goes unlisted again.
+  Future<void> removePublicProjection(String groupId) async {
+    await _publicProjectionRef.doc(groupId).delete();
+  }
+
+  /// Rebuilds a display-only [NeighborhoodGroup] from a projection doc.
+  ///
+  /// The unavailable fields are filled with safe blanks — `inviteCode` is empty
+  /// because the projection genuinely has none, which is why joining from
+  /// discovery goes through [joinPublicGroup] (by id) rather than by code.
+  NeighborhoodGroup _groupFromProjection(
+      QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data();
+    return NeighborhoodGroup(
+      id: doc.id,
+      name: d['name'] as String? ?? '',
+      description: d['description'] as String?,
+      streetName: null,
+      city: null,
+      isPublic: true,
+      inviteCode: '',
+      creatorUid: '',
+      createdAt: DateTime.now(),
+      // memberCount drives the "N homes" label; the uids themselves are not
+      // published, so synthesize a list of the right LENGTH with no identities.
+      memberUids: List<String>.filled(
+        (d['memberCount'] as num?)?.toInt() ?? 0,
+        '',
+      ),
+      latitude: (d['latCoarse'] as num?)?.toDouble(),
+      longitude: (d['lonCoarse'] as num?)?.toDouble(),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

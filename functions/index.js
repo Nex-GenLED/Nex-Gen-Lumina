@@ -26,6 +26,11 @@ exports.endSyncSession = endSyncSession;
 const { applySyncPattern } = require("./lib/applySyncPattern");
 exports.applySyncPattern = applySyncPattern;
 
+// F-3: server-side crew join. The client can no longer read a group it does not
+// belong to, nor insert itself into memberUids, so this is the ONLY join path.
+const { joinNeighborhood } = require("./lib/joinNeighborhood");
+exports.joinNeighborhood = joinNeighborhood;
+
 const { triggerSyncFailover } = require("./lib/triggerSyncFailover");
 exports.triggerSyncFailover = triggerSyncFailover;
 

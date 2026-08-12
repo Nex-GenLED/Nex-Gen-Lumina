@@ -2704,8 +2704,11 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
     );
 
     if (confirmed == true && mounted) {
-      final result = await ref.read(neighborhoodNotifierProvider.notifier).joinGroup(
-        group.inviteCode,
+      // F-3: discovery results come from the public projection, which carries
+      // no invite code — `group.inviteCode` here is always ''. A public crew is
+      // joined by id and authorized server-side by its own isPublic flag.
+      final result = await ref.read(neighborhoodNotifierProvider.notifier).joinPublicGroup(
+        group.id,
         displayName: nameController.text.trim().isNotEmpty
             ? nameController.text.trim()
             : null,

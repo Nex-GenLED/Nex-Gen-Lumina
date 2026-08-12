@@ -181,6 +181,32 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
     }
   }
 
+  /// Joins a PUBLIC crew discovered by proximity search.
+  ///
+  /// Separate from [joinGroup] because after F-3 the two carry different
+  /// credentials: a private crew is entered with an invite code, a public one
+  /// by id (discovery results come from the `/neighborhood_public` projection,
+  /// which publishes no code). Same state machine and the same null-vs-error
+  /// contract, so the UI can treat the results identically.
+  Future<NeighborhoodGroup?> joinPublicGroup(String groupId,
+      {String? displayName}) async {
+    state = const AsyncValue.loading();
+    try {
+      final group =
+          await _service.joinPublicGroup(groupId, displayName: displayName);
+      if (group != null) {
+        ref.read(activeNeighborhoodIdProvider.notifier).state = group.id;
+        markNeighborhoodSyncOnboardingComplete();
+      }
+      state = const AsyncValue.data(null);
+      return group;
+    } catch (e, st) {
+      debugPrint('NeighborhoodNotifier.joinPublicGroup failed: $e');
+      state = AsyncValue.error(e, st);
+      return null;
+    }
+  }
+
   /// Leaves the currently active group.
   ///
   /// For non-host members, removes them from the group.
