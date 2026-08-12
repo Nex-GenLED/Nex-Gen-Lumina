@@ -733,6 +733,20 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Evaluate WLED version-pin (0.15.1, see SOP §2.0) before fleet scale.
   - Files: firmware/version-pin policy (no app fix).
 
+- [ ] **#62 — Codemagic auto-submits every green `main` build to TestFlight**
+  - Status: OPEN (recorded 2026-08-11, not acted on) · Evidence: `codemagic.yaml:131`
+  - `submit_to_testflight: true` with a push trigger on `main`. Harmless when `main`
+    moved once a day; `main` now moves several times a night, so every docs commit
+    ships a TestFlight build. Two builds tonight (`680abc6`, `a0cde1e`) carried +72
+    code under a +71 telemetry stamp and auto-submitted with no ledger row able to
+    identify them — see the +72 VOID note in `docs/BUILD_LEDGER.md`.
+  - Options: manual submit; or trigger on **tag** rather than push, which also makes
+    the ledger's SHA join key the thing that creates the build instead of a race
+    against the next commit.
+  - Evaluate AFTER §7.2d — gating it now would block the verification build.
+  - Files: `codemagic.yaml`. Related: **P2-15** (build-number override — same
+    build-identity problem from the other end).
+
 - [ ] **P2-15 — Codemagic build-number override**
   - Status: OPEN · Evidence: reported
   - Phone reports CM's counter, not pubspec `+N`; SHA is the only reliable identity. Let
