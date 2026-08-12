@@ -156,6 +156,30 @@ resolved for the affected accounts.
 
   Record the distribution in the row (`Uploaded: internal track only` is a
   distinct and useful value from `NO` and from `YES`).
+- **A watcher asserts on STRUCTURED STATE, not on log text.** A grep over a log
+  line is a prototype, not a monitor. Read the fields — Firestore documents, job
+  `state`, a parsed JSON counter — and compare values.
+
+  Three-strikes retrospective from the 2026-08-12 Game Day cycle, all one root
+  cause (asserting on rendered text instead of state):
+
+  | # | symptom | why |
+  |---|---|---|
+  | 1 | alerted every tick after the disarm | expectation was hard-coded to the previous operating mode |
+  | 2 | re-reported known state on restart | truncated its own snapshot file, so cold start looked like a change |
+  | 3 | reported a second end fire that never happened | unanchored grep matched the wrong field in the same line |
+
+  Strike 3 is the one that matters: it produced a **false positive on a P0-shaped
+  event** — a duplicate end fire, days after #66. The ground truth (`endsPlanned:
+  0`, two `plan_end` rows, three fire jobs, `errors: 0`) took three independent
+  checks to establish, all of which were available to the watcher and none of
+  which it used.
+
+  Rules: parse, don't grep; anchor and validate any pattern against a real
+  payload BEFORE arming; seed state from the first observation rather than
+  treating it as a change; and re-derive expectations when the operating mode
+  changes rather than editing thresholds. If a watch fires three times without a
+  real event, retire it — its alerts have stopped carrying information.
 - Archive `build/debug-info/<platform>/*.symbols` per build. Never commit them.
 
 ---
