@@ -211,6 +211,22 @@ void main() {
       expect(executableCommands([c]), isEmpty);
     });
 
+    // THE 2026-08-12 DELIVERY DEFECT. resolveMemberTargets returns ip:"" for
+    // every member whose doc carries a denormalized controllerId array, so the
+    // CF wrote commands naming no destination. The real bridge answered
+    // "ERROR: HTTP -1" and marked them failed; the stub, which never reads
+    // controllerIp, reported the byte-identical command as delivered. The
+    // simulator must not be more capable than the bridge.
+    test('skips a command with an EMPTY controllerIp', () {
+      final c = QueuedCommand(
+        id: 'c5',
+        type: 'applyJson',
+        payload: _pattern.toSegPayload(),
+        controllerIp: '',
+      );
+      expect(executableCommands([c]), isEmpty);
+    });
+
     test('skips an entirely empty payload', () {
       const c = QueuedCommand(id: 'c4', type: 'applyJson', payload: {});
       expect(executableCommands([c]), isEmpty);
@@ -261,6 +277,17 @@ void main() {
     test('a 500 is NOT a refusal', () {
       final r = FanoutResponse.fromBody(500, {'error': 'boom'});
       expect(r.isRateLimited, isFalse);
+    });
+
+    test('a SUCCESS carries no reason — the body fallback is failure-only', () {
+      final r = FanoutResponse.fromBody(
+          200, {'ok': true, 'memberCount': 2, 'commandCount': 2, 'skipped': 0});
+      expect(r.reason, isNull);
+    });
+
+    test('a failure with neither reason nor error still reports the body', () {
+      final r = FanoutResponse.fromBody(400, {'ok': false, 'detail': 'x'});
+      expect(r.reason, contains('detail'));
     });
 
     test('200 with a different reason is NOT a rate-limit refusal', () {

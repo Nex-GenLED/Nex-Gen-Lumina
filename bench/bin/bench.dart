@@ -809,6 +809,7 @@ class _RestCommandQueue implements CommandQueue {
         type: decoded['type'] as String? ?? 'applyJson',
         status: decoded['status'] as String? ?? 'pending',
         payload: payload,
+        controllerIp: decoded['controllerIp'] as String? ?? '',
       ));
     }
     return out;

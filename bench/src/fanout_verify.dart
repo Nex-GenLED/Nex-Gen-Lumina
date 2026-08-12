@@ -129,11 +129,16 @@ class QueuedCommand {
   final Map<String, dynamic> payload;
   final String status;
 
+  /// Where the bridge is told to POST. Empty means the command names no
+  /// destination and cannot be executed — see [executableCommands].
+  final String controllerIp;
+
   const QueuedCommand({
     required this.id,
     required this.type,
     required this.payload,
     this.status = 'pending',
+    this.controllerIp = '127.0.0.1',
   });
 }
 
@@ -143,10 +148,21 @@ class QueuedCommand {
 /// a command with no usable payload is skipped rather than POSTed as an empty
 /// body (posting an empty `seg` is the skip-apply hazard the sync engine
 /// already guards).
+///
+/// A command with an EMPTY `controllerIp` is also not executable, and this is
+/// the harness's most important fidelity rule. The simulator POSTs to its own
+/// stub and never reads `controllerIp`, so without this filter it happily
+/// "delivers" a command that names no destination — which is exactly what
+/// happened on 2026-08-12: `resolveMemberTargets` returned `ip:""` for every
+/// member with a denormalized `controllerId` array, the real bridge answered
+/// `ERROR: HTTP -1`, and the stub reported success for a command byte-identical
+/// to the one that failed. A simulator that is more capable than the thing it
+/// simulates does not verify it.
 List<QueuedCommand> executableCommands(List<QueuedCommand> queue) {
   return queue
       .where((c) => c.status == 'pending')
       .where((c) => c.type == 'applyJson')
+      .where((c) => c.controllerIp.isNotEmpty)
       .where((c) => c.payload.isNotEmpty)
       .where((c) {
     final seg = c.payload['seg'];
@@ -225,10 +241,15 @@ class FanoutResponse {
     // less informative than the response that caused it.
     final r = body['reason'] as String?;
     final e = body['error'] as String?;
+    final ok = body['ok'] == true;
     return FanoutResponse(
       statusCode: statusCode,
-      ok: body['ok'] == true,
-      reason: r ?? e ?? (body.isEmpty ? null : jsonEncode(body)),
+      ok: ok,
+      // The whole-body fallback is for FAILURES only. On a success there is
+      // nothing to explain, and dumping the body into `reason` made a healthy
+      // fanout#1 print `reason={"ok":true,...}` — noise that reads like a
+      // problem.
+      reason: r ?? e ?? (ok || body.isEmpty ? null : jsonEncode(body)),
       retryAfterMs: (body['retryAfterMs'] as num?)?.toInt() ?? 0,
       memberCount: (body['memberCount'] as num?)?.toInt(),
       commandCount: (body['commandCount'] as num?)?.toInt(),
