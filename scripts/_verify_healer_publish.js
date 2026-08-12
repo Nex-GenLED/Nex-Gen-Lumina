@@ -208,13 +208,28 @@ function crossCheck(d, timers) {
   console.log(`  light.gc.col = ${col} ${col === 2.8 ? '(OK — still 2.8)' : '*** EXPECTED 2.8 ***'}`);
 }
 
+/// Order-independent stringify.
+///
+/// Firestore does not guarantee map key order between reads, so a plain
+/// JSON.stringify of `base_boundaries` (an array of maps) reported
+/// "value changed: YES" for a byte-identical value. A false change signal in a
+/// verification tool is worse than no signal — it is the thing that gets
+/// believed. Keys are sorted recursively before comparison.
+function canon(v) {
+  if (Array.isArray(v)) return `[${v.map(canon).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
 function diff(before, after) {
   console.log('\n── PUBLISH HISTORY · before → after ──');
   for (const fam of [PART, BASE]) {
     const b = before[`${fam}_publish_count`] ?? 0;
     const a = after[`${fam}_publish_count`] ?? 0;
-    const valB = JSON.stringify(before[fam] ?? null);
-    const valA = JSON.stringify(after[fam] ?? null);
+    const valB = canon(before[fam] ?? null);
+    const valA = canon(after[fam] ?? null);
     const delta = a - b;
     console.log(`  ${fam}`);
     console.log(`      publish_count : ${b} → ${a}  (${delta >= 0 ? '+' : ''}${delta})`);
