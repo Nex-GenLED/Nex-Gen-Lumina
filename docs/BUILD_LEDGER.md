@@ -19,6 +19,42 @@ optional.
 
 ## Operational flags
 
+### `config/sync_fanout` — SCOPED ENABLE, 2026-08-12T21:15:10.089Z
+
+```
+{ enabled: true, group_allowlist: ["8b25LBEhS51H65VHKGQ1"] }
+```
+
+**Fanout live for exactly one group: "demo" (`8b25LBEhS51H65VHKGQ1`).**
+
+Chosen because it is bench-created and its only members are
+`tyler.honeycutt@nex-genled.com` (controller `192_168_1_150`) and
+`nex-genadmin@nex-genled.com` (controller `80_f3_da_b3_76_64`) — **no customer**.
+
+> **`OqWsIyvNUwYjel6Dbzwl` ("Let's Hope This Works") is deliberately EXCLUDED.**
+> It contains `ecochran08@yahoo.com` with a real controller
+> (`20_e7_c8_f4_d5_38`). Fanout writes commands to *other people's* controllers,
+> so enabling that group would put a customer's lights under another member's
+> control. `06m7bMxKNjolhsRXV5MJ` is also excluded — it was the F-3 join-test
+> target and is left untouched so that verification's evidence stays clean.
+
+Verified against the **deployed** parser reading the **live** flag doc:
+
+```
+demo      8b25LBEhS51H65VHKGQ1  ->  true
+demo test 06m7bMxKNjolhsRXV5MJ  ->  false
+CUSTOMER  OqWsIyvNUwYjel6Dbzwl  ->  false
+```
+
+**ROLLBACK: `enabled: false`. Instant, no deploy** — both the CF and the client
+re-read the flag live.
+
+`applySyncPattern` imports only `firebase-functions` and `firebase-admin`, shares
+no module with `planGameDayFires`, and was deployed with `--only
+functions:applySyncPattern`, so the planner keeps its existing revision.
+
+
+
 ### F-3 — CLOSED 2026-08-12. Neighborhood reads scoped, crew join moved server-side.
 
 Deployed from `fix/f3-neighborhood-security` @ `a83193f` (worktree
