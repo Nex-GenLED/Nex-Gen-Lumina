@@ -468,10 +468,10 @@ resolved for the affected accounts.
 
 | Field | Value |
 |---|---|
-| **Tag** | **`build-74`** — the deliberate act that produced the iOS build (#62). Tag points at `cec7a9e`; app bytes are `850c0db` (see below). |
+| **Tag** | **`build-74`** — the deliberate act that produced the iOS build (#62). The tag points at the docs-only commit that follows `850c0db`; the app bytes are `850c0db` (see below). |
 | **Git SHA (app bytes)** | **`850c0db`** — `feat(staff): retire the legacy installer entry points; bump to 2.5.10+74`. **iOS↔Android join key.** |
 | **App-bytes ancestry** | `1d95104` (+73) **+** the #66 end-guard, F-3 security, the #70 fanout fix, and the staff-entry retirement. |
-| **Ledger SHA (tagged)** | `cec7a9e` — docs-only on top of `850c0db`. Verified with a tree comparison, not a grep: `git diff --stat 850c0db cec7a9e -- . ':(exclude)docs'` is EMPTY, so the tag builds byte-identical app code. |
+| **Ledger SHA (tagged)** | The `build-74` tag, docs-only on top of `850c0db`. Verified with a tree comparison, not a grep — `git diff --stat 850c0db build-74 -- . ':(exclude)docs'` is EMPTY, so the tag builds byte-identical app code. Deliberately named by TAG, not by hash: a commit cannot state its own SHA (amending to insert it changes it), and that self-invalidating reference has bitten this ledger before. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **74** — `kStaffAuthTelemetryAppVersion` moved to `2.5.10+74` in the same commit; they are one fact in two files. |
 | **Android artifact** | `<PENDING>` — built locally from an isolated worktree at the tag. |
