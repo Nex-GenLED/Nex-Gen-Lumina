@@ -90,6 +90,55 @@ optional.
 
 ---
 
+## 2.5.10+73 — participation reads buses from the healer's own cfg
+
+| Field | Value |
+|---|---|
+| **Git SHA (app bytes)** | **`1d95104`** — `chore(release): bump to 2.5.10+73`. **iOS↔Android join key.** |
+| **App-bytes ancestry** | `4f76b56` (+72) **+** the bus-source rewire. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **73** — merged manifest (`android:versionCode="73"`, `android:versionName="2.5.10"`) |
+| **Android artifact** | `app-release.aab` · **68,296,715 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-12 from an isolated worktree at `1d95104`, `git status` empty before **and** after |
+| **iOS** | Build number **`PENDING`**. Triggered by the push of `1d95104`. Record the number **and the SHA Codemagic reports** — the version name is `2.5.10` for +69 through +73 alike, so it identifies nothing. |
+| **Uploaded** | **NO.** TestFlight distribution for §7.2d is a verification path, not production exposure (Conventions). |
+| **Supersedes** | **+72** |
+
+**Contents since +72**
+
+- **Bus-source rewire** — participation resolves the bus list from
+  `ControllerClockInfo.hardware`, parsed from the `/json/cfg` the healer has
+  already fetched, instead of `deviceHardwareConfigProvider`. §7.2d proved that
+  provider hands back a **stale cached null at the same instant the healer's own
+  read succeeds** (#63). `wled_service.dart`'s inline `hw.led` parsing was
+  extracted to `hardwareConfigFromCfg()` and `getConfig()` rewired to it, so both
+  paths share **one** parser.
+- **Approved decision reversal** — "the caller owns the bus-list derivation" is
+  reversed for the bus leg only. The original constraint (no second parser, no
+  `ref` in the healer) is better served by this shape than by the provider. The
+  **roofline** leg is unchanged: still the caller's awaited Firestore future.
+- **`noBusesConfigured`** disposition added — "we read `hw.led` and the
+  controller reports no LED outputs", now distinguishable from "we could not
+  read it". `shapeUnknown` is retained although it should be unreachable from
+  the healer path: an unreachable disposition that fires anyway is the signal
+  worth having.
+
+**What the 20s bound covers now:** the **roofline await only**. The bus leg no
+longer crosses a provider boundary and cannot time out.
+
+**Verification:** suite run **from `1d95104` inside the build worktree** —
+**2159 passed · 3 skipped · 6 failed**. The 6 are 1 pre-existing
+(`base_ladder_repair_live_test`) + **5 × #64**, a midnight-wrap defect in the
+lease integration test reproduced at pre-change HEAD in a clean worktree. Net of
+#64 the count is 2164 passing, up 4 from +72's 2160 (3 new parser/one-fetch
+tests, 1 new disposition test).
+
+**§7.2d on +73 is OWED** and unchanged except: expected disposition `offered`;
+take a **fresh** `--before` (the +72 run mutated the document); and **verify the
+TestFlight build number against Codemagic before connecting** — 288 was served
+ahead of 291 once already.
+
+---
+
 ## 2.5.10+72 — facts-publish disposition mirror
 
 | Field | Value |
@@ -99,9 +148,10 @@ optional.
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **72** — merged manifest (`android:versionCode="72"`, `android:versionName="2.5.10"`) |
 | **Android artifact** | `app-release.aab` · **68,296,487 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-11 from an isolated worktree at `4f76b56`, `git status` empty before **and** after |
-| **iOS** | Build number **`PENDING`**. Triggered by the push of `4f76b56` (Codemagic builds on push). Fill the number **and the SHA Codemagic reports** when it completes; do not infer either from the version name, which is `2.5.10` for +71 and +72 alike. |
+| **iOS** | **Build 291**, from `998307b` — verified byte-identical to `4f76b56` across `lib/assets/pubspec/android/ios`, contains the mirror commit `680abc6`, stamps `2.5.10+72`. **TestFlight served build 288 first** (an older `2.5.10` artifact); the device had to be updated to 291 before §7.2d could run. **#62 materialised exactly as filed** — the version name is identical across builds, so only the build number distinguishes them. |
 | **Uploaded** | **NO** (Android). iOS: `codemagic.yaml` sets `submit_to_testflight: true`, so a green build **auto-submits** — see the VOID note below. TestFlight is a verification path, not production exposure (Conventions). |
 | **Supersedes** | **+71**, wholesale. |
+| **SUPERSEDED BY +73** | `1d95104`. +72 was correct and it did its job — see the §7.2d result below. |
 
 **Contents since +71**
 
@@ -122,6 +172,34 @@ existed, and never uploaded, so nothing depends on it.
 **Verification:** suite run **from `4f76b56` inside the build worktree** —
 **2160 passed · 3 skipped · 1 failed** (`base_ladder_repair_live_test` —
 pre-existing, reproduced at baseline). `flutter analyze lib/ test/` no errors.
+
+### §7.2d ON +72 (build 291) — RED, and legibly so
+
+First run with the mirror. Verbatim from the controller document:
+
+```
+participation_publish_disposition
+    SKIPPED(bus list resolved empty — shape unknown)
+    at: 2026-08-12T04:19:08.171Z
+```
+
+| step | result |
+|---|---|
+| participation published | **RED** — `_source` still `neighborhood_sync`, no `publish_count` |
+| base boundaries | **GREEN** — 4 rows → 3 after the lease expired, exact match to `timers.ins`, `publish_count` 2 → 3 |
+| `gc.col` | **GREEN** — 2.8 |
+| disposition mirrored | **GREEN** — first mirrored outcome |
+| **step 6 on hardware** | **GREEN** — `base_boundaries_at` and the disposition `_at` are the SAME instant, `04:19:08.171Z`. Both families rode one `set(merge:true)`. First hardware confirmation of the one-write guarantee. |
+
+**The mirror paid for itself immediately.** The same run would previously have
+produced a base-boundary update and total silence on participation; instead it
+named the cause in one line, and the root cause (#63) was diagnosable without a
+second bench cycle. Fixed in **+73**.
+
+Also confirmed live: the solar sentinel moved from readback index 3 → 2 when the
+lease row expired and compaction closed the gap — the content-based (`hour ==
+255`) classification held through a real index shift that would have
+misclassified it under the original index-based rule.
 
 ### ⚠️ VOID — two Codemagic builds that must not be trusted
 
