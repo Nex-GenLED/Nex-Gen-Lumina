@@ -127,9 +127,58 @@ baseline. Ellie's bridge `D4E9F4FA9D40` was never reachable: her crew
 `OqWsIyvNUwYjel6Dbzwl` is excluded by the `group_allowlist` above, and no
 command doc was written to any account outside the two test uids.
 
-**The global flip is blocked on #70.** Commits: `a60a808` (format only),
-`44c7f17` (initiatorUid + error surfacing), `1e5f07f` (#69), `3910a85` (poll for
-the real bridge), `0c5fd92` (empty-IP fidelity + #70 filed).
+**Run 4 — 22:27Z, TRUE 4/4. Neighborhood Sync reached hardware for the first
+time.**
+
+```
+A baseline fx=0 pal=5 on=true
+fanout#1 -> status=200 ok=true served=2 wrote=2 skipped=0
+bridge-sim drained 1 command(s)
+A converged after ~2s (real bridge)
+fanout#2 -> status=200 ok=false reason=rate_limited
+4/4
+```
+
+`#70` fixed in `06e36dc`, deployed `--only functions:applySyncPattern` at
+**22:20:40Z**. The denorm branch now joins each id against
+`/users/{uid}/controllers` with one `getAll`; an addressless target is written
+`status:"failed" error:"no_address"` instead of dispatched at an empty host.
+A failed join deliberately does **not** fall through to the subcollection scan —
+that would command controllers the member never named, widening the blast radius
+on an error path.
+
+**Webhook Mode is not addressless.** The first cut judged deliverability on
+`controllerIp` alone; `executeWledCommand` (`functions/index.js:398`) routes on
+`webhookUrl` and never reads `controllerIp`, so that would have marked every
+Webhook-Mode member `no_address` — breaking a working path to repair a broken
+one. Deliverability is ip-OR-webhook. 291 tests / 12 suites (baseline 271 / 11).
+
+Verified independently of the harness, at 22:27Z — the before/after sits in one
+collection:
+
+```
+A  22:27:17.380Z  status=completed  ip="192.168.1.150"  err=null   <- the fix
+A  22:04:39.941Z  status=failed     ip=""   err="ERROR: HTTP -1"   <- #70
+A  22:03:45.287Z  status=failed     ip=""   err="ERROR: HTTP -1"
+B  22:27:17.373Z  status=completed  ip="192.168.1.156" err=null
+```
+
+and on the strip itself: `seg0 fx=88 pal=5 col=[[255,0,0],[0,0,255]]`.
+
+**Bench restored** to `on=false bri=200 ps=2`. Note that power-toggling alone
+leaves `ps=-1`; base is re-established by re-applying preset 2, not by switching
+off.
+
+**Flag state held overnight**, both bench-scoped and correct:
+`config/gameday_planner` `write_jobs:true` / `uid_allowlist:[bench]`
+(`updateTime 15:51:14Z`); `config/sync_fanout` `enabled:true` /
+`group_allowlist:["8b25LBEhS51H65VHKGQ1"]` (`updateTime 21:15:10Z`). Neither was
+touched by the deploy, and `planGameDayFires` keeps its `15:33:21Z` revision.
+
+**§4 CLOSED.** Commits: `a60a808` (format only), `44c7f17` (initiatorUid + error
+surfacing), `1e5f07f` (#69), `3910a85` (poll for the real bridge), `0c5fd92`
+(empty-IP fidelity + #70 filed), `06e36dc` (#70 server fix). The global flip is
+now a decision, not a blocker.
 
 ### F-3 — CLOSED 2026-08-12. Neighborhood reads scoped, crew join moved server-side.
 
@@ -286,6 +335,15 @@ resolved for the affected accounts.
 
 ## Conventions
 
+- **A simulator must fail everywhere the real component fails, or its passes are
+  void.** The bench bridge-sim POSTs to its own stub and never read
+  `controllerIp`, so it reported *delivered* for commands the real bridge
+  refused with `ERROR: HTTP -1`. Three §4 runs "passed" that assertion while the
+  feature had never once reached hardware (#70). A stub that is more permissive
+  than the thing it stands in for does not merely miss bugs — it manufactures
+  evidence against their existence. When stubbing a transport, enforce every
+  precondition the real transport enforces, and encode each one as a test the
+  day you learn of it.
 - **Never edit a row after the build is uploaded.** Append a correction row instead.
 - Record the Android versionCode from the **merged manifest**
   (`build/app/intermediates/bundle_manifest/release/.../AndroidManifest.xml`),

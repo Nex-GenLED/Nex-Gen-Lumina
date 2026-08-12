@@ -844,10 +844,18 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     Evaluate WLED version-pin (0.15.1, see SOP §2.0) before fleet scale.
   - Files: firmware/version-pin policy (no app fix).
 
-- [ ] **#70 — Every crew fanout command names an EMPTY controllerIp, so no real bridge can
-  execute it. Neighborhood Sync has never reached hardware.**
-  - Status: OPEN (found 2026-08-12, §4 two-node run) · Severity: **P1 — the feature does not
-    work in production** · Evidence: **hardware-proven**
+- [x] **#70 — Every crew fanout command names an EMPTY controllerIp, so no real bridge can
+  execute it. Neighborhood Sync has never reached hardware. FIXED + DEPLOYED + HARDWARE-VERIFIED
+  2026-08-12.**
+  - Status: **CLOSED** — fix `06e36dc`, deployed `--only functions:applySyncPattern` 22:20:40Z,
+    verified on hardware 22:27Z (`A converged after ~2s (real bridge)`, TRUE 4/4). The denorm
+    branch joins ids to addresses via one `getAll`; an unresolvable target is written
+    `status:"failed" error:"no_address"` rather than dispatched at an empty host. A failed join
+    does NOT fall through to the subcollection scan — that would command controllers the member
+    never named. **Deliverability is ip-OR-webhook**: `executeWledCommand` routes Webhook Mode on
+    `webhookUrl` and never reads `controllerIp`, so judging on ip alone would have marked every
+    Webhook-Mode member `no_address`. 291 tests / 12 suites (baseline 271 / 11).
+  - Severity: **P1 — the feature did not work in production** · Evidence: **hardware-proven**
   - [applySyncPattern.ts:418-425](../functions/src/applySyncPattern.ts#L418): `resolveMemberTargets`
     takes a denormalized branch whenever the member doc carries a `controllerId` **array**:
     ```ts
