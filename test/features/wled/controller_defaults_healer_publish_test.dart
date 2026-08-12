@@ -83,6 +83,9 @@ class _RecordingPublisher extends ControllerFactsPublisher {
   /// Publishes that survived dedup — i.e. would have hit Firestore.
   int writes = 0;
 
+  /// The mirrored disposition label handed over on each attempt.
+  final List<String?> dispositions = [];
+
   @override
   Future<bool> publishDeviceFacts({
     required String? controllerId,
@@ -90,8 +93,10 @@ class _RecordingPublisher extends ControllerFactsPublisher {
     required List<BaseBoundaryRow>? baseBoundaries,
     required int slotsRead,
     required String source,
+    String? participationDisposition,
   }) async {
     calls.add((participation: participation?.resolved, rows: baseBoundaries));
+    dispositions.add(participationDisposition);
     final id = controllerId;
     if (id == null) return false;
     final families = [
@@ -128,6 +133,7 @@ class _ThrowingPublisher extends ControllerFactsPublisher {
     required List<BaseBoundaryRow>? baseBoundaries,
     required int slotsRead,
     required String source,
+    String? participationDisposition,
   }) {
     throw StateError('firestore unavailable');
   }
@@ -456,22 +462,53 @@ void main() {
       expect(res.outcome!.participation, ParticipationDisposition.inputsAbsent);
     });
 
-    test('THE SILENCE IS THE DEFECT — every disposition describes itself', () {
+    test('THE SILENCE IS THE DEFECT — every disposition describes itself, and '
+        'MIRRORS itself', () {
       // A skipped publish used to leave no trace anywhere, which is why the
-      // bench caught this and no log line did. Every outcome must be legible.
+      // bench caught this and no log line did. Every outcome must be legible
+      // BOTH in the log and on the document — on a release build debugPrint is
+      // nulled, so the mirrored field is the only external evidence.
+      final labels = <String>{};
       for (final d in ParticipationDisposition.values) {
-        final line = FactsPublishOutcome(
+        final outcome = FactsPublishOutcome(
           participation: d,
           baseBoundariesOffered: false,
           wrote: false,
-        ).describe();
+        );
+        final line = outcome.describe();
         expect(line, contains('participation='));
         expect(line, contains('wrote=false'));
+
+        // The mirrored value exists, is non-empty, and is the SAME string the
+        // log line carries — one formatter, so document and log cannot
+        // disagree about what happened.
+        final mirrored = participationDispositionLabel(d);
+        expect(mirrored, isNotEmpty);
+        expect(outcome.participationLabel, mirrored);
+        expect(line, contains('participation=$mirrored'));
+
+        // Distinct per disposition, so the field can actually discriminate.
+        expect(labels.add(mirrored), isTrue,
+            reason: '$d shares a mirrored label with another disposition');
+
         if (d != ParticipationDisposition.offered) {
-          expect(line, contains('SKIPPED'),
-              reason: '$d must announce that it did nothing');
+          expect(mirrored, startsWith('SKIPPED'),
+              reason: '$d must announce externally that it did nothing');
         }
       }
+      expect(labels.length, ParticipationDisposition.values.length);
+    });
+
+    test('the healer mirrors the disposition on EVERY attempt, including '
+        'offered', () async {
+      // Absent must mean "never attempted", never "attempted and skipped".
+      await _run(_healer(_Repo(_healthy()), pub));
+      expect(pub.dispositions.single, 'offered');
+
+      final pub2 = _RecordingPublisher();
+      await _run(_healer(_Repo(_healthy()), pub2, participating: null));
+      expect(pub2.dispositions.single,
+          'SKIPPED(bus list resolved empty — shape unknown)');
     });
 
     test('the bound exceeds the WledService HTTP timeout it waits on', () {

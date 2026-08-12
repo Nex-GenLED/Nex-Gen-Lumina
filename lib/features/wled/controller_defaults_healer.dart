@@ -736,6 +736,11 @@ class ControllerDefaultsHealer {
         baseBoundaries: rows,
         slotsRead: slotsRead,
         source: kHealerPublishSource,
+        // Mirrored to Firestore so a SKIP is visible off-device. On a release
+        // build debugPrint is nulled, so the log line below does not exist and
+        // this field is the ONLY external evidence the healer attempted
+        // anything. Same string as the log line — one formatter.
+        participationDisposition: participationDispositionLabel(disposition),
       );
     } catch (e) {
       debugPrint('[Healer] facts publish threw: $e');

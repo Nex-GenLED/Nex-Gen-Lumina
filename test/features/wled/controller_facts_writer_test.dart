@@ -46,6 +46,7 @@ Future<bool> _publishBoth(
   bool timersReadable = true,
   int slotsRead = 10,
   String source = 'healer',
+  String? disposition = 'offered',
 }) {
   return writeControllerFacts(
     controllerId: _ctrl,
@@ -62,6 +63,8 @@ Future<bool> _publishBoth(
         slotsRead: slotsRead,
         source: source,
       ),
+      if (disposition != null)
+        prepareDispositionFacts(controllerId: _ctrl, disposition: disposition),
     ],
     label: source,
     firestore: db,
@@ -76,6 +79,7 @@ void main() {
     db = FakeFirebaseFirestore();
     resetParticipationMemo();
     resetBaseBoundariesMemo();
+    resetDispositionMemo();
   });
 
   group('one write, both families', () {
@@ -109,8 +113,27 @@ void main() {
       expect(d.containsKey(kBaseBoundariesField), isFalse);
     });
 
-    test('when BOTH abstain there is no write at all', () async {
-      final ok = await _publishBoth(db, participation: null, timersReadable: false);
+    test('when both fact families abstain, NO FACT is written — only the '
+        'disposition mirror', () async {
+      // Changed deliberately when the mirror landed. Both families abstaining
+      // used to mean zero writes; it now means "nothing was learned, and we
+      // say so out loud", because a silent skip is what made §7.2d
+      // undiagnosable.
+      final ok = await _publishBoth(
+          db, participation: null, timersReadable: false);
+      expect(ok, isTrue);
+
+      final d = await _read(db);
+      expect(d.containsKey(kParticipatingChannelsField), isFalse);
+      expect(d.containsKey(kBaseBoundariesField), isFalse);
+      expect(d[kParticipationDispositionField], 'offered');
+      expect(d.keys.length, 2, reason: 'the mirror and its timestamp, nothing else');
+    });
+
+    test('with the mirror suppressed, both abstaining is still zero writes',
+        () async {
+      final ok = await _publishBoth(
+          db, participation: null, timersReadable: false, disposition: null);
       expect(ok, isFalse);
       expect((await _doc(db).get()).exists, isFalse);
     });
@@ -145,12 +168,22 @@ void main() {
       expect(d[factPublishCountField(kBaseBoundariesField)], 1);
     });
 
-    test('both families share the SAME server timestamp', () async {
-      // Different timestamps would mean two writes even if the count matched.
+    test('both families are stamped together, within one write', () async {
+      // In REAL Firestore every FieldValue.serverTimestamp() in a single set()
+      // resolves to one server-side instant, so exact equality holds. The FAKE
+      // resolves each sentinel independently from the local clock, so under
+      // full-suite load the two can straddle a millisecond — this test passed
+      // in isolation and failed in the suite for exactly that reason.
+      //
+      // The one-write guarantee is pinned properly by the mutation count above;
+      // asserting a tight window here keeps the intent without depending on the
+      // fake's timestamp precision.
       await _publishBoth(db);
       final d = await _read(db);
-      expect(d[factAtField(kParticipatingChannelsField)],
-          equals(d[factAtField(kBaseBoundariesField)]));
+      final a = (d[factAtField(kParticipatingChannelsField)] as Timestamp).toDate();
+      final b = (d[factAtField(kBaseBoundariesField)] as Timestamp).toDate();
+      expect(a.difference(b).abs().inMilliseconds, lessThan(50),
+          reason: 'stamped in the same write, not two seconds apart');
     });
 
     test('one family deduped still costs exactly one mutation, not zero and '
@@ -169,6 +202,77 @@ void main() {
       await _publishBoth(db);
       final n = await mutationsDuring(() => _publishBoth(db));
       expect(n, 0);
+    });
+  });
+
+  group('DISPOSITION MIRROR — visible off-device, without costing a write', () {
+    Future<int> mutations(Future<void> Function() body) async {
+      var n = 0;
+      final sub = _doc(db).snapshots().listen((_) => n++);
+      await pumpEventQueue();
+      n = 0;
+      await body();
+      await pumpEventQueue();
+      await sub.cancel();
+      return n;
+    }
+
+    test('rides the SAME mutation as the facts write — still exactly one',
+        () async {
+      // The whole constraint: making a skip observable must not break step 6.
+      final n = await mutations(() => _publishBoth(db));
+      expect(n, 1, reason: 'facts + disposition in one set(merge:true)');
+
+      final d = await _read(db);
+      expect(d[kParticipationDispositionField], 'offered');
+      expect(d[factAtField(kParticipationDispositionField)], isNotNull);
+      expect(d[kParticipatingChannelsField], isNotNull);
+      expect(d[kBaseBoundariesField], isNotNull);
+    });
+
+    test('an UNCHANGED disposition on a fully-deduped second pass costs ZERO '
+        'mutations', () async {
+      // Without deduping the mirror, this would have become 1 — silently
+      // breaking the both-deduped-is-zero guarantee.
+      await _publishBoth(db);
+      final n = await mutations(() => _publishBoth(db));
+      expect(n, 0);
+    });
+
+    test('a CHANGED disposition with nothing else to write is its own single '
+        'write', () async {
+      await _publishBoth(db);                       // offered, everything lands
+      final n = await mutations(() => _publishBoth(
+            db,
+            disposition: 'SKIPPED(inputs timed out after 20s)',
+          ));
+      expect(n, 1, reason: 'the skip must reach the document on its own');
+
+      final d = await _read(db);
+      expect(d[kParticipationDispositionField],
+          'SKIPPED(inputs timed out after 20s)');
+      // ...and it did NOT disturb the fact families' counters.
+      expect(d[factPublishCountField(kParticipatingChannelsField)], 1);
+      expect(d[factPublishCountField(kBaseBoundariesField)], 1);
+    });
+
+    test('a SKIP still records the previous successful values — the mirror '
+        'annotates, it does not erase', () async {
+      await _publishBoth(db, participation: [0, 1]);
+      await _publishBoth(
+          db, disposition: 'SKIPPED(bus list resolved empty — shape unknown)');
+      final d = await _read(db);
+      expect(d[kParticipatingChannelsField], [0, 1],
+          reason: 'the last known-good set must survive a later skip');
+      expect(d[kParticipationDispositionField], startsWith('SKIPPED'));
+    });
+
+    test('the field name is snake_case and its _at derives from the shared '
+        'convention', () {
+      expect(kParticipationDispositionField,
+          'participation_publish_disposition');
+      expect(factAtField(kParticipationDispositionField),
+          'participation_publish_disposition_at');
     });
   });
 
@@ -272,14 +376,19 @@ void main() {
       // verdict server-side meaning "light nothing" — so publishing it would
       // silently darken a house that expected a show.
       expect(participationShapeIsKnown(const []), isFalse);
-      final ok = await _publishBoth(
+      await _publishBoth(
         db,
         participation: const [],
         deviceChannelIds: const [],
         timersReadable: false,
+        disposition: 'SKIPPED(bus list resolved empty — shape unknown)',
       );
-      expect(ok, isFalse);
-      expect((await _doc(db).get()).exists, isFalse);
+      final d = await _read(db);
+      expect(d.containsKey(kParticipatingChannelsField), isFalse,
+          reason: 'no [] may be published against an unknown shape');
+      // ...but the refusal itself IS recorded, which is the point of the mirror.
+      expect(d[kParticipationDispositionField],
+          'SKIPPED(bus list resolved empty — shape unknown)');
     });
 
     test('a real bus list publishes an empty resolution — that IS an answer',

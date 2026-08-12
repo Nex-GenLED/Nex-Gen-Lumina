@@ -13,6 +13,7 @@
 //      dependency would have made every existing heal test carry a fake
 //      Firestore it does not care about.
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
@@ -22,6 +23,79 @@ import 'package:nexgen_command/features/wled/participation_denormalizer.dart';
 /// Source tag written to `*_source` for a publish that came from the
 /// on-connect defaults healer.
 const String kHealerPublishSource = 'healer';
+
+/// Mirrors the participation disposition onto the controller document so it is
+/// observable **off the device**.
+///
+/// WHY THIS FIELD EXISTS. `ControllerHealReport.factsPublish` is in-process
+/// only, and `debugPrint` is nulled under `kReleaseMode` (`main.dart:129`), so
+/// on a release build a SKIPPED disposition left **zero external evidence**.
+/// Firestore was the only witness and it only ever witnessed success — which is
+/// how §7.2d ended up unable to tell "the healer never ran" from "the healer
+/// ran and skipped". Those need completely different responses.
+///
+/// **An ABSENT field means the healer never attempted a publish on this
+/// controller.** It never means "attempted and skipped" — every disposition
+/// writes, including [ParticipationDisposition.offered].
+const String kParticipationDispositionField =
+    'participation_publish_disposition';
+
+/// The mirrored label for one disposition — `offered`, or
+/// `SKIPPED(<reason>)`.
+///
+/// **One formatter.** This is both the Firestore field value and the
+/// participation clause of [FactsPublishOutcome.describe], so the log line and
+/// the document can never disagree about what happened.
+String participationDispositionLabel(ParticipationDisposition d) {
+  switch (d) {
+    case ParticipationDisposition.offered:
+      return 'offered';
+    case ParticipationDisposition.shapeUnknown:
+      return 'SKIPPED(bus list resolved empty — shape unknown)';
+    case ParticipationDisposition.inputsTimedOut:
+      return 'SKIPPED(inputs timed out after '
+          '${kParticipationInputTimeout.inSeconds}s)';
+    case ParticipationDisposition.inputsFailed:
+      return 'SKIPPED(input resolution threw)';
+    case ParticipationDisposition.inputsAbsent:
+      return 'SKIPPED(no inputs supplied)';
+  }
+}
+
+/// Process-lifetime memo of the last disposition mirrored per controller.
+///
+/// The mirror is deduped for the same reason the facts are: without it, a
+/// second connect in one session — which correctly writes NOTHING today —
+/// would start costing a document mutation, silently breaking the step-6
+/// one-write guarantee. Deduping keeps the counts exactly as they were.
+@visibleForTesting
+final Map<String, String> publishedDispositionMemo = <String, String>{};
+
+@visibleForTesting
+void resetDispositionMemo() => publishedDispositionMemo.clear();
+
+/// This family's contribution to a publish, or [PreparedFacts.none] when the
+/// disposition is unchanged from what this process last mirrored.
+///
+/// Deliberately NOT given the `_publish_count` / `_previous` treatment the two
+/// fact families get: this is a status field, not a denormalized value a
+/// planner acts on, and its history is already legible from `_at`.
+PreparedFacts prepareDispositionFacts({
+  required String controllerId,
+  required String disposition,
+}) {
+  if (publishedDispositionMemo[controllerId] == disposition) {
+    return PreparedFacts.none;
+  }
+  final fields = <String, Object?>{
+    kParticipationDispositionField: disposition,
+    factAtField(kParticipationDispositionField): FieldValue.serverTimestamp(),
+  };
+  return PreparedFacts(
+    fields,
+    () => publishedDispositionMemo[controllerId] = disposition,
+  );
+}
 
 /// The participation half of a publish, **resolved by the caller**.
 ///
@@ -100,21 +174,14 @@ class FactsPublishOutcome {
     required this.wrote,
   });
 
+  /// The participation clause — the SAME string mirrored to Firestore as
+  /// [kParticipationDispositionField]. See [participationDispositionLabel].
+  String get participationLabel => participationDispositionLabel(participation);
+
   /// One line, always logged. Deliberately states the negative cases as
   /// loudly as the positive one.
   String describe() {
-    final p = switch (participation) {
-      ParticipationDisposition.offered => 'participation=offered',
-      ParticipationDisposition.shapeUnknown =>
-        'participation=SKIPPED(bus list resolved empty — shape unknown)',
-      ParticipationDisposition.inputsTimedOut =>
-        'participation=SKIPPED(inputs timed out after '
-            '${kParticipationInputTimeout.inSeconds}s)',
-      ParticipationDisposition.inputsFailed =>
-        'participation=SKIPPED(input resolution threw)',
-      ParticipationDisposition.inputsAbsent =>
-        'participation=SKIPPED(no inputs supplied)',
-    };
+    final p = 'participation=$participationLabel';
     final b = baseBoundariesOffered
         ? 'base_boundaries=offered'
         : 'base_boundaries=SKIPPED(timer table unreadable)';
@@ -159,8 +226,15 @@ abstract class ControllerFactsPublisher {
   ///
   /// Each family self-gates: [participation] null contributes nothing;
   /// [baseBoundaries] null (timer table unreadable) contributes nothing; either
-  /// may also dedup against its process-lifetime memo. When both abstain there
-  /// is no write.
+  /// may also dedup against its process-lifetime memo. When all three abstain
+  /// there is no write.
+  ///
+  /// [participationDisposition] is the [participationDispositionLabel] for this
+  /// attempt, mirrored to the document so a skip is visible off-device. It
+  /// rides the SAME `set(merge: true)` when either fact family writes, and
+  /// becomes its own single write only when they do not and it has changed —
+  /// so it never perturbs the one-write guarantee. Null suppresses the mirror
+  /// entirely (no attempt was made).
   ///
   /// Returns whether a document write actually went out. Never throws.
   Future<bool> publishDeviceFacts({
@@ -169,6 +243,7 @@ abstract class ControllerFactsPublisher {
     required List<BaseBoundaryRow>? baseBoundaries,
     required int slotsRead,
     required String source,
+    String? participationDisposition,
   });
 }
 
@@ -184,6 +259,7 @@ class FirestoreControllerFactsPublisher extends ControllerFactsPublisher {
     required List<BaseBoundaryRow>? baseBoundaries,
     required int slotsRead,
     required String source,
+    String? participationDisposition,
   }) async {
     final id = controllerId;
     if (id == null || id.isEmpty) return false;
@@ -203,6 +279,16 @@ class FirestoreControllerFactsPublisher extends ControllerFactsPublisher {
           slotsRead: slotsRead,
           source: source,
         ),
+        // Last, so it merges into whatever write the fact families already
+        // justify rather than provoking a second one. writeControllerFacts
+        // folds every non-empty family into ONE set(merge: true), and this
+        // family is the same never-throws envelope as the rest — a mirror
+        // failure cannot fail the publish.
+        if (participationDisposition != null)
+          prepareDispositionFacts(
+            controllerId: id,
+            disposition: participationDisposition,
+          ),
       ],
       label: source,
     );
