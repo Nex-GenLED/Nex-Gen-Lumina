@@ -135,7 +135,12 @@ describe("savedDesignUsable", () => {
 
 describe("decideEndSignal", () => {
   const base = { sport: "mlb", nowMs: T0 + 4 * H };
-  const st = (o = {}) => ({ gameStartMs: T0, ...o });
+  // startPlannedAt is present by default because GUARD 0 (#66) now refuses any
+  // session this system did not start, and every test below is about a DIFFERENT
+  // guard. Without it all eight short-circuit on `no_start` and stop testing
+  // what they were written to test. The guard itself is covered in
+  // endRequiresStart.test.js, including the case where this field is absent.
+  const st = (o = {}) => ({ gameStartMs: T0, startPlannedAt: T0 + 1000, ...o });
 
   test("GUARD 1 — one final is NOT enough", () => {
     const d = decideEndSignal({ ...base, espnIsFinal: true, state: st() });
@@ -208,7 +213,9 @@ describe("decideEndSignal", () => {
   test("no game start → refuses rather than assuming", () => {
     const d = decideEndSignal({
       espnIsFinal: true, sport: "mlb", nowMs: T0 + 10 * H,
-      state: { consecutiveFinalPolls: 1 },
+      // startPlannedAt present so this reaches GUARD 2 rather than being caught
+      // by GUARD 0 — the point of this test is the MISSING gameStartMs.
+      state: { consecutiveFinalPolls: 1, startPlannedAt: T0 + 1000 },
     });
     expect(d.fireEnd).toBe(false);
     expect(d.reason).toBe("no_game_start");

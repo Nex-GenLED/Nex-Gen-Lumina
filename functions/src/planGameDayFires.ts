@@ -48,6 +48,7 @@ import {
   argbToRgb,
   buildParticipatingSegArray,
   decideEndSignal,
+  startJobConfirmsFired,
   estimatedDurationMs,
   isDaylightOnlyGame,
   savedDesignUsable,
@@ -484,23 +485,64 @@ export async function runPlannerTick(
           bump(stats.skipped, "start_time_passed");
         }
 
-        // ── END — the three guards ───────────────────────────────────────
+        // ── END — the guards. GUARD 0 (#66) first: never end a show this
+        // system did not start. startPlannedAt is the ONLY evidence that a
+        // start job was actually written; it is set inside `if (writeJobs)`
+        // beside the create, so it cannot be true for a log-only-era session.
         const decision = decideEndSignal({
           espnIsFinal: game.isFinal,
           state: {
             consecutiveFinalPolls: session.consecutiveFinalPolls,
             endFiredAt: session.endFiredAt,
             gameStartMs: session.gameStartMs ?? game.startMs,
+            startPlannedAt: session.startPlannedAt,
           },
           sport,
           nowMs,
         });
+
+        // #66: every stale session the guard catches is free evidence. Counted
+        // and logged as its own reason so "the guard is holding" is observable
+        // rather than inferred from an absence — the same rule the disposition
+        // mirror established: a skip must be legible, not silent.
+        // NOTE: no bump here. The else-if below already buckets this as
+        // `end:no_start` (reason is neither not_final nor already_fired), and
+        // counting it twice would break the stats reconciliation this file has
+        // already been burned by once (the 20/19 lastSummary bug).
+        if (decision.reason === "no_start") {
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip",
+            reason: "end_skipped_no_start",
+          });
+        }
 
         if (writeJobs || session.startPlannedAt) {
           await sRef.set(
             { consecutiveFinalPolls: decision.nextConsecutive, gameStartMs: game.startMs },
             { merge: true }
           );
+        }
+
+        // GUARD 0b (#66) — the end is about to fire; confirm the START job this
+        // system wrote actually reached the device. One read, only at the
+        // moment it matters. A created-but-never-dispatched start leaves the
+        // house exactly as a never-started one does.
+        if (decision.fireEnd) {
+          const startJob = await db
+            .collection("users").doc(uid)
+            .collection(FIRE_JOBS_COLLECTION).doc(`${eventId}_start`)
+            .get();
+          if (!startJobConfirmsFired(startJob.data()?.state)) {
+            bump(stats.endSkipped, "end:start_never_dispatched");
+            logRows.push({
+              uid, teamSlug, eventId, action: "skip",
+              reason: "end_skipped_start_never_dispatched",
+              startJobState: startJob.exists
+                ? String(startJob.data()?.state)
+                : "missing",
+            });
+            continue;
+          }
         }
 
         if (decision.fireEnd) {

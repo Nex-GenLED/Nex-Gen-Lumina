@@ -224,6 +224,32 @@ export interface EndSignalState {
   /** Written once the end fire has been planned. The once-per-event marker. */
   endFiredAt?: unknown;
   gameStartMs?: unknown;
+  /**
+   * Set when THIS system actually wrote the start job for this event. Written
+   * only inside `if (writeJobs)`, so it is absent for every session that was
+   * only ever observed in log-only mode. See GUARD 0.
+   */
+  startPlannedAt?: unknown;
+}
+
+/**
+ * GUARD 0b — did the start job this system wrote actually reach the device?
+ *
+ * `startPlannedAt` proves a start job was CREATED (it is written immediately
+ * after the `create()`, in the same block). It does not prove the job was ever
+ * dispatched. A start that was created and then never dispatched leaves the
+ * house in exactly the state a never-started show does — so ending it is the
+ * same unrequested command #66 was about, one step further along.
+ *
+ * `undefined` state means the job document is missing entirely, which is
+ * stronger evidence of "never fired" than any status string.
+ *
+ * Deliberately NOT called on every tick: it is one extra read, and it only
+ * matters at the instant an end would actually fire. Call it after the other
+ * guards pass.
+ */
+export function startJobConfirmsFired(startJobState: unknown): boolean {
+  return startJobState === "dispatched" || startJobState === "completed";
 }
 
 export interface EndSignalDecision {
@@ -253,6 +279,42 @@ export function decideEndSignal(args: {
     typeof state.consecutiveFinalPolls === "number" && state.consecutiveFinalPolls > 0
       ? state.consecutiveFinalPolls
       : 0;
+
+  // GUARD 0 — NEVER end a show this system did not start. INCIDENT #66.
+  //
+  // An end fire is a RESTORE. Restoring a house that was never put into a Game
+  // Day design is not a restore, it is an unrequested command — and because
+  // `baseRestorePayload` resolves to a preset load, that command turns lights
+  // ON.
+  //
+  // 2026-08-12, bench: the scoped flip was written 05:45:21Z. `startPlannedAt`
+  // and `consecutiveFinalPolls` are both written only when
+  // `writeJobs || session.startPlannedAt` (planGameDayFires :494), so through
+  // the whole log-only era the counter was pinned at 0 and no end could ever
+  // qualify. Arming opened that gate: 05:50:04Z counter -> 1, 05:55:04Z -> 2,
+  // REQUIRED_FINAL_POLLS met, `plan_end reason=confirmed_final`, job dispatched
+  // COMPLETED with payload {"ps":1} = preset "NGL On". The bench strip came on
+  // at 01:00 local for a game that finished hours earlier and whose START this
+  // system never fired. Two ticks, ten minutes after arming.
+  //
+  // Under a GLOBAL flip that was a simultaneous 1am lights-on across all ten
+  // Game-Day-enabled accounts, seven of which have no base layer to correct it.
+  //
+  // The other four guards all passed honestly — endFiredAt unset, ESPN final,
+  // gameStartMs known, well past minimum duration, two consecutive finals. Every
+  // one was true. None of them asked the question that mattered: did we start
+  // this? So this guard runs FIRST, ahead of even `already_fired`, because a
+  // show we did not start is not ours to end regardless of any other state.
+  //
+  // PERMANENTLY ineligible, not merely deferred: `startPlannedAt` is only ever
+  // written alongside a start job, so a session that reaches a terminal state
+  // without one can never acquire it — the start path refuses on
+  // `start_time_passed` and `already_planned` long before it would write.
+  // Stale sessions therefore age out by the event passing out of the planner's
+  // 6-hour horizon and the team's schedule, not by any counter re-tripping.
+  if (state.startPlannedAt === null || state.startPlannedAt === undefined) {
+    return { fireEnd: false, reason: "no_start", nextConsecutive: prior };
+  }
 
   // GUARD 3 — once per event, from a written marker.
   if (state.endFiredAt !== null && state.endFiredAt !== undefined) {
