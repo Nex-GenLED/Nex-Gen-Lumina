@@ -298,6 +298,14 @@ export function isMemberSkipped(participationStatus: unknown): boolean {
  * byte-compatible with the self-only path above and the app's
  * CloudRelayRepository writer. The server `createdAt` timestamp is added by the
  * caller (it can't be a pure value). Exported for unit verification.
+ *
+ * #70 — A TARGET WITH NO ADDRESS IS BORN FAILED. An empty `controllerIp` used
+ * to be written as `status:"pending"`, so the bridge dutifully POSTed to an
+ * empty host and reported `ERROR: HTTP -1`. The command is still written —
+ * silence would be worse, and the doc is the evidence that a member was
+ * *meant* to be commanded — but it is written `failed` with a legible
+ * `no_address`, so it is never dispatched and never has to be diagnosed from a
+ * transport error. Server-side twin of the harness guard in `0c5fd92`.
  */
 export function buildFanoutCommandDoc(args: {
   payloadString: string;
@@ -308,13 +316,24 @@ export function buildFanoutCommandDoc(args: {
   initiatorUid: string;
   sessionId: string;
 }): Record<string, unknown> {
+  // WEBHOOK MODE IS NOT ADDRESSLESS. executeWledCommand (functions/index.js:398)
+  // routes on webhookUrl and never reads controllerIp, so a Webhook-Mode member
+  // with no IP is perfectly deliverable. Judging on controllerIp alone would
+  // have marked every one of them no_address — a fix that broke a working path
+  // to repair a broken one.
+  const hasIp =
+    typeof args.controllerIp === "string" && args.controllerIp.trim().length > 0;
+  const hasWebhook =
+    typeof args.webhookUrl === "string" && args.webhookUrl.trim().length > 0;
+  const deliverable = hasIp || hasWebhook;
   return {
     type: "applyJson",
     payload: args.payloadString,
     controllerId: args.controllerId,
     controllerIp: args.controllerIp,
     webhookUrl: args.webhookUrl,
-    status: "pending",
+    status: deliverable ? "pending" : "failed",
+    ...(deliverable ? {} : { error: "no_address" }),
     source: args.source,
     initiatorUid: args.initiatorUid,
     sessionId: args.sessionId,
@@ -399,18 +418,42 @@ async function readSyncFanoutPolicy(
 }
 
 /**
+ * PURE. Attach a resolved address to each denormalized controller id.
+ *
+ * An id with no entry in `ipById`, or an entry that is blank, resolves to
+ * `ip:""` — which [buildFanoutCommandDoc] then records as a `no_address`
+ * failure rather than a pending command. Unknown is preserved as unknown here;
+ * this function never invents a fallback address.
+ *
+ * Exported for unit verification (#70).
+ */
+export function mergeDenormTargets(
+  ids: string[],
+  ipById: Record<string, string>
+): { id: string; ip: string }[] {
+  return ids.map((id) => ({ id, ip: (ipById[id] || "").trim() }));
+}
+
+/**
  * Resolve a member's controller targets.
- *   1. Denormalized member.controllerId[] (Slice 1) → write one target per id
- *      with controllerIp:"" so the bridge self-resolves its paired WLED IP. No
- *      cross-collection read — this is the denormalization win for the common
- *      bridge-mode install.
+ *   1. Denormalized member.controllerId[] (Slice 1) → one target per id, JOINED
+ *      against users/{uid}/controllers for each address.
  *   2. Else LAZY-read users/{uid}/controllers live → {id, ip} (covers existing
  *      members with no controllerId[] yet, and Webhook-Mode members that need a
  *      real IP).
  *   3. Else the legacy single controllerIp on the member doc.
- *   4. Else a single {id:"", ip:""} — the bridge self-resolves from "".
+ *   4. Else a single {id:"", ip:""}.
+ *
+ * #70 — WHY BRANCH 1 READS AFTER ALL. It used to return `ip:""` with no
+ * cross-collection read, on the documented assumption that "the bridge
+ * self-resolves its paired WLED IP". That was the denormalization win, and the
+ * bridge does not have that capability: on 2026-08-12 the bench bridge answered
+ * `ERROR: HTTP -1` to every such command and the strip never moved. Because
+ * this is the NORMAL member shape, it meant no crew fanout had ever reached
+ * hardware. The read costs one getAll per member at crew scale — the price of
+ * the command being deliverable.
  */
-async function resolveMemberTargets(
+export async function resolveMemberTargets(
   db: admin.firestore.Firestore,
   memberUid: string,
   memberData: admin.firestore.DocumentData
@@ -421,7 +464,34 @@ async function resolveMemberTargets(
       )
     : [];
   if (denormIds.length > 0) {
-    return (denormIds as string[]).map((id) => ({ id, ip: "" }));
+    const ipById: Record<string, string> = {};
+    try {
+      const refs = (denormIds as string[]).map((id) =>
+        db.collection("users").doc(memberUid).collection("controllers").doc(id)
+      );
+      const docs = await db.getAll(...refs);
+      for (const d of docs) {
+        if (d.exists) ipById[d.id] = (d.data()?.ip as string) || "";
+      }
+    } catch (err) {
+      // Leave ipById empty: every id then resolves no_address, which is
+      // recorded and visible. Falling through to the subcollection scan would
+      // silently widen the blast radius to controllers the member did not name.
+      console.warn(
+        `applySyncPattern: address join failed for ${memberUid}`,
+        err
+      );
+    }
+    const targets = mergeDenormTargets(denormIds as string[], ipById);
+    const unresolved = targets.filter((t) => t.ip.length === 0);
+    if (unresolved.length > 0) {
+      console.warn(
+        `applySyncPattern: ${unresolved.length}/${targets.length} controller(s) ` +
+          `for ${memberUid} have no address — ` +
+          `${unresolved.map((t) => t.id).join(",")} (recorded no_address, not dispatched)`
+      );
+    }
+    return targets;
   }
 
   try {

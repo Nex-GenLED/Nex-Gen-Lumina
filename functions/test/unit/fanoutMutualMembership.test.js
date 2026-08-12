@@ -22,7 +22,15 @@ function makeDb({ memberUids, members }) {
     get: async () => ({ data: () => ({}) }),
     collection: (sub) => {
       if (sub === "controllers") {
-        return { get: async () => ({ forEach: () => {} }) };
+        return {
+          get: async () => ({ forEach: () => {} }),
+          // #70: the denorm branch now JOINS ids to addresses, so the fake must
+          // hand back a controller doc. Without this the code under test falls
+          // into its address-join catch and every command becomes no_address —
+          // the assertions below would still pass, but against the degraded
+          // path rather than the real one.
+          doc: (id) => ({ _uid: uid, _id: id }),
+        };
       }
       if (sub === "commands") {
         commands[uid] = commands[uid] || [];
@@ -37,6 +45,14 @@ function makeDb({ memberUids, members }) {
     },
   });
   const db = {
+    // Every named controller resolves to a real address, so the fanout under
+    // test produces deliverable commands.
+    getAll: async (...refs) =>
+      refs.map((r) => ({
+        id: r._id,
+        exists: true,
+        data: () => ({ ip: "10.0.0." + (r._id.length % 200) }),
+      })),
     collection: (name) => {
       if (name === "neighborhoods") {
         return {

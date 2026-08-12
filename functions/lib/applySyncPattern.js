@@ -76,9 +76,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RATE_WINDOW_MS = exports.INITIATOR_COOLDOWN_MS = exports.GROUP_CEILING_PER_MIN = exports.applySyncPattern = void 0;
+exports.RATE_WINDOW_MS = exports.INITIATOR_COOLDOWN_MS = exports.GROUP_CEILING_PER_MIN = exports.FANOUT_OFF = exports.applySyncPattern = void 0;
 exports.isMemberSkipped = isMemberSkipped;
 exports.buildFanoutCommandDoc = buildFanoutCommandDoc;
+exports.fanoutPolicyFrom = fanoutPolicyFrom;
+exports.fanoutsForGroup = fanoutsForGroup;
+exports.mergeDenormTargets = mergeDenormTargets;
+exports.resolveMemberTargets = resolveMemberTargets;
 exports.verifyFanoutTarget = verifyFanoutTarget;
 exports.fanoutToCrew = fanoutToCrew;
 exports.evaluateRateLimit = evaluateRateLimit;
@@ -163,7 +167,18 @@ exports.applySyncPattern = (0, https_1.onRequest)({ maxInstances: 10, cors: fals
     // high-frequency background callers incur zero extra read. Membership was
     // already verified above.
     if (fanout === true && groupId && groupId.length > 0) {
-        const fanoutEnabled = await readSyncFanoutEnabled(db);
+        const policy = await readSyncFanoutPolicy(db);
+        const fanoutEnabled = fanoutsForGroup(policy, groupId);
+        // LEGIBILITY (#68): a group held back by the allowlist must SAY so. A
+        // scoped-out group falls through to the host-only path, which looks
+        // identical to the flag being off — and "identical to off" with no reason
+        // recorded is exactly how a scoped rollout becomes undiagnosable.
+        if (policy.enabled && !fanoutEnabled) {
+            console.log(`applySyncPattern: fanout SCOPED_OUT for group=${groupId} ` +
+                `(allowlist has ${policy.allowlist?.length ?? 0} entr` +
+                `${policy.allowlist?.length === 1 ? "y" : "ies"}); ` +
+                "host-only path, no crew commands written");
+        }
         if (fanoutEnabled) {
             // Anti-strobe rate limit (Commit 2). Reserve a slot TRANSACTIONALLY so
             // the function's concurrent instances serialize on the state doc — a
@@ -266,49 +281,149 @@ function isMemberSkipped(participationStatus) {
  * byte-compatible with the self-only path above and the app's
  * CloudRelayRepository writer. The server `createdAt` timestamp is added by the
  * caller (it can't be a pure value). Exported for unit verification.
+ *
+ * #70 — A TARGET WITH NO ADDRESS IS BORN FAILED. An empty `controllerIp` used
+ * to be written as `status:"pending"`, so the bridge dutifully POSTed to an
+ * empty host and reported `ERROR: HTTP -1`. The command is still written —
+ * silence would be worse, and the doc is the evidence that a member was
+ * *meant* to be commanded — but it is written `failed` with a legible
+ * `no_address`, so it is never dispatched and never has to be diagnosed from a
+ * transport error. Server-side twin of the harness guard in `0c5fd92`.
  */
 function buildFanoutCommandDoc(args) {
+    // WEBHOOK MODE IS NOT ADDRESSLESS. executeWledCommand (functions/index.js:398)
+    // routes on webhookUrl and never reads controllerIp, so a Webhook-Mode member
+    // with no IP is perfectly deliverable. Judging on controllerIp alone would
+    // have marked every one of them no_address — a fix that broke a working path
+    // to repair a broken one.
+    const hasIp = typeof args.controllerIp === "string" && args.controllerIp.trim().length > 0;
+    const hasWebhook = typeof args.webhookUrl === "string" && args.webhookUrl.trim().length > 0;
+    const deliverable = hasIp || hasWebhook;
     return {
         type: "applyJson",
         payload: args.payloadString,
         controllerId: args.controllerId,
         controllerIp: args.controllerIp,
         webhookUrl: args.webhookUrl,
-        status: "pending",
+        status: deliverable ? "pending" : "failed",
+        ...(deliverable ? {} : { error: "no_address" }),
         source: args.source,
         initiatorUid: args.initiatorUid,
         sessionId: args.sessionId,
     };
 }
-/** Read the fanout feature flag (config/sync_fanout.enabled). Default false. */
-async function readSyncFanoutEnabled(db) {
+exports.FANOUT_OFF = { enabled: false, allowlist: null };
+/**
+ * PURE. Derive the policy from the flag document's data.
+ *
+ *   doc absent / undefined data   -> OFF
+ *   enabled !== true              -> OFF regardless of any allowlist
+ *   enabled true, list present    -> fanout for those groupIds ONLY
+ *   enabled true, list absent     -> global (the eventual end state)
+ *   enabled true, list MALFORMED  -> OFF, loudly
+ *
+ * MALFORMED IS OFF, NOT GLOBAL. Anyone who wrote `group_allowlist` INTENDED to
+ * scope the enable; treating a typo as "global" would turn it into a fleet-wide
+ * fanout — light control across every crew — which is the exact opposite of
+ * what the author reached for. An empty array is NOT malformed: it is a
+ * deliberate "enabled for nobody" and is honoured.
+ */
+function fanoutPolicyFrom(data) {
+    if (!data || data.enabled !== true)
+        return exports.FANOUT_OFF;
+    const raw = data.group_allowlist;
+    if (raw === undefined || raw === null) {
+        return { enabled: true, allowlist: null }; // global
+    }
+    if (!Array.isArray(raw) || raw.some((g) => typeof g !== "string" || g === "")) {
+        console.error("applySyncPattern: group_allowlist is MALFORMED (expected string[]); " +
+            "refusing to fan out. Fix or remove the field to enable. Value: " +
+            JSON.stringify(raw));
+        return exports.FANOUT_OFF;
+    }
+    return { enabled: true, allowlist: raw };
+}
+/** True when THIS group may fan out. */
+function fanoutsForGroup(policy, groupId) {
+    if (!policy.enabled)
+        return false;
+    if (policy.allowlist === null)
+        return true;
+    return policy.allowlist.includes(groupId);
+}
+/** Read the fanout policy (config/sync_fanout). Default OFF. */
+async function readSyncFanoutPolicy(db) {
     try {
         const doc = await db.collection("config").doc("sync_fanout").get();
-        return doc.exists && doc.data()?.enabled === true;
+        if (!doc.exists)
+            return exports.FANOUT_OFF;
+        return fanoutPolicyFrom(doc.data());
     }
     catch (err) {
         console.warn("applySyncPattern: fanout flag read failed; defaulting OFF", err);
-        return false;
+        return exports.FANOUT_OFF;
     }
 }
 /**
+ * PURE. Attach a resolved address to each denormalized controller id.
+ *
+ * An id with no entry in `ipById`, or an entry that is blank, resolves to
+ * `ip:""` — which [buildFanoutCommandDoc] then records as a `no_address`
+ * failure rather than a pending command. Unknown is preserved as unknown here;
+ * this function never invents a fallback address.
+ *
+ * Exported for unit verification (#70).
+ */
+function mergeDenormTargets(ids, ipById) {
+    return ids.map((id) => ({ id, ip: (ipById[id] || "").trim() }));
+}
+/**
  * Resolve a member's controller targets.
- *   1. Denormalized member.controllerId[] (Slice 1) → write one target per id
- *      with controllerIp:"" so the bridge self-resolves its paired WLED IP. No
- *      cross-collection read — this is the denormalization win for the common
- *      bridge-mode install.
+ *   1. Denormalized member.controllerId[] (Slice 1) → one target per id, JOINED
+ *      against users/{uid}/controllers for each address.
  *   2. Else LAZY-read users/{uid}/controllers live → {id, ip} (covers existing
  *      members with no controllerId[] yet, and Webhook-Mode members that need a
  *      real IP).
  *   3. Else the legacy single controllerIp on the member doc.
- *   4. Else a single {id:"", ip:""} — the bridge self-resolves from "".
+ *   4. Else a single {id:"", ip:""}.
+ *
+ * #70 — WHY BRANCH 1 READS AFTER ALL. It used to return `ip:""` with no
+ * cross-collection read, on the documented assumption that "the bridge
+ * self-resolves its paired WLED IP". That was the denormalization win, and the
+ * bridge does not have that capability: on 2026-08-12 the bench bridge answered
+ * `ERROR: HTTP -1` to every such command and the strip never moved. Because
+ * this is the NORMAL member shape, it meant no crew fanout had ever reached
+ * hardware. The read costs one getAll per member at crew scale — the price of
+ * the command being deliverable.
  */
 async function resolveMemberTargets(db, memberUid, memberData) {
     const denormIds = Array.isArray(memberData.controllerId)
         ? memberData.controllerId.filter((x) => typeof x === "string" && x.length > 0)
         : [];
     if (denormIds.length > 0) {
-        return denormIds.map((id) => ({ id, ip: "" }));
+        const ipById = {};
+        try {
+            const refs = denormIds.map((id) => db.collection("users").doc(memberUid).collection("controllers").doc(id));
+            const docs = await db.getAll(...refs);
+            for (const d of docs) {
+                if (d.exists)
+                    ipById[d.id] = d.data()?.ip || "";
+            }
+        }
+        catch (err) {
+            // Leave ipById empty: every id then resolves no_address, which is
+            // recorded and visible. Falling through to the subcollection scan would
+            // silently widen the blast radius to controllers the member did not name.
+            console.warn(`applySyncPattern: address join failed for ${memberUid}`, err);
+        }
+        const targets = mergeDenormTargets(denormIds, ipById);
+        const unresolved = targets.filter((t) => t.ip.length === 0);
+        if (unresolved.length > 0) {
+            console.warn(`applySyncPattern: ${unresolved.length}/${targets.length} controller(s) ` +
+                `for ${memberUid} have no address — ` +
+                `${unresolved.map((t) => t.id).join(",")} (recorded no_address, not dispatched)`);
+        }
+        return targets;
     }
     try {
         const snap = await db

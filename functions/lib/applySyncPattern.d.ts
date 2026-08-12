@@ -57,6 +57,14 @@ export declare function isMemberSkipped(participationStatus: unknown): boolean;
  * byte-compatible with the self-only path above and the app's
  * CloudRelayRepository writer. The server `createdAt` timestamp is added by the
  * caller (it can't be a pure value). Exported for unit verification.
+ *
+ * #70 — A TARGET WITH NO ADDRESS IS BORN FAILED. An empty `controllerIp` used
+ * to be written as `status:"pending"`, so the bridge dutifully POSTed to an
+ * empty host and reported `ERROR: HTTP -1`. The command is still written —
+ * silence would be worse, and the doc is the evidence that a member was
+ * *meant* to be commanded — but it is written `failed` with a legible
+ * `no_address`, so it is never dispatched and never has to be diagnosed from a
+ * transport error. Server-side twin of the harness guard in `0c5fd92`.
  */
 export declare function buildFanoutCommandDoc(args: {
     payloadString: string;
@@ -67,6 +75,77 @@ export declare function buildFanoutCommandDoc(args: {
     initiatorUid: string;
     sessionId: string;
 }): Record<string, unknown>;
+/**
+ * The fanout policy: globally enabled, or enabled for a named set of groups.
+ *
+ * `allowlist === null` means "no list" — every group fans out once `enabled` is
+ * true. A non-null list enables ONLY those groupIds; every other group falls
+ * through to the host-only path exactly as it does when the flag is off.
+ *
+ * Deliberately the same shape and the same failure directions as the planner's
+ * `uid_allowlist` (planGameDayFires). Two scoping mechanisms that behave
+ * differently under a typo would be worse than one.
+ */
+export interface FanoutPolicy {
+    enabled: boolean;
+    allowlist: string[] | null;
+}
+export declare const FANOUT_OFF: FanoutPolicy;
+/**
+ * PURE. Derive the policy from the flag document's data.
+ *
+ *   doc absent / undefined data   -> OFF
+ *   enabled !== true              -> OFF regardless of any allowlist
+ *   enabled true, list present    -> fanout for those groupIds ONLY
+ *   enabled true, list absent     -> global (the eventual end state)
+ *   enabled true, list MALFORMED  -> OFF, loudly
+ *
+ * MALFORMED IS OFF, NOT GLOBAL. Anyone who wrote `group_allowlist` INTENDED to
+ * scope the enable; treating a typo as "global" would turn it into a fleet-wide
+ * fanout — light control across every crew — which is the exact opposite of
+ * what the author reached for. An empty array is NOT malformed: it is a
+ * deliberate "enabled for nobody" and is honoured.
+ */
+export declare function fanoutPolicyFrom(data: Record<string, unknown> | undefined): FanoutPolicy;
+/** True when THIS group may fan out. */
+export declare function fanoutsForGroup(policy: FanoutPolicy, groupId: string): boolean;
+/**
+ * PURE. Attach a resolved address to each denormalized controller id.
+ *
+ * An id with no entry in `ipById`, or an entry that is blank, resolves to
+ * `ip:""` — which [buildFanoutCommandDoc] then records as a `no_address`
+ * failure rather than a pending command. Unknown is preserved as unknown here;
+ * this function never invents a fallback address.
+ *
+ * Exported for unit verification (#70).
+ */
+export declare function mergeDenormTargets(ids: string[], ipById: Record<string, string>): {
+    id: string;
+    ip: string;
+}[];
+/**
+ * Resolve a member's controller targets.
+ *   1. Denormalized member.controllerId[] (Slice 1) → one target per id, JOINED
+ *      against users/{uid}/controllers for each address.
+ *   2. Else LAZY-read users/{uid}/controllers live → {id, ip} (covers existing
+ *      members with no controllerId[] yet, and Webhook-Mode members that need a
+ *      real IP).
+ *   3. Else the legacy single controllerIp on the member doc.
+ *   4. Else a single {id:"", ip:""}.
+ *
+ * #70 — WHY BRANCH 1 READS AFTER ALL. It used to return `ip:""` with no
+ * cross-collection read, on the documented assumption that "the bridge
+ * self-resolves its paired WLED IP". That was the denormalization win, and the
+ * bridge does not have that capability: on 2026-08-12 the bench bridge answered
+ * `ERROR: HTTP -1` to every such command and the strip never moved. Because
+ * this is the NORMAL member shape, it meant no crew fanout had ever reached
+ * hardware. The read costs one getAll per member at crew scale — the price of
+ * the command being deliverable.
+ */
+export declare function resolveMemberTargets(db: admin.firestore.Firestore, memberUid: string, memberData: admin.firestore.DocumentData): Promise<{
+    id: string;
+    ip: string;
+}[]>;
 /**
  * SYNC-1 server-side mutual-membership verification. A fanout may only target a
  * uid that is a VERIFIED member of the crew — present in the group's
