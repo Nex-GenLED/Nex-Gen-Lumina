@@ -90,6 +90,71 @@ optional.
 
 ---
 
+## 2.5.10+72 — facts-publish disposition mirror
+
+| Field | Value |
+|---|---|
+| **Git SHA (app bytes)** | **`4f76b56`** — `chore(release): bump to 2.5.10+72`. **iOS↔Android join key for both artifacts.** |
+| **App-bytes ancestry** | `01ab2b4` (+71 bytes) **+** `680abc6` (disposition mirror, its dedup memo, enum-label distinctness). `a0cde1e` and the other commits in between are docs/tools-only. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **72** — merged manifest (`android:versionCode="72"`, `android:versionName="2.5.10"`) |
+| **Android artifact** | `app-release.aab` · **68,296,487 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-11 from an isolated worktree at `4f76b56`, `git status` empty before **and** after |
+| **iOS** | Build number **`PENDING`**. Triggered by the push of `4f76b56` (Codemagic builds on push). Fill the number **and the SHA Codemagic reports** when it completes; do not infer either from the version name, which is `2.5.10` for +71 and +72 alike. |
+| **Uploaded** | **NO** (Android). iOS: `codemagic.yaml` sets `submit_to_testflight: true`, so a green build **auto-submits** — see the VOID note below. TestFlight is a verification path, not production exposure (Conventions). |
+| **Supersedes** | **+71**, wholesale. |
+
+**Contents since +71**
+
+- **Disposition mirror** (`680abc6`) — `participation_publish_disposition` (+ `_at`)
+  written on **every** facts-publish attempt including `offered`, so an absent
+  field means "the healer never attempted here" and can never mean "attempted
+  and skipped". `ControllerHealReport.factsPublish` is in-process only and
+  `debugPrint` is nulled under `kReleaseMode`, so before this a skip left **zero
+  external evidence** — the blindness that made §7.2d undiagnosable.
+  One formatter (`participationDispositionLabel`) feeds both the log line and
+  the field. The mirror carries its own dedup memo so it rides an existing write
+  and a fully-deduped connect still costs **zero** mutations.
+
+**Why +71 is superseded rather than burned:** it was a correct build —
+worktree-clean, jar verified, 68,296,168 bytes — simply sealed before the mirror
+existed, and never uploaded, so nothing depends on it.
+
+**Verification:** suite run **from `4f76b56` inside the build worktree** —
+**2160 passed · 3 skipped · 1 failed** (`base_ladder_repair_live_test` —
+pre-existing, reproduced at baseline). `flutter analyze lib/ test/` no errors.
+
+### ⚠️ VOID — two Codemagic builds that must not be trusted
+
+`680abc6` and `a0cde1e` carry the **+72 mirror code** but predate this bump, so
+they still stamp `kStaffAuthTelemetryAppVersion = '2.5.10+71'`.
+
+**Why they are void — stated accurately.** The "versionCode 71 on +72 bytes"
+framing is Android-only and does **not** apply to these: `codemagic.yaml`
+overwrites the iOS build number with `PROJECT_BUILD_NUMBER`, so no iOS build was
+ever going to be stamped 71 or 72. The two real defects are:
+
+1. **No ledger row can identify them.** They match neither the +71 row
+   (different `lib`) nor this +72 row (different SHA). Given a crash report from
+   one, the shipped commit is unrecoverable — the exact failure this file exists
+   to prevent.
+2. **Telemetry misattributes.** They report as `2.5.10+71`, so S-5
+   dealer-adoption would credit their events to +71.
+
+**They auto-submit.** With `submit_to_testflight: true`, a green build from
+either is pushed to TestFlight without further action. Cancel them if running;
+if either already went green, expire/remove the TestFlight build and do not
+promote it. Superseded by the `4f76b56` build in every respect.
+
+### Codemagic triage — tonight's SHAs
+
+| SHA | classification |
+|---|---|
+| `a712180` `2a15b83` `aa8298b` `42746bd` `6d86668` `d8da74a` | **+71 app bytes.** A green build from any of these is the +71 iOS artifact: verified, NOT uploaded, superseded by +72 |
+| `680abc6` `a0cde1e` | **VOID** — +72 code, +71 telemetry stamp, no ledger identity |
+| **`4f76b56`** and later | **+72** — the TestFlight candidate for §7.2d |
+
+---
+
 ## 2.5.10+71 — healer participation ordering fix
 
 | Field | Value |
@@ -104,6 +169,7 @@ optional.
 | **iOS build number ≠ 71, by design** | `codemagic.yaml` takes only the version *name* (`2.5.10`) from pubspec and overwrites the build number with its own `PROJECT_BUILD_NUMBER`. The git SHA is the join key; a build-number mismatch here is expected and is not a defect. |
 | **Sibling artifact** | Android **`2.5.10+71`** — `app-release.aab`, **68,296,168 bytes**, `jarsigner -verify` → *jar verified*, built 2026-08-11 19:11 from an isolated worktree at `01ab2b4`. **Built, NOT uploaded.** |
 | **Uploaded** | NO — neither platform |
+| **SUPERSEDED BY +72** | `4f76b56`. +71 was correct and complete; it was sealed before the disposition mirror existed and nothing was ever distributed from it. Retained as a row for identity, not as a candidate. |
 
 **Contents since +69**
 
