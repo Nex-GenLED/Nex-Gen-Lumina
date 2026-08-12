@@ -51,7 +51,9 @@ String participationDispositionLabel(ParticipationDisposition d) {
     case ParticipationDisposition.offered:
       return 'offered';
     case ParticipationDisposition.shapeUnknown:
-      return 'SKIPPED(bus list resolved empty — shape unknown)';
+      return 'SKIPPED(bus list unreadable — shape unknown)';
+    case ParticipationDisposition.noBusesConfigured:
+      return 'SKIPPED(controller reports no LED outputs)';
     case ParticipationDisposition.inputsTimedOut:
       return 'SKIPPED(inputs timed out after '
           '${kParticipationInputTimeout.inSeconds}s)';
@@ -136,10 +138,23 @@ enum ParticipationDisposition {
   /// Handed to the writer. It may still have deduped — see [FactsPublishOutcome.wrote].
   offered,
 
-  /// The caller resolved the shape and it was EMPTY. Publishing a resolution
-  /// against an unknown bus list would record `[]`, which the server reads as
-  /// a usable "light nothing".
+  /// The bus list could not be READ — `cfg.hw.led` absent or malformed.
+  ///
+  /// Since the +73 rewire the bus list comes from the healer's own cfg fetch,
+  /// so on a LAN connect whose cfg parsed this should be **unreachable**. It is
+  /// deliberately kept: an unreachable disposition that fires anyway is exactly
+  /// the signal worth having, and the enum-iteration test forbids adding a
+  /// disposition that cannot announce itself.
   shapeUnknown,
+
+  /// The bus list was READ and the controller reports **no LED outputs**.
+  ///
+  /// Distinct from [shapeUnknown] on purpose. "We could not see the hardware"
+  /// and "we saw it and there is nothing wired" are different faults with
+  /// different fixes — collapsing them is the null-vs-unknown class that
+  /// produced #63, and this enum is the last place that distinction survives
+  /// before it reaches a human.
+  noBusesConfigured,
 
   /// The inputs did not resolve inside the bound. Base boundaries publish
   /// alone; the next connect retries.

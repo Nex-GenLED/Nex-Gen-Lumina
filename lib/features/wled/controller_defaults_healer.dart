@@ -414,40 +414,32 @@ class ControllerDefaultsHealer {
   /// every heal still runs.
   final String? controllerId;
 
-  /// The participating-channel set and the bus list it was resolved against,
-  /// **supplied by the caller** — and supplied as a FUTURE.
+  /// The ROOFLINE segments, supplied by the caller as a future.
   ///
-  /// DECISION (2026-08-11): passed in as a parameter, not read from a `ref` and
-  /// not derived here. This class is deliberately dependency-light and runs for
-  /// every controller on every connect; deriving the bus list internally would
-  /// duplicate the bus→[DeviceChannel] parsing that `deviceChannelsProvider`
-  /// already owns, and two implementations of that parsing would drift. The
-  /// resolution additionally needs the roofline segments, a second provider —
-  /// the caller holds both. That decision is unchanged.
+  /// ── WHAT CHANGED IN +73, AND WHY ────────────────────────────────────────
+  /// This used to carry the bus list too. It no longer does: the bus list now
+  /// comes from the healer's OWN `/json/cfg` read, via
+  /// [ControllerClockInfo.hardware].
   ///
-  /// ── WHY A FUTURE AND NOT A SNAPSHOT ────────────────────────────────────────
-  /// A snapshot was the first cut and it published participation **never**.
-  /// BENCH-PROVEN 2026-08-11: base boundaries landed on a real connect while
-  /// participation did not, on the same call, so the controller id, the LAN
-  /// gate and this class were all fine — the two families differ only in input
-  /// source.
+  /// §7.2d on `2.5.10+72` (build 291) recorded, verbatim:
   ///
-  /// The healer fires from `ref.listen(wledRepositoryProvider, …,
-  /// fireImmediately: true)` at t=0 of the connect. Both participation inputs
-  /// are asynchronous and neither has resolved by then:
-  ///   • `deviceHardwareConfigProvider` is a FutureProvider doing its own
-  ///     `GET /json/cfg`, so `deviceChannelsFromConfig(null)` returns `const []`
-  ///     and `participationShapeIsKnown` correctly refuses;
-  ///   • `currentRooflineConfigProvider` is a StreamProvider, and an unresolved
-  ///     roofline is indistinguishable from an untraced install to the resolver
-  ///     (`segments.isEmpty` ⇒ every channel participates), which would publish
-  ///     a SUPERSET rather than nothing — the quieter of the two bugs.
+  ///   participation_publish_disposition =
+  ///     "SKIPPED(bus list resolved empty — shape unknown)"   04:19:08.171Z
   ///
-  /// So the caller hands over a future that resolves both, and the publish
-  /// awaits it (bounded by [kParticipationInputTimeout]) rather than sampling
-  /// providers that cannot possibly be ready. Null result ⇒ shape unknown ⇒
-  /// participation is skipped and said so out loud.
-  final Future<ParticipationInput?>? participationInputs;
+  /// at the SAME instant the healer's own cfg read succeeded and returned three
+  /// timer rows. `deviceHardwareConfigProvider` is a FutureProvider that
+  /// returns null before a repo exists and then caches it, so awaiting
+  /// `.future` handed back a completed stale null — **an `await` on an
+  /// already-completed future waits for nothing.** Two answers, same endpoint,
+  /// same instant. See #63.
+  ///
+  /// Tyler's original constraint is better served by this shape, not violated
+  /// by it: the healer holds no `ref`, and the bus parsing is the SHARED
+  /// [hardwareConfigFromCfg] + [deviceChannelsFromConfig], not a second copy.
+  ///
+  /// The ROOFLINE stays a caller-supplied future because it is Firestore-backed
+  /// and genuinely not on the device. Null disables participation entirely.
+  final Future<List<RooflineSegment>>? rooflineSegments;
 
   /// Where device-only facts go. Injected so this class stays testable without
   /// Firestore.
@@ -460,7 +452,7 @@ class ControllerDefaultsHealer {
     required this.ctx,
     required this.gammaAction,
     this.controllerId,
-    this.participationInputs,
+    this.rooflineSegments,
     this.publisher = const FirestoreControllerFactsPublisher(),
   });
 
@@ -692,7 +684,7 @@ class ControllerDefaultsHealer {
       // inferred — and so tests await it instead of pumping the event queue.
       // Still unawaited by run(): the heals proceed in parallel.
       report.factsPublish =
-          _awaitInputsAndPublish(id, rows, info.timerRows?.length ?? 0);
+          _awaitInputsAndPublish(id, info, rows, info.timerRows?.length ?? 0);
       unawaited(report.factsPublish!);
     } catch (e) {
       report.log.add('facts publish dispatch failed: $e');
@@ -707,24 +699,54 @@ class ControllerDefaultsHealer {
   /// defect this method was rewritten to fix.
   Future<FactsPublishOutcome> _awaitInputsAndPublish(
     String controllerId,
+    ControllerClockInfo info,
     List<BaseBoundaryRow>? rows,
     int slotsRead,
   ) async {
     ParticipationInput? input;
-    var disposition = ParticipationDisposition.inputsAbsent;
+    final ParticipationDisposition disposition;
 
-    final pending = participationInputs;
-    if (pending != null) {
-      try {
-        input = await pending.timeout(kParticipationInputTimeout);
-        disposition = input == null
-            ? ParticipationDisposition.shapeUnknown
-            : ParticipationDisposition.offered;
-      } on TimeoutException {
-        disposition = ParticipationDisposition.inputsTimedOut;
-      } catch (e) {
-        disposition = ParticipationDisposition.inputsFailed;
-        debugPrint('[Healer] participation input resolution threw: $e');
+    // ── BUS LIST: from the cfg THIS healer just read. No provider, no cache,
+    // no ordering. Null hardware = the hw.led block was unreadable; readable
+    // with zero buses = the controller reports no LED outputs. Different
+    // faults, different labels — see #63 for what collapsing them costs.
+    final hw = info.hardware;
+    if (hw == null) {
+      disposition = ParticipationDisposition.shapeUnknown;
+    } else {
+      final ids = deviceChannelsFromConfig(hw).map((c) => c.id).toList();
+      if (ids.isEmpty) {
+        disposition = ParticipationDisposition.noBusesConfigured;
+      } else {
+        // ── ROOFLINE: still the caller's future, still awaited. An unresolved
+        // roofline is indistinguishable BY VALUE from an untraced install, and
+        // the resolver reads an empty segment list as "every channel
+        // participates" — so sampling it publishes a SUPERSET rather than
+        // failing. This is the only remaining timed leg.
+        final pending = rooflineSegments;
+        if (pending == null) {
+          disposition = ParticipationDisposition.inputsAbsent;
+        } else {
+          ParticipationDisposition d;
+          try {
+            final segments = await pending.timeout(kParticipationInputTimeout);
+            input = ParticipationInput(
+              resolved: resolveParticipatingChannels(
+                explicit: null,
+                segments: segments,
+                allDeviceChannelIds: ids,
+              ),
+              deviceChannelIds: ids,
+            );
+            d = ParticipationDisposition.offered;
+          } on TimeoutException {
+            d = ParticipationDisposition.inputsTimedOut;
+          } catch (e) {
+            d = ParticipationDisposition.inputsFailed;
+            debugPrint('[Healer] roofline resolution threw: $e');
+          }
+          disposition = d;
+        }
       }
     }
 
@@ -738,8 +760,8 @@ class ControllerDefaultsHealer {
         source: kHealerPublishSource,
         // Mirrored to Firestore so a SKIP is visible off-device. On a release
         // build debugPrint is nulled, so the log line below does not exist and
-        // this field is the ONLY external evidence the healer attempted
-        // anything. Same string as the log line — one formatter.
+        // this field is the ONLY external evidence. Same string — one
+        // formatter.
         participationDisposition: participationDispositionLabel(disposition),
       );
     } catch (e) {
@@ -751,8 +773,6 @@ class ControllerDefaultsHealer {
       baseBoundariesOffered: rows != null,
       wrote: wrote,
     );
-    // ALWAYS logged, on one line, whatever happened. Published, refused on an
-    // empty shape, timed out, or deduped — all of it is visible.
     debugPrint('[Healer] facts-publish $controllerId: ${outcome.describe()}');
     return outcome;
   }
@@ -1027,57 +1047,26 @@ final controllerFactsPublisherProvider = Provider<ControllerFactsPublisher>(
   (ref) => const FirestoreControllerFactsPublisher(),
 );
 
-/// Resolve the participation publish inputs. **This is the caller's job, and
-/// it is why the healer takes a future.**
+/// Resolve the ROOFLINE segments for participation. **The caller's job, and
+/// the reason the healer still takes a future.**
 ///
-/// BOTH inputs are asynchronous and NEITHER is ready when the healer fires:
+/// `currentRooflineConfigProvider` is a **StreamProvider** and is not resolved
+/// when the healer fires. Sampling it early yields no segments, and to
+/// `resolveParticipatingChannels` an empty segment list means "untraced install
+/// => every channel participates" — so it would not refuse, it would publish a
+/// **SUPERSET** on a traced install, lighting channels the roofline explicitly
+/// marks secondary-only. That is a wrong answer that looks right, which is why
+/// this is awaited and why a mutation test pins the await.
 ///
-/// * `deviceHardwareConfigProvider` — a FutureProvider performing its own
-///   `GET /json/cfg`. Sampling it at connect time yields `null`, hence an empty
-///   bus list, hence a correct-but-permanent refusal to publish. This is the
-///   bug the bench caught.
-/// * `currentRooflineConfigProvider` — a **StreamProvider**. Sampling it early
-///   yields no segments, and to `resolveParticipatingChannels` an empty segment
-///   list means "untraced install ⇒ every channel participates". That failure
-///   is quieter and worse than the first: it would publish a SUPERSET on a
-///   traced install, lighting channels the roofline marks secondary-only,
-///   rather than publishing nothing.
+/// The BUS list is deliberately NOT here any more — it comes from the healer's
+/// own cfg read. See `ControllerDefaultsHealer.rooflineSegments`.
 ///
-/// So both are awaited. `.future` on each completes with the first real value.
-///
-/// Returns **null** when the bus list resolves EMPTY — "we could not determine
-/// the device shape", which must never be published as `[]` (the server reads
-/// that as a usable "light nothing"). Distinguishing the two is the whole point
-/// of `participationShapeIsKnown`.
-///
-/// Throws are left to propagate; the healer catches them and records
-/// [ParticipationDisposition.inputsFailed].
+/// A null config is a legitimate untraced install and yields `[]`. Throws are
+/// left to propagate; the healer records `inputsFailed`.
 @visibleForTesting
-Future<ParticipationInput?> resolveParticipationInputs(Ref ref) async {
-  final hw = await ref.read(deviceHardwareConfigProvider.future);
-  // deviceChannelsFromConfig is the SAME pure function deviceChannelsProvider
-  // is a one-line wrapper around, so this is the provider's parsing, not a
-  // second copy of it. Reading the provider directly would be equivalent but
-  // depends on dependent-rebuild ordering right after the await; calling the
-  // shared function is deterministic.
-  final ids = deviceChannelsFromConfig(hw).map((c) => c.id).toList();
-  if (ids.isEmpty) return null; // shape unknown — refuse, loudly, upstream
-
+Future<List<RooflineSegment>> resolveRooflineSegments(Ref ref) async {
   final roofline = await ref.read(currentRooflineConfigProvider.future);
-  final segments = roofline?.segments ?? const <RooflineSegment>[];
-
-  // `explicit: null` matches the other two publish sites: no channel picker
-  // writes participatingChannelIndices today, so the default policy is the only
-  // reachable branch. When a picker ships, all three sites need the explicit
-  // set threaded through together.
-  return ParticipationInput(
-    resolved: resolveParticipatingChannels(
-      explicit: null,
-      segments: segments,
-      allDeviceChannelIds: ids,
-    ),
-    deviceChannelIds: ids,
-  );
+  return roofline?.segments ?? const <RooflineSegment>[];
 }
 
 // ── Gamma watchdog ─────────────────────────────────────────────────────────
@@ -1237,7 +1226,7 @@ final controllerDefaultsHealerProvider =
     // why the healer does not derive them. NOT awaited here: doing so would
     // hold the heals behind a device fetch. The future is handed to the healer,
     // which awaits it on the fire-and-forget publish path only.
-    final participationInputs = resolveParticipationInputs(ref);
+    final rooflineSegments = resolveRooflineSegments(ref);
     // The healer cannot attach its `await` until AFTER its own /json/cfg read,
     // so there is a window — one network round trip — in which this future has
     // no listener. If it fails inside that window the error would surface as an
@@ -1245,7 +1234,7 @@ final controllerDefaultsHealerProvider =
     // publish that is designed to fail quietly. `ignore()` marks it handled
     // without consuming it: the healer's later await still receives the error
     // and records ParticipationDisposition.inputsFailed.
-    participationInputs.ignore();
+    rooflineSegments.ignore();
 
     final profile = ref.read(currentUserProfileProvider).valueOrNull;
     final nowFn = ref.read(healerPhoneNowProvider);
@@ -1265,7 +1254,7 @@ final controllerDefaultsHealerProvider =
       ctx: ctx,
       gammaAction: ref.read(gammaSelfHealActionProvider),
       controllerId: ref.read(selectedControllerIdProvider),
-      participationInputs: participationInputs,
+      rooflineSegments: rooflineSegments,
       publisher: ref.read(controllerFactsPublisherProvider),
     );
 

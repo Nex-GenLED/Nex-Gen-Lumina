@@ -1,48 +1,63 @@
-// REGRESSION GUARD for the roofline half of the +69 ordering defect.
+// REGRESSION GUARD for the ROOFLINE await, plus the cfg→bus parser.
 //
-// `resolveParticipationInputs` must AWAIT `currentRooflineConfigProvider`, not
-// sample it. The distinction is not cosmetic:
+// SCOPE NOTE (+73). This file used to guard BOTH participation inputs. The bus
+// list no longer crosses a provider boundary — since the +73 rewire it comes
+// from the healer's own /json/cfg read via `hardwareConfigFromCfg`, because
+// §7.2d proved `deviceHardwareConfigProvider` returns a stale cached null at
+// the very instant the healer's own read succeeds. So the 20s bound and the
+// await guard now cover the ROOFLINE leg ONLY.
+//
+// Nothing that was pinned has been dropped — the bus leg is pinned harder, and
+// differently: by parser tests against a real captured payload, and by a test
+// that buses and timers come from ONE fetch.
+//
+// The roofline half is unchanged, and it is still the dangerous one:
 //
 //   an unresolved roofline stream  →  no segments yet
 //   a genuinely untraced install   →  no segments, ever
 //
-// Those are indistinguishable by value, and `resolveParticipatingChannels`
-// treats `segments.isEmpty` as "untraced install ⇒ EVERY channel
-// participates". So a sampled-but-unresolved roofline does not refuse and does
-// not fail — it publishes a SUPERSET, lighting channels the roofline marks
-// secondary-only, and it looks entirely plausible on the way out.
+// indistinguishable BY VALUE, and `resolveParticipatingChannels` reads
+// `segments.isEmpty` as "untraced install ⇒ EVERY channel participates". So
+// sampling does not refuse and does not throw — it publishes a SUPERSET that
+// looks entirely plausible.
 //
-// That is why this is the more dangerous of the two async inputs: the bus-list
-// half at least refused (`participationShapeIsKnown`) and left the field
-// absent. This half would have written a wrong answer with full confidence.
-//
-// The test pins the AWAIT, not the answer. A future refactor that drops the
-// `await` and reads `.valueOrNull` would still return a plausible list and
-// would still pass an answer-only assertion — so the "never emits" case asserts
-// that the future does NOT complete, which is the only observable difference.
+// The test therefore pins the AWAIT, not the answer: the "never emits" case
+// asserts the future does NOT complete, which is the only observable
+// difference between awaiting and sampling.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/neighborhood/services/channel_participation_resolver.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
-import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
+import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
-import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 
-/// Two buses — the bench rig's actual shape (0-128 pin 2, 128-290 pin 14).
-/// Channels [0, 1].
-WledHardwareConfig _twoBusConfig() => const WledHardwareConfig(
-      totalLeds: 290,
-      buses: [
-        WledLedBus(pin: [2], start: 0, len: 128),
-        WledLedBus(pin: [14], start: 128, len: 162),
-      ],
-    );
+/// Verbatim `/json/cfg` excerpt from the bench controller `.150`, 2026-08-12 —
+/// two buses (0-128 pin 2, 128-290 pin 14) and the three armed timer rows left
+/// after the Wednesday lease expired.
+const String _benchCfg = '''
+{
+  "hw": {"led": {"total": 290, "maxpwr": 30000, "ins": [
+    {"start": 0, "len": 128, "pin": [2], "type": 30, "order": 1},
+    {"start": 128, "len": 162, "pin": [14], "type": 30, "order": 1}
+  ]}},
+  "if": {"ntp": {"tz": 5, "lt": 38.99346, "ln": -94.2527}},
+  "light": {"gc": {"bri": 1, "col": 2.8, "val": 2.8}},
+  "timers": {"ins": [
+    {"en": 1, "hour": 20, "min": 23, "macro": 10, "dow": 127},
+    {"en": 1, "hour": 6, "min": 22, "macro": 2, "dow": 127},
+    {"en": 1, "hour": 255, "min": 0, "macro": 2, "dow": 127}
+  ]}
+}
+''';
 
 RooflineSegment _seg({required int channelIndex, required bool isPrimary}) =>
     RooflineSegment(
@@ -51,13 +66,10 @@ RooflineSegment _seg({required int channelIndex, required bool isPrimary}) =>
       pixelCount: 10,
       channelIndex: channelIndex,
       isPrimary: isPrimary,
-      points: const <Offset>[],
+      points: const [],
     );
 
-/// Channel 0 primary, channel 1 traced but NOT primary.
-///
-/// The correct resolution is `[0]`. If the roofline is treated as empty the
-/// resolver returns `[0, 1]` — the superset this test exists to forbid.
+/// Channel 0 primary, channel 1 traced but NOT primary → correct answer `[0]`.
 RooflineConfiguration _tracedRoofline() => RooflineConfiguration(
       id: 'r1',
       name: 'bench',
@@ -65,118 +77,150 @@ RooflineConfiguration _tracedRoofline() => RooflineConfiguration(
         _seg(channelIndex: 0, isPrimary: true),
         _seg(channelIndex: 1, isPrimary: false),
       ],
-      createdAt: DateTime(2026, 8, 11),
-      updatedAt: DateTime(2026, 8, 11),
+      createdAt: DateTime(2026, 8, 12),
+      updatedAt: DateTime(2026, 8, 12),
     );
 
-/// Runs `resolveParticipationInputs` inside a real container so the provider
-/// awaits are exercised, not stubbed.
-final _probe = FutureProvider<ParticipationInput?>(
-  (ref) => resolveParticipationInputs(ref),
+/// Runs `resolveRooflineSegments` inside a real container so the provider await
+/// is exercised rather than stubbed.
+final _probe = FutureProvider<List<RooflineSegment>>(
+  (ref) => resolveRooflineSegments(ref),
 );
 
-ProviderContainer _container({
-  required Stream<RooflineConfiguration?> roofline,
-  WledHardwareConfig? hardware,
-  Duration hardwareDelay = Duration.zero,
-}) {
-  return ProviderContainer(
-    overrides: [
-      deviceHardwareConfigProvider.overrideWith((ref) async {
-        if (hardwareDelay > Duration.zero) {
-          await Future<void>.delayed(hardwareDelay);
-        }
-        return hardware;
-      }),
+ProviderContainer _container(Stream<RooflineConfiguration?> roofline) =>
+    ProviderContainer(overrides: [
       currentRooflineConfigProvider.overrideWith((ref) => roofline),
-    ],
-  );
-}
+    ]);
+
+/// The bus list the healer now supplies from its own cfg.
+List<int> _resolveWith(List<RooflineSegment> segments) =>
+    resolveParticipatingChannels(
+      explicit: null,
+      segments: segments,
+      allDeviceChannelIds: const [0, 1],
+    );
 
 void main() {
-  test('an UNRESOLVED roofline stream blocks — it never yields the superset',
-      () async {
-    // The stream is open and has emitted nothing, exactly as at t=0 of a
-    // connect. A sampling implementation would return [0, 1] here immediately.
-    final never = StreamController<RooflineConfiguration?>();
-    addTearDown(never.close);
+  group('the ROOFLINE await — the remaining timed leg', () {
+    test('an UNRESOLVED roofline stream blocks — it never yields the superset',
+        () async {
+      final never = StreamController<RooflineConfiguration?>();
+      addTearDown(never.close);
+      final c = _container(never.stream);
+      addTearDown(c.dispose);
 
-    final c = _container(roofline: never.stream, hardware: _twoBusConfig());
-    addTearDown(c.dispose);
+      Object? settled;
+      unawaited(c.read(_probe.future).then((v) => settled = v));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
 
-    Object? settled;
-    unawaited(c.read(_probe.future).then((v) => settled = v ?? 'null'));
+      expect(settled, isNull,
+          reason: 'resolveRooflineSegments must still be AWAITING. A value '
+              'here means it sampled an unresolved stream, and the set derived '
+              'from it would be the superset.');
+    });
 
-    // Generous relative to anything the resolver does synchronously.
-    await Future<void>.delayed(const Duration(milliseconds: 250));
+    test('once it arrives, the traced roofline EXCLUDES the secondary channel',
+        () async {
+      final c = _container(
+          Stream<RooflineConfiguration?>.value(_tracedRoofline()));
+      addTearDown(c.dispose);
 
-    expect(settled, isNull,
-        reason: 'resolveParticipationInputs must still be AWAITING the '
-            'roofline. A non-null value here means it sampled an unresolved '
-            'stream — and the value it would have produced is the superset.');
+      final segments = await c.read(_probe.future);
+      expect(segments, hasLength(2));
+      expect(_resolveWith(segments), [0],
+          reason: 'channel 1 is traced but not primary. [0, 1] would be the '
+              'untraced-install superset — the wrong answer sampling gives.');
+    });
+
+    test('a genuinely UNTRACED install is every channel — the two cases differ '
+        'by timing, not by value', () async {
+      final c = _container(Stream<RooflineConfiguration?>.value(null));
+      addTearDown(c.dispose);
+
+      final segments = await c.read(_probe.future);
+      expect(segments, isEmpty);
+      expect(_resolveWith(segments), [0, 1],
+          reason: 'correct HERE — which is exactly why value alone cannot '
+              'detect the sampling bug');
+    });
   });
 
-  test('once the roofline arrives it resolves, and EXCLUDES the non-primary '
-      'channel', () async {
-    // Same container shape, but the stream emits. This is the control: it
-    // proves the blocking above is the await and not a broken override.
-    final c = _container(
-      roofline: Stream<RooflineConfiguration?>.value(_tracedRoofline()),
-      hardware: _twoBusConfig(),
-    );
-    addTearDown(c.dispose);
+  group('hardwareConfigFromCfg — the bus leg, parsed from the healer cfg', () {
+    test('the REAL captured bench payload yields both buses', () {
+      final hw = hardwareConfigFromCfg(
+          jsonDecode(_benchCfg) as Map<String, dynamic>);
+      expect(hw, isNotNull);
+      expect(hw!.totalLeds, 290);
+      expect(hw.buses.map((b) => [b.start, b.len]).toList(), [
+        [0, 128],
+        [128, 162],
+      ]);
+      expect(hw.buses.map((b) => b.pin.first).toList(), [2, 14]);
+      expect(deviceChannelsFromConfig(hw).map((c) => c.id).toList(), [0, 1],
+          reason: 'the exact set §7.2d expected and did not get');
+    });
 
-    final input = await c.read(_probe.future);
+    test('UNREADABLE and EMPTY are different answers', () {
+      // null → could not see hw.led         → shapeUnknown
+      // []   → saw it, nothing wired        → noBusesConfigured
+      // Collapsing these is the #63 class.
+      expect(hardwareConfigFromCfg(null), isNull);
+      expect(hardwareConfigFromCfg({}), isNull);
+      expect(hardwareConfigFromCfg({'hw': 'nope'}), isNull);
+      expect(
+          hardwareConfigFromCfg({
+            'hw': {'led': 'nope'}
+          }),
+          isNull);
 
-    expect(input, isNotNull);
-    expect(input!.deviceChannelIds, [0, 1], reason: 'both buses are present');
-    expect(input.resolved, [0],
-        reason: 'channel 1 is traced but not primary, so it is EXCLUDED. '
-            '[0, 1] here would be the untraced-install superset — the exact '
-            'wrong answer an unresolved roofline produces.');
+      final empty = hardwareConfigFromCfg({
+        'hw': {
+          'led': {'total': 0}
+        }
+      });
+      expect(empty, isNotNull, reason: 'the block WAS readable');
+      expect(empty!.buses, isEmpty);
+      expect(deviceChannelsFromConfig(empty), isEmpty);
+    });
+
+    test('malformed bus entries are skipped, not fatal', () {
+      final hw = hardwareConfigFromCfg({
+        'hw': {
+          'led': {
+            'total': 128,
+            'ins': [
+              {'start': 0, 'len': 128, 'pin': [2]},
+              'garbage',
+            ],
+          }
+        }
+      });
+      expect(hw!.buses, hasLength(1));
+    });
   });
 
-  test('a genuinely UNTRACED install is still every channel — the two cases '
-      'differ by timing, not by value', () async {
-    // The reason sampling is undetectable by value: this legitimately IS the
-    // superset, and it is correct here.
-    final c = _container(
-      roofline: Stream<RooflineConfiguration?>.value(null),
-      hardware: _twoBusConfig(),
-    );
-    addTearDown(c.dispose);
+  group('ONE FETCH — buses and timers come from the same cfg map', () {
+    test('ControllerClockInfo.fromMaps parses both from one payload', () {
+      // The cost argument for putting the publish in the healer rests on this:
+      // if the bus list ever needs its own fetch, that argument collapses.
+      final info = ControllerClockInfo.fromMaps(
+        {'time': '2026-8-12, 4:19:08'},
+        jsonDecode(_benchCfg) as Map<String, dynamic>,
+      );
 
-    final input = await c.read(_probe.future);
-    expect(input!.resolved, [0, 1]);
-  });
+      expect(info.hardwareKnown, isTrue);
+      expect(info.timersKnown, isTrue);
+      expect(deviceChannelsFromConfig(info.hardware).map((c) => c.id).toList(),
+          [0, 1]);
+      expect(info.timerRows, hasLength(3));
+      expect(info.tzIndex, 5, reason: 'clock fields still parse — additive');
+    });
 
-  test('a LATE bus list is awaited too, not sampled as empty', () async {
-    // The half that failed on +69: deviceHardwareConfigProvider had not
-    // resolved, so the bus list read as [] and participation was refused on
-    // every connect.
-    final c = _container(
-      roofline: Stream<RooflineConfiguration?>.value(_tracedRoofline()),
-      hardware: _twoBusConfig(),
-      hardwareDelay: const Duration(milliseconds: 120),
-    );
-    addTearDown(c.dispose);
-
-    final input = await c.read(_probe.future);
-    expect(input, isNotNull,
-        reason: 'a slow bus list must be waited for, not treated as unknown');
-    expect(input!.deviceChannelIds, [0, 1]);
-  });
-
-  test('an EMPTY bus list still returns null — shape unknown, never []',
-      () async {
-    // Unchanged behaviour, re-pinned here because it now shares a code path
-    // with the roofline await.
-    final c = _container(
-      roofline: Stream<RooflineConfiguration?>.value(_tracedRoofline()),
-      hardware: null,
-    );
-    addTearDown(c.dispose);
-
-    expect(await c.read(_probe.future), isNull);
+    test('relay (no cfg) leaves BOTH unknown, not empty', () {
+      final info =
+          ControllerClockInfo.fromMaps({'time': '2026-8-12, 4:19:08'}, null);
+      expect(info.hardwareKnown, isFalse);
+      expect(info.timersKnown, isFalse);
+    });
   });
 }

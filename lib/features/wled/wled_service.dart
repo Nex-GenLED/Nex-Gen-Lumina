@@ -761,30 +761,11 @@ class WledService
       client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        final cfg = jsonDecode(body) as Map<String, dynamic>;
-        final hw = cfg['hw'];
-        if (hw is! Map) return null;
-        final led = hw['led'];
-        if (led is! Map) return null;
-
-        final totalLeds = (led['total'] is num) ? (led['total'] as num).toInt() : 0;
-        final maxPwr = (led['maxpwr'] is num) ? (led['maxpwr'] as num).toInt() : 30000;
-
-        final ins = led['ins'];
-        final List<WledLedBus> buses = [];
-        if (ins is List) {
-          for (final entry in ins) {
-            if (entry is Map<String, dynamic>) {
-              buses.add(WledLedBus.fromMap(entry));
-            }
-          }
-        }
-
-        return WledHardwareConfig(
-          totalLeds: totalLeds,
-          maxPowerMw: maxPwr,
-          buses: buses,
-        );
+        // Shared with ControllerClockInfo.fromMaps, which parses the cfg the
+        // defaults healer has already fetched. One parser, so the bus list
+        // means the same thing on both paths.
+        return hardwareConfigFromCfg(
+            jsonDecode(body) as Map<String, dynamic>);
       }
       debugPrint('WLED getConfig status ${res.statusCode}: $body');
     } catch (e) {

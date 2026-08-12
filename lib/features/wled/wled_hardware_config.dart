@@ -56,3 +56,43 @@ class WledHardwareConfig {
     this.buses = const [],
   });
 }
+
+/// Parse `hw.led` out of a raw `GET /json/cfg` map.
+///
+/// **One parser, two callers.** `WledService.getConfig` (which performs its own
+/// cfg fetch, feeding `deviceHardwareConfigProvider`) and
+/// `ControllerClockInfo.fromMaps` (which reuses the cfg the defaults healer has
+/// already fetched) both come through here, so the bus list means the same
+/// thing whichever path produced it. Extracted for the healer rewire — the
+/// point of that change was to stop crossing a provider boundary, NOT to gain a
+/// second implementation of this.
+///
+/// Returns **null** when `hw.led` is absent or the wrong shape — "we could not
+/// read the hardware block". That is deliberately distinct from a config whose
+/// `buses` list is empty, which means "we read it and this controller reports
+/// no LED outputs". Collapsing the two is the defect class that produced #63:
+/// `deviceHardwareConfigProvider` returns null for no-repo, unreachable,
+/// parse-failed AND no-buses alike, so no caller can tell them apart.
+WledHardwareConfig? hardwareConfigFromCfg(Map<String, dynamic>? cfg) {
+  if (cfg == null) return null;
+  final hw = cfg['hw'];
+  if (hw is! Map) return null;
+  final led = hw['led'];
+  if (led is! Map) return null;
+
+  final buses = <WledLedBus>[];
+  final ins = led['ins'];
+  if (ins is List) {
+    for (final entry in ins) {
+      if (entry is Map) {
+        buses.add(WledLedBus.fromMap(Map<String, dynamic>.from(entry)));
+      }
+    }
+  }
+
+  return WledHardwareConfig(
+    totalLeds: (led['total'] is num) ? (led['total'] as num).toInt() : 0,
+    maxPowerMw: (led['maxpwr'] is num) ? (led['maxpwr'] as num).toInt() : 30000,
+    buses: buses,
+  );
+}

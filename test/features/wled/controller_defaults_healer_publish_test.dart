@@ -14,6 +14,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
@@ -155,7 +156,19 @@ List<Map<String, dynamic>> _rigTimers() => [
     ];
 
 /// A perfectly healthy controller — nothing to heal.
-ControllerClockInfo _healthy({List<Map<String, dynamic>>? timers}) =>
+/// The bench rig's two buses, as they arrive on the healer's OWN cfg read.
+const WledHardwareConfig _twoBuses = WledHardwareConfig(
+  totalLeds: 290,
+  buses: [
+    WledLedBus(pin: [2], start: 0, len: 128),
+    WledLedBus(pin: [14], start: 128, len: 162),
+  ],
+);
+
+ControllerClockInfo _healthy({
+  List<Map<String, dynamic>>? timers,
+  WledHardwareConfig? hardware = _twoBuses,
+}) =>
     ControllerClockInfo(
       deviceTime: _now,
       tzIndex: 5,
@@ -164,6 +177,7 @@ ControllerClockInfo _healthy({List<Map<String, dynamic>>? timers}) =>
       longitude: -87.63,
       ntpHost: kHealNtpHost,
       timerRows: timers ?? _rigTimers(),
+      hardware: hardware,
     );
 
 /// Clock never synced → the NTP heal fires and, on a dealer-configured
@@ -173,6 +187,7 @@ ControllerClockInfo _clockUnset() => ControllerClockInfo(
       turnOnAtBoot: false,
       bootPresetId: kWledNoBootPreset,
       timerRows: _rigTimers(),
+      hardware: _twoBuses,
     );
 
 ControllerHealContext _ctx() => ControllerHealContext(
@@ -184,17 +199,16 @@ ControllerHealContext _ctx() => ControllerHealContext(
       phoneUtcOffset: const Duration(hours: -5),
     );
 
-/// [participating] null models "the caller could not determine the device
-/// shape" (the future resolves to null); [inputs] overrides the whole future so
-/// a test can supply a slow or throwing one.
+/// The bus list now comes from the repo's cfg ([_healthy]'s `hardware`); only
+/// the ROOFLINE is still a caller-supplied future. [segments] is that future's
+/// value; [roofline] overrides the whole future (slow / never / throwing).
 ControllerDefaultsHealer _healer(
   _Repo repo,
   _RecordingPublisher pub, {
   bool isLan = true,
   String? controllerId = '192_168_1_150',
-  List<int>? participating = const [0, 1],
-  List<int> deviceChannelIds = const [0, 1],
-  Future<ParticipationInput?>? inputs,
+  List<RooflineSegment> segments = const <RooflineSegment>[],
+  Future<List<RooflineSegment>>? roofline,
   bool noInputs = false,
 }) =>
     ControllerDefaultsHealer(
@@ -204,15 +218,9 @@ ControllerDefaultsHealer _healer(
       ctx: _ctx(),
       gammaAction: (ip) async => WledConfigPushResult.skipped('already correct'),
       controllerId: controllerId,
-      participationInputs: noInputs
+      rooflineSegments: noInputs
           ? null
-          : (inputs ??
-              Future<ParticipationInput?>.value(participating == null
-                  ? null
-                  : ParticipationInput(
-                      resolved: participating,
-                      deviceChannelIds: deviceChannelIds,
-                    ))),
+          : (roofline ?? Future<List<RooflineSegment>>.value(segments)),
       publisher: pub,
     );
 
@@ -224,6 +232,19 @@ Future<({ControllerHealReport report, FactsPublishOutcome? outcome})> _run(
   final outcome = await report.factsPublish;
   return (report: report, outcome: outcome);
 }
+
+RooflineSegment _seg({required int channelIndex, required bool isPrimary}) =>
+    RooflineSegment(
+      id: 'ch$channelIndex', name: 'ch$channelIndex', pixelCount: 10,
+      channelIndex: channelIndex, isPrimary: isPrimary,
+      points: const <Offset>[],
+    );
+
+/// Channel 0 primary, channel 1 traced-but-secondary => resolves to [0].
+List<RooflineSegment> _traced() => [
+      _seg(channelIndex: 0, isPrimary: true),
+      _seg(channelIndex: 1, isPrimary: false),
+    ];
 
 void main() {
   late _RecordingPublisher pub;
@@ -249,16 +270,29 @@ void main() {
     });
 
     test('the resolved set is passed THROUGH, not re-derived', () async {
-      await _run(_healer(_Repo(_healthy()), pub,
-          participating: const [2], deviceChannelIds: const [0, 1, 2]));
-      expect(pub.calls.single.participation, [2]);
+      // Traced roofline: channel 1 is secondary, so it is EXCLUDED.
+      await _run(_healer(_Repo(_healthy()), pub, segments: _traced()));
+      expect(pub.calls.single.participation, [0]);
     });
 
-    test('a null resolution reaches the publisher as "no opinion"', () async {
-      await _run(_healer(_Repo(_healthy()), pub, participating: null));
+    test('UNREADABLE hardware reaches the publisher as "no opinion"', () async {
+      await _run(_healer(_Repo(_healthy(hardware: null)), pub));
       expect(pub.calls.single.participation, isNull);
+      expect(pub.dispositions.single,
+          'SKIPPED(bus list unreadable — shape unknown)');
       expect(pub.writes, 1,
           reason: 'base boundaries still publish on their own');
+    });
+
+    test('READABLE hardware with ZERO buses is its own, distinct disposition',
+        () async {
+      // "could not see the hardware" vs "saw it, nothing wired" — #63's class.
+      await _run(_healer(
+          _Repo(_healthy(hardware: const WledHardwareConfig(totalLeds: 0))),
+          pub));
+      expect(pub.calls.single.participation, isNull);
+      expect(pub.dispositions.single,
+          'SKIPPED(controller reports no LED outputs)');
     });
   });
 
@@ -309,6 +343,7 @@ void main() {
         longitude: -87.63,
         ntpHost: kHealNtpHost,
         timerRows: null,
+        hardware: _twoBuses, // readable: the two families are independent
       );
       await _run(_healer(_Repo(info), pub));
       expect(pub.calls.single.rows, isNull);
@@ -398,8 +433,8 @@ void main() {
     });
 
     test('a CHANNEL change republishes within the same session', () async {
-      await _run(_healer(_Repo(_healthy()), pub, participating: const [0, 1]));
-      await _run(_healer(_Repo(_healthy()), pub, participating: const [0]));
+      await _run(_healer(_Repo(_healthy()), pub));
+      await _run(_healer(_Repo(_healthy()), pub, segments: _traced()));
       expect(pub.writes, 2);
     });
   });
@@ -411,21 +446,18 @@ void main() {
       // NOT resolved. Sampling it (the old snapshot param) meant participation
       // was refused on EVERY connect and the feature never worked in
       // production — base boundaries published, participation never did.
-      final slow = Future<ParticipationInput?>.delayed(
-        const Duration(milliseconds: 120),
-        () => const ParticipationInput(resolved: [0, 1], deviceChannelIds: [0, 1]),
-      );
-      final res = await _run(_healer(_Repo(_healthy()), pub, inputs: slow));
+      final slow = Future<List<RooflineSegment>>.delayed(
+        const Duration(milliseconds: 120), _traced);
+      final res = await _run(_healer(_Repo(_healthy()), pub, roofline: slow));
       expect(res.outcome!.participation, ParticipationDisposition.offered);
-      expect(pub.calls.single.participation, [0, 1]);
+      expect(pub.calls.single.participation, [0],
+          reason: 'the late roofline was WAITED for, not sampled as untraced');
       expect(pub.writes, 1);
     });
 
-    test('inputs that resolve NULL are refused as shape-unknown, and say so',
+    test('unreadable hardware is refused as shape-unknown, and says so',
         () async {
-      // An empty bus list must never publish [] — the server reads that as a
-      // usable "light nothing".
-      final res = await _run(_healer(_Repo(_healthy()), pub, participating: null));
+      final res = await _run(_healer(_Repo(_healthy(hardware: null)), pub));
       expect(res.outcome!.participation, ParticipationDisposition.shapeUnknown);
       expect(res.outcome!.describe(), contains('shape unknown'));
       expect(pub.calls.single.participation, isNull);
@@ -434,8 +466,8 @@ void main() {
 
     test('inputs that never resolve TIME OUT, and base boundaries publish '
         'alone', () async {
-      final never = Completer<ParticipationInput?>().future;
-      final res = await _run(_healer(_Repo(_healthy()), pub, inputs: never));
+      final never = Completer<List<RooflineSegment>>().future;
+      final res = await _run(_healer(_Repo(_healthy()), pub, roofline: never));
       expect(res.outcome!.participation,
           ParticipationDisposition.inputsTimedOut);
       expect(res.outcome!.baseBoundariesOffered, isTrue);
@@ -449,10 +481,10 @@ void main() {
       // reported as an UNHANDLED async error by the test zone before the healer
       // can attach. Production closes that same window with `.ignore()` on the
       // provider side — see resolveParticipationInputs' call site.
-      final boom = Future<ParticipationInput?>.delayed(
+      final boom = Future<List<RooflineSegment>>.delayed(
           const Duration(milliseconds: 30),
-          () => throw StateError('cfg blew up'));
-      final res = await _run(_healer(_Repo(_healthy()), pub, inputs: boom));
+          () => throw StateError('roofline blew up'));
+      final res = await _run(_healer(_Repo(_healthy()), pub, roofline: boom));
       expect(res.outcome!.participation, ParticipationDisposition.inputsFailed);
       expect(res.outcome!.wrote, isTrue, reason: 'base boundaries unaffected');
     });
@@ -506,9 +538,9 @@ void main() {
       expect(pub.dispositions.single, 'offered');
 
       final pub2 = _RecordingPublisher();
-      await _run(_healer(_Repo(_healthy()), pub2, participating: null));
+      await _run(_healer(_Repo(_healthy(hardware: null)), pub2));
       expect(pub2.dispositions.single,
-          'SKIPPED(bus list resolved empty — shape unknown)');
+          'SKIPPED(bus list unreadable — shape unknown)');
     });
 
     test('the bound exceeds the WledService HTTP timeout it waits on', () {
@@ -532,6 +564,7 @@ void main() {
           latitude: 41.88,
           longitude: -87.63,
           ntpHost: kHealNtpHost,
+          hardware: _twoBuses,
         )),
         _RecordingPublisher(),
       ))).report;
@@ -551,9 +584,7 @@ void main() {
         gammaAction: (ip) async =>
             WledConfigPushResult.skipped('already correct'),
         controllerId: '192_168_1_150',
-        participationInputs: Future<ParticipationInput?>.value(
-          const ParticipationInput(resolved: [0, 1], deviceChannelIds: [0, 1]),
-        ),
+        rooflineSegments: Future<List<RooflineSegment>>.value(const []),
         publisher: _ThrowingPublisher(),
       );
       final r = await healer.run();

@@ -34,6 +34,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:nexgen_command/features/schedule/timer_landing.dart'
     show timerInstancesFromCfg;
+import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
 
 /// Capability interface for repositories that can read a controller's clock /
 /// timezone / location for the BUG-CLOCK-1 health check. Kept OFF
@@ -138,6 +139,30 @@ class ControllerClockInfo {
   /// "this controller has no timers". Consumers must keep the two apart.
   final List<Map<String, dynamic>>? timerRows;
 
+  /// The controller's hardware LED config (`cfg.hw.led`) — the BUS list.
+  ///
+  /// Carried for the same reason [timerRows] is: this is already the healer's
+  /// one `/json/cfg` read, and participation resolution needs the bus list.
+  ///
+  /// **This replaced sourcing the bus list from `deviceHardwareConfigProvider`,
+  /// and the reason is empirical.** §7.2d on `2.5.10+72` (build 291) recorded
+  ///
+  ///   `participation_publish_disposition = "SKIPPED(bus list resolved empty
+  ///    — shape unknown)"`  at 2026-08-12T04:19:08.171Z
+  ///
+  /// at the *same instant* the healer's own cfg read succeeded and yielded
+  /// three timer rows. The provider is a `FutureProvider` that returns null
+  /// before a repo exists and caches it, so awaiting `.future` returned a
+  /// completed stale null immediately — an `await` on an already-completed
+  /// future waits for nothing. Same instant, same endpoint, two answers. See
+  /// #63.
+  ///
+  /// **Null means the `hw.led` block was unreadable**; a non-null config with
+  /// an EMPTY [WledHardwareConfig.buses] means the controller reported no LED
+  /// outputs. Keeping those apart is the whole point — see
+  /// [hardwareConfigFromCfg].
+  final WledHardwareConfig? hardware;
+
   const ControllerClockInfo({
     this.deviceTime,
     this.tzIndex,
@@ -148,6 +173,7 @@ class ControllerClockInfo {
     this.bootPresetId,
     this.turnOnAtBoot,
     this.timerRows,
+    this.hardware,
   });
 
   /// True when timezone fields were readable (local mode). False in relay mode
@@ -164,6 +190,11 @@ class ControllerClockInfo {
   /// failed cfg read — the base-boundary publish is skipped rather than
   /// publishing an empty table the planner would believe.
   bool get timersKnown => timerRows != null;
+
+  /// True when the `hw.led` block was readable. False in relay mode and on a
+  /// failed cfg read — participation is then skipped rather than resolved
+  /// against a shape we never saw.
+  bool get hardwareKnown => hardware != null;
 
   /// Build from the raw /json/info and (optional) /json/cfg maps.
   factory ControllerClockInfo.fromMaps(
@@ -214,6 +245,9 @@ class ControllerClockInfo {
       // for schedule readback, so a timer row means the same thing to the
       // publisher and to the sync verifier. Null-on-absent is load-bearing.
       timerRows: timerInstancesFromCfg(cfg),
+      // Same cfg map, same fetch — no extra device I/O. Shared parser, so the
+      // bus list is identical to what WledService.getConfig would produce.
+      hardware: hardwareConfigFromCfg(cfg),
     );
   }
 }
