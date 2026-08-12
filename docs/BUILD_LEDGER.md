@@ -99,7 +99,7 @@ optional.
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **73** — merged manifest (`android:versionCode="73"`, `android:versionName="2.5.10"`) |
 | **Android artifact** | `app-release.aab` · **68,296,715 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-12 from an isolated worktree at `1d95104`, `git status` empty before **and** after |
-| **iOS** | Build number **`PENDING`**. Triggered by the push of `1d95104`. Record the number **and the SHA Codemagic reports** — the version name is `2.5.10` for +69 through +73 alike, so it identifies nothing. |
+| **iOS** | **Build 292**, from `1d95104`. Installed build verified against Codemagic **before** connecting (`2.5.10 (292)`), and distinct from 291 — which is what makes the 05:04:23.001Z run attributable to +73 rather than to a lucky +72. |
 | **Uploaded** | **NO.** TestFlight distribution for §7.2d is a verification path, not production exposure (Conventions). |
 | **Supersedes** | **+72** |
 
@@ -136,10 +136,53 @@ Re-run after local midnight on the same tree, no code change:
 1 disposition test). #64 is deterministic, not flaky: the same five went red at
 23:45 and green at 23:59.
 
-**§7.2d on +73 is OWED** and unchanged except: expected disposition `offered`;
-take a **fresh** `--before` (the +72 run mutated the document); and **verify the
-TestFlight build number against Codemagic before connecting** — 288 was served
-ahead of 291 once already.
+### §7.2d ON +73 (build 292) — **GREEN. First participation publish from the healer on real hardware.**
+
+Ran 2026-08-12 **05:04:23.001Z**. Read with a client credential.
+
+```
+participating_channels                 [0, 1]
+participating_channels_device_ids      [0, 1]
+participating_channels_source          healer      <- was neighborhood_sync
+participating_channels_at              05:04:23.001Z   <- was 2026-08-11T18:20:14.409Z
+participating_channels_publish_count   1           <- appeared
+participation_publish_disposition      offered
+participation_publish_disposition_at   05:04:23.001Z
+base_boundaries                        3 rows, MATCH to timers.ins, count 3 -> 4
+light.gc.col                           2.8
+```
+
+Disposition transition: `SKIPPED(bus list resolved empty — shape unknown)` →
+**`offered`**.
+
+**Step 6 confirmed again:** all three families carry the identical `_at`
+(`05:04:23.001Z`) — participation, base boundaries and the mirror in one
+`set(merge: true)`.
+
+**The `[0, 1]` assertion is evidence-based, not assumed.** The bench roofline
+holds one segment (channel 0, `isPrimary: true`), so the resolver's answer is
+primaries `{0}` ∪ untraced device channels `{1}` = `[0, 1]`. Correct, and not a
+superset.
+
+**Build identity mattered and was checked.** `offered` is byte-identical in +72
+and +73, so Firestore alone cannot tell them apart — a +72 build could have
+produced this result if `deviceHardwareConfigProvider` happened to be warm, which
+is exactly the timing luck +73 removes. Build **292** (≠ 291) is what makes this
+attributable.
+
+#### Known limit — this rig is NOT the production analogue for the roofline leg
+
+With channel 1 **untraced**, an unresolved roofline (`segments.isEmpty` ⇒ all
+channels) and a correctly-resolved roofline both yield `[0, 1]`. The two are
+indistinguishable on this hardware. The **bus** leg is discriminating here
+(empty vs `[0,1]`); the **roofline** leg is not, and remains pinned only by the
+mutation test.
+
+To make the bench discriminating: add a channel-1 segment with
+`isPrimary: false` — correct becomes `[0]`, sampled-empty stays `[0, 1]`.
+
+**Still owed:** the on-hardware dedup pass (a second back-to-back heal with no
+relaunch; expect **0** mutations and no counter movement).
 
 ---
 
