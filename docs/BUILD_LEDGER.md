@@ -126,11 +126,15 @@ optional.
 longer crosses a provider boundary and cannot time out.
 
 **Verification:** suite run **from `1d95104` inside the build worktree** —
-**2159 passed · 3 skipped · 6 failed**. The 6 are 1 pre-existing
-(`base_ladder_repair_live_test`) + **5 × #64**, a midnight-wrap defect in the
-lease integration test reproduced at pre-change HEAD in a clean worktree. Net of
-#64 the count is 2164 passing, up 4 from +72's 2160 (3 new parser/one-fetch
-tests, 1 new disposition test).
+**2159 passed · 3 skipped · 6 failed**, of which 1 is pre-existing
+(`base_ladder_repair_live_test`) and **5 are #64**, a midnight-wrap defect in the
+lease integration test, reproduced at pre-change HEAD in a clean worktree.
+
+Re-run after local midnight on the same tree, no code change:
+**2164 passed · 3 skipped · 1 failed** — the pre-existing hardware test alone.
+**2164 is the new baseline**, up 4 from +72's 2160 (3 parser / one-fetch tests,
+1 disposition test). #64 is deterministic, not flaky: the same five went red at
+23:45 and green at 23:59.
 
 **§7.2d on +73 is OWED** and unchanged except: expected disposition `offered`;
 take a **fresh** `--before` (the +72 run mutated the document); and **verify the
