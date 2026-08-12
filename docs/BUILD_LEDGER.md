@@ -464,6 +464,57 @@ resolved for the affected accounts.
 
 ---
 
+## 2.5.10+74 — legacy installer entries retired; first build carrying a verified crew fanout
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-74`** — the deliberate act that produced the iOS build (#62). Tag points at `cec7a9e`; app bytes are `850c0db` (see below). |
+| **Git SHA (app bytes)** | **`850c0db`** — `feat(staff): retire the legacy installer entry points; bump to 2.5.10+74`. **iOS↔Android join key.** |
+| **App-bytes ancestry** | `1d95104` (+73) **+** the #66 end-guard, F-3 security, the #70 fanout fix, and the staff-entry retirement. |
+| **Ledger SHA (tagged)** | `cec7a9e` — docs-only on top of `850c0db`. Verified with a tree comparison, not a grep: `git diff --stat 850c0db cec7a9e -- . ':(exclude)docs'` is EMPTY, so the tag builds byte-identical app code. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **74** — `kStaffAuthTelemetryAppVersion` moved to `2.5.10+74` in the same commit; they are one fact in two files. |
+| **Android artifact** | `<PENDING>` — built locally from an isolated worktree at the tag. |
+| **iOS** | `<PENDING>` — Codemagic build number to be filled **when the build completes**, not when queued. |
+| **Uploaded** | `<PENDING>` |
+| **Supersedes** | **+73** |
+
+**Contents since +73**
+
+- **Legacy installer entry points retired** (`audit/INSTALLER_ENTRY.md`). Two
+  parallel entries existed, both live, both minting real server-side staff
+  tokens, landing on two different destinations. `/staff/pin` superseded the
+  legacy path on 2026-04-09 but only the login-screen caller was migrated — the
+  documentation was not stale, the code was. `installer_pin_screen.dart` (361
+  lines) and `admin/admin_dashboard_screen.dart` (248) deleted with routes
+  `/installer/pin` and `/admin/pin`; Day 1 / Day 2 session-expiry gates
+  repointed to `staffPin`.
+- **The Settings 5-tap is gone.** This was the entry Tyler had been using in the
+  field. On this build installer mode is reachable only via the login-screen
+  logo 5-tap or the visible "Installer" button on `/link-account`.
+- **The `/link-account` "Media" button removed** — it pushed a 4-digit staff PIN
+  screen while `MediaAccessCodeScreen` expects a 6-character media code, on the
+  default path of every fresh sign-up including a reviewer's. Repointing it
+  would not have fixed it: `media_codes`/`media_access_logs` have no
+  `firestore.rules` coverage, `/media` is in no `appRedirect` allow-list, and the
+  screen fabricates an `installerSessionProvider` with no minted token.
+- **`/sales/pin` and the visible "Installer" button KEPT deliberately** — the
+  former because `sales_landing_screen` still bounces to it on session expiry,
+  the latter because it is an open submission-review question and not something
+  to change silently under a release.
+- **Server work verified before this build, not after** — #70 (crew fanout wrote
+  `controllerIp:""`, so no real bridge could ever execute it) fixed in `06e36dc`,
+  deployed 22:20:40Z, and proven on hardware at **4/4** the same evening:
+  `A converged after ~2s (real bridge)`, strip carrying `seg0 fx=88 pal=5`
+  red/blue, A's command `completed` against `ip="192.168.1.150"`. Also carries
+  F-3 and the #66 end-fire guard. **The fanout fix is server-side and is already
+  live for the demo group regardless of this build** — +74 does not gate it.
+
+**Hardware state at cut:** bench `.150` restored to `on=false bri=200 ps=2`.
+Controller config untouched — type 30 / RGB order 1 remains source of truth.
+
+---
+
 ## 2.5.10+73 — participation reads buses from the healer's own cfg
 
 | Field | Value |
