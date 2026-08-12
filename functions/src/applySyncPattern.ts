@@ -157,7 +157,20 @@ export const applySyncPattern = onRequest(
     // high-frequency background callers incur zero extra read. Membership was
     // already verified above.
     if (fanout === true && groupId && groupId.length > 0) {
-      const fanoutEnabled = await readSyncFanoutEnabled(db);
+      const policy = await readSyncFanoutPolicy(db);
+      const fanoutEnabled = fanoutsForGroup(policy, groupId);
+      // LEGIBILITY (#68): a group held back by the allowlist must SAY so. A
+      // scoped-out group falls through to the host-only path, which looks
+      // identical to the flag being off — and "identical to off" with no reason
+      // recorded is exactly how a scoped rollout becomes undiagnosable.
+      if (policy.enabled && !fanoutEnabled) {
+        console.log(
+          `applySyncPattern: fanout SCOPED_OUT for group=${groupId} ` +
+            `(allowlist has ${policy.allowlist?.length ?? 0} entr` +
+            `${policy.allowlist?.length === 1 ? "y" : "ies"}); ` +
+            "host-only path, no crew commands written"
+        );
+      }
       if (fanoutEnabled) {
         // Anti-strobe rate limit (Commit 2). Reserve a slot TRANSACTIONALLY so
         // the function's concurrent instances serialize on the state doc — a
@@ -308,19 +321,80 @@ export function buildFanoutCommandDoc(args: {
   };
 }
 
-/** Read the fanout feature flag (config/sync_fanout.enabled). Default false. */
-async function readSyncFanoutEnabled(
+/**
+ * The fanout policy: globally enabled, or enabled for a named set of groups.
+ *
+ * `allowlist === null` means "no list" — every group fans out once `enabled` is
+ * true. A non-null list enables ONLY those groupIds; every other group falls
+ * through to the host-only path exactly as it does when the flag is off.
+ *
+ * Deliberately the same shape and the same failure directions as the planner's
+ * `uid_allowlist` (planGameDayFires). Two scoping mechanisms that behave
+ * differently under a typo would be worse than one.
+ */
+export interface FanoutPolicy {
+  enabled: boolean;
+  allowlist: string[] | null;
+}
+
+export const FANOUT_OFF: FanoutPolicy = { enabled: false, allowlist: null };
+
+/**
+ * PURE. Derive the policy from the flag document's data.
+ *
+ *   doc absent / undefined data   -> OFF
+ *   enabled !== true              -> OFF regardless of any allowlist
+ *   enabled true, list present    -> fanout for those groupIds ONLY
+ *   enabled true, list absent     -> global (the eventual end state)
+ *   enabled true, list MALFORMED  -> OFF, loudly
+ *
+ * MALFORMED IS OFF, NOT GLOBAL. Anyone who wrote `group_allowlist` INTENDED to
+ * scope the enable; treating a typo as "global" would turn it into a fleet-wide
+ * fanout — light control across every crew — which is the exact opposite of
+ * what the author reached for. An empty array is NOT malformed: it is a
+ * deliberate "enabled for nobody" and is honoured.
+ */
+export function fanoutPolicyFrom(
+  data: Record<string, unknown> | undefined
+): FanoutPolicy {
+  if (!data || data.enabled !== true) return FANOUT_OFF;
+
+  const raw = data.group_allowlist;
+  if (raw === undefined || raw === null) {
+    return { enabled: true, allowlist: null }; // global
+  }
+  if (!Array.isArray(raw) || raw.some((g) => typeof g !== "string" || g === "")) {
+    console.error(
+      "applySyncPattern: group_allowlist is MALFORMED (expected string[]); " +
+        "refusing to fan out. Fix or remove the field to enable. Value: " +
+        JSON.stringify(raw)
+    );
+    return FANOUT_OFF;
+  }
+  return { enabled: true, allowlist: raw as string[] };
+}
+
+/** True when THIS group may fan out. */
+export function fanoutsForGroup(policy: FanoutPolicy, groupId: string): boolean {
+  if (!policy.enabled) return false;
+  if (policy.allowlist === null) return true;
+  return policy.allowlist.includes(groupId);
+}
+
+/** Read the fanout policy (config/sync_fanout). Default OFF. */
+async function readSyncFanoutPolicy(
   db: admin.firestore.Firestore
-): Promise<boolean> {
+): Promise<FanoutPolicy> {
   try {
     const doc = await db.collection("config").doc("sync_fanout").get();
-    return doc.exists && doc.data()?.enabled === true;
+    if (!doc.exists) return FANOUT_OFF;
+    return fanoutPolicyFrom(doc.data());
   } catch (err) {
     console.warn(
       "applySyncPattern: fanout flag read failed; defaulting OFF",
       err
     );
-    return false;
+    return FANOUT_OFF;
   }
 }
 
