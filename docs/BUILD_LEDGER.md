@@ -42,7 +42,84 @@ optional.
       || echo "DIFFERS: $d"
   done
   ```
+- **Never cut a release build from the shared working tree.** This repo is
+  worked by parallel Claude sessions, so another window can save uncommitted
+  work into your tree mid-build and it will be compiled in. That is not
+  hypothetical — it burned **+70**, whose `.aab` contained a second session's
+  unreviewed installer-entry work. Build from an isolated worktree at the exact
+  merge SHA, and confirm its `git status` is empty before and after:
+
+  ```sh
+  git worktree add --detach /tmp/wt <merge-sha>
+  cp android/app/google-services.json /tmp/wt/android/app/   # gitignored
+  cp android/key.properties android/app/*.keystore /tmp/wt/android/…
+  cd /tmp/wt && flutter build appbundle --release --obfuscate \
+      --split-debug-info=build/debug-info/android
+  ```
+- **A burned versionCode gets its own row**, marked DO NOT UPLOAD, with why.
+  Silently skipping a number leaves the next person unable to tell a burn from a
+  bookkeeping error.
 - Archive `build/debug-info/<platform>/*.symbols` per build. Never commit them.
+
+---
+
+## 2.5.10+71 — healer participation ordering fix
+
+| Field | Value |
+|---|---|
+| **Git SHA (app bytes)** | **`01ab2b4`** — the `--no-ff` merge of `release/2.5.10+71`. **iOS↔Android join key.** |
+| **SHA range for this release** | `9e8607c..01ab2b4` defines the app bytes; later commits for this release are docs-only. Verify with the tree comparison in Conventions — **not** a path grep. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **71** — merged manifest (`android:versionCode="71"`, `android:versionName="2.5.10"`) |
+| **Android artifact** | `app-release.aab` · 68,296,168 bytes · built 2026-08-11 19:11 · `jarsigner -verify` → **jar verified** |
+| **Built from** | **An isolated `git worktree` checked out at `01ab2b4`**, not the main working tree — see the +70 row. Worktree `git status` was empty before and after the build, so no in-flight edit could reach the artifact. |
+| **iOS** | **NOT YET TRIGGERED.** Build number `PENDING`. Build from the tip of `main` once `01ab2b4` is pushed. |
+| **Uploaded** | NO |
+
+**Contents since +69**
+
+- **Participation ordering fix** (`89ca43e`) — +69 published base boundaries but
+  **never** participation. Both participation inputs are asynchronous and
+  neither has resolved when the healer fires at t=0:
+  `deviceHardwareConfigProvider` is a FutureProvider doing its own `/json/cfg`
+  GET (empty bus list ⇒ correct-but-permanent refusal), and
+  `currentRooflineConfigProvider` is a **StreamProvider** (no segments ⇒ the
+  resolver reads "untraced install" and would publish a **superset**). The
+  caller now hands the healer a `Future<ParticipationInput?>`, awaited on the
+  fire-and-forget path with a 20s bound. Heals unaffected.
+- **The silence, fixed structurally** — a skipped publish left no log line, no
+  field and no report entry, which is why a bench run caught this and nothing
+  else did. `ParticipationDisposition` enumerates every skip reason,
+  `FactsPublishOutcome.describe()` logs one line always, and
+  `ControllerHealReport.factsPublish` exposes the outcome as an awaitable.
+
+**Verification:** Dart suite **2148 passed · 3 skipped · 1 failed**
+(`test/hardware/base_ladder_repair_live_test.dart` — pre-existing, reproduced at
+baseline), run **inside the clean worktree**. `flutter analyze lib/ test/` no
+errors. Step 6 (both families in one `set(merge:true)`) is now pinned by counting
+document mutations via a snapshot listener.
+
+**Participation re-verification on hardware is OWED** — `audit/HEALER_PUBLISH.md`
+§7.2d. +69 proved base boundaries; participation has never once published from
+the healer on a real device.
+
+**NOT deployed:** Cloud Functions, `firestore.rules`, and
+`config/gameday_planner.write_jobs` NOT flipped.
+
+---
+
+## 2.5.10+70 — BURNED, NEVER SHIPPED. DO NOT UPLOAD.
+
+| Field | Value |
+|---|---|
+| **Status** | **Artifact built, then DELETED. versionCode 70 is consumed and must never be reused.** |
+| **Why** | The `.aab` was built from the main working tree at 17:37 while a **parallel session** saved uncommitted work-in-progress into that same tree at 17:20–17:21 (`lib/app_router.dart`, `lib/features/auth/staff_pin_screen.dart`, `lib/features/auth/link_account_screen.dart`, `lib/features/site/settings_page.dart`). The Dart compile picked them up. The artifact therefore contained another session's unreviewed, untested, uncommitted code. |
+| **Disposition** | Deleted from `build/app/outputs/bundle/release/`. No commit was ever made at +70; the version bump went straight to +71. The other session's files were left untouched and uncommitted. |
+
+**The lesson, promoted to Conventions:** this repo is worked by parallel sessions,
+so **a release build must never be cut from the shared working tree.** +71 was
+built in an isolated `git worktree` at the exact merge SHA, whose `git status`
+was empty before and after.
 
 ---
 
