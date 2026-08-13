@@ -24,4 +24,43 @@
  *   npm run build
  *   firebase deploy --only functions:initiateSyncSession
  */
+export type InitiatorVerdict = {
+    ok: true;
+} | {
+    ok: false;
+    reason: string;
+    message: string;
+};
+/**
+ * PURE. May THIS initiator start a session in this category?
+ *
+ * CONSENT > PAUSE. Pause is a mood; consent is a contract. This function knows
+ * only about the contract — `participationStatus` is deliberately not an input,
+ * because the initiator is exempt from it and passing it here would invite a
+ * future edit to blend the two back together.
+ *
+ * Three distinct refusals, because the remedies differ: never answered, said no
+ * to the category, said skip-this-one.
+ */
+export declare function initiatorConsentVerdict(args: {
+    consentExists: boolean;
+    categoryOptIns: Record<string, unknown> | undefined | null;
+    skipNextEventIds: unknown;
+    category: string;
+    eventId: string;
+}): InitiatorVerdict;
+/**
+ * PURE. Is this member dropped for participationStatus?
+ *
+ * #71: the initiator never is. Identity-keyed, mirroring #69's fix in
+ * applySyncPattern — NOT a relaxed predicate, so every other member's pause
+ * semantics are byte-identical to before.
+ */
+export declare function memberSkippedForSession(isInitiator: boolean, participationStatus: unknown): boolean;
+/**
+ * PURE. Host selection, unchanged in rule and now reachable by a paused
+ * initiator: they are in `participants`, so the existing preference order can
+ * pick them.
+ */
+export declare function chooseHost(participants: string[], creatorUid: unknown, initiatorUid: string): string;
 export declare const initiateSyncSession: import("firebase-functions/v2/https").HttpsFunction;

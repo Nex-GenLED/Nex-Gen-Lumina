@@ -60,8 +60,74 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initiateSyncSession = void 0;
+exports.initiatorConsentVerdict = initiatorConsentVerdict;
+exports.memberSkippedForSession = memberSkippedForSession;
+exports.chooseHost = chooseHost;
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
+/**
+ * PURE. May THIS initiator start a session in this category?
+ *
+ * CONSENT > PAUSE. Pause is a mood; consent is a contract. This function knows
+ * only about the contract — `participationStatus` is deliberately not an input,
+ * because the initiator is exempt from it and passing it here would invite a
+ * future edit to blend the two back together.
+ *
+ * Three distinct refusals, because the remedies differ: never answered, said no
+ * to the category, said skip-this-one.
+ */
+function initiatorConsentVerdict(args) {
+    if (!args.consentExists) {
+        return {
+            ok: false,
+            reason: "consent_missing",
+            message: `You have no sync consent recorded for "${args.category}", so this ` +
+                "session was not started.",
+        };
+    }
+    if (!(args.categoryOptIns || {})[args.category]) {
+        return {
+            ok: false,
+            reason: "consent_blocked",
+            message: `Your sync consent for "${args.category}" is off, so this session was ` +
+                "not started. Turn it on to sync this category.",
+        };
+    }
+    const skip = Array.isArray(args.skipNextEventIds) ? args.skipNextEventIds : [];
+    if (skip.includes(args.eventId)) {
+        return {
+            ok: false,
+            reason: "skip_next_active",
+            message: "You chose to skip this event, so this session was not started.",
+        };
+    }
+    return { ok: true };
+}
+/**
+ * PURE. Is this member dropped for participationStatus?
+ *
+ * #71: the initiator never is. Identity-keyed, mirroring #69's fix in
+ * applySyncPattern — NOT a relaxed predicate, so every other member's pause
+ * semantics are byte-identical to before.
+ */
+function memberSkippedForSession(isInitiator, participationStatus) {
+    if (isInitiator)
+        return false;
+    return participationStatus === "paused" || participationStatus === "optedOut";
+}
+/**
+ * PURE. Host selection, unchanged in rule and now reachable by a paused
+ * initiator: they are in `participants`, so the existing preference order can
+ * pick them.
+ */
+function chooseHost(participants, creatorUid, initiatorUid) {
+    if (typeof creatorUid === "string" && participants.includes(creatorUid)) {
+        return creatorUid;
+    }
+    if (participants.includes(initiatorUid))
+        return initiatorUid;
+    return participants[0];
+}
 exports.initiateSyncSession = (0, https_1.onRequest)({ maxInstances: 10, cors: false }, async (req, res) => {
     if (req.method !== "POST") {
         res.status(405).json({ error: "Method not allowed; use POST." });
@@ -151,10 +217,48 @@ exports.initiateSyncSession = (0, https_1.onRequest)({ maxInstances: 10, cors: f
         .get();
     const category = eventData.category || "gameDay";
     const participants = [];
+    // ── #71 — CONSENT > PAUSE, and the initiator is exempt from pause only ──
+    //
+    // Tyler's decision, 2026-08-13: *"the initiator exemption extends to
+    // participationStatus (pause) in initiateSyncSession, but NEVER overrides
+    // syncConsent. Pause is a mood; consent is a contract. A paused initiator
+    // joins and can host their own session; an explicitly opted-out initiator
+    // gets a LEGIBLE refusal telling them their consent setting blocks it —
+    // never a silent re-opt-in, never a silent drop."*
+    //
+    // The initiator's consent is resolved BEFORE the member loop so the refusal
+    // can be returned instead of a session. Inside the loop they would merely be
+    // skipped, and the caller would receive "no eligible participants" — the
+    // silent drop the decision forbids.
+    const initiatorConsentDoc = await db
+        .collection("neighborhoods").doc(groupId)
+        .collection("members").doc(initiatorUid)
+        .collection("settings").doc("syncConsent")
+        .get();
+    const refuse = (reason, message) => {
+        console.warn(`initiateSyncSession: REFUSED for ${initiatorUid} in ${groupId} ` +
+            `category=${category} event=${eventId} — ${reason}`);
+        res.status(200).json({ success: false, reason, category, message });
+    };
+    const ic = initiatorConsentDoc.data() || {};
+    const verdict = initiatorConsentVerdict({
+        consentExists: initiatorConsentDoc.exists,
+        categoryOptIns: ic.categoryOptIns,
+        skipNextEventIds: ic.skipNextEventIds,
+        category,
+        eventId,
+    });
+    if (!verdict.ok) {
+        refuse(verdict.reason, verdict.message);
+        return;
+    }
     for (const memberDoc of membersSnap.docs) {
         const memberData = memberDoc.data();
         const uid = memberDoc.id;
-        // Check consent
+        const isInitiator = uid === initiatorUid;
+        // Check consent — applies to EVERYONE, initiator included. The initiator
+        // already passed it above; re-running it here keeps one code path rather
+        // than a special case that could drift.
         const consentDoc = await db
             .collection("neighborhoods")
             .doc(groupId)
@@ -174,9 +278,13 @@ exports.initiateSyncSession = (0, https_1.onRequest)({ maxInstances: 10, cors: f
         const skipIds = consent.skipNextEventIds || [];
         if (skipIds.includes(eventId))
             continue;
-        // Participation status check
-        if (memberData.participationStatus === "paused" ||
-            memberData.participationStatus === "optedOut") {
+        // Participation status check. #71: the initiator is exempt — identity
+        // keyed, exactly as #69's fix in applySyncPattern, NOT a relaxed
+        // predicate. Every other member's pause semantics are untouched.
+        if (memberSkippedForSession(isInitiator, memberData.participationStatus)) {
+            console.warn(`initiateSyncSession: skipped ${uid} in ${groupId} — ` +
+                `participationStatus=${String(memberData.participationStatus)} ` +
+                "(not the initiator)");
             continue;
         }
         participants.push(uid);
@@ -188,12 +296,7 @@ exports.initiateSyncSession = (0, https_1.onRequest)({ maxInstances: 10, cors: f
         return;
     }
     // ── Determine host ────────────────────────────────────────────────
-    const creatorUid = groupData.creatorUid;
-    const hostUid = participants.includes(creatorUid)
-        ? creatorUid
-        : participants.includes(initiatorUid)
-            ? initiatorUid
-            : participants[0];
+    const hostUid = chooseHost(participants, groupData.creatorUid, initiatorUid);
     // ── Create session ────────────────────────────────────────────────
     const sessionRef = db
         .collection("neighborhoods")
