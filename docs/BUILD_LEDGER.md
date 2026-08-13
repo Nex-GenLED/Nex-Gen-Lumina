@@ -235,6 +235,30 @@ example** — the two reason sets overlap by four and `YcSGiwes` fails only R3, 
 the distinct count is the union. The test caught that before the log could state
 it wrongly.
 
+### WORKSHEET MOVEMENT — first customer-driven graduation, 2026-08-13T15:55:14Z
+
+`Ayf0rqwN` (textim6@yahoo.com) published participation facts — `dev=[0,1]` —
+minutes after the gate went live. Nobody did anything server-side: this is the
+self-healing R3 path, a customer opening the app on their LAN and the healer
+publishing. **The first movement on the global-arm worksheet, and it came from a
+customer rather than from us.**
+
+The account graduated `no_facts` and stays gated on `no_floor`, so the live line
+moved `{no_facts:5}` to `{no_facts:4}` with `gated` holding at 8 — the counts
+behaving exactly as the model predicts, which is a better check on the summariser
+than any fixture. **R3 gaps are now three:** `EHRfYGyf`, `NmDukd5r`, `YcSGiwes`
+(`reviewer` has no controller at all). `Ayf0rqwN` now needs only a floor.
+
+Also this pass: the summary separator became **ASCII** (`|`) — the middot rendered
+as `?` in the gcloud console, so the line's first act in production was to become
+unreadable in the place it is read. And the census test split in two: permanent
+**invariants** (gated + armed = evaluated; advisory never folded in; counts folded
+from the same verdicts as the rows; a gated count is the UNION of reasons, not
+their sum) and a dated **snapshot** that reports drift and never hard-fails —
+a red build because a customer set a schedule would teach everyone to stop reading
+it. Updating the snapshot is a deliberate ledger act; this entry is the first one.
+376 tests / 16 suites.
+
 ### GLOBAL-ARM WORKSHEET — census 2026-08-13
 
 Nine accounts, eighteen configs — reconciles exactly with the planner's
