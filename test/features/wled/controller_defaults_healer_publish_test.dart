@@ -87,6 +87,10 @@ class _RecordingPublisher extends ControllerFactsPublisher {
   /// The mirrored disposition label handed over on each attempt.
   final List<String?> dispositions = [];
 
+  /// W4/R2: the tri-state base-ladder verdict handed over on each attempt.
+  /// Recorded so a healer that stops measuring it fails loudly here.
+  final List<bool?> ladderVerdicts = [];
+
   @override
   Future<bool> publishDeviceFacts({
     required String? controllerId,
@@ -95,9 +99,11 @@ class _RecordingPublisher extends ControllerFactsPublisher {
     required int slotsRead,
     required String source,
     String? participationDisposition,
+    bool? ladderAssertsSegments,
   }) async {
     calls.add((participation: participation?.resolved, rows: baseBoundaries));
     dispositions.add(participationDisposition);
+    ladderVerdicts.add(ladderAssertsSegments);
     final id = controllerId;
     if (id == null) return false;
     final families = [
@@ -135,6 +141,7 @@ class _ThrowingPublisher extends ControllerFactsPublisher {
     required int slotsRead,
     required String source,
     String? participationDisposition,
+    bool? ladderAssertsSegments,
   }) {
     throw StateError('firestore unavailable');
   }

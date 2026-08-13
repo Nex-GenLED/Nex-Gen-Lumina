@@ -17,6 +17,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
+import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart';
 import 'package:nexgen_command/features/wled/controller_facts_writer.dart';
 import 'package:nexgen_command/features/wled/participation_denormalizer.dart';
 
@@ -259,6 +260,9 @@ abstract class ControllerFactsPublisher {
     required int slotsRead,
     required String source,
     String? participationDisposition,
+    /// R2 (W4). Tri-state: true verified good, false verified BAD, null not
+    /// measured. Null contributes nothing — see [prepareBaseLadderFacts].
+    bool? ladderAssertsSegments,
   });
 }
 
@@ -275,6 +279,7 @@ class FirestoreControllerFactsPublisher extends ControllerFactsPublisher {
     required int slotsRead,
     required String source,
     String? participationDisposition,
+    bool? ladderAssertsSegments,
   }) async {
     final id = controllerId;
     if (id == null || id.isEmpty) return false;
@@ -292,6 +297,15 @@ class FirestoreControllerFactsPublisher extends ControllerFactsPublisher {
           controllerId: id,
           rows: baseBoundaries,
           slotsRead: slotsRead,
+          source: source,
+        ),
+        // R2 (W4). Rides the same write as its siblings and keeps its own
+        // dedup, so an unchanged verdict on a reconnect contributes nothing —
+        // the zero-mutation guarantee, pinned in
+        // base_ladder_denormalizer_test.dart.
+        prepareBaseLadderFacts(
+          controllerId: id,
+          verdict: ladderAssertsSegments,
           source: source,
         ),
         // Last, so it merges into whatever write the fact families already

@@ -84,6 +84,7 @@ import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
+import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart';
 import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -750,9 +751,50 @@ class ControllerDefaultsHealer {
       }
     }
 
+    // ── R2 (W4): does the base ladder assert per-segment state? ─────────
+    // One extra GET, on the LAN connect the healer is already performing. The
+    // verdict is TRI-STATE and the null cases matter more than the true one:
+    // no bus list, or presets unreadable, must publish NOTHING rather than
+    // `false`, because `false` moves the account into log-only server-side.
+    // A failed HTTP GET must never do that.
+    bool? ladderVerdict;
+    try {
+      final busIds = hw == null
+          ? const <int>[]
+          : deviceChannelsFromConfig(hw).map((c) => c.id).toList();
+      // Same narrowing the on-preset heal uses: only a direct-LAN WledService
+      // can read /presets.json. Over the relay this stays null — unmeasured,
+      // which is the honest answer from off-LAN.
+      final source = repo;
+      if (busIds.isNotEmpty && source is WledService) {
+        final read = await source.readPresets();
+        // PresetsRead is tri-state too, and the mapping is the whole point:
+        //   available   -> measure it
+        //   deviceEmpty -> a REAL measurement. The controller holds no presets,
+        //                  so a restore to preset 1/2 asserts nothing. false.
+        //   unknown     -> non-2xx / unreachable / unparseable. We did not
+        //                  look, so we say nothing. NOT false.
+        switch (read.state) {
+          case PresetsReadState.available:
+          case PresetsReadState.deviceEmpty:
+            ladderVerdict = ladderAssertsSegments(
+              presets: read.presets,
+              deviceChannelIds: busIds,
+            );
+            break;
+          default:
+            ladderVerdict = null;
+        }
+      }
+    } catch (e) {
+      // Stays null — unmeasured, not broken.
+      debugPrint('[Healer] base-ladder read failed: $e');
+    }
+
     var wrote = false;
     try {
       wrote = await publisher.publishDeviceFacts(
+        ladderAssertsSegments: ladderVerdict,
         controllerId: controllerId,
         participation: input,
         baseBoundaries: rows,
