@@ -19,6 +19,51 @@ optional.
 
 ## Operational flags
 
+### Sync cleanup + fanout RESCOPED — 2026-08-13
+
+Production `/neighborhoods` held three groups. Two were internal test artifacts
+and were deleted with their subcollections enumerated explicitly (Firestore does
+not cascade):
+
+```
+06m7bMxKNjolhsRXV5MJ  "demo test"  commands/1  members/2
+8b25LBEhS51H65VHKGQ1  "demo"       commands/1  members/2  rate_limits/state
+```
+
+Verified after: both group docs gone, **0 residual subcollection docs**,
+`/neighborhoods` = 1. `/neighborhood_public` was already empty. **No user doc
+referenced any deleted group id** — scanned every user for all three ids, zero
+hits, so no denormalized cleanup was needed.
+
+**`/invitations` is NOT Sync** and was left alone: those two pending docs are
+household-sharing invites (`installation_id`, `permissions`,
+`primary_user_id: j8eXTfcs` = marc@tapsonmain.com).
+
+> **THE THIRD GROUP WAS KEPT, AND THE PREMISE THAT WOULD HAVE DELETED IT WAS
+> WRONG.** The cleanup brief described the real Tyler+Ellie group as something
+> that "gets created fresh when Tyler and Ellie run the live street test." It
+> already existed: `OqWsIyvNUwYjel6Dbzwl` — *"Let's Hope This Works"*, created
+> 2026-07-28, whose second member `ecochran08@yahoo.com` reads
+> `display_name: "Ellie Cochran"`, `bridge_paired: true`, bridge `10.0.0.112`,
+> controller `20_e7_c8_f4_d5_38` at `10.0.0.32`. Deleting it would have dropped a
+> remote household's membership and forced a re-join by invite code. Audit-first
+> is what caught it.
+
+**Fanout rescoped in the same pass**, readback-confirmed:
+
+```
+BEFORE group_allowlist=["8b25LBEhS51H65VHKGQ1"]   enabled=true
+AFTER  group_allowlist=["OqWsIyvNUwYjel6Dbzwl"]   enabled=true
+```
+
+> ⚠️ **THIS IS A DELIBERATE WIDENING, NOT A LIKE-FOR-LIKE MOVE.** The previous
+> entry justified itself as *"bench-created … no customer."* The new target
+> contains a **real second home**: a fanout in this group commands **Ellie's**
+> lights, not a bench rig. That is presumably the point — it is the live
+> street-test group — but the safety property the old scoping relied on is gone,
+> and the next fanout run is against someone's house. `enabled:false` remains the
+> instant rollback, no deploy.
+
 ### `config/sync_fanout` — SCOPED ENABLE, 2026-08-12T21:15:10.089Z
 
 ```
