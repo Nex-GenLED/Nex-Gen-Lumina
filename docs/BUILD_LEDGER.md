@@ -868,6 +868,32 @@ deploys were performed**.
 fresh-account invite-code join on +76 closes it for both builds.
 
 ---
+> ### ⚠️ THE JOIN-SMOKE ACCOUNT IS A CUSTOMER, AND IT INVALIDATES THE FANOUT SCOPING PREMISE
+>
+> The account used was **`YcSGiwesJuS7Qsh1aql0Qh1jqYh2` = stegall.s@yahoo.com** — not a fresh
+> test account. It is a **real customer**, row 6 of the Game Day census, with a real controller
+> (`80_f3_da_b3_b8_20`, `192.168.1.250`).
+>
+> The smoke result stands: the join path works on device, which is what it was there to prove.
+> What does NOT stand is the reason `sync_fanout` was scoped to this group. The flag record says:
+> *"Chosen because it is bench-created and its only members are tyler.honeycutt and
+> nex-genadmin — **no customer**."* **That premise is now false.**
+>
+> Their member doc is `participationStatus:"active"`, so the fanout loop would serve them, and
+> `resolveMemberTargets` would resolve `192.168.1.250` from their controllers subcollection.
+> **The next crew broadcast in the demo group would write commands to a customer's lights.**
+> Not spontaneous — a fanout only runs when someone initiates one — but the next `fanout-verify`
+> run would do it.
+>
+> They have no `syncConsent` doc, so `initiateSyncSession` would skip them; `applySyncPattern`
+> does not consult consent at all, so the fanout path is the exposed one.
+>
+> **RECOMMENDATION REVERSED. Revert the join.** The earlier advice — keep it as a permanent
+> outsider-uid rig asset — was written before the account was identified, and a customer is not
+> a rig asset. A dedicated test account gives the same three-times-this-week convenience with
+> none of this exposure. Until it is reverted, treat the demo group as CONTAINING A CUSTOMER and
+> do not run a fanout against it.
+
 ## 2.5.10+75 — F-3's app half ships; the +74 join regression is closed
 
 | Field | Value |
@@ -882,7 +908,7 @@ fresh-account invite-code join on +76 closes it for both builds.
 | **iOS** | **Build 296** — reported by Tyler 2026-08-13 for the `build-75` tag. **Trigger and checked-out SHA NOT independently confirmed:** this session has no Codemagic credential, so "triggered by the tag, built from `0769e70`" rests on the tag-only webhook plus Tyler's attribution, not on a read of the build record. Corroboration, not proof: +74 was 295 and +75 is 296 with no gap, which is consistent with no stray push-build having run between the two tags. |
 | **Uploaded** | **DISTRIBUTED 2026-08-13** — Play **closed testing track** + **TestFlight** (iOS 296, tag `build-75`). Supersedes +74 on BOTH tracks. |
 | **Supersedes** | **+74** (join regression) — superseded on both tracks. |
-| **OPEN AT DISTRIBUTION** | ⚠️ **On-device join smoke is PENDING.** Posted on the strength of the F-3 c5 callable proof in production (membership written same-batch, server-side). The app's UI wiring TO that callable is unit-tested (`neighborhood_join_reflects_in_ui_test.dart`, 6 cases) but **has not been exercised on a device**. Closed by exactly one thing: **a fresh-account join by invite code on +75**. Until then the claim is "the server accepts the join" — not "the app performs it". |
+| **OPEN AT DISTRIBUTION** | ✅ **CLOSED 2026-08-13 — on-device join smoke PASSED on +76 (iOS 298).** A non-member account joined the demo crew by invite code; the app confirmed "Welcome to demo" and the server shows `memberUids` at 3 with an `active` member doc. The +74 regression path is verified fixed ON DEVICE, for +75 and +76 both. Was: ⚠️ pending. Posted on the strength of the F-3 c5 callable proof in production (membership written same-batch, server-side). The app's UI wiring TO that callable is unit-tested (`neighborhood_join_reflects_in_ui_test.dart`, 6 cases) but **has not been exercised on a device**. Closed by exactly one thing: **a fresh-account join by invite code on +75**. Until then the claim is "the server accepts the join" — not "the app performs it". |
 
 **Why this build exists**
 
