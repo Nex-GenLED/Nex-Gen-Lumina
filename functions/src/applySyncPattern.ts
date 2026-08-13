@@ -586,11 +586,37 @@ export async function fanoutToCrew(
 
   membersSnap.forEach((memberDoc) => {
     const data = memberDoc.data();
-    if (isMemberSkipped(data.participationStatus)) {
+    const memberUid = memberDoc.id;
+    // #69 — PAUSE MUTES THE CREW, NOT YOURSELF.
+    //
+    // Tyler's decision, 2026-08-13: "pause does NOT mute your own broadcast. A
+    // paused member who initiates receives their own command; pause continues
+    // to mute INCOMING broadcasts."
+    //
+    // Before this, the fanout arm RETURNS, so the host-only self-write below it
+    // never runs when fanout is on — the initiator's own command could only come
+    // from this loop, and this loop skipped them for being paused. A paused
+    // member pressing broadcast lit the whole crew and not their own house, and
+    // only when the flag was on. Found on the first successful two-node run
+    // (3/4, 2026-08-12: `members=1 commands=1 skipped=1`).
+    //
+    // The exemption is deliberately keyed on identity, not on a relaxed
+    // predicate: `isMemberSkipped` is unchanged, so every OTHER member's pause
+    // semantics are untouched.
+    const isInitiator = memberUid === args.initiatorUid;
+    if (!isInitiator && isMemberSkipped(data.participationStatus)) {
       skipped++;
+      // This branch used to be SILENT. It incremented `skipped` and returned,
+      // so the 3/4 run reported `skipped:1` with no reason anywhere and the
+      // cause had to be recovered by reading the roster by hand. The sibling
+      // branch below has always logged; this one now matches it.
+      console.warn(
+        `applySyncPattern FANOUT: skipped ${memberUid} in ${args.groupId} — ` +
+          `participationStatus=${String(data.participationStatus)} ` +
+          "(not the initiator; pause mutes INCOMING broadcasts)"
+      );
       return;
     }
-    const memberUid = memberDoc.id;
     // SYNC-1: reject any target not mutually verified in memberUids[]. Closes
     // the self-fanout hole — a one-sided/out-of-band member doc never receives a
     // write to its command queue. Structured + logged.
