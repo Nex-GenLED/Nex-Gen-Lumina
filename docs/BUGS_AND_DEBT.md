@@ -977,7 +977,39 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Prerequisite for the global `sync_fanout` flip. Files:
     `functions/src/applySyncPattern.ts:413-445`. Related **#69**, F-3.
 
-- [ ] **#69 — A PAUSED member who initiates a sync gets no command for their OWN house, and only
+- [x] **#69 — A PAUSED member who initiates a sync gets no command for their OWN house. FIXED + DEPLOYED + HARDWARE-VERIFIED 2026-08-13.**
+  - Status: **CLOSED.** Tyler's decision, quoted: *"pause does NOT mute your own broadcast. A
+    paused member who initiates receives their own command; pause continues to mute INCOMING
+    broadcasts."* Fix `8cb9d3c` at `applySyncPattern.ts:587-608`: `memberUid` is read before the
+    skip, which becomes `!isInitiator && isMemberSkipped(...)`. Keyed on **identity**, not on a
+    relaxed predicate — `isMemberSkipped` is untouched, so every other member's pause semantics
+    are unchanged. That branch was also **silent**; it now logs the member and status, matching
+    its sibling. Deployed `--only functions:applySyncPattern`. 322 tests / 14 suites (was 313/13).
+  - **Two runs, same rig, same roster:** 2026-08-12 with A paused → `members=1 commands=1
+    skipped=1`, A never converged (the exposing configuration). 2026-08-13 with A **still paused**
+    → `served=2 skipped=0`, A converged **~2s via the real bridge**, B's stub reflected,
+    `retryAfterMs=14883`. **4/4 with a paused initiator.**
+  - Bench resting state is deliberately left **`paused`** so every future run exercises the
+    exemption — see the ledger note.
+
+- [ ] **#71 — `initiateSyncSession` has the SAME defect #69 just fixed, and no initiator exemption**
+  - Status: OPEN (found 2026-08-13 while closing #69) · Severity: **P2** · Evidence:
+    verified-by-source
+  - [initiateSyncSession.ts:167-171](../functions/src/initiateSyncSession.ts#L167) skips any member
+    whose `participationStatus` is `paused`/`optedOut` — with **no exemption for the caller**,
+    even though `initiatorUid` is known at `:70` and verified against the token at `:79`.
+  - Consequence is worse than #69's: the paused initiator is dropped from `participants`, so at
+    `:185-188` they cannot be chosen host either (`creatorUid` if present, else `initiatorUid` if
+    present — a paused initiator is in neither), and `:234` skips them again. They start a sync
+    session they do not join and may not host.
+  - **Not fixed with #69 deliberately.** This path also gates on a per-category `syncConsent`
+    doc, so "the initiator always participates" is a stronger claim here than in the fanout —
+    it would override an explicit consent opt-out, not just a pause. Tyler's #69 decision reads
+    naturally as covering it, but the consent interaction is a product call and should be made
+    explicitly rather than inherited.
+  - Files: `functions/src/initiateSyncSession.ts:167-171`, `:185-188`, `:234`. Related **#69**.
+
+- [x] **#69 (original entry) — A PAUSED member who initiates a sync gets no command for their OWN house, and only
   when fanout is enabled**
   - Status: OPEN (found 2026-08-12 on the first successful two-node fanout run) · Severity:
     **P2** · Evidence: verified-by-source + live run

@@ -180,6 +180,60 @@ surfacing), `1e5f07f` (#69), `3910a85` (poll for the real bridge), `0c5fd92`
 (empty-IP fidelity + #70 filed), `06e36dc` (#70 server fix). The global flip is
 now a decision, not a blocker.
 
+### #69 — CLOSED 2026-08-13. Pause mutes the crew, not yourself.
+
+**Tyler's decision, quoted** (a product choice, not derivable from the code):
+*"pause does NOT mute your own broadcast. A paused member who initiates receives
+their own command; pause continues to mute INCOMING broadcasts."*
+
+**Fix** `8cb9d3c`, `applySyncPattern.ts:587-608`. `memberUid` moves above the skip;
+the skip becomes `!isInitiator && isMemberSkipped(...)`. Keyed on **identity, not a
+relaxed predicate** — `isMemberSkipped` is untouched, so every other member's pause
+semantics are unchanged, and a later "simplification" into the predicate fails a
+pinned test. The branch was also SILENT: it incremented `skipped` and returned, which
+is why the 3/4 run reported `skipped:1` with no reason anywhere and the cause had to
+be recovered by reading the roster by hand. It now logs member + status, matching its
+sibling branch. Deployed `--only functions:applySyncPattern`; **322 tests / 14 suites**
+(was 313 / 13).
+
+**Two runs, same rig, same roster — the exposing configuration became the proof:**
+
+| Date | A's status | Result |
+|---|---|---|
+| 2026-08-12 | `paused` | `members=1 commands=1 skipped=1` — A never converged |
+| 2026-08-13 | `paused` | `served=2 skipped=0`, A converged **~2s via the real bridge**, B's stub reflected, `retryAfterMs=14883` — **4/4** |
+
+**Post-deploy flag check:** `config/gameday_planner` `write_jobs:true` /
+`uid_allowlist:[bench]` (`updateTime 15:51:14Z`, 2026-08-12) and `config/sync_fanout`
+`enabled:true` / `group_allowlist:[demo]` (`21:15:10Z`) both **unchanged**;
+`planGameDayFires` still on its `15:33:21Z` revision.
+
+**The first deploy attempt failed** — `Cannot determine backend specification. Timeout
+after 10000`. Not a code fault: `require('./index.js')` loads in 897ms locally, and the
+identical retry succeeded. Recorded so the next occurrence is read as transient rather
+than diagnosed from scratch.
+
+**BENCH RESTING STATE: A stays `paused`.** Recommended and set, for two reasons.
+(1) **Discriminating power.** Paused is the only state that exercises the initiator
+exemption. With A `active` the exemption is dead code on the bench, and a revert would
+pass every run silently — exactly how #69 hid. With A `paused`, a regression fails the
+very next fanout run, visibly, on hardware.
+(2) **It costs #67 nothing.** `participationStatus` is read by exactly two consumers —
+`applySyncPattern` and `initiateSyncSession`. The **fire path does not read it at all**;
+Game Day participation resolves from `participating_channels` (published by the healer),
+a separate mechanism. Segment state is likewise unaffected. So #67's step 6 keeps full
+bench participation and segment readability with A paused.
+
+**One trade-off, named rather than buried:** with A paused, `initiateSyncSession` will
+exclude A from sync SESSIONS — that path has the same skip and **no** initiator
+exemption (**#71**, filed today). Any future bench test that drives a sync session will
+see A missing, and should read #71 before treating it as a new bug.
+
+**Unexplained, recorded:** A's member doc read `paused` at the start of today's work,
+having been set `active` on 2026-08-12 for the 4/4 run. Nothing in this session's
+commits touches roster data. It was the state the test wanted, so it was left alone —
+but the reset itself is unaccounted for.
+
 ### F-3 — CLOSED 2026-08-12. Neighborhood reads scoped, crew join moved server-side.
 
 Deployed from `fix/f3-neighborhood-security` @ `a83193f` (worktree
