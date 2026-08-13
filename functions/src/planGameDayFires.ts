@@ -47,6 +47,7 @@ import {
   PLAN_HORIZON_MS,
   argbToRgb,
   buildParticipatingSegArray,
+  buildFullPartitionSegArray,
   decideEndSignal,
   startJobConfirmsFired,
   estimatedDurationMs,
@@ -188,7 +189,16 @@ async function readWriteJobsPolicy(
 export function buildGameDayPayload(args: {
   config: Record<string, unknown>;
   participatingChannels: number[];
-}): { payload: string } | { refuse: string } {
+  /**
+   * #67. The controller's full channel set, from the healer's published facts.
+   * Present → the payload asserts the FULL PARTITION. Absent/empty → falls back
+   * to naming only the participating channels (pre-#67 behaviour) and reports
+   * `partitioned:false` so the caller can log `partition_unavailable`.
+   * Never guess a partial: a fabricated device set would darken a channel the
+   * customer actually has.
+   */
+  deviceChannelIds?: number[] | null;
+}): { payload: string; partitioned: boolean } | { refuse: string } {
   const c = args.config;
 
   // Saved design takes priority, exactly as the client's selectDesign does.
@@ -203,7 +213,11 @@ export function buildGameDayPayload(args: {
     // channels — the client documents the same carve-out (selectDesign's
     // saved branch bypasses _buildWledPayload and is not participation
     // filtered). Re-expanding would flatten a multi-seg design onto bus 0.
-    return { payload: raw };
+    // #67 does NOT partition a saved design either: the blob carries its own
+    // multi-segment shape, and overlaying an exclusion set built for the
+    // channel model would fight it. Recorded as partitioned:false so a saved
+    // design is never mistaken for a partitioned fire in the log.
+    return { payload: raw, partitioned: false };
   }
 
   if (args.participatingChannels.length === 0) {
@@ -214,13 +228,30 @@ export function buildGameDayPayload(args: {
   const secondary =
     typeof c.secondary_color === "number" ? c.secondary_color : 0xffffffff;
 
-  const seg = buildParticipatingSegArray({
-    participatingChannelIds: args.participatingChannels,
+  const look = {
     effectId: typeof c.effect_id === "number" ? c.effect_id : 0,
     speed: typeof c.speed === "number" ? c.speed : 128,
     intensity: typeof c.intensity === "number" ? c.intensity : 128,
     colorSlots: toRgbwSlots([argbToRgb(primary), argbToRgb(secondary)]),
-  });
+  };
+
+  // #67 — assert the full partition when the device set is known, so an
+  // excluded channel goes DARK rather than merely unchanged. Without the facts
+  // we cannot know what to exclude, and inventing it is worse than the old
+  // behaviour, so we fall back and say so.
+  const deviceIds = args.deviceChannelIds;
+  const canPartition = Array.isArray(deviceIds) && deviceIds.length > 0;
+
+  const seg = canPartition
+    ? buildFullPartitionSegArray({
+        deviceChannelIds: deviceIds as number[],
+        participatingChannelIds: args.participatingChannels,
+        ...look,
+      })
+    : buildParticipatingSegArray({
+        participatingChannelIds: args.participatingChannels,
+        ...look,
+      });
 
   return {
     payload: JSON.stringify({
@@ -228,6 +259,7 @@ export function buildGameDayPayload(args: {
       bri: typeof c.brightness === "number" ? c.brightness : 200,
       seg,
     }),
+    partitioned: canPartition,
   };
 }
 
@@ -410,6 +442,9 @@ export async function runPlannerTick(
           const built = buildGameDayPayload({
             config: c,
             participatingChannels: part.channels,
+            // #67 — the device's own channel set, so the payload can name
+            // every channel and darken the excluded ones.
+            deviceChannelIds: part.deviceChannelIds,
           });
           if ("refuse" in built) {
             bump(stats.skipped, `payload:${built.refuse.split(":")[0]}`);
@@ -428,6 +463,12 @@ export async function runPlannerTick(
                 uid, teamSlug, eventId, action: "plan_start",
                 fireAt: new Date(startFireAt).toISOString(),
                 channels: part.channels, bytes: built.payload.length,
+                // #67 — false means the fire named only the participating
+                // channels because the device set was unknown, so an excluded
+                // channel was left UNCHANGED rather than darkened. A partial
+                // exclusion must be legible in the corpus, not inferred.
+                partitioned: built.partitioned,
+                ...(built.partitioned ? {} : { partitionNote: "partition_unavailable" }),
                 // Armed globally/for this uid, or held back by the allowlist.
                 // Without this a scoped-out row is indistinguishable from a
                 // log-only-era row, and the corpus stops being auditable the

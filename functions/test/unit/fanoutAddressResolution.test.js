@@ -80,21 +80,21 @@ describe("mergeDenormTargets (pure join)", () => {
   test("attaches the resolved address to each id", () => {
     expect(
       mergeDenormTargets(["a", "b"], { a: "192.168.1.150", b: "10.0.0.9" })
-    ).toEqual([
+    ).toMatchObject([
       { id: "a", ip: "192.168.1.150" },
       { id: "b", ip: "10.0.0.9" },
     ]);
   });
 
   test("an id absent from the map resolves to empty — never invented", () => {
-    expect(mergeDenormTargets(["a", "ghost"], { a: "1.2.3.4" })).toEqual([
+    expect(mergeDenormTargets(["a", "ghost"], { a: "1.2.3.4" })).toMatchObject([
       { id: "a", ip: "1.2.3.4" },
       { id: "ghost", ip: "" },
     ]);
   });
 
   test("blank and whitespace addresses count as unresolved", () => {
-    expect(mergeDenormTargets(["a", "b"], { a: "", b: "   " })).toEqual([
+    expect(mergeDenormTargets(["a", "b"], { a: "", b: "   " })).toMatchObject([
       { id: "a", ip: "" },
       { id: "b", ip: "" },
     ]);
@@ -113,7 +113,8 @@ describe("resolveMemberTargets — SHAPE 1: denormalized controllerId array", ()
     const out = await resolveMemberTargets(db, "uA", {
       controllerId: ["192_168_1_150"],
     });
-    expect(out).toEqual([{ id: "192_168_1_150", ip: "192.168.1.150" }]);
+    expect(out).toMatchObject([
+      { id: "192_168_1_150", ip: "192.168.1.150" }]);
     // The exact assertion the old code failed. Stated separately so a future
     // refactor that reintroduces ip:"" fails on the claim, not on a deep-equal.
     expect(out[0].ip).not.toBe("");
@@ -124,7 +125,7 @@ describe("resolveMemberTargets — SHAPE 1: denormalized controllerId array", ()
     const out = await resolveMemberTargets(db, "uA", {
       controllerId: ["c1", "c2"],
     });
-    expect(out).toEqual([
+    expect(out).toMatchObject([
       { id: "c1", ip: "10.0.0.1" },
       { id: "c2", ip: "10.0.0.2" },
     ]);
@@ -135,7 +136,8 @@ describe("resolveMemberTargets — SHAPE 1: denormalized controllerId array", ()
     const out = await resolveMemberTargets(db, "uA", {
       controllerId: ["c1", "", null, 42],
     });
-    expect(out).toEqual([{ id: "c1", ip: "10.0.0.1" }]);
+    expect(out).toMatchObject([
+      { id: "c1", ip: "10.0.0.1" }]);
   });
 
   test("an UNRESOLVABLE id yields a target with no address, not a guess",
@@ -144,7 +146,8 @@ describe("resolveMemberTargets — SHAPE 1: denormalized controllerId array", ()
       const out = await resolveMemberTargets(db, "uA", {
         controllerId: ["ghost"],
       });
-      expect(out).toEqual([{ id: "ghost", ip: "" }]);
+      expect(out).toMatchObject([
+      { id: "ghost", ip: "" }]);
     });
 
   test("a failed join does NOT fall through to the subcollection scan",
@@ -158,7 +161,8 @@ describe("resolveMemberTargets — SHAPE 1: denormalized controllerId array", ()
       const out = await resolveMemberTargets(db, "uA", {
         controllerId: ["c1"],
       });
-      expect(out).toEqual([{ id: "c1", ip: "" }]);
+      expect(out).toMatchObject([
+      { id: "c1", ip: "" }]);
     });
 });
 
@@ -169,8 +173,8 @@ describe("resolveMemberTargets — SHAPE 2: no denorm array (fallback preserved)
         controllers: { c1: "10.0.0.1", c2: "10.0.0.2" },
       });
       const out = await resolveMemberTargets(db, "uA", {});
-      expect(out).toEqual([
-        { id: "c1", ip: "10.0.0.1" },
+      expect(out).toMatchObject([
+      { id: "c1", ip: "10.0.0.1" },
         { id: "c2", ip: "10.0.0.2" },
       ]);
       expect(calls()).toBe(0); // the join is not used by this shape
@@ -179,7 +183,8 @@ describe("resolveMemberTargets — SHAPE 2: no denorm array (fallback preserved)
     test("an empty array is not a denorm shape — it falls back", async () => {
       const { db } = makeDb({ controllers: { c1: "10.0.0.1" } });
       const out = await resolveMemberTargets(db, "uA", { controllerId: [] });
-      expect(out).toEqual([{ id: "c1", ip: "10.0.0.1" }]);
+      expect(out).toMatchObject([
+      { id: "c1", ip: "10.0.0.1" }]);
     });
 
     test("legacy single controllerIp on the member doc still wins over nothing",
@@ -188,16 +193,54 @@ describe("resolveMemberTargets — SHAPE 2: no denorm array (fallback preserved)
         const out = await resolveMemberTargets(db, "uA", {
           controllerIp: "172.16.0.5",
         });
-        expect(out).toEqual([{ id: "", ip: "172.16.0.5" }]);
+        expect(out).toMatchObject([
+      { id: "", ip: "172.16.0.5" }]);
       });
 
     test("nothing at all -> a single addressless target", async () => {
       const { db } = makeDb({ controllers: {} });
-      expect(await resolveMemberTargets(db, "uA", {})).toEqual([
-        { id: "", ip: "" },
+      expect(await resolveMemberTargets(db, "uA", {})).toMatchObject([
+      { id: "", ip: "" },
       ]);
     });
   });
+
+describe("#67 — channel facts ride along on the SAME read", () => {
+  // The partition needs the device's channel set. Fetching it separately would
+  // double the reads for a fact that lives on the controller doc we already
+  // have in hand, so resolveMemberTargets carries it out with the address.
+  test("device + participating ids come back with the target", async () => {
+    const db = {
+      getAll: async (...refs) =>
+        refs.map((r) => ({
+          id: r._id,
+          exists: true,
+          data: () => ({
+            ip: "192.168.1.150",
+            participating_channels_device_ids: [0, 1],
+            participating_channels: [0],
+          }),
+        })),
+      collection: () => ({ doc: () => ({ collection: () => ({ doc: (id) => ({ _id: id }) }) }) }),
+    };
+    const out = await resolveMemberTargets(db, "uA", { controllerId: ["c_a"] });
+    expect(out[0].deviceChannelIds).toEqual([0, 1]);
+    expect(out[0].participatingChannelIds).toEqual([0]);
+  });
+
+  test("absent facts are NULL, never an empty array", async () => {
+    // [] would claim "this controller has no channels" — a fabricated fact that
+    // would darken everything. Null means "unknown" and triggers the fallback.
+    const db = {
+      getAll: async (...refs) =>
+        refs.map((r) => ({ id: r._id, exists: true, data: () => ({ ip: "1.2.3.4" }) })),
+      collection: () => ({ doc: () => ({ collection: () => ({ doc: (id) => ({ _id: id }) }) }) }),
+    };
+    const out = await resolveMemberTargets(db, "uA", { controllerId: ["c_a"] });
+    expect(out[0].deviceChannelIds).toBeNull();
+    expect(out[0].participatingChannelIds).toBeNull();
+  });
+});
 
 describe("buildFanoutCommandDoc — an addressless command is born failed", () => {
   test("a real ip -> pending, no error field", () => {

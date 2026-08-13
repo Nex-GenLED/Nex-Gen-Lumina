@@ -83,6 +83,7 @@ exports.fanoutPolicyFrom = fanoutPolicyFrom;
 exports.fanoutsForGroup = fanoutsForGroup;
 exports.mergeDenormTargets = mergeDenormTargets;
 exports.resolveMemberTargets = resolveMemberTargets;
+exports.partitionBroadcastPayload = partitionBroadcastPayload;
 exports.verifyFanoutTarget = verifyFanoutTarget;
 exports.fanoutToCrew = fanoutToCrew;
 exports.evaluateRateLimit = evaluateRateLimit;
@@ -374,8 +375,25 @@ async function readSyncFanoutPolicy(db) {
  *
  * Exported for unit verification (#70).
  */
-function mergeDenormTargets(ids, ipById) {
-    return ids.map((id) => ({ id, ip: (ipById[id] || "").trim() }));
+function mergeDenormTargets(ids, ipById, factsById = {}) {
+    return ids.map((id) => ({
+        id,
+        ip: (ipById[id] || "").trim(),
+        deviceChannelIds: factsById[id]?.deviceChannelIds ?? null,
+        participatingChannelIds: factsById[id]?.participatingChannelIds ?? null,
+    }));
+}
+/** Clean integer array or null. Never a partial: one bad entry voids the set. */
+function intArray(v) {
+    if (!Array.isArray(v))
+        return null;
+    const out = [];
+    for (const x of v) {
+        if (typeof x !== "number" || !Number.isInteger(x) || x < 0)
+            return null;
+        out.push(x);
+    }
+    return out;
 }
 /**
  * Resolve a member's controller targets.
@@ -402,12 +420,22 @@ async function resolveMemberTargets(db, memberUid, memberData) {
         : [];
     if (denormIds.length > 0) {
         const ipById = {};
+        const factsById = {};
         try {
             const refs = denormIds.map((id) => db.collection("users").doc(memberUid).collection("controllers").doc(id));
             const docs = await db.getAll(...refs);
             for (const d of docs) {
-                if (d.exists)
-                    ipById[d.id] = d.data()?.ip || "";
+                if (!d.exists)
+                    continue;
+                const dd = d.data() || {};
+                ipById[d.id] = dd.ip || "";
+                // #67 — participation rides along on the read we are already doing.
+                // A separate per-target get would double the reads for a fact that
+                // lives on the same document.
+                factsById[d.id] = {
+                    deviceChannelIds: intArray(dd.participating_channels_device_ids),
+                    participatingChannelIds: intArray(dd.participating_channels),
+                };
             }
         }
         catch (err) {
@@ -416,7 +444,7 @@ async function resolveMemberTargets(db, memberUid, memberData) {
             // silently widen the blast radius to controllers the member did not name.
             console.warn(`applySyncPattern: address join failed for ${memberUid}`, err);
         }
-        const targets = mergeDenormTargets(denormIds, ipById);
+        const targets = mergeDenormTargets(denormIds, ipById, factsById);
         const unresolved = targets.filter((t) => t.ip.length === 0);
         if (unresolved.length > 0) {
             console.warn(`applySyncPattern: ${unresolved.length}/${targets.length} controller(s) ` +
@@ -432,7 +460,15 @@ async function resolveMemberTargets(db, memberUid, memberData) {
             .collection("controllers")
             .get();
         const out = [];
-        snap.forEach((d) => out.push({ id: d.id, ip: d.data().ip || "" }));
+        snap.forEach((d) => {
+            const dd = d.data() || {};
+            out.push({
+                id: d.id,
+                ip: dd.ip || "",
+                deviceChannelIds: intArray(dd.participating_channels_device_ids),
+                participatingChannelIds: intArray(dd.participating_channels),
+            });
+        });
         if (out.length > 0)
             return out;
     }
@@ -440,9 +476,72 @@ async function resolveMemberTargets(db, memberUid, memberData) {
         console.warn(`applySyncPattern: controller read failed for ${memberUid}`, err);
     }
     const legacyIp = memberData.controllerIp || "";
+    const bare = { deviceChannelIds: null, participatingChannelIds: null };
     if (legacyIp.length > 0)
-        return [{ id: "", ip: legacyIp }];
-    return [{ id: "", ip: "" }];
+        return [{ id: "", ip: legacyIp, ...bare }];
+    return [{ id: "", ip: "", ...bare }];
+}
+/**
+ * #67 — partition a SYNC broadcast across a member's full channel set.
+ *
+ * Tyler's decision, 2026-08-13: fires assert the full partition;
+ * non-participating segments get `{id: N, on: false}` ONLY, look preserved.
+ * The same principle governs a crew broadcast: a member who excluded their
+ * patio must have it go DARK for the event, not merely stay unchanged. Third
+ * appearance — unstated segment state is inherited state, and inherited state
+ * is a bug.
+ *
+ * CONSERVATIVE BY CONSTRUCTION. Partitioning only happens for the canonical
+ * broadcast shape: exactly one `seg` entry carrying no `id`, which is what the
+ * app sends (`{"seg":[{"fx":88,"pal":5,"col":[...]}]}`). Anything else — a
+ * multi-segment design, or entries that already name ids — is passed through
+ * UNTOUCHED. A caller that has already decided which segments it addresses is
+ * not guessing, and overlaying an exclusion set on top of it would fight a
+ * deliberate choice. Saved multi-seg designs are exactly that case.
+ *
+ * Returns the reason when it declines, so "not partitioned" is never silent.
+ */
+function partitionBroadcastPayload(args) {
+    const pass = (reason) => ({
+        payloadString: args.payloadString,
+        partitioned: false,
+        reason,
+    });
+    const device = args.deviceChannelIds;
+    const participating = args.participatingChannelIds;
+    if (!Array.isArray(device) || device.length === 0) {
+        return pass("partition_unavailable");
+    }
+    if (!Array.isArray(participating)) {
+        return pass("participation_unknown");
+    }
+    let obj;
+    try {
+        obj = JSON.parse(args.payloadString);
+    }
+    catch (_) {
+        return pass("unparseable_payload");
+    }
+    const seg = obj.seg;
+    if (!Array.isArray(seg) || seg.length !== 1) {
+        return pass("not_single_segment");
+    }
+    const design = seg[0];
+    if (typeof design !== "object" || design === null) {
+        return pass("not_single_segment");
+    }
+    if (design.id !== undefined) {
+        return pass("segment_already_addressed");
+    }
+    const on = new Set(participating);
+    const partitioned = device.map((ch) => on.has(ch)
+        ? { ...design, id: ch, on: true }
+        : { id: ch, on: false });
+    return {
+        payloadString: JSON.stringify({ ...obj, seg: partitioned }),
+        partitioned: true,
+        reason: "ok",
+    };
 }
 /**
  * SYNC-1 server-side mutual-membership verification. A fanout may only target a
@@ -553,9 +652,20 @@ async function fanoutToCrew(db, args) {
                 .collection("commands");
             let written = 0;
             for (const t of targets) {
+                // #67 — partition per TARGET, not once for the crew: every member has
+                // their own channel count and their own excluded set.
+                const part = partitionBroadcastPayload({
+                    payloadString: args.payloadString,
+                    deviceChannelIds: t.deviceChannelIds ?? null,
+                    participatingChannelIds: t.participatingChannelIds ?? null,
+                });
+                if (!part.partitioned) {
+                    console.log(`applySyncPattern FANOUT: ${memberUid}/${t.id} NOT partitioned ` +
+                        `— ${part.reason} (excluded channels stay UNCHANGED, not dark)`);
+                }
                 await commandsRef.add({
                     ...buildFanoutCommandDoc({
-                        payloadString: args.payloadString,
+                        payloadString: part.payloadString,
                         controllerId: t.id,
                         controllerIp: t.ip,
                         webhookUrl,

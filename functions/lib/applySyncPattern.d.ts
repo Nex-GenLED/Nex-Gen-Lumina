@@ -119,10 +119,16 @@ export declare function fanoutsForGroup(policy: FanoutPolicy, groupId: string): 
  *
  * Exported for unit verification (#70).
  */
-export declare function mergeDenormTargets(ids: string[], ipById: Record<string, string>): {
+export declare function mergeDenormTargets(ids: string[], ipById: Record<string, string>, factsById?: Record<string, ChannelFacts>): FanoutTarget[];
+/** #67 — the two published facts a partition needs, per controller. */
+export interface ChannelFacts {
+    deviceChannelIds: number[] | null;
+    participatingChannelIds: number[] | null;
+}
+export interface FanoutTarget extends ChannelFacts {
     id: string;
     ip: string;
-}[];
+}
 /**
  * Resolve a member's controller targets.
  *   1. Denormalized member.controllerId[] (Slice 1) → one target per id, JOINED
@@ -142,10 +148,36 @@ export declare function mergeDenormTargets(ids: string[], ipById: Record<string,
  * hardware. The read costs one getAll per member at crew scale — the price of
  * the command being deliverable.
  */
-export declare function resolveMemberTargets(db: admin.firestore.Firestore, memberUid: string, memberData: admin.firestore.DocumentData): Promise<{
-    id: string;
-    ip: string;
-}[]>;
+export declare function resolveMemberTargets(db: admin.firestore.Firestore, memberUid: string, memberData: admin.firestore.DocumentData): Promise<FanoutTarget[]>;
+/**
+ * #67 — partition a SYNC broadcast across a member's full channel set.
+ *
+ * Tyler's decision, 2026-08-13: fires assert the full partition;
+ * non-participating segments get `{id: N, on: false}` ONLY, look preserved.
+ * The same principle governs a crew broadcast: a member who excluded their
+ * patio must have it go DARK for the event, not merely stay unchanged. Third
+ * appearance — unstated segment state is inherited state, and inherited state
+ * is a bug.
+ *
+ * CONSERVATIVE BY CONSTRUCTION. Partitioning only happens for the canonical
+ * broadcast shape: exactly one `seg` entry carrying no `id`, which is what the
+ * app sends (`{"seg":[{"fx":88,"pal":5,"col":[...]}]}`). Anything else — a
+ * multi-segment design, or entries that already name ids — is passed through
+ * UNTOUCHED. A caller that has already decided which segments it addresses is
+ * not guessing, and overlaying an exclusion set on top of it would fight a
+ * deliberate choice. Saved multi-seg designs are exactly that case.
+ *
+ * Returns the reason when it declines, so "not partitioned" is never silent.
+ */
+export declare function partitionBroadcastPayload(args: {
+    payloadString: string;
+    deviceChannelIds: number[] | null;
+    participatingChannelIds: number[] | null;
+}): {
+    payloadString: string;
+    partitioned: boolean;
+    reason: string;
+};
 /**
  * SYNC-1 server-side mutual-membership verification. A fanout may only target a
  * uid that is a VERIFIED member of the crew — present in the group's

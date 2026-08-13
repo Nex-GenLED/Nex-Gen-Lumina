@@ -130,6 +130,59 @@ export function buildParticipatingSegArray(args: {
   }));
 }
 
+/**
+ * #67 — THE FULL PARTITION. Every device channel named exactly once.
+ *
+ * Tyler's decision, 2026-08-13: *"fires assert the full partition;
+ * non-participating segments get `{id: N, on: false}` ONLY — look/effect
+ * preserved (exclusion = dark for this event; the base restore asserts full
+ * state after, so nothing else needs clearing)."*
+ *
+ * WHY. [buildParticipatingSegArray] names only the participating channels, and
+ * root `on:true` powers the master, which lights every segment whose own `on`
+ * is already true. So naming a subset prevented the excluded channel from
+ * CHANGING, not from LIGHTING. On the bench Twins fire (2026-08-12 17:10:00Z)
+ * participation resolved `[0]`, the plan row said `channels:[0]`, the payload
+ * carried exactly one segment — and both channels lit. Planner and dispatcher
+ * were correct end to end; the payload was simply not exhaustive.
+ *
+ * Third appearance of the same principle, and the reason it is stated here as a
+ * rule rather than a fix: **unstated segment state is inherited state, and
+ * inherited state is a bug.**
+ *
+ * `{id, on:false}` and NOTHING else. No `fx`, no `col`, no `bri`. The excluded
+ * channel keeps the look it had, so when it next participates it returns as
+ * itself rather than as whatever this event happened to be. Exclusion means
+ * dark for THIS event, not erased.
+ *
+ * Device order is preserved and `deviceChannelIds` is the sole authority for
+ * what exists: a participating id absent from the device set is DROPPED, never
+ * emitted. Inventing a segment the controller does not have is how a payload
+ * starts addressing hardware that is not there.
+ */
+export function buildFullPartitionSegArray(args: {
+  deviceChannelIds: number[];
+  participatingChannelIds: number[];
+  effectId: number;
+  speed: number;
+  intensity: number;
+  colorSlots: ColorSlot[];
+}): Array<Record<string, unknown>> {
+  const participating = new Set(args.participatingChannelIds);
+  return args.deviceChannelIds.map((ch) =>
+    participating.has(ch)
+      ? {
+          id: ch,
+          on: true,
+          fx: args.effectId,
+          sx: args.speed,
+          ix: args.intensity,
+          col: args.colorSlots,
+        }
+      : { id: ch, on: false }
+  );
+}
+
 /** RGB → the RGBW 4-slot shape the fleet uses (W=0; WLED's gamma owns white). */
 export function toRgbwSlots(colors: number[][]): ColorSlot[] {
   return colors.map((c) => [c[0] ?? 0, c[1] ?? 0, c[2] ?? 0, 0]);

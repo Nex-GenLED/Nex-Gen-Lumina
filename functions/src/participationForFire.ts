@@ -29,7 +29,22 @@ export interface ParticipationFields {
 }
 
 export type ParticipationVerdict =
-  | { usable: true; channels: number[]; ageMs: number; reason: "ok" }
+  | {
+      usable: true;
+      channels: number[];
+      /**
+       * #67. The controller's FULL channel set as the healer published it, so a
+       * fire can name every channel and darken the excluded ones. `null` when
+       * the field is absent or malformed — the caller must then fall back to
+       * naming only the participating channels and log `partition_unavailable`.
+       * Never synthesised from `channels`: "the set we light" and "the set that
+       * exists" are different facts, and conflating them would silently make
+       * every fire look fully partitioned.
+       */
+      deviceChannelIds: number[] | null;
+      ageMs: number;
+      reason: "ok";
+    }
   | { usable: false; channels: null; ageMs: number | null; reason: string };
 
 const asIntArray = (v: unknown): number[] | null => {
@@ -97,7 +112,13 @@ export function participationForFire(
     };
   }
 
-  return { usable: true, channels, ageMs, reason: "ok" };
+  return {
+    usable: true,
+    channels,
+    deviceChannelIds: asIntArray(controller.participating_channels_device_ids),
+    ageMs,
+    reason: "ok",
+  };
 }
 
 /**
