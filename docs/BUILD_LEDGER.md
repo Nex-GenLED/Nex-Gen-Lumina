@@ -525,6 +525,70 @@ was dropped in the cherry-pick — the +21 figure was simply imprecise. Function
 suite **313 / 13 suites** (was 291 / 12; `joinNeighborhood.test.js` adds 22).
 `flutter analyze lib/ test/` — **0 errors**.
 
+**PRE-DISTRIBUTION CONTENT GATE** — `git log 850c0db..build-75 -- lib functions
+firestore.rules`, every commit named:
+
+| Commit | Workstream |
+|---|---|
+| `7796a40` | release — version bump |
+| `6caefa5` | join-membership — leave-sync restore |
+| `bcf6ea3` | join-membership — join-navigation / UI reflect |
+| `71e7fb8` | F-3 (rebased from `a83193f`) |
+
+Four commits, nothing unattributed, nothing unexpected.
+
+**Must-be-present, read AT THE TAG** (`git show build-75:<file>`), not inferred
+from the merge:
+
+- `functions/src/applySyncPattern.ts` → `mergeDenormTargets`, `db.getAll(...)`,
+  `no_address` (#70 `06e36dc`) and `readSyncFanoutPolicy`, `fanoutsForGroup`,
+  `group_allowlist` (scoped fanout `dab5b27`). Both commits confirmed ancestors
+  of `build-75`. **Neither reverted.**
+- `lib/features/neighborhood/neighborhood_service.dart` → `httpsCallable(
+  'joinNeighborhood')`, `joinPublicGroup`, `/neighborhood_public`. F-3's app half
+  is in the build.
+
+**A trap worth recording: `a83193f` is NOT an ancestor of `build-75`.** The
+rebase reshaped it into `71e7fb8`; the content survives, the hash does not. An
+ancestry test on a deployed SHA therefore raises a FALSE ALARM after any rebase.
+The correct test is per-path content equality —
+`git diff a83193f build-75 -- firestore.rules functions/src/joinNeighborhood.ts
+functions/index.js` → **0 lines on all three**. Do not diff whole directories for
+this: the target legitimately carries other work, so a non-empty directory diff
+proves nothing in either direction.
+
+**RULES FREEZE LIFTED as of `0769e70`.** Rules deploys from `main` are safe —
+main and production are equivalent by source and by behaviour (below).
+**FUNCTIONS DEPLOYS REMAIN FROZEN until the #69 prompt.**
+
+### Pre-distribution smoke plan (Tyler, on device, against production)
+
+Nothing is posted to either track until these pass. This is the +74 lesson: that
+build was internally consistent and still shipped a dead join path, because no
+one exercised the path end-to-end before distribution.
+
+**a. Build-number check FIRST, before any testing.** Read what Codemagic reports
+for the `build-75` tag, then confirm the installed app shows the SAME number
+(Settings → version). On 2026-08-11 TestFlight served a stale 288 while 291 was
+the real build and a hardware run was attributed to the wrong artifact. If the
+numbers differ, STOP — every later result is unattributable.
+
+**b. Join a crew by invite code** — the exact path dead in +74. Use a test
+account that is NOT already a member. Expected: the join succeeds, the crew
+appears in the list, and membership is written SERVER-side by the callable (the
+client no longer writes `memberUids`). A silent no-op or a permission error is a
+FAIL, and `bcf6ea3` specifically made a silent failure surface as a message.
+
+**c. Nearby-group discovery** renders from `/neighborhood_public` — public crews
+appear with NO invite code exposed, and joining one goes through
+`joinPublicGroup(groupId)`, not the invite-code path.
+
+**d. If either fails, capture before retrying:** the exact on-screen error text;
+the build number from (a); whether the account was already a member; and the
+Cloud Function log for `joinNeighborhood` around the attempt
+(`gcloud logging read 'resource.labels.service_name="joinneighborhood"'`). A
+client-side permission error and a callable-side refusal look identical on the
+handset and are diagnosed from opposite ends.
 **Rules/functions convergence, verified both ways.** Source: `git diff a83193f HEAD`
 is **0 lines** for `firestore.rules`, `functions/src/joinNeighborhood.ts` and
 `functions/index.js` — main now equals the source that was actually deployed on
