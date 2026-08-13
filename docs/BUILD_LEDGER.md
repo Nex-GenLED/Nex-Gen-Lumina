@@ -846,7 +846,7 @@ resolved for the affected accounts.
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **76** — `kStaffAuthTelemetryAppVersion` moved in the same commit. |
 | **Android artifact** | `app-release.aab` · **68,316,478 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="76"` / `versionName="2.5.10"` · built 2026-08-13 from isolated worktree `lumina-b76` at tag `build-76`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/`. **versionCode 76 CONSUMED.** |
-| **iOS** | **Build 298** — reported by Tyler 2026-08-13 for the `build-76` tag. **Trigger and checked-out SHA NOT independently confirmed:** this session has no Codemagic credential (no `CM_*` env, no token file), so "triggered by the tag, built from `f7323c2`" rests on the tag-only webhook plus Tyler's attribution, not on a read of the build record. Corroboration, not proof: 295 (+74) → 296 (+75) → 298 (+76). **The 297 gap is unexplained from here** — consistent with an unrelated or failed run, but it is exactly the kind of gap the numbering argument relied on being absent at +75, so it weakens rather than supports the no-stray-build inference. |
+| **iOS** | **Build 298** (manual, Branch `main`, commit `f7323c2`) — the artifact TestFlight served and the one on-device. **Build 297** is its tag-triggered twin (GitHub webhook, tag `build-76`, same commit `f7323c2`). **Both are valid +76 artifacts, byte-identical in source.** Confirmed from the Codemagic build records 2026-08-13. |
 | **Uploaded** | `<PENDING>` |
 | **Supersedes** | **+75** |
 
@@ -904,6 +904,27 @@ legibility** — persistence runs first and unconditionally, every notification
 failure path is swallowed, and with notifications denied the banner is fully
 functional. No new dependency.
 
+**The 297 "gap" is resolved, and my reading of it was wrong.** I recorded 295 → 296 → 298 as an
+unexplained gap that *weakened* the no-stray-build inference. The opposite was true: **297 IS the
+tag build**, fired by the GitHub webhook on tag `build-76` exactly as the #62 pipeline is designed
+to. 298 was a manual duplicate started at 12:32 from Branch `main`, on the same commit. The
+tag-only trigger has not drifted; there was never a stray push-build. Recorded because the
+inference, not just the number, is what needed correcting — a numbering gap can mean a build
+succeeded twice as easily as it can mean something ran that should not have.
+
+> **CONVENTION — prefer re-running the TAG build over a manual `main` start.** A manual build
+> from Branch `main` is safe only while `main`'s tip still equals the tag. Here it did, so 297 and
+> 298 carry identical source. But `main` moved within the hour (five docs-only commits followed
+> `f7323c2`), and a manual `main` build started after that would carry a different SHA — same app
+> bytes, different identity, and the ledger's join key stops matching the artifact. The tag is the
+> deliberate act; re-run it rather than reaching for the branch.
+
+> ⚠️ **OPEN — BOTH BUILDS "finished with post-processing failed".** The same step failed on 297
+> and 298, which makes it systematic rather than a flake. Submission itself succeeded — 298 reached
+> TestFlight and the device — so the failure is downstream of the build and upload. Suspected
+> dSYM/artifact publishing. **Step name pending from the log**; filed when Tyler reports it. Until
+> then the symbol files for +76 should not be assumed archived on Codemagic's side — the local
+> Android `build/debug-info/` symbols are unaffected.
 **Suites:** Dart **2272 / 3 skipped / 0 failed**, from +75's 2218 — +23 (W4),
 +15 (gate reader), +16 (W1). `flutter analyze lib/ test/`: **0 errors**.
 Functions unchanged at **392 / 17** — no server code in this build, and **no
