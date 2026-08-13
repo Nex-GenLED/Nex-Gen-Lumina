@@ -352,8 +352,19 @@ export const initiateSyncSession = onRequest(
         .collection("settings")
         .doc("syncConsent");
 
+      // #74 — arrayRemove takes the ELEMENT, not an array containing it.
+      // `arrayRemove([eventId])` asks Firestore to remove the nested array
+      // `[eventId]` from `skipNextEventIds`, which it rejects outright:
+      // "Element at index 0 is not a valid array element. Nested arrays are not
+      // supported." The #84 family, one call site further on.
+      //
+      // Latent until 2026-08-13: this loop runs once per participant, and with
+      // no participants the batch was empty and never validated. #71 put the
+      // paused initiator INTO participants, which is what first reached it —
+      // and it throws AFTER `sessionRef.set()`, so the session goes live and
+      // the caller still gets a 500.
       batch.update(consentRef, {
-        skipNextEventIds: admin.firestore.FieldValue.arrayRemove([eventId]),
+        skipNextEventIds: admin.firestore.FieldValue.arrayRemove(eventId),
       });
     }
     await batch.commit();
