@@ -992,7 +992,42 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Bench resting state is deliberately left **`paused`** so every future run exercises the
     exemption — see the ledger note.
 
-- [ ] **#71 — `initiateSyncSession` has the SAME defect #69 just fixed, and no initiator exemption**
+- [x] **#71 — `initiateSyncSession` had the same defect as #69. FIXED + DEPLOYED 2026-08-13;
+  RIG VERIFICATION BLOCKED (see below).**
+  - Status: **CLOSED in code.** Fix `initiatorConsentVerdict` / `memberSkippedForSession` /
+    `chooseHost`, deployed `--only functions:initiateSyncSession`. 392 tests / 17 suites.
+  - **Precedence: CONSENT > PAUSE.** The exemption is identity-keyed on pause only;
+    `participationStatus` is deliberately not an input to the consent verdict, so the
+    exemption structurally cannot reach a contract. Pinned by a test.
+  - Three distinct refusals, no session created: `consent_missing` (never answered),
+    `consent_blocked` (said no to the category), `skip_next_active` (said skip this one).
+  - **:234 is NOT a defect and was left alone.** It skips the initiator when building the FCM
+    recipient list — suppressing a push to the person who just pressed the button. Exempting
+    them there, as the brief asked, would notify the initiator about their own action.
+  - **RIG VERIFICATION NOT PERFORMED — preconditions absent, and seeding them is not free.**
+    The demo group has **zero `syncEvents`**, and A has **no `syncConsent` doc**. The handler
+    validates the event before reaching any #71 code, so neither the paused-initiator case nor
+    the consent refusal can be reached today. Seeding a live `syncEvent` is not inert: the
+    background worker polls for triggers and is the ONLY caller, so a seeded event could fire a
+    real session and fan out to B, driving A's rig unattended. Deferred for a decision rather
+    than done quietly.
+  - Files: `functions/src/initiateSyncSession.ts`. Related **#69**, **+76** (client half).
+
+- [ ] **#73 — a refused sync initiation is invisible to the user (+76 client half)**
+  - Status: OPEN (found 2026-08-13 closing #71) · Severity: **P2** · Evidence:
+    verified-by-source
+  - `initiateSyncSession`'s only caller is
+    [sync_event_background_worker.dart:502-510](../lib/features/neighborhood/services/sync_event_background_worker.dart#L502):
+    on 200 it returns `result['sessionId']` — **null** for a `{success:false, reason}` body —
+    and on non-200 it `debugPrint`s and returns null. **Either way the refusal is discarded.**
+  - So #71's legible refusals are legible to the SERVER LOG and to nobody else. There is no
+    foreground caller at all, which also means there is no user present at the moment of
+    refusal — the message needs a surface (a notification, or state the Sync screen reads),
+    not just a return value.
+  - **This is why the server half shipped without the client half rather than instead of it:**
+    the server now refuses correctly and says why in the log, which is strictly better than
+    silently dropping the initiator. Filing the surface as +76 app work.
+
   - Status: OPEN (found 2026-08-13 while closing #69) · Severity: **P2** · Evidence:
     verified-by-source
   - [initiateSyncSession.ts:167-171](../functions/src/initiateSyncSession.ts#L167) skips any member
