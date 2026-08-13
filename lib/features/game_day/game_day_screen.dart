@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/autopilot/base_layer_gate.dart';
+import 'package:nexgen_command/features/game_day/gate_status.dart';
+import 'package:nexgen_command/features/game_day/gate_status_banner.dart';
+import 'package:nexgen_command/features/game_day/gate_status_provider.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:flutter/services.dart';
@@ -78,6 +81,13 @@ class GameDayScreen extends ConsumerWidget {
             padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
+                // W2 — the readiness gate, as the customer sees it. Renders
+                // nothing when the account is armed (and once, on graduating).
+                // Eight of ten live accounts are held in log-only and until now
+                // saw a UI that looked armed.
+                GateStatusBanner(
+                  onCreateSchedule: () => context.push(AppRoutes.schedule),
+                ),
                 // Hero description
                 _buildHeroCard(context),
                 const SizedBox(height: 20),
@@ -305,7 +315,15 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                 // Live game indicator
                 gameAsync.when(
                   data: (game) => game != null
-                      ? _GameStatusBadge(game: game)
+                      ? _GameStatusBadge(
+                          game: game,
+                          // W3 — only the PRE-GAME promise consults the gate.
+                          // Read here, not polled by the badge: the badge keeps
+                          // its own cadence, which is what stopped it freezing
+                          // for celebrations-off users.
+                          gate: ref.watch(gateStatusProvider).value ??
+                              GateStatus.unknown,
+                        )
                       : const SizedBox.shrink(),
                   loading: () => const SizedBox.shrink(),
                   error: (_, __) => const SizedBox.shrink(),
@@ -1033,7 +1051,14 @@ class _TeamColorDots extends StatelessWidget {
 class _GameStatusBadge extends StatelessWidget {
   final GameState game;
 
-  const _GameStatusBadge({required this.game});
+  /// W3 — the account's readiness verdict.
+  ///
+  /// Consulted for the UPCOMING branch ONLY. Live and final are reports of
+  /// fact and cannot be wrong about the future; the pre-game text is the only
+  /// promise this badge makes, so it is the only one the gate can withdraw.
+  final GateStatus gate;
+
+  const _GameStatusBadge({required this.game, this.gate = GateStatus.unknown});
 
   @override
   Widget build(BuildContext context) {
@@ -1041,20 +1066,24 @@ class _GameStatusBadge extends StatelessWidget {
         game.status == GameStatus.inProgress ||
         game.status == GameStatus.halftime;
     final isFinal = game.status == GameStatus.final_;
+    // Only an upcoming game can be gated — see the field doc.
+    final gatedUpcoming = !isLive &&
+        !isFinal &&
+        upcomingPromiseFor(gate) == UpcomingPromise.gated;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: isLive
             ? Colors.green.withValues(alpha: 0.2)
-            : isFinal
+            : isFinal || gatedUpcoming
                 ? NexGenPalette.textMedium.withValues(alpha: 0.15)
                 : NexGenPalette.cyan.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isLive
               ? Colors.green.withValues(alpha: 0.4)
-              : isFinal
+              : isFinal || gatedUpcoming
                   ? NexGenPalette.textMedium.withValues(alpha: 0.3)
                   : NexGenPalette.cyan.withValues(alpha: 0.3),
         ),
@@ -1078,7 +1107,9 @@ class _GameStatusBadge extends StatelessWidget {
                 ? '${game.homeScore} - ${game.awayScore}'
                 : isFinal
                     ? 'Final ${game.homeScore}-${game.awayScore}'
-                    : 'Today',
+                    : gatedUpcoming
+                        ? kGatedBadgeLabel
+                        : 'Today',
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -1086,7 +1117,11 @@ class _GameStatusBadge extends StatelessWidget {
                   ? Colors.green
                   : isFinal
                       ? NexGenPalette.textMedium
-                      : NexGenPalette.cyan,
+                      // Gated reads as muted, not as the confident cyan that
+                      // says "this is happening tonight".
+                      : gatedUpcoming
+                          ? NexGenPalette.textMedium
+                          : NexGenPalette.cyan,
             ),
           ),
         ],
