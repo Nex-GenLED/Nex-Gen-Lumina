@@ -474,7 +474,7 @@ resolved for the affected accounts.
 | **Ledger SHA (tagged)** | The `build-75` tag. `git diff --stat 7796a40 build-75 -- . ':(exclude)docs'` is EMPTY. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **75** — merged manifest. `kStaffAuthTelemetryAppVersion` moved in the same commit. |
-| **Android artifact** | `<PENDING>` |
+| **Android artifact** | `app-release.aab` · **68,283,657 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-13 from isolated worktree `lumina-b75` at tag `build-75`, `git status` empty before **and** after. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64). **versionCode 75 CONSUMED.** |
 | **iOS** | `<PENDING>` — fill when Codemagic reports, not when queued. |
 | **Uploaded** | `<PENDING>` |
 | **Supersedes** | **+74** (join regression) |
@@ -525,8 +525,22 @@ was dropped in the cherry-pick — the +21 figure was simply imprecise. Function
 suite **313 / 13 suites** (was 291 / 12; `joinNeighborhood.test.js` adds 22).
 `flutter analyze lib/ test/` — **0 errors**.
 
-**No deploy in this step.** Rules and functions remain frozen per the deploy
-freeze; main and production are already convergent on rules.
+**Rules/functions convergence, verified both ways.** Source: `git diff a83193f HEAD`
+is **0 lines** for `firestore.rules`, `functions/src/joinNeighborhood.ts` and
+`functions/index.js` — main now equals the source that was actually deployed on
+2026-08-12. Behaviourally, against the LIVE ruleset with client credentials:
+
+```
+GET /neighborhoods/8b25LBEh...  MEMBER     (wrQRUUKy)       -> HTTP 200  readable
+GET /neighborhoods/8b25LBEh...  NON-MEMBER (f3_repro_probe) -> HTTP 403  denied
+```
+
+which is exactly `allow read: if isGroupMember() || isGroupCreator()`. The source
+identity alone would not have proved this — the Rules API still 403s to the ADC
+token, so behaviour is the evidence and source identity is the corroboration.
+
+**No deploy in this step.** The rules freeze can lift now that main and production
+have converged; **functions deploys remain frozen until Prompt 2.**
 
 ---
 ## 2.5.10+74 — legacy installer entries retired; first build carrying a verified crew fanout
