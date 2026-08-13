@@ -41,6 +41,12 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { logger } from "firebase-functions";
 import * as admin from "firebase-admin";
 import { participationForFire } from "./participationForFire";
+import {
+  evaluateAccountReadiness,
+  graduationEvents,
+  gateSummary,
+  GateBlockingReason,
+} from "./gameDayGate";
 import { assertPayloadIsFireSafe, FIRE_JOBS_COLLECTION } from "./fireJobs";
 import {
   DEFAULT_LEAD_MINUTES,
@@ -319,7 +325,7 @@ export async function runPlannerTick(
     // still logs what WOULD have been planned — the dry-run corpus must keep
     // growing for the eventual global audit, which is the only thing that can
     // clear F1 (the end path has never executed) fleet-wide.
-    const writeJobs = writesJobsFor(policy, uid);
+    const allowlisted = writesJobsFor(policy, uid);
     if (opts.onlyUid && uid !== opts.onlyUid) continue;
 
     const configs = await db
@@ -334,6 +340,76 @@ export async function runPlannerTick(
     // One controller read per user, shared by every config.
     const controllers = await db.collection("users").doc(uid).collection("controllers").get();
     const controller = controllers.docs[0] ?? null;
+
+    // ── READINESS GATE ────────────────────────────────────────────────
+    // Evaluated for EVERY account with an enabled config, on every tick —
+    // not on the enable toggle. That is the whole point: all nine live
+    // accounts predate the old client prompt, so a toggle-time check would
+    // still gate nobody. An already-enabled account is evaluated here with
+    // no user action, and graduates the tick after it becomes ready.
+    const udata = u.data() || {};
+    const hasScheduleArray =
+      Array.isArray(udata.schedules) && udata.schedules.length > 0;
+    // Only pay for the subcollection read when the array is empty — the
+    // #TD-1 dual state means either counts, but most accounts answer on the
+    // cheap side.
+    let hasScheduleSubcollection = false;
+    if (!hasScheduleArray) {
+      try {
+        const sub = await db
+          .collection("users").doc(uid).collection("schedules").limit(1).get();
+        hasScheduleSubcollection = !sub.empty;
+      } catch (_) {
+        /* unreadable → treat as absent; the gate fails safe toward log-only */
+      }
+    }
+    const cdata = controller?.data() || {};
+    const gate = evaluateAccountReadiness({
+      hasScheduleArray,
+      hasScheduleSubcollection,
+      hasParticipationFacts:
+        Array.isArray(cdata.participating_channels_device_ids) &&
+        cdata.participating_channels_device_ids.length > 0,
+      // Tri-state, read straight through. The fact is not published yet, so
+      // this is `undefined` fleet-wide today = unknown-and-allowed.
+      ladderAssertsSegments:
+        typeof cdata.base_ladder_asserts_segments === "boolean"
+          ? (cdata.base_ladder_asserts_segments as boolean)
+          : null,
+    });
+
+    // Log-only for THIS account when gated — the same shape the allowlist
+    // produces, deliberately not a second mechanism.
+    const writeJobs = allowlisted && gate.armed;
+
+    const priorGate = Array.isArray(udata.gameday_gate_blocking)
+      ? (udata.gameday_gate_blocking as GateBlockingReason[])
+      : null;
+    for (const g of graduationEvents(priorGate, gate.blocking)) {
+      logRows.push({ uid, action: "gate", reason: g });
+      bump(stats.skipped, g);
+    }
+    for (const r of gate.blocking) {
+      logRows.push({ uid, action: "gate", reason: r, summary: gateSummary(gate) });
+    }
+    for (const a of gate.advisory) {
+      logRows.push({ uid, action: "gate", reason: a, advisory: true });
+    }
+    // Persist ONLY on change: the verdict is the input to the next tick's
+    // graduation check, and a write every tick for every user would cost more
+    // than the gate saves.
+    const changed =
+      JSON.stringify(priorGate ?? []) !== JSON.stringify(gate.blocking);
+    if (changed) {
+      try {
+        await u.ref.set(
+          { gameday_gate_blocking: gate.blocking },
+          { merge: true }
+        );
+      } catch (_) {
+        /* a failed state write must never stop planning */
+      }
+    }
 
     for (const cfgDoc of configs.docs) {
       stats.configsEnabled++;
