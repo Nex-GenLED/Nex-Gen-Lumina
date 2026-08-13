@@ -12,6 +12,9 @@ import '../../sports_alerts/services/game_schedule_service.dart';
 import '../../wled/wled_payload_utils.dart';
 import 'season_schedule_reconciliation.dart';
 import 'sync_event_background_persistence.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import 'sync_refusal_record.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // SYNC EVENT BACKGROUND WORKER
@@ -30,6 +33,9 @@ import 'sync_event_background_persistence.dart';
 //   6. Monitors active sessions for score celebrations (game day)
 //   7. Communicates session state back to the UI via service.invoke()
 // ═════════════════════════════════════════════════════════════════════════════
+
+/// Fixed id so a re-notification replaces rather than stacks.
+const int _kRefusalNotificationId = 90210;
 
 const String _functionsBaseUrl =
     'https://us-central1-icrt6menwsv2d8all8oijs021b06s5'
@@ -455,6 +461,47 @@ class SyncEventBackgroundWorker {
     }
   }
 
+  /// Best-effort local notification for a refusal the customer can act on.
+  ///
+  /// PERMISSION GATES IMMEDIACY, NEVER LEGIBILITY. Every failure path here —
+  /// permission denied, plugin unavailable in this isolate, initialise throws —
+  /// is swallowed. The refusal is already persisted by the caller, so the
+  /// banner shows it on next open regardless. Option 2 is option 3's floor,
+  /// and this method is the only part that is optional.
+  Future<void> _notifyRefusal(SyncRefusal refusal) async {
+    try {
+      final plugin = FlutterLocalNotificationsPlugin();
+      await plugin.initialize(
+        const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          iOS: DarwinInitializationSettings(),
+        ),
+      );
+      const details = NotificationDetails(
+        android: AndroidNotificationDetails(
+          'sync_refusal',
+          'Neighborhood Sync',
+          channelDescription:
+              'Tells you when a sync did not start, and why.',
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+          styleInformation: BigTextStyleInformation(''),
+        ),
+        iOS: DarwinNotificationDetails(),
+      );
+      await plugin.show(
+        _kRefusalNotificationId,
+        refusal.title,
+        refusal.message.isNotEmpty
+            ? refusal.message
+            : 'Your consent settings stopped this sync.',
+        details,
+      );
+    } catch (e) {
+      debugPrint('[SyncBgWorker] refusal notification skipped: $e');
+    }
+  }
+
   /// Call the initiateSyncSession Cloud Function via HTTP.
   /// Returns the session ID on success, null on failure.
   Future<String?> _callInitiateSessionFunction({
@@ -501,7 +548,39 @@ class SyncEventBackgroundWorker {
 
         if (response.statusCode == 200) {
           final result = jsonDecode(response.body) as Map<String, dynamic>;
-          return result['sessionId'] as String?;
+
+          // W1 — a refusal is a 200 with success:false and a reason. It used to
+          // vanish here: sessionId is null for a refusal, so the caller saw
+          // "nothing happened" and the customer saw nothing at all. There is no
+          // foreground caller, so this isolate is the only place the reason
+          // exists — persist it, and notify only for the causes the customer
+          // can act on.
+          final refusal = SyncRefusal.fromResponseBody(
+            result,
+            eventId: eventId,
+            nowMillis: DateTime.now().millisecondsSinceEpoch,
+          );
+          if (refusal != null) {
+            final notify = await const SyncRefusalStore().record(refusal);
+            debugPrint('[SyncBgWorker] sync refused: ${refusal.reason} '
+                '(${refusal.category}) notify=$notify');
+            if (notify) {
+              // PERMISSION GATES IMMEDIACY, NOT LEGIBILITY. If this does
+              // nothing — denied, unsupported, throws — the refusal is already
+              // persisted above and the banner will still show it. Option 2 is
+              // option 3's floor.
+              await _notifyRefusal(refusal);
+            }
+            return null;
+          }
+
+          // A real session started: the standing refusal no longer describes
+          // reality, so the banner must not outlive it.
+          final sessionId = result['sessionId'] as String?;
+          if (sessionId != null) {
+            await const SyncRefusalStore().clearStanding();
+          }
+          return sessionId;
         } else {
           debugPrint(
             '[SyncBgWorker] Cloud Function error: ${response.statusCode}',

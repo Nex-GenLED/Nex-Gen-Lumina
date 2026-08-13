@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/neighborhood/sync_refusal_banner.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../theme.dart';
@@ -83,6 +84,13 @@ class _NeighborhoodSyncScreenState extends ConsumerState<NeighborhoodSyncScreen>
       appBar: _buildAppBar(context),
       body: Stack(
         children: [
+          // W1 — the standing sync refusal. This is the half that cannot fail:
+          // if the notification never arrived (permission denied, app killed),
+          // this is where the customer finds out a sync did not start and why.
+          const Align(
+            alignment: Alignment.topCenter,
+            child: SyncRefusalBanner(),
+          ),
           NeighborhoodOnboarding(
             onCreateGroup: () {
               markNeighborhoodSyncOnboardingComplete();
