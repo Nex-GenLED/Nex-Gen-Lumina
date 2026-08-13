@@ -868,7 +868,7 @@ deploys were performed**.
 fresh-account invite-code join on +76 closes it for both builds.
 
 ---
-> ### ⚠️ THE JOIN-SMOKE ACCOUNT IS A CUSTOMER, AND IT INVALIDATES THE FANOUT SCOPING PREMISE
+> ### THE JOIN-SMOKE ACCOUNT WAS A CUSTOMER — SMOKE VALID, JOIN REVERTED
 >
 > The account used was **`YcSGiwesJuS7Qsh1aql0Qh1jqYh2` = stegall.s@yahoo.com** — not a fresh
 > test account. It is a **real customer**, row 6 of the Game Day census, with a real controller
@@ -888,11 +888,31 @@ fresh-account invite-code join on +76 closes it for both builds.
 > They have no `syncConsent` doc, so `initiateSyncSession` would skip them; `applySyncPattern`
 > does not consult consent at all, so the fanout path is the exposed one.
 >
-> **RECOMMENDATION REVERSED. Revert the join.** The earlier advice — keep it as a permanent
-> outsider-uid rig asset — was written before the account was identified, and a customer is not
-> a rig asset. A dedicated test account gives the same three-times-this-week convenience with
-> none of this exposure. Until it is reverted, treat the demo group as CONTAINING A CUSTOMER and
-> do not run a fanout against it.
+> **REVERTED 2026-08-13, verified in both places.** Tyler confirmed Blue Line was a genuine
+> non-member, so the smoke is VALID and the flag is closed for +75 and +76. The membership was
+> then removed, because a commercial customer's bar is not a rig asset:
+>
+> ```
+> memberUids (2): wrQRUUKy, KOerj0ui      Blue Line present: false
+> members/{blueline} exists: false        member docs remaining: 2
+> ```
+>
+> **Blue Line's own state untouched**, checked before and after: 1 controller
+> (`80_f3_da_b3_b8_20`), 75 user-doc keys, 3 Game Day configs, `gameday_gate_blocking` unchanged
+> at `["gated_no_facts"]`. Crews they belong to: 0 — the demo crew was their only one, which is
+> why removal restores them exactly to where they started. The member doc had no subcollections,
+> so nothing was orphaned.
+>
+> `arrayRemove(U)` — the ELEMENT, not `[U]`. **#74 is one week old** and this is the same call
+> shape that took `initiateSyncSession` down.
+>
+> **The fanout scoping premise is restored:** the demo group's only members are again
+> `tyler.honeycutt` and `nex-genadmin`, which is what `config/sync_fanout`'s allowlist entry
+> claims.
+>
+> **STILL WANTED: a dedicated outsider-uid rig asset.** A known clean non-member has been needed
+> three times this week. Five-minute setup whenever Tyler makes one — a purpose-built test
+> account, recorded here as a rig asset, so the next smoke never reaches for a customer.
 
 ## 2.5.10+75 — F-3's app half ships; the +74 join regression is closed
 
