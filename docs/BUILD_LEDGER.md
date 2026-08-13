@@ -223,7 +223,17 @@ automatic** — re-evaluated every tick, so setting a schedule arms the account 
 the next one with no re-toggle, logged `graduated_<reason>`. The prior verdict
 persists on the user doc and is written ONLY on change. Reads are reused: the
 user doc and controllers are already in hand, and the schedules subcollection is
-read only when the array is empty. **368 tests / 16 suites** (was 338 / 15).
+read only when the array is empty. **374 tests / 16 suites** (was 338 / 15).
+
+**Summary counter** (2026-08-13, `formatGateSummary`): one aggregate line beside
+the per-account rows, folded from the SAME verdict array the rows are built from
+— `gate: 8 accounts gated {no_facts:5, no_floor:7} · 10 advisory
+{no_ladder_unknown:10} · 2 armed`. Advisory is stated apart from gating: every
+account carries the R2 advisory today, and a merged figure would read "10
+blocked" when 2 of those are armed. **Eight gated, not the seven in the approved
+example** — the two reason sets overlap by four and `YcSGiwes` fails only R3, so
+the distinct count is the union. The test caught that before the log could state
+it wrongly.
 
 ### GLOBAL-ARM WORKSHEET — census 2026-08-13
 
