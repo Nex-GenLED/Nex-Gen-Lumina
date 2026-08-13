@@ -790,6 +790,84 @@ resolved for the affected accounts.
 
 ---
 
+## 2.5.10+76 — every legible server refusal gets a customer surface
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-76`** — points at the docs-only commit following `2aa5c15`. |
+| **Git SHA (app bytes)** | **`2aa5c15`** — `chore(release): bump to 2.5.10+76`. **iOS↔Android join key.** |
+| **App-bytes ancestry** | `7796a40` (+75) **+** W4, the gate reader, W2+W3, W1. |
+| **Ledger SHA (tagged)** | The `build-76` tag. `git diff --stat 2aa5c15 build-76 -- . ':(exclude)docs'` is EMPTY. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **76** — `kStaffAuthTelemetryAppVersion` moved in the same commit. |
+| **Android artifact** | `<PENDING>` |
+| **iOS** | `<PENDING>` — fill when Codemagic reports, not when queued. |
+| **Uploaded** | `<PENDING>` |
+| **Supersedes** | **+75** |
+
+**Theme: a refusal nobody sees is still a silent drop.** Three server-side
+guards shipped legible refusals in the preceding days — #69/#71 consent, the
+readiness gate, #67's partition — and every one of them was legible to the
+server log and to nobody else.
+
+**W4 — the R2 fact** (`b0bfa05`). The healer measures
+`base_ladder_asserts_segments` on the LAN connect it already performs: do
+presets **1 and 2**, the only two `baseRestorePayload` can load, each carry a
+`seg` array with an explicit `on` for every device channel? `null` is not
+`false` three times over (no bus list, `PresetsReadState.unknown`, relay rather
+than LAN) because `false` moves an account into log-only and a failed GET must
+never do that. `deviceEmpty` IS `false` — we looked, there are no presets. A
+segment present but SILENT about `on` counts as not asserted: precisely the
+inherited-state case #67 exists to eliminate. Zero-mutation on reconnect is
+pinned, since the disposition mirror nearly broke the equivalent guarantee.
+**This begins hardening R2 per account with no server change — the gate already
+consumes the field.**
+
+**W2 — the gate's client state** (`8bd6237`, `5d50353`). Eight of ten live
+accounts are held in log-only and saw a UI that looked armed. The banner
+reflects the planner's persisted verdict, names the missing item, and offers the
+one fix performable in-app. Armed renders NOTHING; graduation is said ONCE,
+device-locally. Advisory renders nothing at all — `gated_no_ladder_unknown` is
+ours to collect (W4), not the customer's to fix. The reader never invents a
+refusal: absent, empty and malformed all read as armed.
+
+**W3 — the badge** (`5d50353`). Only the UPCOMING branch consults the gate; live
+and final are reports of fact and cannot be wrong about the future. The verdict
+is READ at the call site rather than polled by the badge, so its own cadence
+stays uncoupled — the coupling that once froze it for celebrations-off users.
+
+> **W3 SCOPE, and the residual stated plainly.** Gated-state only. `will-fire`
+> needs `users/{uid}/fire_jobs` and `skipped(reason)` needs a per-user mirror of
+> skip reasons; **neither is client-readable** — no rule matches either path and
+> there is no recursive wildcard under `users/{userId}`. Wiring them needs a
+> rules deploy, which moves on its own clock per the +74 lesson rather than
+> riding a client build. **Residual: a non-gated account whose specific game was
+> skipped still shows plain "Today".** That is incomplete honesty, not a false
+> promise — that account does fire, just not for that game. Filed as follow-up;
+> the fleet-wide `gameday_plan_log` must never be client-exposed.
+
+**W1 — the refusal surface** (`5cb3852`, #73). `initiateSyncSession` has **no
+foreground caller**: at the moment of refusal there is no user, no BuildContext
+and no Riverpod, so a snackbar is structurally impossible. Persist always,
+notify for `consent_blocked`/`consent_missing`, **silent for**
+`skip_next_active` — they asked to skip it. Dedup keyed **(eventId, reason)**:
+the notification announces the TRANSITION, the banner shows the STANDING state,
+pinned by a test running ten worker attempts across one blocked night and
+asserting exactly one announcement. The key excludes message and timestamp, so a
+reworded server message cannot re-notify. **Permission gates immediacy, never
+legibility** — persistence runs first and unconditionally, every notification
+failure path is swallowed, and with notifications denied the banner is fully
+functional. No new dependency.
+
+**Suites:** Dart **2272 / 3 skipped / 0 failed**, from +75's 2218 — +23 (W4),
++15 (gate reader), +16 (W1). `flutter analyze lib/ test/`: **0 errors**.
+Functions unchanged at **392 / 17** — no server code in this build, and **no
+deploys were performed**.
+
+**Carried forward:** the +75 on-device join smoke is still PENDING. One
+fresh-account invite-code join on +76 closes it for both builds.
+
+---
 ## 2.5.10+75 — F-3's app half ships; the +74 join regression is closed
 
 | Field | Value |
