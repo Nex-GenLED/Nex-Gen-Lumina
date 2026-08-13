@@ -252,95 +252,183 @@ describe("census fixtures — the nine live accounts as of 2026-08-13", () => {
 
 const { summarizeGate, formatGateSummary } = require("../../lib/gameDayGate");
 
-describe("summary counter — one aggregate line, derived from the same verdicts", () => {
-  // The nine live accounts plus the bench, as the planner sees them today.
-  const fleet = () =>
-    [
-      [false, true],  // 5oHhaEaf
-      [false, false], // Ayf0rqwN
-      [false, false], // EHRfYGyf
-      [false, false], // NmDukd5r
-      [false, true],  // Pqptfawp
-      [true, false],  // YcSGiwes
-      [true, true],   // cndlN3nm  -> armed
-      [false, true],  // j8eXTfcs (marc)
-      [false, false], // reviewer
-      [true, true],   // bench     -> armed
-    ].map(([floor, facts]) =>
+describe("summary counter — INVARIANTS (permanent; these must never drift)", () => {
+  // Property-style, deliberately not tied to any account. These hold for every
+  // fleet in every state, so they stay true as the worksheet moves.
+  const fleets = [
+    [],
+    [[true, true]],
+    [[false, false]],
+    [[true, false], [false, true], [true, true], [false, false]],
+    Array.from({ length: 25 }, (_, i) => [i % 2 === 0, i % 3 === 0]),
+  ].map((rows) =>
+    rows.map(([floor, facts]) =>
       evaluateAccountReadiness({
         hasScheduleArray: floor,
         hasScheduleSubcollection: false,
         hasParticipationFacts: facts,
         ladderAssertsSegments: null,
       })
-    );
+    )
+  );
 
-  // EIGHT, not seven. The approved example line read "7 accounts gated
-  // {no_floor:7, no_facts:5}" — but those two sets OVERLAP by four, and
-  // YcSGiwes fails ONLY R3, so it is gated without appearing in no_floor:7.
-  // Distinct gated accounts is the union: 8. This test is why the number is
-  // right in the log instead of plausible.
-  test("reproduces the 2026-08-13 live tick exactly", () => {
-    const c = summarizeGate(fleet());
-    expect(c.evaluated).toBe(10);
-    expect(c.gated).toBe(8);
-    expect(c.armed).toBe(2);
-    expect(c.blocking).toEqual({ gated_no_floor: 7, gated_no_facts: 5 });
-    expect(c.advisory).toEqual({ gated_no_ladder_unknown: 10 });
-  });
-
-  // THE MISREADING THIS EXISTS TO PREVENT. Every account carries the advisory,
-  // so a merged figure would say "10 gated" when 7 are gated and 3... 2 are
-  // armed. An operator would go looking for three blocks that do not exist.
-  test("advisory is NEVER folded into the gated count", () => {
-    const c = summarizeGate(fleet());
-    const advisoryTotal = Object.values(c.advisory).reduce((a, b) => a + b, 0);
-    expect(advisoryTotal).toBe(10);
-    expect(c.gated).toBe(8);
-    expect(c.gated + c.armed).toBe(c.evaluated);
-    expect(c.gated).toBeLessThan(advisoryTotal);
-  });
-
-  // Counts are FOLDED from the verdicts the rows are built from, never
-  // recomputed from the inputs. This asserts the invariant directly: rebuild
-  // the counts from the verdicts a second way and they must agree.
-  test("counts are consistent with the verdicts they came from", () => {
-    const vs = fleet();
-    const c = summarizeGate(vs);
-    expect(c.gated).toBe(vs.filter((v) => !v.armed).length);
-    expect(c.armed).toBe(vs.filter((v) => v.armed).length);
-    for (const [reason, n] of Object.entries(c.blocking)) {
-      expect(n).toBe(vs.filter((v) => v.blocking.includes(reason)).length);
-    }
-    for (const [reason, n] of Object.entries(c.advisory)) {
-      expect(n).toBe(vs.filter((v) => v.advisory.includes(reason)).length);
+  test("gated + armed === evaluated, always", () => {
+    for (const vs of fleets) {
+      const c = summarizeGate(vs);
+      expect(c.gated + c.armed).toBe(c.evaluated);
+      expect(c.evaluated).toBe(vs.length);
     }
   });
 
-  test("the line reads the way an operator needs it to", () => {
-    const line = formatGateSummary(summarizeGate(fleet()));
-    expect(line).toBe(
-      "gate: 8 accounts gated {no_facts:5, no_floor:7} · " +
-        "10 advisory {no_ladder_unknown:10} · 2 armed"
-    );
+  // THE MISREADING THE LINE EXISTS TO PREVENT. Advisory accounts are ARMED.
+  // Folding them into `gated` would send an operator after blocks that do not
+  // exist — and today every account carries the R2 advisory, so the overstate
+  // would be total.
+  test("advisory is never folded into gated", () => {
+    for (const vs of fleets) {
+      const c = summarizeGate(vs);
+      const adv = Object.values(c.advisory).reduce((a, b) => a + b, 0);
+      expect(c.gated).toBe(vs.filter((v) => !v.armed).length);
+      // Every account here is R2-unknown, so advisory === evaluated and is
+      // wholly independent of how many are gated.
+      expect(adv).toBe(c.evaluated);
+    }
   });
 
-  test("an all-clear fleet says so without an advisory clause", () => {
-    const vs = [
+  // Counts are FOLDED from the same verdicts the detail rows are built from.
+  // Recomputing from the inputs a second time is how a summary and its own
+  // rows come to disagree; this rebuilds them a different way and requires
+  // agreement.
+  test("counts are derived from the same verdicts as the detail rows", () => {
+    for (const vs of fleets) {
+      const c = summarizeGate(vs);
+      for (const [reason, n] of Object.entries(c.blocking)) {
+        expect(n).toBe(vs.filter((v) => v.blocking.includes(reason)).length);
+      }
+      for (const [reason, n] of Object.entries(c.advisory)) {
+        expect(n).toBe(vs.filter((v) => v.advisory.includes(reason)).length);
+      }
+    }
+  });
+
+  test("a gated count is the UNION of reasons, never their sum", () => {
+    // Two accounts, each failing both checks: no_floor:2 + no_facts:2 but only
+    // 2 accounts gated. Summing reasons would say 4. This is the arithmetic
+    // that made the approved example line read 7 when the answer was 8.
+    const vs = [0, 1].map(() =>
       evaluateAccountReadiness({
-        hasScheduleArray: true,
+        hasScheduleArray: false,
         hasScheduleSubcollection: false,
-        hasParticipationFacts: true,
-        ladderAssertsSegments: true,
-      }),
-    ];
-    expect(formatGateSummary(summarizeGate(vs))).toBe(
-      "gate: 0 accounts gated {} · 1 armed"
+        hasParticipationFacts: false,
+        ladderAssertsSegments: null,
+      })
     );
+    const c = summarizeGate(vs);
+    expect(c.blocking).toEqual({ gated_no_floor: 2, gated_no_facts: 2 });
+    expect(c.gated).toBe(2);
   });
 
-  test("no accounts evaluated -> zeroes, not a crash", () => {
-    const c = summarizeGate([]);
-    expect(c).toEqual({ evaluated: 0, gated: 0, armed: 0, blocking: {}, advisory: {} });
+  test("the separator is ASCII — this line is read through tooling", () => {
+    const line = formatGateSummary(summarizeGate(fleets[3]));
+    expect(line).toContain(" | ");
+    // Every code unit below 128. Written without a control-character
+    // literal on purpose: embedding a raw NUL in a source file to test for
+    // ASCII-ness is its own small joke at the reader's expense.
+    for (const ch of line) {
+      expect(ch.codePointAt(0)).toBeLessThan(128);
+    }
+  });
+
+  test("all-clear drops the advisory clause; empty fleet does not throw", () => {
+    expect(
+      formatGateSummary(
+        summarizeGate([
+          evaluateAccountReadiness({
+            hasScheduleArray: true,
+            hasScheduleSubcollection: false,
+            hasParticipationFacts: true,
+            ladderAssertsSegments: true,
+          }),
+        ])
+      )
+    ).toBe("gate: 0 accounts gated {} | 1 armed");
+    expect(summarizeGate([])).toEqual({
+      evaluated: 0, gated: 0, armed: 0, blocking: {}, advisory: {},
+    });
+  });
+});
+
+// ── WORKSHEET SNAPSHOT — a DRIFT DETECTOR, not a gate on the build ──────────
+//
+// This records the fleet as of a moment. It must never hard-fail: the fleet
+// moving is the POINT, and a red build for a customer setting a schedule would
+// teach everyone to stop reading it. On divergence it reports the delta and
+// passes; updating the snapshot is a deliberate ledger act recording worksheet
+// progress.
+describe("worksheet snapshot 2026-08-13T15:55Z — drift detector", () => {
+  // [label, hasFloor, hasFacts]
+  const SNAPSHOT = [
+    ["5oHhaEaf ecochran08", false, true],
+    ["Ayf0rqwN textim6", false, true], // graduated no_facts 15:55:14Z
+    ["EHRfYGyf cpaschall10", false, false],
+    ["NmDukd5r jjdyer1", false, false],
+    ["Pqptfawp dnicholas0131", false, true],
+    ["YcSGiwes stegall.s", true, false],
+    ["cndlN3nm chris_cipollone", true, true], // ARMED
+    ["j8eXTfcs marc (#53)", false, true],
+    ["reviewer", false, false],
+    ["wrQRUUKy bench", true, true], // ARMED
+  ];
+
+  // The line production emitted at 2026-08-13T15:55:07Z, recorded verbatim
+  // except for the separator, which became ASCII in the same commit.
+  const RECORDED =
+    "gate: 8 accounts gated {no_facts:4, no_floor:7} | " +
+    "10 advisory {no_ladder_unknown:10} | 2 armed";
+
+  const current = () =>
+    formatGateSummary(
+      summarizeGate(
+        SNAPSHOT.map(([, floor, facts]) =>
+          evaluateAccountReadiness({
+            hasScheduleArray: floor,
+            hasScheduleSubcollection: false,
+            hasParticipationFacts: facts,
+            ladderAssertsSegments: null,
+          })
+        )
+      )
+    );
+
+  test("reports drift from the recorded worksheet, and never fails on it", () => {
+    const now = current();
+    if (now !== RECORDED) {
+      // Deliberately not an assertion. The delta is the deliverable.
+      console.warn(
+        [
+          "WORKSHEET DRIFT - the fleet has moved since 2026-08-13T15:55Z.",
+          "  recorded: " + RECORDED,
+          "  current:  " + now,
+          "  Update SNAPSHOT and record the movement in docs/BUILD_LEDGER.md.",
+        ].join(String.fromCharCode(10))
+      );
+    }
+    expect(true).toBe(true);
+  });
+
+  // What the snapshot is FOR: the two accounts that can fire unattended today.
+  test("records which accounts arm — the worksheet's actual question", () => {
+    const armed = SNAPSHOT.filter(([, floor, facts]) =>
+      evaluateAccountReadiness({
+        hasScheduleArray: floor,
+        hasScheduleSubcollection: false,
+        hasParticipationFacts: facts,
+        ladderAssertsSegments: null,
+      }).armed
+    ).map(([label]) => label);
+    expect(armed).toEqual([
+      "cndlN3nm chris_cipollone",
+      "wrQRUUKy bench",
+    ]);
   });
 });

@@ -201,5 +201,8 @@ export function formatGateSummary(c: GateSummaryCounts): string {
   const adv = Object.values(c.advisory).reduce((a, b) => a + b, 0);
   if (adv > 0) parts.push(`${adv} advisory {${fmt(c.advisory)}}`);
   parts.push(`${c.armed} armed`);
-  return parts.join(" · ");
+  // ASCII-ONLY SEPARATOR. This line exists to be scanned through tooling, and
+  // a middot renders as "?" in the gcloud console — the first thing it did in
+  // production was become unreadable in the place it is read.
+  return parts.join(" | ");
 }
