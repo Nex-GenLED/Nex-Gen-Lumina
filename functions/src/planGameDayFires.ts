@@ -45,7 +45,10 @@ import {
   evaluateAccountReadiness,
   graduationEvents,
   gateSummary,
+  summarizeGate,
+  formatGateSummary,
   GateBlockingReason,
+  GateVerdict,
 } from "./gameDayGate";
 import { assertPayloadIsFireSafe, FIRE_JOBS_COLLECTION } from "./fireJobs";
 import {
@@ -315,6 +318,10 @@ export async function runPlannerTick(
     errors: 0,
   };
   const logRows: Array<Record<string, unknown>> = [];
+  // The SINGLE source for both the per-account gate rows and the aggregate
+  // tick line. Summarising a second pass over the inputs is how a summary and
+  // its own detail rows come to disagree.
+  const gateVerdicts: GateVerdict[] = [];
 
   const users = await db.collection("users").get(); // scope COLLECTION, no index
   const gameCache = new Map<string, EspnGame | null>();
@@ -385,6 +392,7 @@ export async function runPlannerTick(
     const priorGate = Array.isArray(udata.gameday_gate_blocking)
       ? (udata.gameday_gate_blocking as GateBlockingReason[])
       : null;
+    gateVerdicts.push(gate);
     for (const g of graduationEvents(priorGate, gate.blocking)) {
       logRows.push({ uid, action: "gate", reason: g });
       bump(stats.skipped, g);
@@ -804,6 +812,12 @@ export async function runPlannerTick(
             : `LIVE:scoped(${policy.allowlist.length})`
       }]: ${JSON.stringify(stats)}`
     );
+    // Aggregate gate line, alongside the per-account rows rather than instead
+    // of them. Advisory is stated separately: today every account carries
+    // no_ladder_unknown, so a merged figure would read "10 blocked" when 7 are
+    // blocked and the rest are ARMED — a summary that overstates a block sends
+    // someone to fix nothing.
+    logger.info(formatGateSummary(summarizeGate(gateVerdicts)));
   }
   return { ...stats, logRows };
 }

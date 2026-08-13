@@ -147,3 +147,59 @@ export function gateSummary(v: GateVerdict): string {
   }
   return `log-only: ${parts.join("; ")}`;
 }
+
+/** Aggregate counts for the tick line. Derived, never independently recounted. */
+export interface GateSummaryCounts {
+  evaluated: number;
+  gated: number;
+  armed: number;
+  blocking: Record<string, number>;
+  advisory: Record<string, number>;
+}
+
+/**
+ * PURE. Fold the SAME verdicts the per-account rows were built from.
+ *
+ * Single source by construction. The alternative — recomputing counts from the
+ * inputs a second time — is how a summary and its own detail rows come to
+ * disagree, and then neither can be trusted. The caller pushes rows from this
+ * array and summarises this array; nothing is counted twice.
+ */
+export function summarizeGate(verdicts: GateVerdict[]): GateSummaryCounts {
+  const c: GateSummaryCounts = {
+    evaluated: verdicts.length,
+    gated: 0,
+    armed: 0,
+    blocking: {},
+    advisory: {},
+  };
+  for (const v of verdicts) {
+    if (v.armed) c.armed++;
+    else c.gated++;
+    for (const b of v.blocking) c.blocking[b] = (c.blocking[b] ?? 0) + 1;
+    for (const a of v.advisory) c.advisory[a] = (c.advisory[a] ?? 0) + 1;
+  }
+  return c;
+}
+
+/**
+ * One operator-readable line.
+ *
+ * ADVISORY IS COUNTED SEPARATELY AND SAID SEPARATELY. Today every account
+ * carries `no_ladder_unknown`, so a line that merged the two would read as
+ * "10 blocked" when the true figure is 7 — the advisory ones are ARMED. A
+ * summary that overstates a block is worse than no summary: it invites someone
+ * to go fix nothing.
+ */
+export function formatGateSummary(c: GateSummaryCounts): string {
+  const fmt = (m: Record<string, number>) =>
+    Object.keys(m)
+      .sort()
+      .map((k) => `${k.replace(/^gated_/, "")}:${m[k]}`)
+      .join(", ");
+  const parts = [`gate: ${c.gated} accounts gated {${fmt(c.blocking)}}`];
+  const adv = Object.values(c.advisory).reduce((a, b) => a + b, 0);
+  if (adv > 0) parts.push(`${adv} advisory {${fmt(c.advisory)}}`);
+  parts.push(`${c.armed} armed`);
+  return parts.join(" · ");
+}

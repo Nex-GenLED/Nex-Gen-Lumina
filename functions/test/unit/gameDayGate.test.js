@@ -249,3 +249,98 @@ describe("census fixtures — the nine live accounts as of 2026-08-13", () => {
     }
   });
 });
+
+const { summarizeGate, formatGateSummary } = require("../../lib/gameDayGate");
+
+describe("summary counter — one aggregate line, derived from the same verdicts", () => {
+  // The nine live accounts plus the bench, as the planner sees them today.
+  const fleet = () =>
+    [
+      [false, true],  // 5oHhaEaf
+      [false, false], // Ayf0rqwN
+      [false, false], // EHRfYGyf
+      [false, false], // NmDukd5r
+      [false, true],  // Pqptfawp
+      [true, false],  // YcSGiwes
+      [true, true],   // cndlN3nm  -> armed
+      [false, true],  // j8eXTfcs (marc)
+      [false, false], // reviewer
+      [true, true],   // bench     -> armed
+    ].map(([floor, facts]) =>
+      evaluateAccountReadiness({
+        hasScheduleArray: floor,
+        hasScheduleSubcollection: false,
+        hasParticipationFacts: facts,
+        ladderAssertsSegments: null,
+      })
+    );
+
+  // EIGHT, not seven. The approved example line read "7 accounts gated
+  // {no_floor:7, no_facts:5}" — but those two sets OVERLAP by four, and
+  // YcSGiwes fails ONLY R3, so it is gated without appearing in no_floor:7.
+  // Distinct gated accounts is the union: 8. This test is why the number is
+  // right in the log instead of plausible.
+  test("reproduces the 2026-08-13 live tick exactly", () => {
+    const c = summarizeGate(fleet());
+    expect(c.evaluated).toBe(10);
+    expect(c.gated).toBe(8);
+    expect(c.armed).toBe(2);
+    expect(c.blocking).toEqual({ gated_no_floor: 7, gated_no_facts: 5 });
+    expect(c.advisory).toEqual({ gated_no_ladder_unknown: 10 });
+  });
+
+  // THE MISREADING THIS EXISTS TO PREVENT. Every account carries the advisory,
+  // so a merged figure would say "10 gated" when 7 are gated and 3... 2 are
+  // armed. An operator would go looking for three blocks that do not exist.
+  test("advisory is NEVER folded into the gated count", () => {
+    const c = summarizeGate(fleet());
+    const advisoryTotal = Object.values(c.advisory).reduce((a, b) => a + b, 0);
+    expect(advisoryTotal).toBe(10);
+    expect(c.gated).toBe(8);
+    expect(c.gated + c.armed).toBe(c.evaluated);
+    expect(c.gated).toBeLessThan(advisoryTotal);
+  });
+
+  // Counts are FOLDED from the verdicts the rows are built from, never
+  // recomputed from the inputs. This asserts the invariant directly: rebuild
+  // the counts from the verdicts a second way and they must agree.
+  test("counts are consistent with the verdicts they came from", () => {
+    const vs = fleet();
+    const c = summarizeGate(vs);
+    expect(c.gated).toBe(vs.filter((v) => !v.armed).length);
+    expect(c.armed).toBe(vs.filter((v) => v.armed).length);
+    for (const [reason, n] of Object.entries(c.blocking)) {
+      expect(n).toBe(vs.filter((v) => v.blocking.includes(reason)).length);
+    }
+    for (const [reason, n] of Object.entries(c.advisory)) {
+      expect(n).toBe(vs.filter((v) => v.advisory.includes(reason)).length);
+    }
+  });
+
+  test("the line reads the way an operator needs it to", () => {
+    const line = formatGateSummary(summarizeGate(fleet()));
+    expect(line).toBe(
+      "gate: 8 accounts gated {no_facts:5, no_floor:7} · " +
+        "10 advisory {no_ladder_unknown:10} · 2 armed"
+    );
+  });
+
+  test("an all-clear fleet says so without an advisory clause", () => {
+    const vs = [
+      evaluateAccountReadiness({
+        hasScheduleArray: true,
+        hasScheduleSubcollection: false,
+        hasParticipationFacts: true,
+        ladderAssertsSegments: true,
+      }),
+    ];
+    expect(formatGateSummary(summarizeGate(vs))).toBe(
+      "gate: 0 accounts gated {} · 1 armed"
+    );
+  });
+
+  test("no accounts evaluated -> zeroes, not a crash", () => {
+    const c = summarizeGate([]);
+    expect(c).toEqual({ evaluated: 0, gated: 0, armed: 0, blocking: {}, advisory: {} });
+  });
+});
