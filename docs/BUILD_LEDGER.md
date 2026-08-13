@@ -476,8 +476,9 @@ resolved for the affected accounts.
 | **Android versionCode** | **75** — merged manifest. `kStaffAuthTelemetryAppVersion` moved in the same commit. |
 | **Android artifact** | `app-release.aab` · **68,283,657 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-13 from isolated worktree `lumina-b75` at tag `build-75`, `git status` empty before **and** after. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64). **versionCode 75 CONSUMED.** |
 | **iOS** | **Build 296** — reported by Tyler 2026-08-13 for the `build-75` tag. **Trigger and checked-out SHA NOT independently confirmed:** this session has no Codemagic credential, so "triggered by the tag, built from `0769e70`" rests on the tag-only webhook plus Tyler's attribution, not on a read of the build record. Corroboration, not proof: +74 was 295 and +75 is 296 with no gap, which is consistent with no stray push-build having run between the two tags. |
-| **Uploaded** | `<PENDING>` |
-| **Supersedes** | **+74** (join regression) |
+| **Uploaded** | **DISTRIBUTED 2026-08-13** — Play **closed testing track** + **TestFlight** (iOS 296, tag `build-75`). Supersedes +74 on BOTH tracks. |
+| **Supersedes** | **+74** (join regression) — superseded on both tracks. |
+| **OPEN AT DISTRIBUTION** | ⚠️ **On-device join smoke is PENDING.** Posted on the strength of the F-3 c5 callable proof in production (membership written same-batch, server-side). The app's UI wiring TO that callable is unit-tested (`neighborhood_join_reflects_in_ui_test.dart`, 6 cases) but **has not been exercised on a device**. Closed by exactly one thing: **a fresh-account join by invite code on +75**. Until then the claim is "the server accepts the join" — not "the app performs it". |
 
 **Why this build exists**
 
