@@ -1007,6 +1007,12 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     it would override an explicit consent opt-out, not just a pause. Tyler's #69 decision reads
     naturally as covering it, but the consent interaction is a product call and should be made
     explicitly rather than inherited.
+  - **DECISION RECORDED 2026-08-13 (Tyler):** the initiator exemption extends to PAUSE in
+    `initiateSyncSession` — a paused initiator joins the session they started — but it **NEVER
+    overrides `syncConsent`**. An opted-out initiator gets a **legible refusal**, not a silent
+    re-opt-in: consent is a stated preference and pause is a temporary mute, and quietly
+    honouring the second by overriding the first would be the worst of both. Implementation
+    scoped separately; this entry stays OPEN until it lands.
   - Files: `functions/src/initiateSyncSession.ts:167-171`, `:185-188`, `:234`. Related **#69**.
 
 - [x] **#69 (original entry) — A PAUSED member who initiates a sync gets no command for their OWN house, and only
@@ -1070,7 +1076,53 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `scripts/_check_gameday.js` (reader — will surface the rows once written). Related **#67**
     (badge needs these rows), **F1**.
 
-- [ ] **#67 — A fire NAMES participating segments but never excludes the others, so participation is advisory**
+- [x] **#67 — A fire NAMES participating segments but never excludes the others. FIXED + DEPLOYED
+  + HARDWARE-VERIFIED 2026-08-13.**
+  - Status: **CLOSED.** Decisions: *"fires assert the full partition; non-participating segments
+    get `{id: N, on: false}` ONLY — look/effect preserved (exclusion = dark for this event; the
+    base restore asserts full state after)"* and *"unstated segment state is inherited state,
+    and inherited state is a bug"* (third appearance). Fix `adfb49d`,
+    deployed `--only functions:applySyncPattern,functions:planGameDayFires`.
+  - **Both builders**: `buildFullPartitionSegArray` (Game Day, driven by
+    `participating_channels_device_ids` now carried on the `participationForFire` verdict) and
+    `partitionBroadcastPayload` (Sync), applied **per target** — each member has their own
+    channel count and excluded set. `baseRestorePayload` excluded, verified by reading: it emits
+    `{ps:N}` and bench presets 1/2 both assert per-segment state for both segments.
+  - **Discriminating run, 2026-08-13.** Both channels pre-lit, seg1 visibly different
+    (`fx=57` green/purple). One scoped broadcast, bench participation `[0]`. On the wire:
+    `{"seg":[{"fx":88,"pal":5,"col":[[255,0,0],[0,0,255]],"id":0,"on":true},{"id":1,"on":false}]}`.
+    Converged ~3s via the real bridge:
+    ```
+    seg0 on=True   fx=88  pal=5  col0=[255,0,0]
+    seg1 on=False  fx=57  sx=180 ix=200 pal=0 col0=[0,255,120,0]
+    ```
+    Channel 1 **went dark with its look byte-identical to pre-light** — the Twins failure
+    inverted, and the preserve-look assertion verified on the wire rather than argued.
+  - **#65 unblocked.** #67 was the reason fixing #65 was dangerous: it would have made advisory
+    exclusion customer-visible the same day. Exclusion now means dark, so #65 can be fixed on
+    its own merits. 338 tests / 15 suites (was 322 / 14).
+  - Regression safety: participation == all channels is byte-equivalent to the old builder,
+    pinned as a test — which is every live account today, because of #65.
+
+- [ ] **#72 — WATCH: a crew member's `participationStatus` changed with no authoring commit**
+  - Status: OPEN (watch item, recorded 2026-08-13) · Severity: **P3 until it recurs** · Evidence:
+    two timestamps and an absence
+  - `neighborhoods/8b25LBEhS51H65VHKGQ1/members/wrQRUUKyXyc0deyuu0ORS6wsovO2`
+    was set **`active` on 2026-08-12 ~21:5x Z** (deliberately, for the §4 4/4 run) and read back
+    **`paused` on 2026-08-13 ~14:4x Z**, before any write in that session.
+  - No commit in `main` between those points touches roster data, and no session recorded the
+    change. Candidates, none confirmed: the app itself (a pause toggle in the Sync UI), a
+    leave/rejoin cycle re-seeding the member doc (`joinNeighborhood.ts:366` writes
+    `participationStatus: "active"`, so a rejoin would set active, not paused), another Claude
+    window, or a manual console edit.
+  - **Why it is worth a number rather than a shrug:** `participationStatus` gates who receives a
+    crew broadcast. A value that changes without an author is a value no test can rely on, and
+    it silently changed the meaning of a bench run twice in two days.
+  - **What would close it:** an audit trail on member-doc writes, or one reproduction with a
+    known actor. Until then, read the field at the START of any run that depends on it — do not
+    assume the value the last session left.
+
+- [x] **#67 (original entry) — A fire NAMES participating segments but never excludes the others, so participation is advisory**
   - Status: OPEN (found 2026-08-12 on the first real start fire) · Product decision,
     not a code bug
   - Observed on the bench Twins fire, 17:10:00Z. Participation resolved `[0]`, the

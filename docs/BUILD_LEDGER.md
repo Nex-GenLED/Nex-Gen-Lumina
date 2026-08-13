@@ -180,6 +180,75 @@ surfacing), `1e5f07f` (#69), `3910a85` (poll for the real bridge), `0c5fd92`
 (empty-IP fidelity + #70 filed), `06e36dc` (#70 server fix). The global flip is
 now a decision, not a blocker.
 
+### #67 — CLOSED 2026-08-13. Exclusion means dark, not unchanged.
+
+**Decisions, quoted:** *"fires assert the full partition; non-participating
+segments get `{id: N, on: false}` ONLY — look/effect preserved (exclusion = dark
+for this event; the base restore asserts full state after, so nothing else needs
+clearing)."* And the principle, on its **third appearance**: *"unstated segment
+state is inherited state, and inherited state is a bug."*
+
+**Both builders** (`adfb49d`, deployed
+`--only functions:applySyncPattern,functions:planGameDayFires`):
+
+- **Game Day** — `buildFullPartitionSegArray`, wired through `buildGameDayPayload`,
+  driven by `participating_channels_device_ids` which `participationForFire` now
+  carries on its verdict. `deviceChannelIds` is the sole authority for what exists:
+  a participating id absent from the device set is dropped, never emitted.
+- **Sync** — `partitionBroadcastPayload`, applied **per target** inside the fanout
+  loop, because every member has their own channel count and their own excluded
+  set. The facts ride along on the `getAll` the #70 address join already performs,
+  so the partition costs no extra reads.
+
+**`baseRestorePayload` excluded — the claim was verified by reading, not assumed.**
+It emits `{ps:N}`, and on the bench both base presets assert per-segment state:
+`preset 1 'NGL On' seg (id,on)=[(0,true),(1,true)]`, `preset 2 'NGL Off'
+[(0,false),(1,false)]`. Two refinements to the brief, recorded because they narrow
+the claim: it loads preset **1 or 2** (solar-chosen), not always 2; and the
+assertion is **device state, not code** — the bench ladder was repaired 2026-08-09,
+and an unrepaired account whose presets psave with no `seg` key would NOT assert
+full state. On such an account the exclusion would leak past the end fire. That is
+the base-ladder issue, already tracked, not a new one — but it means "the restore
+asserts full state" is true of the bench and not yet provable of the fleet.
+
+**THE DISCRIMINATING RUN.** Both channels pre-lit, seg1 given a visibly different
+look (`fx=57`, green/purple). One scoped Sync broadcast to the demo group, bench
+participation `[0]`. What the CF put on the wire:
+
+```
+{"seg":[{"fx":88,"pal":5,"col":[[255,0,0],[0,0,255]],"id":0,"on":true},{"id":1,"on":false}]}
+```
+
+Converged in ~3s via the real bridge:
+
+```
+          BEFORE                                    AFTER
+seg0  on=True  fx=0   pal=0 col0=[255,170,60]   on=True   fx=88 pal=5 col0=[255,0,0]
+seg1  on=True  fx=57  sx=180 ix=200 pal=0       on=FALSE  fx=57 sx=180 ix=200 pal=0
+                     col0=[0,255,120]                     col0=[0,255,120]
+```
+
+**Channel 1 went dark with its look byte-identical to pre-light.** That is the
+2026-08-12 Twins failure inverted, and it verifies the preserve-look half on the
+wire rather than by argument. Bench restored to `on=false bri=200 ps=2`.
+
+**Regression safety for the live fleet:** participation == all channels is
+byte-equivalent to the old builder, pinned as a test. Because of **#65** that is
+every real account today, so this ships as a no-op everywhere except the bench.
+**#65 is now unblocked** — it was gated on #67 precisely because fixing it first
+would have made advisory exclusion customer-visible the same day.
+
+**Fallback, never a guess:** facts missing or malformed → the pre-#67 payload,
+reported `partitioned:false` and logged `partition_unavailable`, with the plan-log
+row carrying both. Absent facts are `null`, never `[]` — an empty array would
+claim the controller has no channels and darken everything. 338 tests / 15 suites
+(was 322 / 14). Both flag docs unchanged after the deploy.
+
+**Left behind, stated:** the broadcast also queued a command for member B
+(`commandCount:2`), who has no live bridge, so that doc sits pending until it
+expires. Harmless, and the cost of exercising the real fanout rather than a
+self-only call.
+
 ### #69 — CLOSED 2026-08-13. Pause mutes the crew, not yourself.
 
 **Tyler's decision, quoted** (a product choice, not derivable from the code):
