@@ -475,7 +475,7 @@ resolved for the affected accounts.
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **75** — merged manifest. `kStaffAuthTelemetryAppVersion` moved in the same commit. |
 | **Android artifact** | `app-release.aab` · **68,283,657 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-13 from isolated worktree `lumina-b75` at tag `build-75`, `git status` empty before **and** after. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64). **versionCode 75 CONSUMED.** |
-| **iOS** | `<PENDING>` — fill when Codemagic reports, not when queued. |
+| **iOS** | **Build 296** — reported by Tyler 2026-08-13 for the `build-75` tag. **Trigger and checked-out SHA NOT independently confirmed:** this session has no Codemagic credential, so "triggered by the tag, built from `0769e70`" rests on the tag-only webhook plus Tyler's attribution, not on a read of the build record. Corroboration, not proof: +74 was 295 and +75 is 296 with no gap, which is consistent with no stray push-build having run between the two tags. |
 | **Uploaded** | `<PENDING>` |
 | **Supersedes** | **+74** (join regression) |
 
