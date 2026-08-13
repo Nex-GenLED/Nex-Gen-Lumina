@@ -800,7 +800,7 @@ resolved for the affected accounts.
 | **Ledger SHA (tagged)** | The `build-76` tag. `git diff --stat 2aa5c15 build-76 -- . ':(exclude)docs'` is EMPTY. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **76** — `kStaffAuthTelemetryAppVersion` moved in the same commit. |
-| **Android artifact** | `<PENDING>` |
+| **Android artifact** | `app-release.aab` · **68,316,478 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="76"` / `versionName="2.5.10"` · built 2026-08-13 from isolated worktree `lumina-b76` at tag `build-76`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/`. **versionCode 76 CONSUMED.** |
 | **iOS** | **Build 298** — reported by Tyler 2026-08-13 for the `build-76` tag. **Trigger and checked-out SHA NOT independently confirmed:** this session has no Codemagic credential (no `CM_*` env, no token file), so "triggered by the tag, built from `f7323c2`" rests on the tag-only webhook plus Tyler's attribution, not on a read of the build record. Corroboration, not proof: 295 (+74) → 296 (+75) → 298 (+76). **The 297 gap is unexplained from here** — consistent with an unrelated or failed run, but it is exactly the kind of gap the numbering argument relied on being absent at +75, so it weakens rather than supports the no-stray-build inference. |
 | **Uploaded** | `<PENDING>` |
 | **Supersedes** | **+75** |
