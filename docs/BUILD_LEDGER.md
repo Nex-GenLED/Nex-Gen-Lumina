@@ -180,6 +180,99 @@ surfacing), `1e5f07f` (#69), `3910a85` (poll for the real bridge), `0c5fd92`
 (empty-IP fidelity + #70 filed), `06e36dc` (#70 server fix). The global flip is
 now a decision, not a blocker.
 
+### GATE REBUILT 2026-08-13 — per-account readiness, enforced by the planner
+
+**What it replaces.** `base_layer_gate.dart` describes itself: *"⚠️ NOT A GUARD.
+If anything here fails — no context, dialog throws, provider unavailable — the
+enable PROCEEDS."* Toggle-only, session-dismissible, and **all nine live Game Day
+accounts predate it**, so it has gated nobody.
+
+**Enforcement moved server-side** (`392f5db`, deployed
+`--only functions:planGameDayFires`). A client guard covers only the paths it is
+attached to, and enablement has at least three — the toggle
+(`game_day_autopilot_providers.dart:587`), the create-and-enable path (`:638`),
+and the AI recurring-sports handler. The planner iterates every `enabled==true`
+config every five minutes, so it covers all of them, grandfathered accounts, and
+any path added later, **without knowing they exist**. That is the recon answer to
+"map every enablement path": server-side evaluation dissolves the question.
+
+Failing means **LOG-ONLY for that account** — the same shape `uid_allowlist`
+already produces. `writeJobs = allowlisted && gate.armed`. One mechanism, two
+reasons: the allowlist protects the FLEET from unproven code, the gate protects a
+CUSTOMER from unattended wrong lighting.
+
+| Check | Source | Semantics |
+|---|---|---|
+| **R1 floor** | `users/{uid}.schedules` array **or** `/schedules` subcollection (#TD-1 dual state, either counts) | enforced |
+| **R2 ladder** | `controllers/{id}.base_ladder_asserts_segments` | **tri-state** |
+| **R3 facts** | `controllers/{id}.participating_channels_device_ids` | enforced |
+
+R1 is deliberately **not** `base_boundaries` — those are device timers the healer
+published, and an account can have boundaries with no schedule (Ellie does).
+
+**R2's asymmetry is the load-bearing decision.** `true` passes, `false` fails
+CLOSED, absent is unknown-and-**allowed** with an advisory. The fact does not
+exist yet, so failing closed on absence would put the entire fleet in log-only
+awaiting a healer pass that only happens when each customer next opens the app on
+their LAN. Writing the check as `!ladderAssertsSegments` would collapse unknown
+into bad and do exactly that — pinned as a test.
+
+Reasons are distinct per the #68 lesson: `gated_no_floor`, `gated_no_facts`,
+`gated_ladder_bad`, `gated_no_ladder_unknown` (advisory). **Graduation is
+automatic** — re-evaluated every tick, so setting a schedule arms the account on
+the next one with no re-toggle, logged `graduated_<reason>`. The prior verdict
+persists on the user doc and is written ONLY on change. Reads are reused: the
+user doc and controllers are already in hand, and the schedules subcollection is
+read only when the array is empty. **368 tests / 16 suites** (was 338 / 15).
+
+### GLOBAL-ARM WORKSHEET — census 2026-08-13
+
+Nine accounts, eighteen configs — reconciles exactly with the planner's
+`configsEnabled:18`.
+
+| uid | account | teams | R1 floor | R2 ladder | R3 facts | verdict |
+|---|---|---|---|---|---|---|
+| `5oHhaEaf` | ecochran08@yahoo.com | 8 | ❌ | unknown | 1/1 | log-only |
+| `Ayf0rqwN` | textim6@yahoo.com | 1 | ❌ | unknown | 0/1 | log-only |
+| `EHRfYGyf` | cpaschall10@gmail.com | 1 | ❌ | unknown | 0/1 | log-only |
+| `NmDukd5r` | jjdyer1@hotmail.com | 1 | ❌ | unknown | 0/1 | log-only |
+| `Pqptfawp` | dnicholas0131@gmail.com | 1 | ❌ | unknown | 1/1 | log-only |
+| `YcSGiwes` | stegall.s@yahoo.com | 1 | ✅ | unknown | 0/1 | log-only |
+| `cndlN3nm` | chris_cipollone@simonton.com | 1 | ✅ | unknown | 1/1 | **ARMED** |
+| `j8eXTfcs` | **marc@tapsonmain.com** ⚑ **#53** | 2 | ❌ | unknown | 1/1 | log-only |
+| `reviewer` | reviewer@nexgenled.com | 2 | ❌ | unknown | no controller | log-only |
+| `wrQRUUKy` | bench (re-enabled `mlb_twins`) | 1 | ✅ | unknown | 1/1 | **ARMED** |
+
+**Seven of nine fail R1** — the figure confirmed independently of the original
+estimate. **R2 is `unknown` for every account**, because nothing publishes it yet.
+Marc is flagged for the **#53** commercial pairing — his floor is plausibly a
+business-hours schedule; flagged in the census, **not special-cased in code**.
+
+**The remaining path to global arm, plainly:**
+
+1. **Floors — Tyler-side, not code.** Seven accounts need an everyday schedule.
+   This is customer contact (texts), and it is the long pole.
+2. **R3 facts — three accounts** (`Ayf0rqwN`, `EHRfYGyf`, `NmDukd5r`, plus
+   `YcSGiwes`) have a controller that has never published. Self-healing: it
+   happens the next time the owner opens the app on their LAN. Not actionable
+   server-side — the input is only readable over `/json/cfg`.
+3. **R2 fact — a healer publish, filed as +76 app work.** Cheapest shape: a
+   boolean + timestamp `base_ladder_asserts_segments`, computed on the LAN
+   connect the healer already performs, by fetching `/presets.json` and checking
+   that presets **1 and 2** each carry a `seg` array asserting `on` for every
+   device channel. Reuses `controller_facts_writer`'s one-write discipline; costs
+   one extra GET per session.
+4. **Then, and only then, the allowlist-removal decision.** The gate does not
+   replace the allowlist — it makes removing it a decision about *code* maturity
+   rather than a bet on nine customers' base layers.
+
+**#72 instance 3.** The bench's `mlb_royals` config read `enabled=false` with
+`updated_at 2026-08-13T02:28:03.573Z`; it was enabled when it fired the Twins
+cycle on 08-12. No session and no commit accounts for the change. Same class as
+the `participationStatus` flip. Bench re-armed via `mlb_twins`, and the pattern —
+**rig state moves between sessions** — is now three-for-three on being worth
+re-reading rather than assuming.
+
 ### #67 — CLOSED 2026-08-13. Exclusion means dark, not unchanged.
 
 **Decisions, quoted:** *"fires assert the full partition; non-participating
