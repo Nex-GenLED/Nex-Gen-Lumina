@@ -470,7 +470,7 @@ resolved for the affected accounts.
 |---|---|
 | **Tag** | **`build-74`** — the deliberate act that produced the iOS build (#62). The tag points at the docs-only commit that follows `850c0db`; the app bytes are `850c0db` (see below). |
 | **Git SHA (app bytes)** | **`850c0db`** — `feat(staff): retire the legacy installer entry points; bump to 2.5.10+74`. **iOS↔Android join key.** |
-| **App-bytes ancestry** | `1d95104` (+73) **+** the #66 end-guard, F-3 security, the #70 fanout fix, and the staff-entry retirement. |
+| **App-bytes ancestry** | `1d95104` (+73) **+** the staff-entry retirement — **and nothing else.** Corrected 2026-08-13: the original row credited "F-3 security" and "the #70 fanout fix" here. Both are real and both are LIVE IN PRODUCTION, but neither is app bytes — #70 is `functions/` (deployed 22:20:40Z, independent of any build) and F-3 is `firestore.rules` + a callable, whose **app-side half is not on `main` at all** (see the WARNING below). The full app-bytes delta is: `git diff --stat 1d95104 build-74 -- lib pubspec.yaml` → 10 files, +223/-856. |
 | **Ledger SHA (tagged)** | The `build-74` tag, docs-only on top of `850c0db`. Verified with a tree comparison, not a grep — `git diff --stat 850c0db build-74 -- . ':(exclude)docs'` is EMPTY, so the tag builds byte-identical app code. Deliberately named by TAG, not by hash: a commit cannot state its own SHA (amending to insert it changes it), and that self-invalidating reference has bitten this ledger before. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **74** — merged manifest (`android:versionCode="74"`, `android:versionName="2.5.10"`), read from the manifest and not from pubspec. `kStaffAuthTelemetryAppVersion` moved to `2.5.10+74` in the same commit; they are one fact in two files. |
@@ -509,6 +509,33 @@ resolved for the affected accounts.
   red/blue, A's command `completed` against `ip="192.168.1.150"`. Also carries
   F-3 and the #66 end-fire guard. **The fanout fix is server-side and is already
   live for the demo group regardless of this build** — +74 does not gate it.
+
+> ### ⚠️ WARNING — F-3 IS DEPLOYED BUT ITS APP HALF IS NOT IN THIS BUILD
+>
+> Discovered during the +74 identity verification, 2026-08-13. F-3 lives on
+> branch `fix/f3-neighborhood-security` (`a83193f`), which was **never merged to
+> `main`**. Its rules and `joinNeighborhood` callable were deployed to production
+> from the worktree on 2026-08-12; its **285 lines of `lib/features/neighborhood/`
+> changes ship only in a build, and +74 does not contain them.**
+>
+> The deployed rule is `allow read: if isGroupMember() || isGroupCreator()`, and
+> self-insertion into `memberUids` is refused. +74's `NeighborhoodService.joinGroup`
+> still does the pre-F-3 thing — queries `/neighborhoods` by `inviteCode`, then
+> `update({memberUids: arrayUnion([uid])})` and writes `members/{uid}` client-side.
+> A non-member cannot perform that read.
+>
+> **Expected consequence in +74: joining a crew by invite code fails with
+> permission-denied, and so does nearby-group discovery** (the
+> `/neighborhood_public` projection reader is branch-only). Creating a group and
+> existing members' in-crew function are unaffected. NOT yet reproduced on a
+> device — this is derived from the deployed ruleset and the shipped source.
+>
+> Merging the branch is **not** a clean fix: its `functions/src/applySyncPattern.ts`
+> predates the scoped fanout (`dab5b27`) and the #70 address fix (`06e36dc`), so a
+> naive merge reverts both. Rebase onto `main` and keep `main`'s copy of that file.
+>
+> **Do not deploy `firestore.rules` or `functions` from `main` until this is
+> resolved** — `main`'s rules predate F-3 and would reopen the P0.
 
 **Hardware state at cut:** bench `.150` restored to `on=false bri=200 ps=2`.
 Controller config untouched — type 30 / RGB order 1 remains source of truth.
