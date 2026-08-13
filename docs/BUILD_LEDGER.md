@@ -475,8 +475,9 @@ resolved for the affected accounts.
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **74** — merged manifest (`android:versionCode="74"`, `android:versionName="2.5.10"`), read from the manifest and not from pubspec. `kStaffAuthTelemetryAppVersion` moved to `2.5.10+74` in the same commit; they are one fact in two files. |
 | **Android artifact** | `app-release.aab` · **68,271,666 bytes** · `jarsigner -verify` → **jar verified** · built 2026-08-12 from isolated worktree `lumina-b74` at tag `build-74`, `git status` empty before **and** after. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64) — archive, never commit. **versionCode 74 is now CONSUMED: a built AAB consumes its code even if never uploaded.** |
-| **iOS** | `<PENDING>` — Codemagic build number to be filled **when the build completes**, not when queued. |
-| **Uploaded** | `<PENDING>` |
+| **iOS** | **Build 295**, from tag `build-74` (Codemagic). |
+| **Uploaded** | iOS to TestFlight; Android AAB to the **Play closed testing track** (both reported by Tyler 2026-08-13). |
+| **STATUS** | ⚠️ **SUPERSEDED by +75 — JOIN REGRESSION.** Shipped with F-3's rules live but its app half absent, so joining a crew by invite code fails. See the warning below. Not a distribution candidate. |
 | **Supersedes** | **+73** |
 
 **Contents since +73**
@@ -527,8 +528,26 @@ resolved for the affected accounts.
 > **Expected consequence in +74: joining a crew by invite code fails with
 > permission-denied, and so does nearby-group discovery** (the
 > `/neighborhood_public` projection reader is branch-only). Creating a group and
-> existing members' in-crew function are unaffected. NOT yet reproduced on a
-> device — this is derived from the deployed ruleset and the shipped source.
+> existing members' in-crew function are unaffected.
+>
+> **REPRODUCED against production 2026-08-13** with CLIENT credentials (not the
+> admin SDK, which bypasses rules). Ran +74's exact first step - a `runQuery` on
+> `/neighborhoods` filtered by `inviteCode` - for the "demo" group:
+>
+> ```
+> NON-MEMBER (synthetic uid f3_repro_probe)
+>   HTTP 403 {"error":{"code":403,"message":"Missing or insufficient permissions.",
+>             "status":"PERMISSION_DENIED"}}
+> MEMBER     (wrQRUUKy, in the group)
+>   HTTP 403 {"error":{"code":403,"message":"Missing or insufficient permissions.",
+>             "status":"PERMISSION_DENIED"}}
+> ```
+>
+> **Worse than derived: the MEMBER is denied too.** A collection query is allowed
+> only when its constraints prove every matched document satisfies the rule; a
+> filter on `inviteCode` proves nothing about `memberUids`, so Firestore refuses
+> the query outright rather than filtering it. `joinGroup` therefore fails for
+> EVERY caller in +74, not only for new joiners. The caveat is closed.
 >
 > Merging the branch is **not** a clean fix: its `functions/src/applySyncPattern.ts`
 > predates the scoped fanout (`dab5b27`) and the #70 address fix (`06e36dc`), so a
