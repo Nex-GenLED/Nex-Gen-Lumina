@@ -307,6 +307,82 @@ the `participationStatus` flip. Bench re-armed via `mlb_twins`, and the pattern 
 **rig state moves between sessions** — is now three-for-three on being worth
 re-reading rather than assuming.
 
+### #71 — CLOSED 2026-08-13. Consent > pause, verified on the rig.
+
+**Decision, quoted:** *"the initiator exemption extends to participationStatus
+(pause) in initiateSyncSession, but NEVER overrides syncConsent. Pause is a mood;
+consent is a contract. A paused initiator joins and can host their own session; an
+explicitly opted-out initiator gets a LEGIBLE refusal telling them their consent
+setting blocks it — never a silent re-opt-in, never a silent drop."*
+
+**Structural pin:** `participationStatus` is not an input to
+`initiatorConsentVerdict` at all, so the exemption cannot reach a contract even by
+a future edit. Tested as a property, not just as behaviour.
+
+**Two corrections to the brief, both quoted here because each would have shipped a
+defect:**
+
+1. **`:234` is the FCM recipient list, not a participation drop.** It skips the
+   initiator when choosing who to push-notify — suppressing a notification to the
+   person who just pressed the button. Exempting them there, as asked, would have
+   notified the initiator about their own action. Left alone.
+2. **`participationStatus.optedOut` is NOT syncConsent.** They are different
+   fields; the decision's line runs between the two, so the exemption covers
+   `participationStatus` whole — matching #69, where it covers `isMemberSkipped`
+   whole. "An opted-out initiator gets a refusal" reads as if it covers this
+   field, and it must not.
+
+**Worker-hazard analysis (required before touching data).** The background worker
+polls every 5 min (adaptive to 30 s near a trigger) and reads its configs
+**exclusively from SharedPreferences** — *"No Riverpod, no Firestore listeners"*,
+*"Avoids pulling in Firestore dependencies in the background isolate."* A Firestore
+seed is therefore invisible to it unless a running app mirrors it via
+`_syncEventsToBackground`. Belt and braces: the seeded event carried
+`scheduledTime` in **2030** (the worker schedules no timer beyond 60 min out) and
+**no** `espnTeamId`/`sportLeague` (the gameStart path bails immediately). Inert on
+both paths.
+
+**The proposed disabled-event control could not work, and was replaced.** The CF
+validates `isEnabled` *before* consent, so a disabled event returns "Event is
+disabled" and never reaches the #71 code. Both cases therefore used an enabled
+event, made safe by the worker-inert state above rather than by ordering.
+
+**Blocked case** — consent off, A paused:
+```
+HTTP 200 {"success":false,"reason":"consent_blocked","category":"gameDay",
+          "message":"Your sync consent for \"gameDay\" is off, so this session
+                     was not started. Turn it on to sync this category."}
+sessions before=0 after=0   (NO session created)
+```
+
+**Success case** — consent on, A **still paused** (confirmed at start, per #72):
+```
+HTTP 200 {"success":true,"sessionId":"KfaznnvMPZwu0NHz9fF2","participantCount":1,
+          "hostUid":"wrQRUUKyXyc0deyuu0ORS6wsovO2"}
+session doc: activeParticipantUids=["wrQRUUKy"]  hostUid=wrQRUUKy
+```
+A is in participants **and** is host, while paused. Exactly the decision.
+
+**#74 found by this run** — the first attempt created the session and answered
+**500**: `arrayRemove([eventId])` passes a nested array, which Firestore refuses.
+Latent until now (the loop runs per participant; with none it never validated),
+and **#71 is what reached it** by putting the paused initiator into participants.
+It throws AFTER `sessionRef.set()`, so the session went live while the caller saw
+a failure — and the worker treats non-200 as failure. Fixed and redeployed; the
+re-run is the clean 200 above.
+
+**Cleanup verified, not assumed:** 0 syncEvents (no orphaned enabled event for the
+worker to find later), 0 syncSessions, A's `syncConsent` deleted back to absent,
+A still `paused`, no new commands in A's queue, bench `on=false bri=200 ps=2`.
+
+**Client surface remains open as #73 (+76):** the only caller
+(`sync_event_background_worker`) discards the reason — on 200 it reads
+`result['sessionId']`, null for a refusal; on non-200 it `debugPrint`s. There is no
+foreground caller, so no user is present at the moment of refusal. #71's refusals
+are legible to the server log and to nobody else yet.
+
+392 tests / 17 suites.
+
 ### #67 — CLOSED 2026-08-13. Exclusion means dark, not unchanged.
 
 **Decisions, quoted:** *"fires assert the full partition; non-participating
