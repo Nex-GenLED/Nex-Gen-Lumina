@@ -464,6 +464,71 @@ resolved for the affected accounts.
 
 ---
 
+## 2.5.10+75 — F-3's app half ships; the +74 join regression is closed
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-75`** — points at the docs-only commit that follows `7796a40`; app bytes are `7796a40`. |
+| **Git SHA (app bytes)** | **`7796a40`** — `chore(release): bump to 2.5.10+75`. **iOS↔Android join key.** |
+| **App-bytes ancestry** | `850c0db` (+74) **+** the rebased F-3 app half **+** join-navigation **+** leave-sync restore. |
+| **Ledger SHA (tagged)** | The `build-75` tag. `git diff --stat 7796a40 build-75 -- . ':(exclude)docs'` is EMPTY. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **75** — merged manifest. `kStaffAuthTelemetryAppVersion` moved in the same commit. |
+| **Android artifact** | `<PENDING>` |
+| **iOS** | `<PENDING>` — fill when Codemagic reports, not when queued. |
+| **Uploaded** | `<PENDING>` |
+| **Supersedes** | **+74** (join regression) |
+
+**Why this build exists**
+
++74 shipped F-3's rules live with its app half stranded on an unmerged branch.
+Reproduced against production with CLIENT credentials — 403 PERMISSION_DENIED for
+a non-member **and** for a member. Joining a crew was broken for every caller.
+
+**Rebase resolution, file by file** (`rebase/f3-onto-main`, 5 commits replayed +
+2 cherry-picked, zero conflicts):
+
+- `functions/src/applySyncPattern.ts` — **main's copy survives, verified by
+  reading.** `mergeDenormTargets` / `db.getAll(...)` / `no_address` (#70) and
+  `readSyncFanoutPolicy` / `fanoutsForGroup` / `group_allowlist` (scoped fanout)
+  all present. The "keep main wholesale" policy was never actually exercised:
+  **the F-3 branch never touched this file.** The 172-line diff reported on
+  2026-08-13 was main being AHEAD, not the branch diverging — a distinction worth
+  recording, because "no conflict" here is structural, not luck.
+- `lib/features/neighborhood/` — branch's version taken. Callable
+  `joinNeighborhood`, `/neighborhood_public` discovery; the client-side
+  `where('inviteCode')` + `arrayUnion([uid])` self-insert is gone. The nearby-groups
+  overlap auto-merged correctly: the public card calls `joinPublicGroup(group.id)`,
+  not the invite-code path, which is right because the projection carries no code.
+- `firestore.rules` — **byte-identical to `a83193f`, the source that was actually
+  deployed.** `git diff a83193f HEAD -- firestore.rules` is empty, so main and
+  production have converged and the next rules deploy cannot silently drift prod.
+- `lib/features/neighborhood/neighborhood_sync_engine.dart` — rebased copy has 10
+  lines the branch lacked: main's S3b `publishParticipatingChannels`. Main's work
+  preserved, not clobbered.
+
+**Suite reconciliation** — Dart **2218 passed / 3 skipped / 0 failed**, from
++74's 2165. Every one of the +53 accounted for:
+
+| Source | Δ |
+|---|---|
+| `test/bench/fanout_verify_test.dart` (new) | +33 |
+| `neighborhood_join_reflects_in_ui_test.dart` (new) | +6 |
+| `neighborhood_sync_engine_teardown_test.dart` (12 → 15, **modified, not new**) | +3 |
+| `pre_sync_scene_persistence_test.dart` (new) | +11 |
+| **total** | **+53** |
+
+The join-membership branch contributes **20**, not the +21 carried in the plan.
+Not a loss: all three of its test files are byte-identical to the branch tip
+(`git diff fix/neighborhood-join-membership HEAD -- <files>` empty), so nothing
+was dropped in the cherry-pick — the +21 figure was simply imprecise. Functions
+suite **313 / 13 suites** (was 291 / 12; `joinNeighborhood.test.js` adds 22).
+`flutter analyze lib/ test/` — **0 errors**.
+
+**No deploy in this step.** Rules and functions remain frozen per the deploy
+freeze; main and production are already convergent on rules.
+
+---
 ## 2.5.10+74 — legacy installer entries retired; first build carrying a verified crew fanout
 
 | Field | Value |
