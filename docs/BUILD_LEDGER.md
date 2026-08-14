@@ -19,6 +19,81 @@ optional.
 
 ## Operational flags
 
+### ROOT-ON RESOLVED 2026-08-14 — the alarm was mine, not the fleet's
+
+**VERDICT: root `on:false` IS storable. The predicate is satisfiable. There is
+no fleet-wide disruption loop from this cause.** My previous pass escalated the
+opposite as a live possibility; it was wrong, and the correction matters more
+than the finding.
+
+**Source evidence** (WLED `v0.15.1`, `wled00/json.cpp`, `serializeState`):
+
+```cpp
+if (includeBri) {
+  root["on"] = (bri > 0);
+  root["bri"] = briLast;
+  root[F("transition")] = transitionDelay/100;
+}
+```
+
+Root `on` is written **only when `includeBri` is set**, and `ib` is that request
+flag. It is not "omitted when false" — it is omitted when brightness is not
+included. Unambiguous from source, so **no psave experiment was needed** and the
+approved scratch-slot budget went unused.
+
+**So the losing side was my manual repair.** `buildNglOffPresetState` sends
+`ib: true` and always has; its own doc says *"`ib: true` persists root `on:false`
+into the stored preset."* My hand re-save on 2026-08-14 omitted `ib`, which is
+why preset 2 came back with root keys `[mainseg, n]` and no `on`. The app was
+never wrong.
+
+**Bench corrected** via the gated sequence (geometry verify -> set live off ->
+save with `ib:true` -> read back):
+
+```
+preset 2 root keys: [bri, mainseg, n, on, transition]
+   on = False      ROOT on:false STORED: True
+   segs: [(0, False), (1, False)]
+```
+
+**A stale comment was contradicting the code and is fixed.** `schedule_sync.dart`
+claimed *"OFF preset 2 is intentionally left without ib"* while the builder sent
+`ib: true`. Had anyone acted on the comment and removed the flag, they would have
+created the exact unsatisfiable-predicate loop this pass went looking for. The
+comment now carries the `serializeState` cite.
+
+### NON-CONVERGENCE GUARD — the general fix the root-on scare earned
+
+Implemented even though the specific case was benign, because the failure mode
+is real and cheap to foreclose: an unsatisfiable predicate makes `psaveIfChanged`
+re-save every sync, and **`psave` applies live**, so it is a visible flicker on
+every connect with each individual save reporting success.
+
+`preset_repair_convergence.dart` + wiring in `psaveIfChanged`. Three consecutive
+attempts without the predicate flipping -> refuse with a legible reason naming
+the preset, the name and the count. A satisfied predicate resets the counter, so
+an intermittent failure cannot accumulate into a permanent refusal. The limit is
+above 1 deliberately: one failure is ordinarily a transient write. A throwing
+counter **fails open** — the guard must never become a new way to fail. Store is
+process-scoped, so a relaunch re-attempts, which is correct when the controller
+may since have been repaired.
+
+**The rule: a repair that does not converge is a bug report, not a retry.**
+
+### GEOMETRY GATE — spec written
+
+`docs/SYNC_GEOMETRY_LAYER.md`, appendix. Lives at the healer's ladder-repair
+entry, immediately before the first `psaveIfChanged`. Three branches — match,
+drift, **total loss** (the reboot collapse, a proven input). Compares segment
+**count and bounds only**: `rev`/`mi`/`of`/`grp`/`spc` are deliberately NOT
+compared, because the pixel map does not own them and refusing on a correct
+install whose reversal the app has no record of would be #76's mistake with the
+sign flipped. Readback re-verification is mandatory after any re-provision.
+
+**The two guards compose and are distinct:** the gate asks *is the device in a
+state worth saving?*, the convergence guard asks *has saving stopped helping?* A
+gate refusal must not count as a repair attempt — the save never happened.
+
 ### PRESETS.JSON REPAIRED via /edit — and two firmware facts fell out of it
 
 **The corruption mechanism, recorded as its own finding.** `psave`/`pdel` can

@@ -93,3 +93,78 @@ across 200 ft receive the *same* display, rendered at their own densities.
    an assumed density and flagged?
 4. Does the geometry layer write to the device (owning `rev`/`start`/`stop`), or
    only describe it? The preset finding above makes this a real fork.
+
+---
+
+# APPENDIX — the geometry gate (spec)
+
+Not the geometry layer itself. This is the narrow guard that keeps a `psave`
+from baking wrong geometry into the base ladder, specified now because the
+2026-08-14 bench incident supplied every one of its branches as a real input.
+
+**Where it lives:** the healer's ladder-repair entry, immediately before the
+first `psaveIfChanged` in `ScheduleSyncService`. Nothing else may `psave` the
+ladder without passing through it.
+
+**Why there:** `psave` captures LIVE segment geometry into the preset regardless
+of what the inline state specifies (bench-proven — a save sending only
+`{id,on}` stored `rev/mi/of/grp/spc` anyway). So the preset is only as correct
+as the device was at save time. The gate is the only place that can know.
+
+## What "matches the pixel map's expectation" means
+
+Compared, in this order:
+
+1. **Segment count** — `state.seg.length` vs the pixel map's channel count.
+2. **Bounds** — each segment's `start`/`stop` vs the map's per-channel range,
+   exact integers, in device order.
+3. **Nothing else.** `rev`, `mi`, `of`, `grp`, `spc` are NOT compared. The map
+   does not own them today; provisioning and the installer do. Comparing them
+   would make the gate refuse on a correct install whose reversal the app has
+   no record of — which is #76's mistake with the sign flipped.
+
+`start`/`stop` only, because they are the two facts the pixel map actually
+knows and the two a collapse destroys.
+
+## The three branches
+
+| Branch | Condition | Action |
+|---|---|---|
+| **MATCH** | count and bounds equal | proceed to save |
+| **DRIFT** | count equal, bounds differ | re-provision bounds → **re-read** → if now matching, save; else refuse |
+| **TOTAL LOSS** | count differs (typically collapsed to 1) | re-provision the full layout from the pixel map → **re-read** → if matching, save; else refuse |
+
+Total loss is a **proven input, not a hypothesis**: a reboot collapsed `.150`
+from two segments to one on 2026-08-14, and a preset load did **not** restore it
+— bounds live in cfg, a preset carries state onto whatever layout exists. That
+is also why the gate cannot "repair by loading a preset".
+
+**Re-verification by readback is mandatory in both repair branches.** A
+provisioning write that reported success is not evidence; the incident's whole
+lesson is that the device's actual shape is the only authority.
+
+## Refusal
+
+When re-provision fails or the readback still mismatches: **do not save.** Emit
+one legible row per the #68 convention — `gated_geometry_mismatch` with the
+expected and actual shape — and leave the preset alone. A stale-but-correct
+ladder beats a freshly-saved wrong one, because the wrong one is durable and
+loads every night.
+
+## Return
+
+```
+GateResult { proceed: bool, branch: match|drift|total_loss, repaired: bool,
+             expected: shape, actual: shape, refusal: String? }
+```
+
+The caller logs one line and either saves or does not. It never interprets the
+shapes itself.
+
+## Interaction with the non-convergence guard
+
+They compose and are not the same thing. The geometry gate asks *"is the device
+in a state worth saving?"*; the convergence guard asks *"has saving stopped
+helping?"*. A gate refusal must **not** count as a repair attempt — the save
+never happened, so counting it would burn the convergence budget on a condition
+a save was never going to fix.

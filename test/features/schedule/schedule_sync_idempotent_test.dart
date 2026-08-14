@@ -12,6 +12,7 @@
 // re-apply it after, so the strip ends where it started. These tests lock both
 // guarantees by counting the fake controller's savePreset / applyJson calls.
 
+import 'package:nexgen_command/features/schedule/preset_repair_convergence.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
@@ -135,6 +136,11 @@ ScheduleItem _patternItem() => const ScheduleItem(
     );
 
 void main() {
+  // The non-convergence guard's counters are process-scoped ON PURPOSE — that
+  // is what lets it see a repair failing across syncs. Several tests here each
+  // drive a sync in the same process, so without this the fourth test is
+  // refused for the third one's attempts.
+  setUp(resetRepairAttempts);
   const svc = ScheduleSyncService();
 
   test('Option A: pattern preset ALWAYS re-saved (even when it matches); '

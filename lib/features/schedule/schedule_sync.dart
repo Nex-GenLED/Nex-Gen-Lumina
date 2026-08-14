@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/schedule/preset_repair_convergence.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/base_ladder_repair_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
@@ -936,8 +937,26 @@ class ScheduleSyncService {
       final existing = existingPresets[id];
       if (existing != null && isSatisfied(existing)) {
         savedPresetIds.add(id);
+        // Converged: clear the non-convergence counter so an intermittent
+        // failure can never accumulate into a permanent refusal.
+        await repairAttempts.recordSatisfied(id);
         return;
       }
+
+      // NON-CONVERGENCE GUARD. A predicate a save cannot satisfy would be
+      // re-saved on every sync, and psave APPLIES live on this firmware — a
+      // visible flicker on every connect, on every controller, with each
+      // individual save reporting success. Three attempts without the
+      // predicate flipping is a bug report, not a retry.
+      final decision = await decideRepair(presetId: id, presetName: name);
+      if (!decision.allowed) {
+        presetErrors.add(decision.refusal!);
+        debugPrint('ScheduleSync: ${decision.refusal}');
+        savedPresetIds.add(id); // left alone deliberately, not lost
+        return;
+      }
+      await repairAttempts.recordAttempt(id);
+
       final ok = await activeRepo.savePreset(
         presetId: id,
         state: state,
@@ -962,8 +981,15 @@ class ScheduleSyncService {
     // psave) → segments-only, load from master-off leaves master off; slot 249
     // (psave + ib:true) → root {"on":true,"bri":255} persisted, load from
     // master-off → master TRUE. So the ON-timer asserts master power at fire
-    // time via the preset itself. OFF preset 2 is intentionally left without ib
-    // (its lights-off is via seg.on:false — see below).
+    // time via the preset itself.
+    //
+    // CORRECTED 2026-08-14: this used to claim "OFF preset 2 is intentionally
+    // left without ib". It is NOT — buildNglOffPresetState sends `ib: true`,
+    // and it must. WLED 0.15.1 writes root `on` ONLY when includeBri is set
+    // (json.cpp: `if (includeBri) { root["on"] = (bri > 0); ... }`), and `ib`
+    // IS that flag. Without it the OFF preset stores segments only, root `on`
+    // is absent, and isNglOffPresetSatisfied — which requires root on:false —
+    // can never be satisfied, so the healer re-saves preset 2 every sync.
     //
     // SEGMENT STATE (audit/BASE_LADDER.md, 2026-08-09): every ON preset now
     // writes `seg` EXPLICITLY via buildNglOnPresetState. Omitting it let the
