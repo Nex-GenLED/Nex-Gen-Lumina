@@ -1185,6 +1185,25 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Regression safety: participation == all channels is byte-equivalent to the old builder,
     pinned as a test — which is every live account today, because of #65.
 
+- [ ] **#75 — host-only and crew fanout share the source string `sync_fanout`, so the log cannot
+  tell them apart**
+  - Status: OPEN (recorded 2026-08-14) · Severity: **P3** (diagnosability) · Evidence:
+    verified-by-source + a live misreading
+  - [applySyncPattern.ts:274](../functions/src/applySyncPattern.ts#L274) and the fanout writer
+    both default to `source || "sync_fanout"`. The host-only self-apply path and the crew fanout
+    therefore stamp **the same string**, and the ONLY discriminator is which user's queue the
+    command landed in.
+  - **It has already cost a misreading.** On 2026-08-14, four commands stamped `sync_fanout`
+    appeared in Tyler's queue after an evening sync with Ellie. They read as a crew fanout; they
+    were host-only self-apply, every one targeting his own controller. Ellie's queue had zero
+    commands with that source, all time. Nothing was wrong — but proving it took a second query
+    that the source field should have made unnecessary.
+  - **Fix (one line each):** the host-only path defaults to `"self_apply"`, the fanout writer to
+    `"crew_fanout"`. Callers passing an explicit `source` are unaffected.
+  - **Do not rewrite history when fixing.** Existing docs carry `sync_fanout` on both paths;
+    any reader of the corpus must keep using the target queue for anything before the fix.
+  - Files: `functions/src/applySyncPattern.ts:274` (host-only), `:562` (fanout doc builder).
+
 - [ ] **#72 — WATCH: a crew member's `participationStatus` changed with no authoring commit**
   - Status: OPEN (watch item, recorded 2026-08-13) · Severity: **P3 until it recurs** · Evidence:
     two timestamps and an absence

@@ -19,6 +19,62 @@ optional.
 
 ## Operational flags
 
+### CENSUS CORRECTED + R-5 STAYS AMBER — 2026-08-14
+
+**The worksheet census was stale, and I published a stale row.** Ellie
+(`5oHhaEaf`) was recorded as failing R1. She does not: `schedules` array len 1,
+subcollection 1, and the planner's own persisted verdict is
+`gameday_gate_blocking: []` — **armed**. Her R2 is `true` (W4's fact, published
+from her hardware) and R3 is present. **All three green.**
+
+That stale row nearly produced a worse error. Asked to check whether her house
+was stranded on a sync design, the census answer would have been "no floor to
+recover it." The live read said otherwise. **Read the account, not the
+worksheet** — the worksheet is a snapshot with a date on it.
+
+**Fresh census, 2026-08-14, read live:**
+
+| uid | account | R1 | R2 | R3 | verdict |
+|---|---|---|---|---|---|
+| `wrQRUUKy` | bench | OK | **true** | OK | **ARMED** |
+| `cndlN3nm` | chris_cipollone | OK | unknown | OK | **ARMED** |
+| `5oHhaEaf` | **Ellie** | OK | **true** | OK | **ARMED** |
+| `Ayf0rqwN` | textim6 | — | unknown | OK | log-only `[no_floor]` |
+| `YcSGiwes` | Blue Line | OK | unknown | — | log-only `[no_facts]` |
+| `Pqptfawp` | dnicholas0131 | — | unknown | OK | log-only `[no_floor]` |
+| `j8eXTfcs` | marc ⚑ #53 | — | unknown | OK | log-only `[no_floor]` |
+| `EHRfYGyf` | cpaschall10 | — | unknown | — | log-only `[no_floor, no_facts]` |
+| `NmDukd5r` | jjdyer1 | — | unknown | — | log-only `[no_floor, no_facts]` |
+| `reviewer` | reviewer | — | unknown | — | log-only `[no_floor, no_facts]` |
+
+**ARMED 3, no-floor 6, of 10.** Two corrections to the figures in the request:
+it is **3 armed, not 4** — `Ayf0rqwN` graduated **`no_facts`** on 2026-08-13, not
+`no_floor`, and its persisted verdict is still `["gated_no_floor"]`. And
+**6 floors remain, not 5.** Easy to conflate two graduations; recorded so the
+worksheet is not corrected into a second wrong number.
+
+**R2 has started moving.** Two accounts now read `true` (bench and Ellie) where
+the whole fleet was `unknown` yesterday — W4 collecting per account exactly as
+designed, with no server change.
+
+**THE TRUE STATE, not the flattering one:**
+
+- `config/sync_fanout` = `enabled:true`, `group_allowlist:["OqWsIyvNUwYjel6Dbzwl"]`
+  — **Ellie's group**. Her house is **one `fanout:true` away from being
+  commanded**. This is a **STAGED LIVE WIRE**, deliberate, for the street test.
+  The previous scoping's "no customer" safety property is gone by choice, and
+  the allowlist is therefore NOT what protected her last night.
+- **The two-homes crew-fanout milestone has NOT occurred.** Last night was
+  **host-only self-apply** (four commands, all in Tyler's own queue, all
+  targeting `.150`) plus a genuine **cross-network join** earlier. Both real,
+  neither is the milestone.
+- **R-5 stays AMBER** pending the deliberate test in
+  [`docs/STREET_TEST_RUNBOOK.md`](STREET_TEST_RUNBOOK.md).
+
+**#75 filed (P3):** host-only and crew fanout stamp the same `sync_fanout`
+source string; the only discriminator is the target queue. It already caused a
+misreading of last night's data.
+
 ### Sync cleanup + fanout RESCOPED — 2026-08-13
 
 Production `/neighborhoods` held three groups. Two were internal test artifacts
