@@ -19,6 +19,55 @@ optional.
 
 ## Operational flags
 
+### BENCH: presets.json malformed by a scratch-slot experiment — REBOOT DID NOT RECOVER IT
+
+**Self-inflicted, not a field failure.** Diagnosing #76 I set `seg1 rev:true`,
+`psave`d to scratch slot 245 to prove WLED captures geometry, then `pdel`d it.
+Slot 245 is gone, but `/presets.json` has returned malformed output ever since:
+valid JSON to ~char 12660, then padding and 8 non-ASCII bytes, `len 13246`.
+It parsed clean earlier the same day.
+
+**Reboot did NOT fix it** (approved recovery, performed 2026-08-14): identical
+length, identical fault offset afterwards. The damage is on flash, not a flush
+artifact. `pdel` had already rewritten the file, so whatever is wrong survives a
+rewrite.
+
+**The ladder itself is intact and functional.** Recovered by tolerant parse:
+`1 'NGL On'` and `2 'NGL Off'`, both with two segments. `{"ps":2}` loads
+correctly. Only the JSON *read* is broken.
+
+**P1-52 note — add to the unparseable-presets guard's rationale:** `psave`/`pdel`
+against a scratch slot can malform the stored file, and a reboot does not
+necessarily repair it. That is a second, reproducible source for the condition
+the guard exists to survive — the guard is not merely defending against a bad
+HTTP read.
+
+**Live consequences on the bench, both benign-by-design:**
+`readPresets()` returns `PresetsReadState.unknown`, so W4 publishes
+`base_ladder_asserts_segments` as **null** (unmeasured, not false) — the
+tri-state doing its job. The healer's ladder repair will likewise judge the
+presets unreadable rather than empty, which is what P1-52 exists for.
+
+### BENCH: the reboot collapsed the segment layout 2 -> 1, and a preset load did NOT restore it
+
+Both documented reboot behaviours fired. The strip **booted lit**
+(`on=true bri=128`, the `def.on` fact) and the **segment layout collapsed**:
+
+```
+post-reboot   segs=1
+after ps=2    seg0 [0,290) on=false rev=false     <- ONE segment, not two
+```
+
+The recorded expectation was that a preset reload restores the two-segment
+layout. **It did not.** Segment BOUNDS live in `cfg` (`seglc`), not in the
+preset, so the preset restored per-segment on-state onto a layout that no longer
+has a seg1. **The bench is now single-segment**, which changes the rig's shape
+for every geometry test — including the #76 blind-spot work it was meant to
+support.
+
+Restoring two segments is a **controller cfg write**, which the standing
+constraint says to flag rather than perform. Not done; awaiting direction.
+
 ### FIELD FINDINGS — Ellie sync night, 2026-08-12 (recorded 08-14)
 
 Three findings, **one root: the system has no model of the physical house.**
