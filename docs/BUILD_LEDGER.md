@@ -1292,7 +1292,7 @@ resolved for the affected accounts.
 | **Ledger SHA (tagged)** | The `build-77` tag. `git diff --stat 100174a build-77 -- . ':(exclude)docs'` is EMPTY. |
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **77** — `kStaffAuthTelemetryAppVersion` moved in the same commit. |
-| **Android artifact** | `<PENDING>` |
+| **Android artifact** | `app-release.aab` · **68,331,830 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="77"` / `versionName="2.5.10"` · built 2026-08-14 from isolated worktree `lumina-b77` at tag `build-77`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/`. **versionCode 77 CONSUMED.** |
 | **iOS** | `<PENDING>` — fill when Codemagic reports, not when queued. |
 | **Uploaded** | `<PENDING>` |
 | **Supersedes** | **+76** |
