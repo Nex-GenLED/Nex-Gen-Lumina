@@ -59,6 +59,18 @@ class LightItUpAppliedButBroadcastFailed extends LightItUpNowOutcome {
   const LightItUpAppliedButBroadcastFailed(this.error);
 }
 
+/// Registers a manually-started show with the Game Day background worker, so
+/// score monitoring and celebrations find a session for the team.
+///
+/// Injected rather than reaching for the worker singleton, matching this file's
+/// existing callback style — it keeps the orchestrator unit-testable and keeps
+/// the background isolate out of the widget layer.
+typedef RegisterGameDaySessionCall = void Function({
+  required String teamSlug,
+  DateTime? gameStart,
+  String? activeGameId,
+});
+
 /// Run the Light-it-Up-Now chain.
 ///
 /// - [config]            : the Path 1 config to apply + broadcast.
@@ -79,6 +91,9 @@ Future<LightItUpNowOutcome> lightItUpNow({
   required List<int> participatingChannels,
   required List<DeviceChannel> deviceChannels,
   DateTime? now,
+  RegisterGameDaySessionCall? registerSession,
+  DateTime? gameStart,
+  String? activeGameId,
 }) async {
   final applied = await applyGameDayConfigToDevice(
     applyPayloadWithLabel: applyPayloadWithLabel,
@@ -89,6 +104,26 @@ Future<LightItUpNowOutcome> lightItUpNow({
   if (!applied) {
     return const LightItUpApplyFailed();
   }
+
+  // ARM THE REST OF THE EXPERIENCE — celebration blocker (2).
+  //
+  // Applying the pattern used to be ALL this did. The background worker finds
+  // a team's session in its in-memory `_sessions` map, and that map was only
+  // ever populated by the scheduled `evaluate()` path, so a mid-game tap lit
+  // the house and armed nothing: every subsequent scoring event hit
+  // `session == null` and returned silently. Registering here is what makes the
+  // tap start the COMPLETE experience — live scoring, celebrations, and a
+  // proper end at confirmed_final — from that second forward.
+  //
+  // Ordered AFTER the apply on purpose: a failed apply means no show, so there
+  // is no session to monitor and no end to run. Registration is fire-and-forget
+  // relative to the broadcast below; a broadcast failure must not disarm
+  // monitoring that is already correctly armed.
+  registerSession?.call(
+    teamSlug: config.teamSlug,
+    gameStart: gameStart,
+    activeGameId: activeGameId,
+  );
 
   // Apply succeeded. Branch on the broadcast checkbox.
   if (!broadcastToGroup || groupId == null) {

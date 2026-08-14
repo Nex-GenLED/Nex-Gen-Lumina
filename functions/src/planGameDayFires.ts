@@ -604,10 +604,23 @@ export async function runPlannerTick(
             fireAt: new Date(startFireAt).toISOString(),
           });
         } else if (startInPast) {
-          // Fire time already elapsed — a late deploy, a long outage, or a
-          // start time that moved earlier. Distinct from beyond-horizon and
+          // Fire time already elapsed — a late deploy, a long outage, a start
+          // time that moved earlier, or (the 2026-08-13 Dodgers case) a config
+          // created AFTER its own fire time. Distinct from beyond-horizon and
           // materially worse, so it must not share a bucket.
           bump(stats.skipped, "start_time_passed");
+          // ATTRIBUTABLE. This branch bumped the counter and wrote no row,
+          // while `outside_horizon` directly above it wrote one — so the
+          // Dodgers cycle reconciled perfectly (21/21) while naming no team,
+          // and "which config lost its start?" was unanswerable from the log.
+          // Same silent-skip class as #68; the 2026-08-11 "every path must
+          // increment something" pass added the counter here and left the row.
+          // fireAt is derived from game start + lead, so it is constant for a
+          // given game and the row dedupes across ticks.
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: "start_time_passed",
+            fireAt: new Date(startFireAt).toISOString(),
+          });
         }
 
         // ── END — the guards. GUARD 0 (#66) first: never end a show this

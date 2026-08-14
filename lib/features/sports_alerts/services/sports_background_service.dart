@@ -6,6 +6,8 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../autopilot/game_day_autopilot_background_worker.dart';
+import '../../autopilot/game_day_background_persistence.dart';
+import '../../autopilot/unified_monitoring.dart';
 import '../../neighborhood/services/sync_event_background_persistence.dart';
 import '../../neighborhood/services/sync_event_background_worker.dart';
 import '../data/team_colors.dart';
@@ -163,14 +165,30 @@ void _onStart(ServiceInstance service) async {
   });
 
   Future<void> poll() async {
-    final configs = await _loadConfigs();
-    final active = configs.where((c) => c.isEnabled).toList();
+    // UNIFIED ARMING. `active` used to be "enabled SPORTS-ALERT configs" — a
+    // list the user maintained in a different screen, unrelated to the Game Day
+    // teams they had selected. That was celebration blocker (1): both
+    // checkScores AND the alertStream subscription sat behind
+    // `if (active.isNotEmpty)`, so a user with Game Day teams but no
+    // sports-alert opt-in polled nothing and could never celebrate. Monitoring
+    // now derives from Game Day + Live Scoring, with legacy configs honoured
+    // only until migration adopts them.
+    final legacyConfigs = await _loadConfigs();
+    final gameDayConfigs = await loadGameDayConfigsForBackground();
+    final plan = resolveMonitoring(
+      gameDayConfigs: gameDayConfigs,
+      legacyAlertConfigs: legacyConfigs,
+    );
+    final active = plan.monitored;
 
     // Check all workload sources before deciding what to do
     final syncEvents = await loadSyncEventsForBackground();
     final hasSyncEvents = syncEvents.any((e) => e.isEnabled && !e.isManual);
     final hasActiveSession = await loadActiveSession() != null;
     final hasGameDayWork = await gameDayWorker.hasActiveWorkload();
+    // An active Game Day session arms scoring on its own — this is what makes a
+    // mid-game "Light It Up Now" tap start monitoring from that second.
+    final hasActiveGameDaySession = gameDayWorker.hasActiveSession;
 
     if (active.isEmpty && !hasSyncEvents && !hasActiveSession && !hasGameDayWork) {
       _updateNotification(service, 'No active alerts');
@@ -184,18 +202,31 @@ void _onStart(ServiceInstance service) async {
       debugPrint('[SportsBackground] Game Day evaluate failed: $e');
     }
 
-    // ── Sports alerts polling ──────────────────────────────────────
-    if (active.isNotEmpty) {
+    // ── Score polling ──────────────────────────────────────────────
+    // Gate is the unified predicate: anything monitored, OR any active Game Day
+    // session. The session limb is the mid-game-join case — there may be no
+    // enabled config at all for an ephemeral "Light It Up Now" team.
+    if (shouldPollScores(
+      plan: plan,
+      hasActiveGameDaySession: hasActiveGameDaySession,
+    )) {
       // Rebuild trigger service with latest IPs each cycle.
       final trigger = AlertTriggerService(controllerIps: controllerIps);
 
       // Ensure we're subscribed to the monitor stream.
       alertSub ??= monitor.alertStream.listen((event) {
-        final config = active.firstWhere(
-          (c) => c.teamSlug == event.teamSlug,
-          orElse: () => active.first,
-        );
-        trigger.handleAlertEvent(event, config);
+        // orElse must not fabricate a mismatched config: with an ephemeral
+        // session there can be an event for a team with no entry in `active`,
+        // and the old `active.first` fallback would have applied ANOTHER
+        // team's sensitivity and zones to it.
+        final config = active.where((c) => c.teamSlug == event.teamSlug).firstOrNull;
+        if (config != null) {
+          trigger.handleAlertEvent(event, config);
+        }
+
+        // The workers are notified REGARDLESS of whether a monitoring config
+        // matched: an ephemeral session's team legitimately has no config, and
+        // its celebration is exactly the case this whole change exists to fix.
 
         // Notify sync worker for group-level celebration broadcasts.
         syncWorker.onScoreAlertEvent(event);

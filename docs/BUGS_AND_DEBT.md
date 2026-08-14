@@ -414,6 +414,73 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P1 — correctness & trust
 
+- [ ] **#79 — SCORE CELEBRATIONS HAVE NEVER FIRED ON HARDWARE FOR ANYONE, and the
+  `start_time_passed` skip that hid the Dodgers cycle is invisible**
+  - Status: **IN-PROGRESS** on `feat/gameday-unified-monitoring` · Severity: **P1** ·
+    Evidence: verified-by-live-data (read-only pull 2026-08-14) + verified-by-source
+  - **THE EVIDENCE.** 678 command docs fleet-wide, by source: `(none)` 577, `health_probe`
+    70, `bench_fanout_verify` 9, `bench_67_partition` 2, `sync_fanout` 4, `fire_job` 16 —
+    **zero `game_day`-sourced commands, ever.** `_applyToControllers` stamps
+    `'source': 'game_day'`, so any celebration, or any Game Day worker apply at all, would
+    appear there. Retention covers the window (fire_job + bench entries from 08-12→08-14
+    survive). Combined with the three structural blockers below, celebrations have never
+    reached a controller for any account.
+  - **THREE INDEPENDENT BLOCKERS, each sufficient on its own:**
+    1. **Arming keyed off the wrong subsystem.** `checkScores` AND the `alertStream`
+       subscription both sat inside `if (active.isNotEmpty)` where `active` = enabled
+       **sports-alert** configs — a list configured in a separate screen, unrelated to the
+       Game Day teams the user selected. A user with Game Day teams and no sports-alert
+       opt-in polled nothing.
+    2. **`_sessions` is never populated by a manual start.** `onScoreAlertEvent` finds its
+       session in the worker's in-memory map, which only `evaluate()` (the scheduled path)
+       wrote. "Light It Up Now" applied a pattern and armed nothing.
+    3. **The background mirror defaulted celebrations OFF.**
+       `game_day_background_persistence.dart:147` read `scoreCelebrationEnabled ?? false`
+       while `fromFirestore` defaulted the same field to `true`. The two layers disagreed
+       and the worker reads the pessimistic one. The live Twins config has no such field.
+  - **`start_time_passed` is a #68 sibling.** `planGameDayFires.ts:606-611` bumped the
+    counter and pushed **no** `logRows` row, while `outside_horizon` immediately above it
+    pushes one. So the 2026-08-13 Dodgers cycle reconciled perfectly (21/21) while naming no
+    team, and "which config lost its start?" was unanswerable. Root cause of that cycle: the
+    `mlb_dodgers` config was created AFTER its own fire time (first pitch
+    `2026-08-14T02:10:00Z`, 30-min lead → fire `01:40Z`); `configsEnabled` went 20 → 21
+    between the 13th and 14th and `start_time_passed:1` appeared for the first time. The
+    only Dodgers row in the whole log is `end_skipped_no_start` — **#66's GUARD 0 working
+    correctly.**
+  - **Corroborating, and good news:** the Twins cycle that DID run the same night was the
+    **first #67 full-partition fire** and is correct on the wire —
+    `{"on":true,"bri":200,"seg":[{"id":0,"on":true,"fx":0,…},{"id":1,"on":false}]}` — both
+    bench segments named, exclusion-only for the non-participating one. The previous Twins
+    start (08-12) named seg0 only.
+  - ⚠️ **SYNC-3 CORRECTION — the verification was of dead code.**
+    `triggerScoreCelebration` (`game_day_setup_screen.dart:895`) is **hardened but
+    caller-less**: its only references are the debug button and
+    `fanout_trigger_flag_gate_test.dart`. SYNC-3 TASK A rerouted it through the
+    `broadcastSync` flag gate and TASK B pinned that contract, but the live pipeline never
+    invokes it — the real path is `sports_background_service` →
+    `gameDayWorker.onScoreAlertEvent` / `syncWorker.onScoreAlertEvent`. Neither sets
+    `fanout`, so **`group_allowlist` (dab5b27) cannot scope celebrations out** — the
+    allowlist is only consulted inside `if (fanout === true && groupId …)`. SYNC-3's ledger
+    standing should read *"hardened but caller-less; verification was of dead code."*
+  - 📌 **RIDER (Tyler, 2026-08-14):** audit `gameDayWorker.onScoreAlertEvent` as the REAL
+    celebration path — gating, participation, monitored-field respect, and the **#67/#76**
+    payload contracts. The Dodgers celebration trace runs against this path, not against
+    `triggerScoreCelebration`.
+  - **FIX IN FLIGHT** (`feat/gameday-unified-monitoring`): Game Day + Live Scoring becomes
+    the single source of truth for monitoring (`live_scoring_enabled`, client-only,
+    deliberately separate from `enabled` which the **server planner** queries at
+    `planGameDayFires.ts:342` — so a migrated alerts-only team is monitored while staying
+    invisible to the planner and cannot produce an unasked-for first-pitch fire); arming
+    moves to `shouldPollScores`; "Light It Up Now" registers its session; the mirror default
+    flips to true; the four bare returns in `onScoreAlertEvent` become counted, named skips;
+    and `start_time_passed` gets its row.
+  - Files: `lib/features/autopilot/unified_monitoring.dart` (new),
+    `game_day_autopilot_config.dart`, `game_day_background_persistence.dart`,
+    `game_day_autopilot_background_worker.dart`,
+    `lib/features/sports_alerts/services/sports_background_service.dart`,
+    `lib/features/game_day/light_it_up_now.dart`, `functions/src/planGameDayFires.ts`
+    (edited, **NOT deployed**). Related **#66**, **#67**, **#68**, **#76**, **P1-44**.
+
 - [ ] **P1-52 — `pdel` can leave `presets.json` UNPARSEABLE; the app then goes blind to every preset and says nothing**
   - Status: OPEN · Evidence: **bench-reproduced 2026-08-09 on `.150`** (observed, not theorised)
   - Found while cleaning up two scratch presets during the base-ladder work

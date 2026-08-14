@@ -61,6 +61,24 @@ class BackgroundGameDayAutopilotConfig {
   // Score celebrations (future — background will handle these in D3+)
   final bool scoreCelebrationEnabled;
 
+  /// Unified monitoring model: score monitoring + celebrations armed for this
+  /// team. This is the "Live Scoring" toggle, and it is the SINGLE source of
+  /// truth — there is no separate Sports Alerts opt-in any more.
+  ///
+  /// Deliberately distinct from [enabled], which means "runs the scheduled
+  /// show" and is the field the SERVER planner queries. A team migrated from
+  /// the old sports-alerts list carries `enabled:false, liveScoringEnabled:true`
+  /// — monitored and celebrating, but invisible to the planner, so it cannot
+  /// produce a first-pitch fire the user never asked for.
+  final bool liveScoringEnabled;
+
+  /// AlertSensitivity.name — `allEvents` | `majorOnly` | `clutchOnly`.
+  /// Carried here because sensitivity is real, consumed behavior
+  /// (`score_monitor_service._filterBySensitivity`) that used to live only on
+  /// the retired ScoreAlertConfig; it moves onto the Game Day config so Game
+  /// Day is genuinely the one source.
+  final String alertSensitivity;
+
   /// Resolved participating channel (bus) ids for this config, computed at
   /// schedule time in a Riverpod context (roofline + device channels) and read
   /// by the background isolate to target the right channels (#29).
@@ -91,6 +109,8 @@ class BackgroundGameDayAutopilotConfig {
     this.onTimeOverride,
     this.offTimeOverride,
     required this.scoreCelebrationEnabled,
+    this.liveScoringEnabled = true,
+    this.alertSensitivity = 'majorOnly',
     this.participatingChannelIds,
   });
 
@@ -115,6 +135,8 @@ class BackgroundGameDayAutopilotConfig {
         'onTimeOverride': onTimeOverride,
         'offTimeOverride': offTimeOverride,
         'scoreCelebrationEnabled': scoreCelebrationEnabled,
+        'liveScoringEnabled': liveScoringEnabled,
+        'alertSensitivity': alertSensitivity,
         'participatingChannelIds': participatingChannelIds,
       };
 
@@ -144,7 +166,23 @@ class BackgroundGameDayAutopilotConfig {
           (json['leadTimeMinutesOverride'] as num?)?.toInt(),
       onTimeOverride: json['onTimeOverride'] as String?,
       offTimeOverride: json['offTimeOverride'] as String?,
-      scoreCelebrationEnabled: json['scoreCelebrationEnabled'] ?? false,
+      // ABSENT MEANS TRUE. This line read `?? false` and was celebration
+      // blocker (3): a mirrored config written before the field existed — the
+      // live Twins config is one — read back as "celebrations off", so
+      // onScoreAlertEvent returned before applying anything. Firestore's
+      // fromFirestore has always defaulted this to true, so the two layers
+      // disagreed and the background layer, the one the worker actually reads,
+      // was the pessimistic one. The config's own toggle remains the off switch.
+      scoreCelebrationEnabled: json['scoreCelebrationEnabled'] ?? true,
+      // Unified monitoring model. `enabled` means "runs the scheduled show" and
+      // is what the SERVER planner queries (planGameDayFires.ts:342
+      // .where("enabled","==",true)); `liveScoringEnabled` means "score
+      // monitoring + celebrations are armed" and is client-only. Keeping them
+      // separate is what lets a migrated alerts-only team monitor without the
+      // planner ever seeing it — no server change, no deploy ordering.
+      // Absent means true so every existing Game Day team keeps monitoring.
+      liveScoringEnabled: json['liveScoringEnabled'] ?? true,
+      alertSensitivity: json['alertSensitivity'] as String? ?? 'majorOnly',
       participatingChannelIds: (json['participatingChannelIds'] as List?)
           ?.whereType<num>()
           .map((n) => n.toInt())
@@ -183,9 +221,19 @@ class BackgroundGameDayAutopilotConfig {
       onTimeOverride: config.onTimeOverride,
       offTimeOverride: config.offTimeOverride,
       scoreCelebrationEnabled: config.scoreCelebrationEnabled,
+      liveScoringEnabled: config.liveScoringEnabled,
+      alertSensitivity: config.alertSensitivity.name,
       participatingChannelIds: participatingChannelIds,
     );
   }
+
+  /// True when this team should be SCORE-MONITORED right now.
+  ///
+  /// The unified arming predicate, in one place so the background service, the
+  /// worker and the tests cannot drift apart on it. Monitoring follows Live
+  /// Scoring — NOT [enabled] — because an alerts-only team is deliberately
+  /// `enabled:false` to stay invisible to the server planner.
+  bool get isMonitored => liveScoringEnabled;
 
   /// Effective lead time, mirroring GameDayAutopilotConfig.effectiveLeadTimeMinutes.
   int get effectiveLeadTimeMinutes => leadTimeMinutesOverride ?? 30;

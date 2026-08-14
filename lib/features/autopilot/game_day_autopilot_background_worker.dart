@@ -145,25 +145,121 @@ class GameDayAutopilotBackgroundWorker {
     await _persistSessions();
   }
 
+  /// True when ANY team currently has an active session — scheduled or
+  /// ephemeral. The background service arms score polling off this, so a
+  /// mid-game "Light It Up Now" tap starts monitoring from that second.
+  bool get hasActiveSession => _sessions.values.any((s) => s.isActive);
+
+  /// Celebration refusals since process start, keyed by reason.
+  ///
+  /// The counter half of "every path out must increment something" (#68). A
+  /// debugPrint alone vanishes in a release build, so the count is what makes a
+  /// refusal inspectable after the fact; tests assert on this rather than on
+  /// log scraping.
+  final Map<String, int> celebrationSkips = <String, int>{};
+
+  void _noteCelebrationSkip(String teamSlug, String reason) {
+    celebrationSkips[reason] = (celebrationSkips[reason] ?? 0) + 1;
+    debugPrint('[GameDayBg] celebration SKIPPED team=$teamSlug reason=$reason');
+  }
+
+  /// Register an already-running show with the worker's in-memory session map.
+  ///
+  /// THIS IS CELEBRATION BLOCKER (2). `onScoreAlertEvent` finds its session in
+  /// `_sessions`, and `_sessions` was only ever populated by `evaluate()` —
+  /// the scheduled path. "Light It Up Now" applied a pattern to the controllers
+  /// and registered nothing, so every subsequent scoring event hit
+  /// `session == null` and returned. A mid-game tap lit the house and armed
+  /// nothing at all.
+  ///
+  /// Idempotent: re-tapping refreshes the game binding rather than stacking
+  /// sessions, and an existing ACTIVE session for the team is preserved so a
+  /// tap during a scheduled show does not restart it.
+  void registerActiveSession({
+    required String teamSlug,
+    DateTime? gameStart,
+    String? activeGameId,
+    DateTime? activatedAt,
+  }) {
+    if (_disposed) return;
+    final existing = _sessions[teamSlug];
+    if (existing != null && existing.isActive) {
+      // Keep the scheduled session; just bind the game id if we learned one.
+      if (activeGameId != null && existing.activeGameId == null) {
+        _sessions[teamSlug] = BackgroundAutopilotSession(
+          teamSlug: teamSlug,
+          phase: existing.phase,
+          gameStart: existing.gameStart ?? gameStart,
+          gameEndDetected: existing.gameEndDetected,
+          countdownEnd: existing.countdownEnd,
+          activeGameId: activeGameId,
+          usedFallbackTimer: existing.usedFallbackTimer,
+          activatedAt: existing.activatedAt,
+        );
+      }
+      return;
+    }
+    _sessions[teamSlug] = BackgroundAutopilotSession(
+      teamSlug: teamSlug,
+      phase: 'inGame',
+      gameStart: gameStart,
+      gameEndDetected: null,
+      countdownEnd: null,
+      activeGameId: activeGameId,
+      usedFallbackTimer: false,
+      activatedAt: activatedAt ?? DateTime.now(),
+    );
+    debugPrint('[GameDayBg] registered active session for $teamSlug '
+        '(ephemeral/manual start) — scoring armed');
+    unawaited(_persistSessions());
+  }
+
   /// Score celebration hook. Called by the sports background service
   /// when ScoreMonitorService emits an alert event. Only fires if there
   /// is an active Game Day session for the team.
+  ///
+  /// EVERY PATH OUT OF HERE IS LEGIBLE. This method used to have four bare
+  /// `return`s and exactly one debugPrint (in the catch), so "the celebration
+  /// did not fire" and "the celebration was never attempted" were the same
+  /// observable: nothing. That is the same silent-skip class as #68, and it is
+  /// why a fleet-wide "celebrations have never fired" could sit undetected —
+  /// there was no absence to notice. Each refusal now names itself.
   Future<void> onScoreAlertEvent(dynamic event) async {
-    if (_disposed) return;
+    if (_disposed) {
+      _noteCelebrationSkip('(disposed)', 'worker_disposed');
+      return;
+    }
 
     try {
       final teamSlug = event.teamSlug as String?;
-      if (teamSlug == null) return;
+      if (teamSlug == null) {
+        _noteCelebrationSkip('(null)', 'event_without_team');
+        return;
+      }
 
       final session = _sessions[teamSlug];
-      if (session == null || !session.isActive) return;
+      if (session == null) {
+        _noteCelebrationSkip(teamSlug, 'no_session_registered');
+        return;
+      }
+      if (!session.isActive) {
+        _noteCelebrationSkip(teamSlug, 'session_not_active:${session.phase}');
+        return;
+      }
 
       final configs = await loadGameDayConfigsForBackground();
       final config = configs
           .where((c) => c.teamSlug == teamSlug)
           .cast<BackgroundGameDayAutopilotConfig?>()
           .firstWhere((c) => c != null, orElse: () => null);
-      if (config == null || !config.scoreCelebrationEnabled) return;
+      if (config == null) {
+        _noteCelebrationSkip(teamSlug, 'no_config');
+        return;
+      }
+      if (!config.scoreCelebrationEnabled) {
+        _noteCelebrationSkip(teamSlug, 'celebration_disabled');
+        return;
+      }
 
       // Build a flash pattern in team colors.
       final payload = buildCelebrationPayloadForTest(config);
