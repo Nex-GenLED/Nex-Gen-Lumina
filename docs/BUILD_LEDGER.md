@@ -19,6 +19,62 @@ optional.
 
 ## Operational flags
 
+### GEOMETRY GATE IMPLEMENTED 2026-08-14 — #76's severity cap is closed
+
+`lib/features/schedule/geometry_gate.dart`. Geometry clobbering now has four
+independent layers, and the gate is the one that makes the damage
+**non-durable**:
+
+| # | Layer | Where |
+|---|---|---|
+| 1 | builders that no longer emit geometry | seven payload builders, `70726ac` |
+| 2 | a ladder path that never asserts it | `_fullStripOnSegments` emits `{id,on}` only |
+| 3 | a rig configured to catch the class | bench restored to two segments |
+| 4 | **a gate that refuses a drifted re-provision, legibly** | this |
+
+1-3 shrink the window in which geometry can be wrong. **Only 4 stops a `psave`
+taken during that window from baking it into the base layer**, where it loads
+every night. That is the difference between a bad evening and a bad install.
+
+**Compares COUNT and BOUNDS only.** `rev`/`mi`/`of`/`grp`/`spc` are excluded by
+design: the pixel map does not own them, and refusing on a correctly-installed
+reversed channel the app has no record of would be **#76's mistake with the
+sign flipped** — the app's model overriding the installation instead of
+flattening it. Pinned as a test.
+
+**Branches:** `match` (proceed, and it must write NOTHING — asserted),
+`drift` (same count, bounds moved), `totalLoss` (count differs — the 2026-08-14
+reboot collapse, a proven input, and one a preset load cannot undo because
+bounds live in cfg). Drift and totalLoss share one repair shape: write the
+expected layout, then **prove it by reading back**.
+
+**A write that reports success is not evidence.** Pinned by a test where the
+provisioner returns `true` and the shape does not change: the gate re-reads,
+sees the mismatch, and refuses. An unreadable device also refuses and writes
+nothing — the only safe answer to "I could not tell" is "do not save".
+
+**Refusal message names both shapes** and says why the preset was left alone:
+*a stale-but-correct ladder beats a freshly-saved wrong one, because the wrong
+one is durable and loads every night.*
+
+**THE INTERACTION WITH THE NON-CONVERGENCE GUARD, pinned in a test.** They ask
+different questions — the gate asks *is the device in a state worth saving?*,
+the convergence guard asks *has saving stopped helping?* **A gate refusal is NOT
+a repair attempt**: no save happened, so counting it would burn the convergence
+budget on a condition a save was never going to fix, and would eventually
+silence the gate's own legible refusal behind a generic non-convergence one.
+Ten consecutive gate refusals leave the repair budget untouched; a gate that
+PROCEEDS does feed the guard, and the other guard stops it at three.
+
+**Verified against the live bench, without touching it.** The match branch was
+confirmed against the real device (`0[0,128) 1[128,290)` -> `match`, no write).
+For drift I fed the gate a deliberately WRONG EXPECTATION rather than
+mis-bounding a copy of the pixel map — the device is never mutated at all,
+which is strictly safer than snapshot/mutate/restore and proves the same
+classification.
+
+19 gate tests. Suite **2301 / 3 skipped / 0 failed** (from 2282). `flutter analyze lib/ test/`: 0 errors.
+
 ### ROOT-ON RESOLVED 2026-08-14 — the alarm was mine, not the fleet's
 
 **VERDICT: root `on:false` IS storable. The predicate is satisfiable. There is
