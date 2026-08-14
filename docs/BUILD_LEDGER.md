@@ -19,6 +19,60 @@ optional.
 
 ## Operational flags
 
+### PRESETS.JSON REPAIRED via /edit — and two firmware facts fell out of it
+
+**The corruption mechanism, recorded as its own finding.** `psave`/`pdel` can
+leave garbage in the TRAILING PADDING of flash-resident `presets.json`. Here: 12
+non-space bytes (`0x05`, `0x01`, `l`, `"`, and 8 × `0xFF`) sitting between the
+last slot's closing brace and the file's final `}`. Strict JSON parse fails; the
+slots themselves are untouched and still load.
+
+**No preset operation can repair it.** `pdel` rewrote the file and a full ladder
+re-save rewrote two slots — the padding region survived both, byte-identical.
+`psave` rewrites slot CONTENT and preserves padding. A reboot does not clear it
+either. **Recovery requires a filesystem-level rewrite.**
+
+**RECOVERY PROCEDURE (route (a)) — use this if it ever appears in the field:**
+
+1. `GET /edit?download=/presets.json` — keep as backup.
+2. Locate the last valid slot's closing `}`; everything between it and the final
+   `}` must be whitespace. **Verify no slot key (`"N":{`) and no quoted field
+   name appears in that region** — if either does, STOP: it is not padding.
+3. Blank that region to spaces, **preserving file length**, keep the final `}`.
+4. Verify locally: strict-parses, and every slot is byte-identical to a tolerant
+   parse of the original. Here: **12 bytes changed, 0 slots differing, 0 lost.**
+5. `POST` multipart to `/edit` with `filename=/presets.json`.
+
+**Result:** parses clean end-to-end, **18 populated slots** intact (ladder 1-5,
+schedule 10/26-31/33/36/38/40/41/160), `ps=1` and `ps=2` both load onto two
+segments, and `test/hardware/base_ladder_repair_live_test.dart` — which had
+started failing on the corrupt file — **passes again**.
+
+> ### ⚠️ FIRMWARE FACT: WLED 0.15.1 WILL NOT STORE ROOT `on:false` IN A PRESET
+>
+> Investigating the root-on discrepancy (item 3) produced a harder finding than
+> expected. Preset 1 stores `on: true`. Preset 2, saved with `"on":false` inline
+> **and the strip genuinely off beforehand**, stores **no `on` key at all**:
+>
+> ```
+> preset 1 root keys: [bri, mainseg, n, on, transition]   on = True
+> preset 2 root keys: [mainseg, n]                        on = None
+> ```
+>
+> `isNglOffPresetSatisfied` **requires** the def to assert root `on:false`, and
+> its doc calls a segments-only preset 2 "legacy" and re-saves it. If the
+> firmware cannot store that key, **the predicate can never be satisfied** — the
+> healer would re-save preset 2 on every evaluation, and `psave` applies its
+> state live, so that is a visible disruption on every connect.
+>
+> **NOT RESOLVED, and deliberately not chased further** — diagnosing it needs
+> more `psave` cycles than the approved scope allows. Two possibilities worth
+> distinguishing next pass: the original preset 2 carried the key (written by an
+> older firmware or a different path) and my re-save lost it; or it never did and
+> the predicate has been failing quietly all along. **The second would mean the
+> ladder repair has been re-saving preset 2 on every heal, fleet-wide.**
+> The bench is currently in the unsatisfied shape either way.
+
 ### BENCH INCIDENT ARC — closed 2026-08-14, and it is the geometry gate's motivating evidence
 
 **1. Cause (self-inflicted).** Proving WLED captures geometry into presets, I
