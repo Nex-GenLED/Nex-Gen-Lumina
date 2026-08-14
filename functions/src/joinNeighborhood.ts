@@ -356,8 +356,14 @@ export const joinNeighborhood = onCall(
       batch.set(groupRef.collection("members").doc(callerUid), {
         displayName,
         positionIndex,
-        ledCount: 300,
-        rooflineMeters: 15.0,
+        // #78 — NULL, not a placeholder. 300 was the per-channel pixel cap
+        // reused as a default and 15.0 m is 49.2 ft, the figure customers saw
+        // in the UI. Neither was ever measured, and because they LOOKED like
+        // data no consumer could tell a real 300-pixel home from a default.
+        // Null says "not measured", which is the truth until the geometry
+        // layer computes it from the member's own bus data (D2).
+        ledCount: null,
+        rooflineMeters: null,
         rooflineDirection: "leftToRight",
         controllerIp: null,
         controllerId,
