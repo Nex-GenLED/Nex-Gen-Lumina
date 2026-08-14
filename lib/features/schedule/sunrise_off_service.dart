@@ -42,6 +42,9 @@
 // load, never a toggle — so if another timer also lands on sunrise, both
 // resolve to "off". Idempotent; no power-back-on race.
 
+import 'package:nexgen_command/features/wled/device_channel.dart';
+import 'package:nexgen_command/features/schedule/geometry_gate.dart';
+import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -240,11 +243,55 @@ class SunriseOffService {
       debugPrint('SunriseOff: getState failed — $e (falling back to 1 seg)');
     }
 
-    final ok = await repo.savePreset(
-      presetId: ScheduleSyncService.kNglOffPresetId,
-      state: ScheduleSyncService.buildNglOffPresetState(live),
-      presetName: ScheduleSyncService.kNglOffPresetName,
-    );
+    // GEOMETRY GATE (#76 layer 4). This slot reloads on its schedule forever,
+    // so a save taken over a collapsed or drifted layout is exactly as durable
+    // as a baked ladder. Only a direct-LAN service can read the bus layout;
+    // over the relay the gate stands aside rather than blocking the write.
+    bool ok;
+    if (repo is WledService) {
+      final svc = repo as WledService;
+      List<SegmentShape> expected = const [];
+      try {
+        final cfg = await svc.getConfig();
+        if (cfg != null) {
+          expected = expectedShapeFromChannels(deviceChannelsFromConfig(cfg));
+        }
+      } catch (e) {
+        debugPrint('SunriseOff: expected-shape read failed — $e');
+      }
+      final outcome = await gatedPresetSave(
+        presetId: ScheduleSyncService.kNglOffPresetId,
+        presetName: ScheduleSyncService.kNglOffPresetName,
+        expected: expected,
+        read: () async => segmentShapeFromState(await svc.getState()),
+        reprovision: (want) async {
+          try {
+            return await svc.applyJson({
+              'seg': [
+                for (final s in want)
+                  {'id': s.id, 'start': s.start, 'stop': s.stop},
+              ],
+            });
+          } catch (_) {
+            return false;
+          }
+        },
+        label: 'sunrise-off',
+        save: () => repo.savePreset(
+          presetId: ScheduleSyncService.kNglOffPresetId,
+          state: ScheduleSyncService.buildNglOffPresetState(live),
+          presetName: ScheduleSyncService.kNglOffPresetName,
+        ),
+      );
+      if (outcome.gateRefused) debugPrint('SunriseOff: ${outcome.message}');
+      ok = outcome.saved;
+    } else {
+      ok = await repo.savePreset(
+        presetId: ScheduleSyncService.kNglOffPresetId,
+        state: ScheduleSyncService.buildNglOffPresetState(live),
+        presetName: ScheduleSyncService.kNglOffPresetName,
+      );
+    }
     debugPrint('SunriseOff: NGL Off preset save → $ok');
     return ok;
   }

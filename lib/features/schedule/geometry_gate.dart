@@ -133,14 +133,34 @@ Future<GateResult> evaluateGeometryGate({
   }
 
   if (actual == null) {
+    // UNREADABLE STANDS ASIDE — it does not refuse. Corrected 2026-08-14 after
+    // the wiring surfaced the cost, and for consistency with the empty-expected
+    // policy above: this gate guards against a KNOWN mismatch, not against
+    // ignorance. Three reasons it is the right side to err on.
+    //
+    //   1. It matches the discipline used everywhere else this week — #67's
+    //      partition, W4's ladder fact, the readiness gate's R2 — where unknown
+    //      is explicitly NOT bad. Making unknown fatal here alone is the
+    //      inconsistency, not the fix.
+    //   2. If the device's state cannot be read, the save is very unlikely to
+    //      land either. Refusing converts a save failure into a gate refusal
+    //      and buys nothing.
+    //   3. The availability cost is real and asymmetric. On the sunrise-off
+    //      path a refusal ABORTS the timer write, so one transient read failure
+    //      means the customer's lights do not turn off at sunrise — a worse
+    //      outcome, and a more likely one, than a save over geometry that has
+    //      probably not drifted.
+    //
+    // The genuine drift cases all present as a READABLE shape that disagrees
+    // (the reboot collapse read cleanly as one segment), so this concession
+    // costs the gate none of the defects it exists to catch.
     return GateResult(
-      proceed: false,
-      branch: GateBranch.totalLoss,
+      proceed: true,
+      branch: GateBranch.match,
       repaired: false,
       expected: expected,
       actual: const [],
-      refusal: 'gated_geometry_mismatch (unreadable) — could not read the '
-          "device's segment shape, so a save cannot be justified",
+      refusal: null,
     );
   }
 
@@ -215,5 +235,9 @@ List<SegmentShape>? segmentShapeFromState(Map<String, dynamic>? state) {
     if (stop <= start) continue;
     out.add(SegmentShape(id, start, stop));
   }
-  return out;
+  // NO PARSEABLE SEGMENTS == UNREADABLE, not "a device with zero segments".
+  // Real WLED always reports at least one. An empty result means the body did
+  // not tell us the shape, and the gate must treat that as ignorance (stand
+  // aside) rather than as a total-loss claim it would then try to "repair".
+  return out.isEmpty ? null : out;
 }

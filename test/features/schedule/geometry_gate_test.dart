@@ -154,18 +154,36 @@ void main() {
     });
   });
 
-  group('unreadable device', () {
-    test('refuses rather than guessing', () async {
+  // UNREADABLE STANDS ASIDE — it does not refuse. Corrected 2026-08-14 when
+  // wiring showed the cost: on the sunrise-off path a refusal ABORTS the timer
+  // write, so one transient read failure would mean the customer's lights do
+  // not turn off at sunrise. And if state cannot be read the save will very
+  // likely fail anyway, so refusing converts a save failure into a gate refusal
+  // and buys nothing. Consistent with #67, W4 and the readiness gate, where
+  // unknown is explicitly not bad.
+  group('unreadable device stands aside', () {
+    test('a throwing read proceeds WITHOUT re-provisioning', () async {
       final d = FakeDevice(List.of(bench))..readThrows = true;
       final r = await run(d);
-      expect(r.proceed, isFalse);
-      expect(r.refusal, contains('unreadable'));
-      expect(d.writes, isEmpty, reason: 'never write on top of an unknown shape');
+      expect(r.proceed, isTrue);
+      expect(d.writes, isEmpty,
+          reason: 'never write a layout on top of a shape we could not read');
+      expect(r.refusal, isNull);
     });
 
-    test('a null read is also a refusal', () async {
+    test('a null read also proceeds', () async {
       final r = await run(FakeDevice(null));
-      expect(r.proceed, isFalse);
+      expect(r.proceed, isTrue);
+      expect(r.actual, isEmpty);
+    });
+
+    // The concession costs nothing real: every drift case this gate exists for
+    // presents as a READABLE shape that disagrees. The reboot collapse read
+    // cleanly as one segment.
+    test('a readable disagreement is still caught', () async {
+      final d = FakeDevice([const SegmentShape(0, 0, 290)])
+        ..writeActuallyApplies = false;
+      expect((await run(d)).proceed, isFalse);
     });
   });
 

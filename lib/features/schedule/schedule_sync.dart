@@ -1,5 +1,8 @@
 import 'dart:math' as math;
 
+import 'package:nexgen_command/features/wled/device_channel.dart';
+import 'package:nexgen_command/features/schedule/geometry_gate.dart';
+import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
@@ -921,6 +924,41 @@ class ScheduleSyncService {
     // still counts as armable (added to savedPresetIds) — the empty-macro
     // guard below must not refuse a schedule whose preset we deliberately left
     // in place. On a real write, trip didWriteAnyPreset so the caller restores.
+    // Gate inputs, resolved ONCE per sync rather than per preset: the shape
+    // cannot change between two saves in the same pass, and re-reading it five
+    // times would add four GETs to every sync for no new information.
+    // Empty when the controller's bus layout is unreadable — the gate then
+    // stands aside rather than blocking every write on a controller we cannot
+    // describe.
+    List<SegmentShape> gateExpectedShape = const [];
+    GeometryReader gateRead = () async => null;
+    GeometryProvisioner gateReprovision = (_) async => false;
+    if (activeRepo is WledService) {
+      final svc = activeRepo as WledService;
+      try {
+        final cfg = await svc.getConfig();
+        if (cfg != null) {
+          gateExpectedShape =
+              expectedShapeFromChannels(deviceChannelsFromConfig(cfg));
+          gateRead = () async => segmentShapeFromState(await svc.getState());
+          gateReprovision = (want) async {
+            try {
+              return await svc.applyJson({
+                'seg': [
+                  for (final s in want)
+                    {'id': s.id, 'start': s.start, 'stop': s.stop},
+                ],
+              });
+            } catch (_) {
+              return false;
+            }
+          };
+        }
+      } catch (e) {
+        debugPrint('ScheduleSync: gate expected-shape read failed — $e');
+      }
+    }
+
     Future<void> psaveIfChanged({
       required int id,
       required Map<String, dynamic> state,
@@ -941,6 +979,26 @@ class ScheduleSyncService {
         // failure can never accumulate into a permanent refusal.
         await repairAttempts.recordSatisfied(id);
         return;
+      }
+
+      // GEOMETRY GATE FIRST (#76 layer 4), and the ORDER IS THE POINT. A gate
+      // refusal must not count as a repair attempt: no save happens, so
+      // counting it would burn the non-convergence budget on a condition a save
+      // was never going to fix — and would eventually replace the gate's
+      // specific diagnosis with a generic non-convergence refusal. Running the
+      // gate above `decideRepair` makes that structural rather than a comment.
+      if (gateExpectedShape.isNotEmpty) {
+        final gate = await evaluateGeometryGate(
+          expected: gateExpectedShape,
+          read: gateRead,
+          reprovision: gateReprovision,
+        );
+        if (!gate.proceed) {
+          presetErrors.add('preset $id ($name) not saved — ${gate.summary}');
+          debugPrint('ScheduleSync: ${gate.summary}');
+          savedPresetIds.add(id); // left alone deliberately, not lost
+          return; // NO attempt recorded — see above.
+        }
       }
 
       // NON-CONVERGENCE GUARD. A predicate a save cannot satisfy would be

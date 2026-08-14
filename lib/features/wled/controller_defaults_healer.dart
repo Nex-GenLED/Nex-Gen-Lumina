@@ -76,6 +76,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
+import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/channel_participation_resolver.dart';
@@ -844,6 +846,38 @@ class ControllerDefaultsHealer {
   /// inventing a preset from a healer would mask an un-synced controller.
   ///
   /// `ib` is never asserted — it is a psave REQUEST flag, never stored back.
+
+  /// The controller's expected segment shape, from its own hardware buses.
+  /// Empty when unreadable — the gate then saves ungated rather than blocking
+  /// every heal on a controller whose layout we could not read.
+  Future<List<SegmentShape>> _expectedShapeFor(WledService svc) async {
+    try {
+      final cfg = await svc.getConfig();
+      if (cfg == null) return const [];
+      return expectedShapeFromChannels(deviceChannelsFromConfig(cfg));
+    } catch (e) {
+      debugPrint('[Healer] expected-shape read failed: $e');
+      return const [];
+    }
+  }
+
+  /// Write the expected segment layout. Bounds only — the gate compares bounds
+  /// and must not smuggle geometry FIELDS (rev/mi/of/grp/spc) into a repair,
+  /// which would be #76 with the sign flipped.
+  Future<bool> _reprovisionSegments(
+      WledService svc, List<SegmentShape> want) async {
+    try {
+      return await svc.applyJson({
+        'seg': [
+          for (final s in want) {'id': s.id, 'start': s.start, 'stop': s.stop},
+        ],
+      });
+    } catch (e) {
+      debugPrint('[Healer] segment re-provision failed: $e');
+      return false;
+    }
+  }
+
   Future<void> _healOnPresetMasterPower(
     WledService svc,
     ControllerHealReport report,
@@ -901,14 +935,41 @@ class ControllerDefaultsHealer {
             'persist)');
       }
 
+      // GEOMETRY GATE (#76 layer 4). This loop psaves ladder slots on every
+      // connect, and psave captures LIVE segment geometry whatever the inline
+      // state says — so a heal taken while the layout is collapsed or drifted
+      // bakes that error into the base layer, where it reloads every night.
+      // Derived from the controller's OWN buses, not the app's model: the gate
+      // defends the installation against the app, so its expectation must not
+      // come from the app's beliefs about the installation. One extra GET, and
+      // only on the broken path.
+      final expectedShape = await _expectedShapeFor(svc);
+
       for (final id in broken) {
         final spec = ScheduleSyncService.kOnPresetSpecs[id]!;
         try {
-          await svc.savePreset(
+          final outcome = await gatedPresetSave(
             presetId: id,
-            state: ScheduleSyncService.onPresetHealState(spec.bri, liveState),
             presetName: spec.name,
+            expected: expectedShape,
+            read: () async =>
+                segmentShapeFromState(await svc.getState()),
+            reprovision: (want) => _reprovisionSegments(svc, want),
+            label: 'on-preset heal',
+            save: () async {
+              await svc.savePreset(
+                presetId: id,
+                state:
+                    ScheduleSyncService.onPresetHealState(spec.bri, liveState),
+                presetName: spec.name,
+              );
+              return true;
+            },
           );
+          if (!outcome.saved) {
+            report.log.add(outcome.message ?? 'on-preset $id not saved');
+            continue;
+          }
           if (!report.onPresetsHealed.contains(id)) {
             report.onPresetsHealed.add(id);
           }
