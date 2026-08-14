@@ -1185,8 +1185,17 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Regression safety: participation == all channels is byte-equivalent to the old builder,
     pinned as a test — which is every live account today, because of #65.
 
-- [ ] **#76 — design payloads CLOBBER INSTALLATION GEOMETRY. Ellie's reversed channel ran
-  backwards all evening.**
+- [x] **#76 — design payloads CLOBBER INSTALLATION GEOMETRY. BUILDERS FIXED 2026-08-14 (`70726ac`);
+  the gate that caps severity is still OPEN.**
+  - **Builders: DONE.** All seven strip geometry; `custom_design_rev_test` inverted from the
+    half-measure ("reversed emits rev:true") to the real contract, plus a sweep over all seven
+    geometry fields. Dart 2273/3/0, analyze clean.
+  - **STILL OPEN:** the geometry gate (verify geometry -> save -> verify) that makes the
+    remaining window non-durable. Until it lands, a `psave` taken while geometry is wrong can
+    still bake the error into the base ladder.
+  - **Support answer, pre-fix fleet:** a WLED-side direction correction is silently reverted at
+    the next base boundary unless the presets are re-saved, because geometry lives INSIDE
+    presets (bench-proven). Known-phantom class; cite #76.
   - Status: OPEN (field-reported 2026-08-12, root-caused 2026-08-14) · Severity: **P1 —
     customer-visible, wrong output on correct hardware** · Evidence: field + verified-by-source
     + bench-reproduced
