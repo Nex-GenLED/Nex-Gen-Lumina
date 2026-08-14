@@ -667,13 +667,16 @@ class PatternComposer {
       'seg': [
         {
           'id': 0,
-          'start': 0,
-          'stop': totalPixels,
+          // #76 — start/stop removed: bounds are geometry (see below).
+
           'col': colors,
           'fx': motion.effectId ?? 0,
           'sx': motion.speed,
           'ix': motion.intensity,
-          'rev': motion.reverse,
+          // #76 — `rev` removed. WLED spells direction as `rev`, which is a
+          // geometry field owned by provisioning; a motion's "reverse" cannot
+          // be expressed without clobbering the channel's installed
+          // orientation. LOSES: motion.reverse no longer reaches the device.
         }
       ],
     };
@@ -721,8 +724,15 @@ class PatternComposer {
       'seg': [
         {
           'id': 0,
-          'start': 0,
-          'stop': totalPixels,
+          // #76 — bounds removed here too, and this is the site where the
+          // old behaviour was most load-bearing: a per-pixel `i` array was
+          // written against a segment forced to span 0..totalPixels. On a
+          // multi-channel install that assertion FLATTENED the layout to one
+          // full-strip segment, which is #76's harm in its purest form.
+          // The array now lands within seg0's provisioned range. LOSES: a
+          // design longer than seg0 is truncated rather than silently
+          // redefining the strip. Painting across channels is the geometry
+          // layer's job (docs/SYNC_GEOMETRY_LAYER.md).
           'fx': 0,
           'i': ledArray,
         }

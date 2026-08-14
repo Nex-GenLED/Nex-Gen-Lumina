@@ -249,7 +249,10 @@ class CustomDesign {
         // forced rev:false on every apply — clobbering the device's manual
         // per-segment direction. Omitting the key when false lets the apply
         // PRESERVE the controller's current seg.rev instead of overriding it.
-        if (channel.reverse) 'rev': true,
+        // #76 — `rev` no longer written at all. Omitting-when-false was a
+        // partial fix; the rule is that a design payload never asserts
+        // geometry, in either direction. LOSES: channel.reverse reaches the
+        // device only through provisioning now, not through a design apply.
       });
     }
 

@@ -107,8 +107,10 @@ class ComposedPattern {
         'seg': [
           {
             'id': 0,
-            'start': 0,
-            'stop': totalPixels,
+            // #76 — start/stop removed: segment BOUNDS are geometry and
+            // belong to provisioning. Asserting 0..totalPixels forced seg0 to
+            // span the whole strip, flattening any multi-channel layout.
+
             'col': [colorList],
             'fx': 0,
           },

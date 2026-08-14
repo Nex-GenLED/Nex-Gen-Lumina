@@ -199,7 +199,7 @@ class TeamDesignCatalog {
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
-          'grp': colorGroupSize,
+          // #76 — `grp` removed: geometry, not design.
           'pal': 0,
           'col': colors,
         }

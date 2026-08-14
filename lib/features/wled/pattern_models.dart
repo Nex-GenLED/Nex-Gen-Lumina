@@ -342,9 +342,9 @@ class GradientPattern {
           'ix': intensity,
           'pal': 5, // "Colors Only" - prevents rainbow palette blending
           'col': cols,
-          'grp': 1,
-          'spc': 0,
-          'of': 0,
+          // #76 — grp/spc/of removed: geometry, not design. A gradient
+          // asserts colours and effect; how the strip is grouped or offset is
+          // the installation's business.
         }
       ]
     };

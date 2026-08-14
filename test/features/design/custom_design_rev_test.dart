@@ -1,11 +1,20 @@
-// Tests for CustomDesign.toWledPayload's seg `rev` handling (#4, firmware-free
-// half).
+// CustomDesign.toWledPayload must emit NO `rev`, in either direction (#76).
 //
-// Root cause: toWledPayload wrote `'rev': channel.reverse` on EVERY segment.
-// ChannelDesign.reverse defaults false, so every design apply forced rev:false
-// — clobbering the device's manual per-segment direction on each design change
-// / sync-stop. Fix: emit `rev` ONLY when reverse == true; omit it otherwise so
-// the apply preserves the controller's current seg.rev.
+// HISTORY, because this file has now been wrong twice in the same place.
+// Originally toWledPayload wrote `'rev': channel.reverse` on EVERY segment, so
+// every apply forced rev:false and clobbered the device's manual direction.
+// The first fix was to emit `rev` only when reverse == true — and these tests
+// pinned that. It was a half-measure: it stopped the false-clobber but still
+// let a design payload assert geometry.
+//
+// #76 (2026-08-14, field-reported by Ellie, whose reversed channel ran
+// backwards all evening) settles it: a design payload asserts DESIGN fields
+// only — fx/col/pal/sx/ix/on/bri. Geometry — rev, mi, bounds, of, grp/spc —
+// belongs to provisioning and is never written by a design path. The device is
+// the source of truth for how it is installed.
+//
+// The complement to #67: unstated segment state is inherited state; state that
+// isn't yours to state must not be stated.
 //
 // Pure-model tests — no Firebase, no Riverpod, no device.
 
@@ -51,24 +60,42 @@ void main() {
               'its current manual direction');
     });
 
-    test('reversed channel emits rev:true', () {
+    // THE #76 REGRESSION, and the one that matters: a channel the app believes
+    // is reversed must STILL not write rev. Ellie's channel was correctly
+    // reversed on the device; every design apply overwrote that. Writing
+    // rev:true would be the same defect wearing the opposite sign — the app's
+    // model overriding the installation instead of flattening it.
+    test('a REVERSED channel still emits no rev — the app does not own geometry',
+        () {
       final d = designWith([channel(id: 0, reverse: true)]);
       final seg = segsOf(d).single;
 
-      expect(seg['rev'], isTrue);
+      expect(seg.containsKey('rev'), isFalse,
+          reason: 'geometry belongs to provisioning; a design apply must '
+              'preserve whatever the device is installed as');
     });
 
-    test('mixed channels — only the reversed one carries rev', () {
+    test('mixed channels — NO segment carries rev, whatever the model says',
+        () {
       final d = designWith([
         channel(id: 0, reverse: false),
         channel(id: 1, reverse: true),
         channel(id: 2, reverse: false),
       ]);
-      final segs = segsOf(d);
+      for (final seg in segsOf(d)) {
+        expect(seg.containsKey('rev'), isFalse);
+      }
+    });
 
-      expect(segs[0].containsKey('rev'), isFalse);
-      expect(segs[1]['rev'], isTrue);
-      expect(segs[2].containsKey('rev'), isFalse);
+    // The whole geometry set, not just rev — so a future edit cannot
+    // reintroduce a sibling field and pass.
+    test('no geometry field of any kind appears in a design segment', () {
+      final d = designWith([channel(id: 0, reverse: true)]);
+      for (final seg in segsOf(d)) {
+        for (final k in const ['rev', 'mi', 'start', 'stop', 'of', 'grp', 'spc']) {
+          expect(seg.containsKey(k), isFalse, reason: '$k is geometry (#76)');
+        }
+      }
     });
 
     test('omitting rev does not break the rest of the apply payload', () {

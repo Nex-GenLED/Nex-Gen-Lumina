@@ -127,8 +127,7 @@ class ClarificationService {
       'seg': [
         {
           'id': 0,
-          'start': 0,
-          'stop': totalPixels,
+        // #76 — bounds are geometry; not asserted by a design payload.
           'col': [[128, 128, 128, 0]],
           'fx': 0,
         }
@@ -992,7 +991,7 @@ class ClarificationService {
       return {
         'on': true,
         'bri': 200,
-        'seg': [{'id': 0, 'start': 0, 'stop': totalPixels, 'col': [[128, 128, 128, 0]], 'fx': 0}],
+        'seg': [{'id': 0, 'col': [[128, 128, 128, 0]], 'fx': 0}],
       };
     }
 
@@ -1003,8 +1002,7 @@ class ClarificationService {
       'seg': [
         {
           'id': 0,
-          'start': 0,
-          'stop': totalPixels,
+        // #76 — bounds are geometry; not asserted by a design payload.
           'col': [[color.red, color.green, color.blue, 0]],
           'fx': 0,
         }
@@ -1021,8 +1019,7 @@ class ClarificationService {
       'seg': [
         {
           'id': 0,
-          'start': 0,
-          'stop': totalPixels,
+        // #76 — bounds are geometry; not asserted by a design payload.
           'col': [[255, 255, 255, 0], [0, 0, 0, 0]],
           'fx': 0, // Solid - actual spacing shown in composer
         }

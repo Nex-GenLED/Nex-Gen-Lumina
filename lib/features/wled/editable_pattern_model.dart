@@ -187,11 +187,22 @@ class EditablePattern {
           'sx': speed,
           'ix': intensity,
           'pal': 5, // "Colors Only" palette
-          'grp': colorGroupSize,
-          'spc': 0,
-          'of': 0,
-          'rev': direction == PatternDirection.left,
-          'mi': direction == PatternDirection.centerOut,
+          // #76 — GEOMETRY IS NOT OURS TO STATE. This used to emit
+          // grp/spc/of plus `rev: direction == left` and
+          // `mi: direction == centerOut`, so any pattern not authored "left"
+          // stamped rev:false and silently un-reversed a correctly
+          // provisioned channel. Ellie's channel 2 ran backwards all evening
+          // on that line. Geometry belongs to provisioning; a design payload
+          // asserts design only.
+          //
+          // WHAT THIS LOSES, stated rather than hidden: [direction] no longer
+          // reaches the device. There is no design-only expression of it on
+          // this firmware — WLED spells direction as `rev`, which is exactly
+          // the field we must not write. Mapping it to an effect substitution
+          // would be a guess per effect, so direction is UNREPRESENTED until
+          // the geometry layer owns it (docs/SYNC_GEOMETRY_LAYER.md).
+          // [colorGroupSize] still shapes the colour list built above; only
+          // the device-side `grp` grouping is gone.
           'col': cols,
         }
       ],
