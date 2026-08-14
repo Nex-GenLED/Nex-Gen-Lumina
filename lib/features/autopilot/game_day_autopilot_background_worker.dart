@@ -201,7 +201,23 @@ class GameDayAutopilotBackgroundWorker {
     }
     _sessions[teamSlug] = BackgroundAutopilotSession(
       teamSlug: teamSlug,
-      phase: 'inGame',
+      // MUST be 'liveGame', not an invented phase.
+      //
+      // The first cut of this method wrote 'inGame', which is not a phase this
+      // system has. Three things silently followed, and all three defeated the
+      // very fix this method exists to be:
+      //   1. `isActive` is `preGame || liveGame || postGame` — 'inGame' is not
+      //      in it, so the session read as INACTIVE and `hasActiveSession`
+      //      stayed false, so it never armed polling;
+      //   2. `onScoreAlertEvent` therefore refused it as
+      //      `session_not_active:inGame`;
+      //   3. `_updateActiveSession`'s switch has no 'inGame' case, so the
+      //      session could never reach postGame → completed, and the show would
+      //      never have ended — lights on indefinitely.
+      // 'liveGame' is the real in-progress phase: it is active, it is polled,
+      // and on `GameStatus.final_` it transitions to postGame → countdown →
+      // completed, which is the same end contract a scheduled session runs.
+      phase: 'liveGame',
       gameStart: gameStart,
       gameEndDetected: null,
       countdownEnd: null,
@@ -210,7 +226,7 @@ class GameDayAutopilotBackgroundWorker {
       activatedAt: activatedAt ?? DateTime.now(),
     );
     debugPrint('[GameDayBg] registered active session for $teamSlug '
-        '(ephemeral/manual start) — scoring armed');
+        '(manual start, phase=liveGame) — scoring armed');
     unawaited(_persistSessions());
   }
 

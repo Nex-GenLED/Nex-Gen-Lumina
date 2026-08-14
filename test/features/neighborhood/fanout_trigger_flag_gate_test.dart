@@ -30,8 +30,6 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_service.dart';
 import 'package:nexgen_command/features/neighborhood/sync_fanout_feature_flag.dart';
-import 'package:nexgen_command/features/neighborhood/widgets/game_day_setup_screen.dart'
-    show triggerScoreCelebration;
 
 /// NeighborhoodService fake that records the two delivery calls and lets a test
 /// configure what the server-side fanout returns (ok / rate-limited). This is
@@ -157,70 +155,10 @@ void main() {
     });
   });
 
-  // ── SYNC-3 TASK A: the game_day_setup_screen :931 bypass fix ────────────────
-  // triggerScoreCelebration now routes through broadcastSync (the flag gate).
-  // Pre-fix it called broadcastSyncCommand directly → NEVER fanned out. These
-  // widget tests drive the real function with a captured WidgetRef.
-  group('triggerScoreCelebration — routes through the flag gate (bypass fix)',
-      () {
-    Future<_RecordingService> pumpAndTrigger(
-      WidgetTester tester, {
-      required bool flagEnabled,
-      FanoutResult fanoutResult = const FanoutResult(ok: true),
-    }) async {
-      final service = _RecordingService(
-        firestore: FakeFirebaseFirestore(),
-        auth: _StubAuth(_StubUser('u1')),
-        fanoutResult: fanoutResult,
-      );
-      final member = NeighborhoodMember(
-        oderId: 'u1',
-        displayName: 'Me',
-        positionIndex: 0,
-        lastSeen: DateTime(2024, 1, 1),
-      );
-
-      late WidgetRef capturedRef;
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            neighborhoodServiceProvider.overrideWithValue(service),
-            syncFanoutEnabledSyncProvider.overrideWithValue(flagEnabled),
-            activeNeighborhoodIdProvider.overrideWith((ref) => 'g1'),
-            neighborhoodMembersProvider
-                .overrideWith((ref) => Stream.value([member])),
-          ],
-          child: Consumer(
-            builder: (ctx, ref, _) {
-              // Keep the members stream subscribed so it resolves before the
-              // one-shot ref.read inside triggerScoreCelebration.
-              ref.watch(neighborhoodMembersProvider);
-              capturedRef = ref;
-              return const SizedBox();
-            },
-          ),
-        ),
-      );
-      await tester.pump(); // let the members stream emit its first value
-
-      await triggerScoreCelebration('nfl_bills', capturedRef);
-      return service;
-    }
-
-    testWidgets('flag ON → celebration fans out to the crew', (tester) async {
-      final service = await pumpAndTrigger(tester, flagEnabled: true);
-      expect(service.fanoutCalls, 1, reason: 'flag on ⇒ fans out (fix works)');
-      expect(service.broadcastCalls, 1);
-      expect(service.callOrder, ['fanout', 'broadcast']);
-    });
-
-    testWidgets('flag OFF → inert: broadcast only, no fanout', (tester) async {
-      final service = await pumpAndTrigger(tester, flagEnabled: false);
-      expect(service.fanoutCalls, 0);
-      expect(service.broadcastCalls, 1);
-      expect(service.callOrder, ['broadcast']);
-    });
-  });
+  // The triggerScoreCelebration group was REMOVED with the function it tested
+  // (C11): it asserted a routing contract nothing in production exercised.
+  // The broadcastSync gate group above is KEPT — broadcastSync is live code on
+  // the neighborhood sync path, and that coverage is real.
 }
 
 // FirebaseAuth is sealed; subclassing for a scoped test fake is intentional.

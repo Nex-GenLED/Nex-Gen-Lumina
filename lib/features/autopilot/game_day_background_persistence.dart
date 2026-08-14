@@ -379,6 +379,46 @@ Future<void> saveGameDaySessionsFromBackground(
   List<BackgroundAutopilotSession> sessions,
 ) => _persistSessions(sessions);
 
+/// Register a MANUALLY started show ("Light It Up Now") so the background
+/// worker adopts it.
+///
+/// This is celebration blocker (2)'s crossing point. The worker's `_sessions`
+/// map is what `onScoreAlertEvent` looks in, and it was only ever written by
+/// the scheduled `evaluate()` path — a manual tap applied a pattern to the
+/// controllers and registered nothing, so every subsequent scoring event found
+/// no session and returned. The UI cannot touch the worker's memory across the
+/// isolate boundary, so it writes here instead: `startMonitoring()` loads this
+/// exact store into `_sessions`.
+///
+/// `phase: 'liveGame'` is load-bearing and is NOT a free choice — it is the
+/// only in-progress phase that is simultaneously in `isActive`
+/// (`preGame || liveGame || postGame`) and handled by `_updateActiveSession`'s
+/// switch. An invented phase reads as inactive AND never advances, which both
+/// disarms monitoring and strands the show on forever.
+///
+/// Idempotent: an existing ACTIVE session for the team is left alone, so
+/// re-tapping during a running show does not restart or duplicate it.
+Future<void> registerManualGameDaySession({
+  required String teamSlug,
+  DateTime? gameStart,
+  String? activeGameId,
+  DateTime? now,
+}) async {
+  // loadGameDaySessions returns an UNMODIFIABLE map — copy before mutating.
+  final sessions =
+      Map<String, BackgroundAutopilotSession>.from(await loadGameDaySessions());
+  final existing = sessions[teamSlug];
+  if (existing != null && existing.isActive) return;
+  sessions[teamSlug] = BackgroundAutopilotSession(
+    teamSlug: teamSlug,
+    phase: 'liveGame',
+    gameStart: gameStart,
+    activeGameId: activeGameId,
+    activatedAt: now ?? DateTime.now(),
+  );
+  await _persistSessions(sessions.values.toList());
+}
+
 Future<void> _persistSessions(
   List<BackgroundAutopilotSession> sessions,
 ) async {
