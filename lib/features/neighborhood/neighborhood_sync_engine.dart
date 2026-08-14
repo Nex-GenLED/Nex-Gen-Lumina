@@ -214,7 +214,10 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       delays[member.oderId] = ledDelay + gapDelay;
 
       // Add this member's LEDs to the cumulative total
-      cumulativeLeds += member.ledCount;
+      // #78 — a member who has never reported their pixel count still needs a
+      // position in the wave. Assumed for the offset maths only; nothing is
+      // written back, so the stored value stays honestly unknown.
+      cumulativeLeds += member.ledCount ?? kAssumedLedCount;
     }
 
     debugPrint('Calculated delays for ${members.length} members:');

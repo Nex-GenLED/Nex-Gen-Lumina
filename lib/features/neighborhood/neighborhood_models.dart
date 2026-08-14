@@ -297,12 +297,32 @@ extension MemberParticipationStatusExtension on MemberParticipationStatus {
 }
 
 /// A member's configuration within a neighborhood group.
+/// #78 — the ONE place a pixel count is assumed, and only for rendering.
+///
+/// Timing maths needs a number even when the home has never reported one. This
+/// constant is that number, named so it is greppable and obviously an
+/// assumption. It is never persisted: the stored value stays null so the
+/// geometry layer can tell "unknown" from "measured 300".
+const int kAssumedLedCount = 300;
+
 class NeighborhoodMember {
   final String oderId;
   final String displayName;
   final int positionIndex;
-  final int ledCount;
-  final double rooflineMeters;
+  /// #78 — NULL means NOT MEASURED, and that is a real answer.
+  ///
+  /// These were `300` and `15.0` for every member: the per-channel pixel cap
+  /// reused as a default, and 15.0 m = the 49.2 ft customers saw in the UI.
+  /// Neither was ever measured. Because they LOOKED like data, nothing could
+  /// tell a genuine 300-pixel home from a placeholder — so every consumer
+  /// silently trusted a number nobody had checked.
+  ///
+  /// Nullable until the geometry layer derives them from the member's own bus
+  /// data (D2, docs/SYNC_GEOMETRY_LAYER.md). Consumers must handle null
+  /// EXPLICITLY: display it as unknown, or make a local, commented render-time
+  /// assumption. What they must not do is store a guess back.
+  final int? ledCount;
+  final double? rooflineMeters;
   final RooflineDirection rooflineDirection;
   final String? controllerIp;
 
@@ -338,8 +358,8 @@ class NeighborhoodMember {
     required this.oderId,
     required this.displayName,
     required this.positionIndex,
-    this.ledCount = 300,
-    this.rooflineMeters = 15.0,
+    this.ledCount,
+    this.rooflineMeters,
     this.rooflineDirection = RooflineDirection.leftToRight,
     this.controllerIp,
     this.controllerId = const [],
@@ -351,15 +371,21 @@ class NeighborhoodMember {
     this.isParticipating = false,
   });
 
-  factory NeighborhoodMember.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  factory NeighborhoodMember.fromFirestore(DocumentSnapshot doc) =>
+      NeighborhoodMember.fromMap(doc.id, doc.data() as Map<String, dynamic>);
+
+  /// The parsing half, split out so it is testable without faking a
+  /// DocumentSnapshot. #78's null-handling lives here and is worth a test.
+  factory NeighborhoodMember.fromMap(String id, Map<String, dynamic> data) {
     final rawParticipating = data['participatingChannelIndices'];
     return NeighborhoodMember(
-      oderId: doc.id,
+      oderId: id,
       displayName: data['displayName'] ?? 'Unknown Home',
       positionIndex: data['positionIndex'] ?? 0,
-      ledCount: data['ledCount'] ?? 300,
-      rooflineMeters: (data['rooflineMeters'] ?? 15.0).toDouble(),
+      // #78 — no fabricated fallback. An absent or null field reads as
+      // unknown, which is what it is.
+      ledCount: (data['ledCount'] as num?)?.toInt(),
+      rooflineMeters: (data['rooflineMeters'] as num?)?.toDouble(),
       rooflineDirection: RooflineDirectionExtension.fromJson(data['rooflineDirection']),
       controllerIp: data['controllerIp'],
       controllerId: data['controllerId'] is List
@@ -434,9 +460,13 @@ class NeighborhoodMember {
   }
 
   /// Estimated time (in ms) for animation to traverse this home's LEDs.
+  ///
+  /// #78: falls back to [kAssumedLedCount] when the count is unknown. This is a
+  /// RENDER-TIME assumption, local and visible — unlike the old stored default,
+  /// it is never written back and never mistaken for a measurement.
   int animationDurationMs(double pixelsPerSecond) {
     if (pixelsPerSecond <= 0) return 0;
-    return ((ledCount / pixelsPerSecond) * 1000).round();
+    return (((ledCount ?? kAssumedLedCount) / pixelsPerSecond) * 1000).round();
   }
 
   /// Check if this member has opted out of a specific schedule.

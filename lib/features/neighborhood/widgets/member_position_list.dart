@@ -302,7 +302,12 @@ class _MemberTile extends StatelessWidget {
                         children: [
                           _InfoChip(
                             icon: Icons.lightbulb_outline,
-                            label: '${member.ledCount} LEDs',
+                            // #78 — an unmeasured home says so. Showing
+                            // "300 LEDs" for a home nobody measured is how the
+                            // placeholder passed as data for months.
+                            label: member.ledCount == null
+                                ? 'LEDs not set'
+                                : '${member.ledCount} LEDs',
                           ),
                           const SizedBox(width: 8),
                           _InfoChip(
@@ -443,9 +448,14 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.member.displayName);
-    _ledCountController = TextEditingController(text: '${widget.member.ledCount}');
+    // #78 — prefill EMPTY when unknown. A pre-filled 300 invites the user to
+    // press save and turn a placeholder into a "confirmed" measurement.
+    _ledCountController =
+        TextEditingController(text: widget.member.ledCount?.toString() ?? '');
     _rooflineController = TextEditingController(
-      text: (widget.member.rooflineMeters * 3.28084).toStringAsFixed(1),
+      text: widget.member.rooflineMeters == null
+          ? ''
+          : (widget.member.rooflineMeters! * 3.28084).toStringAsFixed(1),
     );
     _rooflineDirection = widget.member.rooflineDirection;
     _participationStatus = widget.member.participationStatus;
@@ -732,8 +742,15 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
   void _save() {
     final updatedMember = widget.member.copyWith(
       displayName: _nameController.text.trim(),
-      ledCount: int.tryParse(_ledCountController.text) ?? widget.member.ledCount,
-      rooflineMeters: ((double.tryParse(_rooflineController.text) ?? (widget.member.rooflineMeters * 3.28084)) / 3.28084),
+      // #78 — an empty field means the user did not supply one, so the value
+      // stays unknown. Only a typed number becomes a measurement.
+      ledCount:
+          int.tryParse(_ledCountController.text) ?? widget.member.ledCount,
+      rooflineMeters: () {
+        final typed = double.tryParse(_rooflineController.text);
+        if (typed != null) return typed / 3.28084;
+        return widget.member.rooflineMeters;
+      }(),
       rooflineDirection: _rooflineDirection,
       participationStatus: _participationStatus,
     );
