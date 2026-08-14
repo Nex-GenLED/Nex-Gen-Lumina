@@ -19,6 +19,67 @@ optional.
 
 ## Operational flags
 
+### BENCH INCIDENT ARC — closed 2026-08-14, and it is the geometry gate's motivating evidence
+
+**1. Cause (self-inflicted).** Proving WLED captures geometry into presets, I
+set `seg1 rev:true`, `psave`d scratch slot 245, `pdel`d it. From that point
+`/presets.json` returned 13246 bytes with 8 stray non-ASCII bytes in the trailing
+padding, breaking strict JSON at char 12719.
+
+**2. `pdel` rewrite did not clear it. Reboot did not clear it.** Identical length
+and identical fault offset after both. `Content-Length` matches bytes received,
+so the transfer is complete — **the file on flash is malformed**, not the read.
+
+**3. The reboot then collapsed `seglc` 2 -> 1**, and — the load-bearing finding —
+**a preset reload could NOT restore the geometry.** `{"ps":2}` restored
+per-segment on-state onto a one-segment layout. Segment BOUNDS live in cfg; a
+preset carries state, not shape. **Recovery required a cfg write; no preset
+operation could have done it.**
+
+**4. Recovered geometry-first**, the exact sequence the gate will enforce:
+
+```
+GATE STEP 1  verify geometry   seg0 [0,128)  seg1 [128,290)   -> PASS
+GATE STEP 2  psave ladder onto verified geometry (presets 1 and 2)
+GATE STEP 3  verify
+```
+
+Executed by hand once because the ladder path cannot run standalone today. **That
+manual sequence IS the gate's contract.** Had step 1 failed, step 2 must not run —
+which is precisely what would have baked a one-segment layout into the base ladder.
+
+**RESULT — what is fixed and what is not:**
+
+| | |
+|---|---|
+| Geometry | ✅ `seg0 [0,128)`, `seg1 [128,290)`, readback-confirmed |
+| Ladder presets | ✅ `1 'NGL On'` and `2 'NGL Off'`, **both segments**, `rev:false`, captured from the restored layout |
+| `ps=1` / `ps=2` | ✅ both load correctly onto two segments |
+| All 19 slots | ✅ recoverable — ladder 1-5, schedule 10/26-31/33/36/38/40/41/160 intact |
+| `presets.json` strict parse | ❌ **STILL FAILS** — the same 8 stray bytes survive a full ladder re-save |
+| `readPresets()` tri-state | ❌ still `unknown` |
+| W4 `base_ladder_asserts_segments` | ❌ still publishes **null**, not `true` |
+
+**Item 2's acceptance criteria are therefore PARTIALLY met.** The dogfood run
+proved the sequence and restored the ladder; it did **not** repair the file. A
+psave rewrites slot contents but preserves the padding region where the stray
+bytes live, so no amount of re-provisioning clears them.
+
+**Remaining repair options, neither taken — both need approval:**
+(a) `/edit` filesystem download → strip the 8 bytes → re-upload `presets.json`;
+precise, preserves all 19 slots, but is a filesystem write.
+(b) Delete `presets.json` and let WLED recreate it — **destroys the schedule and
+lease slots** and is not acceptable without a rebuild plan.
+
+**One behavioural change to note:** re-saved preset 2 leaves root `on:true` with
+both segments off (this firmware stores off-state per segment). The strip is dark
+either way, but the previous stored shape had root `on:false`.
+
+**Why this matters beyond the bench.** The incident is the geometry gate's
+motivating evidence, and it adds a proven input to its spec: the mismatch branch
+must handle **TOTAL geometry loss** — segment count collapsed, not merely bounds
+drifted. Reboot collapse is no longer hypothetical.
+
 ### BENCH: presets.json malformed by a scratch-slot experiment — REBOOT DID NOT RECOVER IT
 
 **Self-inflicted, not a field failure.** Diagnosing #76 I set `seg1 rev:true`,
