@@ -1185,6 +1185,68 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Regression safety: participation == all channels is byte-equivalent to the old builder,
     pinned as a test — which is every live account today, because of #65.
 
+- [ ] **#76 — design payloads CLOBBER INSTALLATION GEOMETRY. Ellie's reversed channel ran
+  backwards all evening.**
+  - Status: OPEN (field-reported 2026-08-12, root-caused 2026-08-14) · Severity: **P1 —
+    customer-visible, wrong output on correct hardware** · Evidence: field + verified-by-source
+    + bench-reproduced
+  - **THE RULE (Tyler, complement to #67):** a design payload asserts **DESIGN** fields only —
+    `fx`, `col`, `pal`, `sx`, `ix`, `on`, `bri`. **Geometry** — `rev`, `mi`, `start`/`stop`,
+    `of`, `grp`/`spc` — is NEVER written by a design path. It belongs to provisioning and
+    roofline tooling. #67 said unstated segment state is inherited state; this says the
+    complement: **state that isn't yours to state must not be stated.**
+  - **Primary offender:** [editable_pattern_model.dart:187-193](../lib/features/wled/editable_pattern_model.dart#L187)
+    emits `'rev': direction == PatternDirection.left` and `'mi': direction == centerOut`. Any
+    pattern not authored as "left" therefore stamps **`rev:false`**, silently un-reversing a
+    correctly-provisioned channel. It also writes `grp`, `spc`, `of`.
+  - **Full audit of geometry-writing payload builders:**
+    | File | Geometry written |
+    |---|---|
+    | `wled/editable_pattern_model.dart:187-193` | `grp`, `spc`, `of`, **`rev`**, **`mi`** |
+    | `wled/pattern_models.dart:346-348` | `grp`, `spc`, `of` |
+    | `design/services/pattern_composer.dart:670-676` | `start`, `stop`, **`rev`** |
+    | `design/services/clarification_service.dart:130,995,1006,1024` | `start`, `stop` |
+    | `design/models/composed_pattern.dart:110-111` | `start`, `stop` |
+    | `autopilot/team_design_catalog.dart:202` | `grp` |
+    | `design/design_models.dart:252` | `rev` (echoes the channel's own config — still to go) |
+  - **BENCH-PROVEN 2026-08-14, and it changes the fix:** setting `rev:true` on a segment then
+    loading a preset **reverts it**. `.150` seg1: `rev=true` after a live write, `rev=false`
+    after `{"ps":2}`. **Geometry is stored INSIDE presets.** Two consequences: (a) the clobber
+    self-heals at the next base-preset boundary for any account with a floor — Ellie's ran
+    backwards for the evening, not forever; (b) **a customer who "fixes it in WLED" without
+    re-saving the preset loses the fix at the next boundary**, which is the more damaging
+    version and should be in the support answer.
+  - **Bench blind spot, and what closing it costs.** Both bench segments run forward, so the rig
+    cannot catch this class. Making one segment `rev:true` **permanently** requires re-saving
+    the base ladder presets — a `psave` against presets 1/2, which is the operation with the
+    frozen-segment capture and ambient-seg history. Live-only reversal is reverted by the first
+    preset load. **Escalated rather than done:** the instruction assumed a state write; it is
+    actually a base-ladder preset edit.
+  - **Fix:** strip geometry from every builder above; pin a test that a `rev:true` segment
+    survives a design apply. Related **#67**, **#77**.
+
+- [ ] **#77 — multi-channel continuity: one design renders as two independent runs**
+  - Status: OPEN (field-reported 2026-08-12) · Severity: **P2 — quality** · Evidence: field
+  - Ellie's two front channels each rendered the design independently: one design, two visual
+    runs, a visible seam at the channel boundary. It should read as one face.
+  - Long-term answer is the geometry layer (`docs/SYNC_GEOMETRY_LAYER.md`); interim mitigations
+    (offset/grouping phasing across channels) are scoped when that is designed, not before —
+    a phasing hack chosen now would have to be unpicked by the coordinate system that replaces it.
+
+- [ ] **#78 — join FABRICATES geometry: every member gets 300 px and 15.0 m**
+  - Status: OPEN (2026-08-14) · Severity: **P2** · Evidence: verified-by-source
+  - **Live write path is the server:** [joinNeighborhood.ts:359-360](../functions/src/joinNeighborhood.ts#L359)
+    writes `ledCount: 300, rooflineMeters: 15.0` for **every** joining member. 15.0 m = **49.2 ft**,
+    the figure seen in the UI; 300 is the per-channel pixel cap reused as a default.
+  - Client mirrors the same defaults at
+    [neighborhood_models.dart:341-342](../lib/features/neighborhood/neighborhood_models.dart#L341)
+    and `:361-362` (the `fromFirestore` fallback), so a member doc missing the fields still reads
+    as 300/15.0 rather than as unknown.
+  - **Neither number is measured.** They are placeholders that look like data — the failure mode
+    is that nothing ever reports "unknown", so no consumer can tell a real 300-pixel home from a
+    default. Fixed properly by D2 (join reads real geometry from healer facts); until then the
+    honest interim is to write **null** and let consumers handle unknown.
+
 - [ ] **#75 — host-only and crew fanout share the source string `sync_fanout`, so the log cannot
   tell them apart**
   - Status: OPEN (recorded 2026-08-14) · Severity: **P3** (diagnosability) · Evidence:

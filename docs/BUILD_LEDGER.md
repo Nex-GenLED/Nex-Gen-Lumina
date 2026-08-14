@@ -19,6 +19,62 @@ optional.
 
 ## Operational flags
 
+### FIELD FINDINGS — Ellie sync night, 2026-08-12 (recorded 08-14)
+
+Three findings, **one root: the system has no model of the physical house.**
+Filed as #76 / #77 / #78; the layer that dissolves all three is specced in
+[`docs/SYNC_GEOMETRY_LAYER.md`](SYNC_GEOMETRY_LAYER.md).
+
+- **#76 (P1, ship-soon) — design payloads clobber installation geometry.** Her
+  reversed channel 2 was stamped `rev:false` by the design template and ran
+  backwards until she fixed it by hand in WLED. Root cause:
+  `editable_pattern_model.dart:187-193` emits `'rev': direction == left` and
+  `'mi': direction == centerOut`, so any pattern not authored "left" un-reverses
+  a correctly-provisioned channel. Seven builders write geometry; all are listed
+  in the bug entry.
+  **THE RULE, complement to #67:** design payloads assert DESIGN fields only
+  (`fx/col/pal/sx/ix/on/bri`); geometry (`rev/mi/start/stop/of/grp/spc`) belongs
+  to provisioning. #67: unstated segment state is inherited state. #76: **state
+  that isn't yours to state must not be stated.**
+- **#77 (P2) — multi-channel continuity.** Her two front channels rendered the
+  design independently: one design, two visual runs, a seam at the boundary.
+  Structural fix is the geometry layer; interim phasing hacks deliberately NOT
+  scoped yet, because the coordinate system would only have to unpick them.
+- **#78 (P2) — join fabricates geometry.** `joinNeighborhood.ts:359-360` writes
+  `ledCount: 300, rooflineMeters: 15.0` (= **49.2 ft**) for every member; the
+  client mirrors the same defaults as `fromFirestore` fallbacks. Neither number
+  is measured, and nothing ever reports "unknown" — so no consumer can tell a
+  real 300-pixel home from a placeholder.
+
+**BENCH FINDING that changes #76's fix, proven on `.150` 2026-08-14:**
+
+```
+seg1 rev=true   (live write)
+{"ps":2}  ->  seg1 rev=false
+```
+
+**Geometry is stored inside presets.** So (a) the clobber self-heals at the next
+base-preset boundary for any account with a floor — Ellie's ran backwards for the
+evening, not permanently; and (b) **a customer who fixes it in WLED without
+re-saving the preset loses the fix at the next boundary**, which is the worse
+case and belongs in the support answer.
+
+**Bench blind spot ESCALATED, not silently done.** Both bench segments run
+forward, so the rig cannot catch this class. Making one `rev:true` *permanently*
+is not a state write — it requires re-saving the base ladder presets, a `psave`
+against presets 1/2, the operation carrying the frozen-segment capture and
+ambient-seg history. Live-only reversal is reverted by the first preset load.
+**Needs a decision before the rig is changed.**
+
+**E — milestone evidence stands, and its limits are stated.** Her house converged
+via **self-apply on her own LAN** (0.16.1 Dig-Octa), and the **cross-network join**
+is real. Neither is the crew fanout. **R-5 remains AMBER** pending the deliberate
+street test.
+
+**IP:** the feet-based multi-home composition in item 3 of the geometry spec is
+assessed novel and server-side — **counsel before any public disclosure**, per the
+IP timeline doc. The spec doc carries the notice at the top.
+
 ### CENSUS CORRECTED + R-5 STAYS AMBER — 2026-08-14
 
 **The worksheet census was stale, and I published a stale row.** Ellie
