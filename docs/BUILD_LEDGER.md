@@ -1282,6 +1282,70 @@ resolved for the affected accounts.
 
 ---
 
+## 2.5.10+77 — #76's cap closed and wired; geometry stops being fabricated
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-77`** — points at the docs-only commit following `100174a`. |
+| **Git SHA (app bytes)** | **`100174a`** — `chore(release): bump to 2.5.10+77`. **iOS↔Android join key.** |
+| **App-bytes ancestry** | `2aa5c15` (+76) **+** the #76 builders, the non-convergence guard, the geometry gate, its wiring, and #78's client half. |
+| **Ledger SHA (tagged)** | The `build-77` tag. `git diff --stat 100174a build-77 -- . ':(exclude)docs'` is EMPTY. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **77** — `kStaffAuthTelemetryAppVersion` moved in the same commit. |
+| **Android artifact** | `<PENDING>` |
+| **iOS** | `<PENDING>` — fill when Codemagic reports, not when queued. |
+| **Uploaded** | `<PENDING>` |
+| **Supersedes** | **+76** |
+
+**Content gate — six commits, all attributed, nothing unexpected:**
+`70726ac` #76 builders · `e1332b6` non-convergence guard + root-on ·
+`65ff312` geometry gate · `1aef6d1` gate wiring · `27471bf` #78 server ·
+`f4477a7` #78 client.
+
+**The sports-alerts restructure is NOT in this build** — another window's work,
+not on `main`. The expectation was corrected before the bump rather than after,
+which is the only reason this row is trustworthy.
+
+**#78 shipped ORDERED, server first.** `joinNeighborhood` writes `null`
+(deployed `--only functions:joinNeighborhood`) before the client stopped
+fabricating. An old client reading `null` falls back to its own 300/15.0 —
+today's behaviour exactly. Shipping the client first would have left a +77
+client reading old member docs and still seeing a real-looking 300. The client
+half had the SAME defaults as `fromFirestore` fallbacks, so without it the
+server fix would have been inert.
+
+**The line #78 draws:** stored values stop lying; render-time code may assume a
+number, but locally, named (`kAssumedLedCount`), and never written back. The
+member editor now prefills EMPTY when unknown — a pre-filled 300 invites the
+user to press save and promote a placeholder into a "confirmed" measurement.
+
+> **MY MISS, recorded as an UNFLAGGED OMISSION — not a deferral.** #78's interim
+> was item 5 of the +76 build prompt. I did W1–W4, the bump and the tag, and
+> simply did not do it, and it did not appear in my +76 report as outstanding.
+> A deferral is a decision; this was neither decided nor visible. It surfaced
+> only because +77's content gate compared against an expectation. **The audit
+> lesson: a build report must enumerate the prompt's items and their status,
+> not just describe what was built** — describing the work cannot reveal work
+> that is absent.
+
+**BENCH IS NOW ELLIE-SHAPED, permanently.** Via the gated sequence — bounds
+verified `0[0,128) 1[128,290)`, then `seg1 rev:true` live, then both ladder
+presets re-saved with `ib:true`:
+
+```
+preset 1  root on=True   seg0 rev=False  seg1 rev=TRUE
+preset 2  root on=False  seg0 rev=False  seg1 rev=TRUE
+ps=1 -> seg1 rev=True     ps=2 -> seg1 rev=True     presets parse clean, 18 slots
+```
+
+`rev` now **survives a preset load**, which is the exact behaviour that reverted
+it on 2026-08-14 and the reason the rig could not previously catch #76's class.
+The rig lives in the configuration that catches the bug.
+
+**Suite 2311 / 3 skipped / 0 failed** (from 2302). `analyze lib/ test/`: 0
+errors. Functions 392 / 17 unchanged.
+
+---
 ## 2.5.10+76 — every legible server refusal gets a customer surface
 
 | Field | Value |
