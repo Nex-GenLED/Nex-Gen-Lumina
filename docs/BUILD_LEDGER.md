@@ -19,6 +19,46 @@ optional.
 
 ## Operational flags
 
+### #76 SEVERITY CAP — CLOSED AND WIRED, 2026-08-14
+
+| # | Layer | Where | Status |
+|---|---|---|---|
+| 1 | builders no longer emit geometry | seven payload builders | `70726ac` |
+| 2 | ladder path never asserts it | `_fullStripOnSegments` | pre-existing, verified |
+| 3 | rig configured to catch the class | bench, two segments | restored 2026-08-14 |
+| 4 | **gate refuses a drifted save** | `gatedPresetSave` chokepoint | **LIVE** `1aef6d1` |
+
+**Live line.** The gate runs at `gatedPresetSave`, the single chokepoint three
+of five save paths call. **Verified by a watched bench connect, 2026-08-14
+17:36:20Z:** the healer executed non-vacuously (all three fact families
+republished — participation 12->13, boundaries 14->15, ladder fact 2->3),
+`presets.json` came through **byte-identical** (`sha256 b66e1185`, 13246 bytes),
+segments unchanged at `0[0,128) 1[128,290)`, and the **match branch wrote
+nothing**. A refusal would have skipped the heal; a mis-classified drift would
+have re-provisioned and re-saved. Neither happened.
+
+**Asterisks of record — what is NOT proven:**
+
+- **#3 `CalendarEntryLeaseManager` is not wired.** Its `_WriteAttempt.
+  savePresetFailed` triggers an in-memory registry rollback, and a gate refusal
+  is not that. Needs a `gateRefused` state rippling into 4+ call sites with
+  rollback semantics — its own reviewed change.
+- **Drift and total-loss re-provision are proven by tests plus the pre-wiring
+  live classification, NOT by physical drift.** Deliberate: the rig does not get
+  broken to watch it recover, having already lost its layout once this week.
+
+**Stand-aside boundary, stated so it is not re-litigated by accident:**
+**unreadable stands aside; a readable disagreement always gates.** The gate
+guards against a KNOWN mismatch, not against ignorance. This was a spec change
+forced by wiring — the original said unreadable refuses, and 14 real test
+failures showed that on the sunrise-off path a refusal ABORTS the timer write,
+so one transient read failure would leave a customer's lights on at sunrise.
+It also brought the gate into line with #67, W4 and the readiness gate, where
+unknown is explicitly not bad — the original spec was the odd one out.
+
+**Baseline of record: 2302 / 3 skipped / 0 failed.** Lineage 2282 -> 2301 ->
+2302. **2305 discarded — unreconciled, and it appears in no measured run.**
+
 ### GEOMETRY GATE IMPLEMENTED 2026-08-14 — #76's severity cap is closed
 
 `lib/features/schedule/geometry_gate.dart`. Geometry clobbering now has four
