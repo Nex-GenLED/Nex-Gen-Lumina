@@ -1300,8 +1300,53 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - **Reproduction note:** expect it on first launch after install/update, if at all — a warm image
     cache hides the swap. Do not treat non-replication as evidence the ordering is sound; the
     source-level branch above is the evidence.
-- [ ] **#79 — INFRA: no read-only Codemagic API token, so every build's identity chain stalls on a
+- [ ] **#83 — score celebrations do NOT assert the #67 full partition: they take the self-apply path,
+  which never partitions**
+  - Status: OPEN (filed 2026-08-15) · Severity: **P2** · Evidence: **verified-by-source** · Answers the
+    2026-08-14 rider on **#79** (audit `onScoreAlertEvent` against the #67/#76 contracts)
+  - **Scorecard for the real celebration path** (`gameDayWorker.onScoreAlertEvent`,
+    [game_day_autopilot_background_worker.dart:151](../lib/features/autopilot/game_day_autopilot_background_worker.dart#L151)):
+
+    | contract | verdict |
+    |---|---|
+    | `participating_channels` (#29) | **RESPECTED** — `expandForChannels(..., config.participatingChannelIds)`; null passes through, `[]` opts out via empty `seg` and `_applyToControllers` skip-applies |
+    | **#76 geometry** (design fields only) | **COMPLIANT** — the flash emits `fx/sx/ix/pal/col` and nothing else; `applyChannelFilter` is called with the default `channels: []`, so it strips `start`/`stop` from the template and adds none. WLED keeps the install-time ranges |
+    | **#67 full partition** | **NOT ASSERTED — predates the contract** |
+
+  - **Why the partition is missed.** `_applyToControllers` POSTs `applySyncPattern` with
+    `groupId: ''` (:562). `partitionBroadcastPayload` is called **only inside the fanout loop**
+    ([applySyncPattern.ts:770](../functions/src/applySyncPattern.ts#L770)); the self-apply path
+    (:247-268) JSON-stringifies the payload as received and enqueues one command per controller.
+    So a celebration names the participating segments only and says nothing about the excluded ones.
+  - **Why it has not yet been visible, and why that is the fragile part.** `applyChannelFilter`
+    already emits segs for participating ids only, and the **fire** that started the show DID
+    partition — the 08-13 Twins fire is on the wire as `seg:[{id:0,on:true,…},{id:1,on:false}]`. So
+    an excluded channel is normally already dark when the flash lands, and the flash correctly does
+    not wake it. **The celebration is inheriting correctness from the fire rather than asserting its
+    own.** Any path that reaches a celebration without a partitioning fire first — a manual
+    "Light It Up Now", a base-pattern re-apply, a controller reboot mid-show — leaves the excluded
+    channel showing whatever it was showing, and the flash confirms nothing. This is exactly the
+    assumption #67 was written to delete.
+  - **Fix direction:** partition at the same chokepoint the fanout uses. Either lift
+    `partitionBroadcastPayload` above the `groupId` branch in `applySyncPattern` so **every** target
+    is partitioned regardless of path, or have the worker emit a full-partition payload client-side.
+    Server-side is preferred — one place, and it covers future callers that forget. Batches with the
+    **#79** implementation session; see `docs/SPORTS_ALERTS_RESTRUCTURE_PLAN.md`.
+  - **Also confirmed this pass (already covered by #79's in-flight fix, recorded so it is not
+    re-derived):** `onScoreAlertEvent` has **four bare `return`s** (:152 disposed, :156 no slug,
+    :159 no active session, :166 no config / celebrations off) and **not one of them logs**. The only
+    `debugPrint` is in the `catch`. The outer poller gate is the same shape: when `active.isEmpty`
+    but Game Day work exists, `sports_background_service.dart:188` skips the whole polling block in
+    silence. **Fires or nothing, with no legible middle** — the mirror lesson again.
+- [ ] **#87 — INFRA: no read-only Codemagic API token, so every build's identity chain stalls on a
   console trip**
+  - **RENUMBERED #79 → #87 (2026-08-15).** `feat/gameday-unified-monitoring` filed its own #79
+    (celebrations have never fired) on 2026-08-14 — earlier, and referenced from that branch's own
+    text. The branch merges CLEAN into main (`git merge-tree`, exit 0): the only shared file is this
+    one and the two entries sit in different regions, so **git would have silently produced a
+    document with two #79s.** A clean textual merge is not a clean semantic merge. Mine moved
+    because I own it and nothing else references it; the branch was left untouched — editing
+    another window's in-flight branch is the hazard, not the fix.
   - Status: OPEN (filed 2026-08-15) · Severity: **P2 — process, not product** · Evidence: three
     consecutive occurrences
   - **The same read has blocked +75, +76 and +77.** In each case everything git-side and
