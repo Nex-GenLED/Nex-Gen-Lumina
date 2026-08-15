@@ -1242,6 +1242,38 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     (offset/grouping phasing across channels) are scoped when that is designed, not before —
     a phasing hack chosen now would have to be unpicked by the coordinate system that replaces it.
 
+- [ ] **#79 — INFRA: no read-only Codemagic API token, so every build's identity chain stalls on a
+  console trip**
+  - Status: OPEN (filed 2026-08-15) · Severity: **P2 — process, not product** · Evidence: three
+    consecutive occurrences
+  - **The same read has blocked +75, +76 and +77.** In each case everything git-side and
+    artifact-side verified cleanly and the chain still could not close, because one fact lives
+    only in Codemagic: **which build number the `build-NN` tag produced, what triggered it, and
+    which commit SHA it checked out.**
+  - It is not a nuisance — it is the check that catches the failure it exists for. On 2026-08-11
+    TestFlight served a stale **288** while **291** was the real build and a hardware run was
+    attributed to the wrong artifact. On +76 the trigger read is what proved **297 was the tag
+    build and 298 a manual duplicate**, correcting my own inference that the numbering gap
+    weakened confidence — it did the opposite.
+  - **Ask: a READ-ONLY token.**
+    - Scope: list builds; read build metadata — number, trigger (tag vs branch push vs manual),
+      commit SHA, status, workflow.
+    - **Explicitly NOT: trigger, cancel, or configure builds.** A verification credential that
+      can start a build is a credential that can start a build by accident, and the whole point
+      of #62's tag-deliberate pipeline is that builds are a deliberate human act.
+  - **Storage: the `functions/.env` convention** — gitignored, and therefore subject to the
+    **worktree-copy rule**. Worktrees do NOT inherit gitignored files; that is what silently
+    broke an earlier release build until `google-services.json`, `key.properties` and the
+    keystore were copied across by hand. Any tooling that reads this token from a worktree must
+    copy it in the same way, or fail loudly rather than fall back to "unverified".
+  - **Payoff:** the identity-chain step becomes a window-side read instead of a Tyler-side console
+    trip, and the verdict stops being "I cannot tell, please go look". The distribution gate keeps
+    its evidence and loses its stall.
+  - **Until it exists**, the honest form of the chain report is unchanged: verify everything
+    git-side and artifact-side, then name the two Codemagic fields as an explicit GAP rather than
+    inferring them from build numbers. Numbering inference has already been wrong once in both
+    directions.
+
 - [ ] **#78 — join FABRICATES geometry: every member gets 300 px and 15.0 m**
   - Status: OPEN (2026-08-14) · Severity: **P2** · Evidence: verified-by-source
   - **Live write path is the server:** [joinNeighborhood.ts:359-360](../functions/src/joinNeighborhood.ts#L359)
