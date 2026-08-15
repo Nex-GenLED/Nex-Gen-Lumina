@@ -1282,6 +1282,53 @@ resolved for the affected accounts.
 
 ---
 
+### +77 SMOKE GREEN — Ellie's bug is dead, proven on the rig shaped to catch it
+
+**2026-08-15 22:10Z, build 301 on device, bench `.150`.**
+
+The test only means anything because the rig was first put into Ellie's
+configuration: `seg1 rev=true`, captured into ladder presets 1 and 2 through the
+gated sequence. Before that the bench ran both segments forward and **could not
+fail this test**.
+
+```
+BEFORE  presets sha 9a5af8c6   preset1 seg1 rev=True   preset2 seg1 rev=True
+        LIVE  ps=2  seg0 [0,128) rev=False   seg1 [128,290) rev=True
+
+APPLY   one design from the +77 app, normal path
+
+AFTER   LIVE  fx=49 pal=5 on BOTH segments   <- the design landed
+        seg0 [0,128) rev=False
+        seg1 [128,290) rev=TRUE              <- PASS
+        bounds intact, presets sha 9a5af8c6 UNCHANGED
+
+CYCLE   ps=1 -> seg1 rev=True
+        ps=2 -> seg1 rev=True
+```
+
+**Three things pass, not one:**
+1. **The apply did not clobber `rev`** — the #76 defect itself. Pre-fix, this
+   exact action stamped `rev:false` and Ellie's channel ran backwards all evening.
+2. **The ladder was untouched** — `presets.json` byte-identical across the apply,
+   so nothing captured a geometry state into a durable slot.
+3. **The reversal survives a load cycle** — the durability half. `rev` lives in
+   the presets now, so a regression could not hide behind a base restore; it
+   would persist rather than self-heal.
+
+**Free extra verification from the power cycle** that preceded the smoke
+(Tyler's glitch-replication attempt): the two-segment layout **survived this
+reboot** — unlike 2026-08-14, where a reboot collapsed it to one. Collapse is
+therefore INTERMITTENT, not deterministic, which makes it harder to catch by hand
+and is precisely why the gate's total-loss branch exists.
+
+One observation worth keeping: the reboot left live `seg1 rev=FALSE` while the
+presets held `true`, with `ps=-1` (boot state, no preset loaded). Loading `ps=2`
+restored it. **Starting the smoke from that state would have produced a false
+FAIL** — "rev is false" for a reason unrelated to #76. The starting state has to
+be established, not assumed.
+
+**GREEN FOR DISTRIBUTION.**
+
 ## 2.5.10+77 — #76's cap closed and wired; geometry stops being fabricated
 
 | Field | Value |
