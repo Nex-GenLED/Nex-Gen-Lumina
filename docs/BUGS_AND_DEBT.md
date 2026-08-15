@@ -1242,6 +1242,64 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     (offset/grouping phasing across channels) are scoped when that is designed, not before —
     a phasing hack chosen now would have to be unpicked by the coordinate system that replaces it.
 
+- [ ] **#80 — home hero flashes the STOCK house over the customer's own photo on any profile-stream
+  re-subscription**
+  - Status: OPEN (filed 2026-08-15) · Severity: **P3 — cosmetic, but see the principle** · Evidence:
+    field-observed by Tyler on build **301 (+77)**, first launch after install, triggered by a Game Day
+    enable; **verified-by-source** below · Rides **+78**
+  - **Observed:** the home-screen house preview flickered between the stock image and Tyler's own home
+    photo momentarily after a Game Day enable rebuilt the home screen. Did NOT replicate after a
+    controller + app restart.
+  - **The 'first-launch cold cache' reading is incomplete.** A cold cache explains why it was VISIBLE
+    that once — a warm asset paints instantly while a cold `NetworkImage` does not — but the stock
+    image is not merely winning a race. It is being deliberately assigned to state:
+
+    ```dart
+    // wled_dashboard_page.dart:368-376
+    final profileLoaded = profileAsync.hasValue;                       // TRUE during a refresh
+    final houseImageUrl = profileAsync.maybeWhen(
+      data: (u) => u?.housePhotoUrl, orElse: () => null);               // NULL during a refresh
+    if (profileLoaded) _updateHeroImage(houseImageUrl, ...);            // -> called with null
+
+    // _updateHeroImage:234-242  — null url is treated as 'no photo exists'
+    final provider = (url != null && url.isNotEmpty)
+        ? NetworkImage(url)
+        : const AssetImage('assets/images/Demohomephoto.jpg');          // STOCK, into state
+    ```
+
+    `hasValue` and `maybeWhen(data:)` **disagree** on a Riverpod loading-with-previous-value state:
+    `hasValue` is true (there IS a cached profile) but the value is `AsyncLoading`, so `data:` does not
+    match and `orElse` returns null. The guard admits the rebuild; the read then reports no photo.
+    `_updateHeroImage` cannot tell *"this user has no photo"* from *"the profile is momentarily
+    unavailable"* — both arrive as `null` — so it commits the stock asset to `_heroImageProvider`.
+  - **The existing guard is bypassed, not absent.** Line 649 (`else if (!profileAsync.isLoading)`) was
+    written precisely to stop stock rendering during load — but it lives in the `else` of
+    `if (_heroImageProvider != null)` (:647). Once the stock asset has been *assigned*, line 647 wins
+    and 649 is never consulted. Somebody already anticipated this failure and defended the wrong layer.
+  - **Trigger scope (what a Game Day enable rebuilds):** the whole home screen, not the affected tile.
+    `build()` watches `activeUserProfileProvider` at :369 alongside `wledStateProvider`,
+    `selectedDeviceIpProvider`, `isRemoteModeProvider` and `isViewingAsCustomerProvider` — every one of
+    them rebuilds the entire `Scaffold`, hero card included. And `activeUserProfileProvider`
+    ([media_access_providers.dart:56-69](../lib/features/installer/media_access_providers.dart#L56)) is a
+    `StreamProvider` that itself watches `viewAsCustomerIdProvider` and `authStateProvider` — so an auth
+    or view-as change **re-creates the stream**, dropping it back to loading-with-value and re-entering
+    the null branch above. That is the general trigger; Game Day was one instance of it.
+  - **Why P3 and not lower:** it is cosmetic and self-corrects within a frame or two. But showing a
+    customer a stranger's house on their own home screen reads as *"the app lost my setup"*, and the
+    same disagreement between "unknown" and "absent" is the exact defect class as **#78** (fabricated
+    geometry) and the **geometry gate** (unreadable ≠ empty). Absent must not render as a value.
+  - **Fix direction — hold last-known-good, and distinguish the two nulls:**
+    1. `_updateHeroImage` takes an explicit *unknown* case and **returns without touching
+       `_heroImageProvider`**, leaving whatever was last resolved on screen.
+    2. Call it only from a genuine `AsyncData` (switch on the value, or gate with
+       `profileAsync is AsyncData`), never from `hasValue` + `orElse`.
+    3. Stock renders only once a loaded profile has **affirmatively** reported no photo — never
+       during resolution. Blank/`matteBlack` (:646) is the correct interim, and is already there.
+  - **Principle (Tyler, 2026-08-15):** *a fallback must never flash stock over an existing user photo,
+    even once.* Rarity is not a fix; it only decides who sees it.
+  - **Reproduction note:** expect it on first launch after install/update, if at all — a warm image
+    cache hides the swap. Do not treat non-replication as evidence the ordering is sound; the
+    source-level branch above is the evidence.
 - [ ] **#79 — INFRA: no read-only Codemagic API token, so every build's identity chain stalls on a
   console trip**
   - Status: OPEN (filed 2026-08-15) · Severity: **P2 — process, not product** · Evidence: three
