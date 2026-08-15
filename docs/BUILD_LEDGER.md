@@ -1293,7 +1293,7 @@ resolved for the affected accounts.
 | **Version name** | `2.5.10` |
 | **Android versionCode** | **77** — `kStaffAuthTelemetryAppVersion` moved in the same commit. |
 | **Android artifact** | `app-release.aab` · **68,331,830 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="77"` / `versionName="2.5.10"` · built 2026-08-14 from isolated worktree `lumina-b77` at tag `build-77`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/`. **versionCode 77 CONSUMED.** |
-| **iOS** | `<PENDING>` — fill when Codemagic reports, not when queued. |
+| **iOS** | **Build 301** — tag-triggered from `build-77`, commit **`4f3ab11`**, confirmed against the Codemagic build record 2026-08-15. **No manual twin this time** (+76 produced 297 tag + 298 manual; +77 produced one build from one tag). Chain COMPLETE. |
 | **Uploaded** | `<PENDING>` |
 | **Supersedes** | **+76** |
 
