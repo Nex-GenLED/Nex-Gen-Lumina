@@ -17,6 +17,52 @@ name and code from pubspec. So **the git SHA is the only identifier common to
 both platforms** — it is the join key, and it is why this ledger is not
 optional.
 
+## STANDING BUILD CONVENTIONS — binding from +79 onward
+
+Adopted 2026-08-17 out of the +78 build session. Each earned its place by
+failing, or nearly failing, in a way the exit code did not report.
+
+**1. Tag the bump commit itself. The ledger commit lands after, outside the tag.**
+The tag then **is** the app-bytes SHA — an exact iOS↔Android join with no
+exclusion diff to compute. (+77 tagged the docs commit following the bump, which
+is why its row had to prove equivalence with
+`git diff --stat <bump> build-77 -- . ':(exclude)docs'`. +78 tagged `dc7fa54`
+directly; nothing to prove.)
+
+**2. Verify release signing by IDENTITY — read the signer CN out of the
+artifact. Never by build exit code.** With `key.properties` or the keystore
+absent, Gradle **silently falls back to debug signing and reports success**; Play
+rejects it at upload, long after the build looked fine. Check:
+
+```
+jarsigner -verify -verbose:summary -certs <aab> | grep -iE "^\s*X.509|CN="
+```
+
+Expect `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC`. A `PKIX path building failed`
+warning alongside `jar verified` is **expected** for a self-signed release key
+and is not a signing failure.
+
+**3. A fresh build worktree needs three ignored inputs, copied from the MAIN
+repo — never from a prior build worktree.** They are gitignored
+(`.gitignore:105` and neighbours), so a new worktree has none of them and
+`bundleRelease` fails at `processReleaseGoogleServices`:
+
+```
+android/app/google-services.json        712 B
+android/app/nex-gen-lumina.keystore    2776 B
+android/key.properties                  112 B
+```
+
+Copying from the previous worktree is banned so a stale key cannot propagate
+build-to-build. Diff sizes against source after copying; the worktree
+`git status` must stay **empty** (all three are ignored, so they cannot leak into
+a commit).
+
+**4. The rule under all three:** *delivery is not content.* A successful deploy
+proves delivery, never content; a successful build proves neither. Verify the
+thing itself — the compiled artifact, the signer, the manifest, the device's
+`/json/state` — not the exit code of the step that was supposed to produce it.
+
 ## Operational flags
 
 ### #76 SEVERITY CAP — CLOSED AND WIRED, 2026-08-14
@@ -1898,41 +1944,63 @@ delete.** If it exists, it is in another window's tree — the ask stands there,
 | **Android versionCode** | **78** — `kStaffAuthTelemetryAppVersion` verified at `2.5.10+78` in the same tree **before** building. |
 | **Android artifact** | `app-release.aab` · **68,367,494 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="78"` / `versionName="2.5.10"` · built 2026-08-17 from isolated worktree `lumina-b78` at tag `build-78`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64). **versionCode 78 CONSUMED.** |
 | **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — the **release** keystore, checked explicitly (see below). The `PKIX path building failed` warning is expected for a self-signed release key and is not a signing failure. |
-| **iOS** | **Build 306** — `2.5.10 (306)`, bundle `com.nexgenled.command`, App Store distribution, min iOS 15.0, signing cert expires 2027-04-28. Built by Codemagic 2026-08-17 after `build-78` was pushed. **Identity fields verified against the tagged source** (`PRODUCT_BUNDLE_IDENTIFIER`, `IPHONEOS_DEPLOYMENT_TARGET = 15.0`, version name `2.5.10` all match at `dc7fa54`). **Trigger and checked-out SHA NOT independently confirmed** — see below. |
+| **iOS** | **Build 308** — tag-triggered from `build-78`, SHA **`dc7fa54` confirmed**, reported 2026-08-17. `2.5.10`, bundle `com.nexgenled.command`, App Store distribution, min iOS 15.0, signing cert expires 2027-04-28. Identity fields independently verified against the tagged source (`PRODUCT_BUNDLE_IDENTIFIER`, `IPHONEOS_DEPLOYMENT_TARGET = 15.0`, version name) — all match at `dc7fa54`. **This is the chain build.** |
+| **iOS — not in chain** | **Build 305** — predates the tag push, source SHA unverified, **EXPIRED**. Superseded by 308. Recorded so it is not mistaken for a +78 artifact later. |
+| **Smoke tests** | **Both PASS on hardware** (bench `192.168.1.150`), verified by **`/json/state` reads, not UI**. See below. |
 | **Test suite at build time** | **2379 passed · 3 skipped · 0 failed**, run in `lumina-b78` at `build-78` **before** the build. |
 | **Server state at build** | `planGameDayFires` deployed 2026-08-17T15:38:15Z (C10 + #90 rows). Server leads client — correct per +74, no client dependency either way. |
 
-### iOS 306 — what is evidenced, and what is not
+### SMOKE TESTS — both PASS, bench `192.168.1.150`, read from `/json/state`
 
-**Evidenced** (from the Codemagic artifact summary): `2.5.10 (306)`, bundle
-`com.nexgenled.command`, App Store distribution, iPhoneOS, min 15.0, cert expiry
-2027-04-28, and an upload of `Lumina.ipa` to App Store Connect **beginning** at
-2026-08-17 18:08:46 via `altool`.
+Verified by **JSON state reads, not UI**. That distinction is the whole value:
+every geometry defect in this repo's history looked correct in the UI.
 
-**NOT evidenced — do not read these as confirmed:**
+**(a) rev-survival.** `seg 1 rev=true` survived a design apply **plus** a
+`ps=1` / `ps=2` cycle. Post-cycle read: both segments intact, bounds
+`0–128` / `128–290`, `rev:true` still standing on seg 1. **Identical to +77
+behaviour** — no regression from the `of` chokepoint change.
 
-- **The upload's OUTCOME.** The record ends at `INFO: ContentDelivery.Uploader`
-  — altool *starting*. No success line, no App Store Connect acceptance. Uploads
-  fail after this point (ITMS validation, missing privacy declarations — this
-  app has an open one, see `PrivacyInfo.xcprivacy` in the diagnostics gap).
-  Treat 306 as **built and upload-attempted**, not as delivered, until App Store
-  Connect shows it.
-- **The trigger and the checked-out SHA.** The summary names no commit and no
-  trigger. Attribution to `dc7fa54` rests on the tag having been pushed
-  immediately before, plus the identity fields matching — **not** on a read of
-  the build record. Same standing as the +75 row, and for the same reason: no
-  Codemagic credential in this session.
+**(b) Fix 1, single-channel apply.** Single-channel design applied to seg 0.
+Post-apply read:
 
-**BUILD-NUMBER GAP: 302–305 are unaccounted for.** Lineage is 295 (+74) → 296
-(+75) → 297/298 (+76) → 301 (+77) → **306** (+78). Codemagic's
-`PROJECT_BUILD_NUMBER` increments per *run*, not per released artifact, so four
-runs happened between `build-77` and `build-78`. This inverts the corroboration
-the +75 row leaned on — there, *no* gap was evidence that no stray push-build ran
-between tags. Here the gap says stray runs **did**. Harmless if they were
-branch/PR builds; it means "one tag, one build" is **not** currently true of this
-project, and a bare `2.5.10` version name cannot distinguish them (**#62**).
-Worth one look at the Codemagic build list to confirm 302–305 were not release
-uploads.
+- both segments present — **no deletion** (#89 class clear);
+- untargeted seg 1 bounds **fully intact** (`start 128` / `stop 290` / `len 162`);
+- seg 1 exactly `on:false` **and nothing else written** — the #67 exclusion
+  contract, *"non-participating segments get `{id:N, on:false}` ONLY"*;
+- `rev:true` **still intact through the apply**;
+- targeted seg 0 carried only design fields (`fx 83`, `col`, `pal 5`, `on`,
+  `bri`) with **`grp`/`spc` at 1/0** — #88's assert-when-unused contract;
+- **no geometry written anywhere** — #76 regression clear.
+
+Both the #89 class and the #76 regression are clear on hardware, not by argument.
+
+### iOS build-number reconciliation — ONE OPEN DISCREPANCY
+
+The chain build is **308** and 305 is expired; both are recorded above as
+directed. One thing does not reconcile and is left visible rather than smoothed:
+
+**The Codemagic artifact summary read into this session on 2026-08-17 reported
+`Version code: 306`** — not 305, not 308 — for a `2.5.10` / `com.nexgenled.command`
+/ App Store build, with `altool` beginning an upload of `Lumina.ipa` to App Store
+Connect at 18:08:46. That is primary evidence of a **306** artifact existing.
+
+Three readings, unresolved: 306 was a tag-triggered run superseded by 308 (a
+re-run after a failed upload); or 306 is the build recorded elsewhere as 305; or
+the number was transposed in one of the two reports. **`PROJECT_BUILD_NUMBER`
+increments per run**, so 305→306→…→308 across pre-tag and tag-triggered runs is
+entirely consistent — which makes the first reading most likely and none of them
+provable from here.
+
+**Why it is not dropped:** this ledger exists so a crash report resolves to a
+commit. An artifact whose existence is evidenced but whose disposition is
+unrecorded is exactly the ambiguity the file is meant to prevent — and a bare
+`2.5.10` version name cannot distinguish these builds from one another (**#62**).
+**One line from the Codemagic build list closes it:** what 306 was, and whether
+it reached App Store Connect. Until then, 308 stands as the chain build on
+Tyler's confirmation, and 306 is neither claimed nor denied.
+
+The earlier gap note is superseded: 302–305 are now understood as pre-tag runs,
+per the 305 disposition above.
 
 ### Two build-input failures worth recording — both cost a code in the past
 
