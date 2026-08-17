@@ -1468,6 +1468,68 @@ off the sports-alert list, `_sessions` unpopulated by a manual start). That trac
 run and its verdict stands; this is a fourth confirming data point, now on build 301.
 **The fix is still unmerged on `feat/gameday-unified-monitoring`.**
 
+### RECORDS — method, evidence roles, and provenance (2026-08-17)
+
+Companion to the closure entry below; that entry carries the numbers, this one
+carries what they are *for*.
+
+#### 1. Method line
+
+> **Measure the population, don't generalise the sample.**
+
+The unreachable-feature verdict came from one config. The population says the
+opposite:
+
+```
+50 game_day_autopilot configs, all users
+PRESENT = 49  (true 49 / false 0)
+ABSENT  =  1  -> wrQRUUKy / mlb_twins, 4-key stub
+live setter: setLiveScoring -> Live Scoring switch, game_day_screen.dart :385 / :1411
+```
+
+The stub sat in the one seat that made it look systemic — it is the config whose
+cycle actually ran on 08-16. **A sample drawn from the thing you are investigating
+is the least representative sample available**, because investigation goes where
+the anomaly is. Counting cost one query.
+
+#### 2. The Ellie control row carries TWO findings, not one
+
+| | |
+|---|---|
+| same game, same tick, `skip_day_games=false` | `plan_start` `2026-08-16T19:37:00Z` |
+| Tyler, `skip_day_games=true` | skipped, **no row written** |
+
+- **Evidence for #90.** One per-config field decided a game, and the planner
+  recorded nothing. `daylight_game` bumps a counter and `continue`s. The 08-16
+  summary reads `daylight_game: 9` and names no team. Correct behaviour is not
+  the same as accounted-for behaviour.
+- **Evidence for the allowlist file.** Her config **plans on real games** —
+  ESPN resolution, participation, partition all succeeded and produced a
+  `plan_start`. **Only `scopedOut:true` stops it reaching hardware.** She is a
+  ready candidate whose readiness is already demonstrated, not assumed. Weigh
+  against `Ayf0rqwN`, whose partition facts flip between ticks — the two
+  together are why widening must be per-uid on observed `partitioned:true`
+  across consecutive ticks, not a fleet flip.
+
+#### 3. Provenance — finding f is RELAYED-WITHOUT-PROVENANCE
+
+A fixed-IP fanout (unawaited HTTP to `192.168.1.11` / `.222`) was relayed for
+deletion. **It does not exist in any tree reachable from here.** Searched:
+
+```
+main lib/ + functions/src/          0 hits
+feat/gameday-unified-monitoring     0 hits in lib/  (2 hits are TEST FIXTURES:
+                                    connection_method_screen_test, handoff_verification_test)
+lumina-gameday .-f3 .-r75 .-voice .-sunrise-off .-p0-3   0 hits each in lib/
+no `192.168.*.222` literal anywhere at all
+```
+
+The Game Day worker has one `http.post` (to `$_functionsBaseUrl/applySyncPattern`,
+resolved) and one `unawaited` (the 15 s revert timer). **Recorded as relayed
+without provenance; Tyler is putting the existence question to the originating
+window.** Nothing was deleted. If it is real it is real somewhere else, and the
+deletion should happen there — the concern itself is sound and not disputed.
+
 ### THE TWO SILENT GAMES — CLOSED 2026-08-17. Both questions answered; the
 ### fleet-wide premise did not survive measurement.
 
