@@ -94,8 +94,11 @@ void main() {
   });
 
   group('channel fan-out via applyChannelFilter (cache-independent)', () {
+    // #89 — the bounds half of this assertion INVERTED. An apply states design,
+    // never installation bounds; the per-bus start/stop this used to pin was
+    // the same defect class as a [0,0) exclusion, aimed the other way.
     test('2-channel device → celebration addresses BOTH seg 0 AND seg 1, '
-        'with per-bus start/stop + per-seg on:true, content preserved', () {
+        'with NO start/stop + per-seg on:true, content preserved', () {
       final step =
           AlertTriggerService.buildAnimationSteps(AlertEventType.touchdown, team)
               .first;
@@ -109,10 +112,12 @@ void main() {
       final seg1 = segs[1] as Map;
       expect(seg0['id'], 0);
       expect(seg1['id'], 1, reason: 'channel 2 (seg 1) MUST be addressed');
-      expect(seg0['start'], 0);
-      expect(seg0['stop'], 128);
-      expect(seg1['start'], 128);
-      expect(seg1['stop'], 188);
+      for (final seg in [seg0, seg1]) {
+        expect(seg.containsKey('start'), isFalse,
+            reason: 'bounds are provisioning\'s — a celebration must not '
+                're-bound the installation');
+        expect(seg.containsKey('stop'), isFalse);
+      }
       expect(seg0['on'], isTrue);
       expect(seg1['on'], isTrue);
 

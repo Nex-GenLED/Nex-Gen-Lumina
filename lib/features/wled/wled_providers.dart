@@ -1369,11 +1369,10 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
 
     final current = state;
-    Map<String, dynamic>? firstSeg;
-    final segs = payload['seg'];
-    if (segs is List && segs.isNotEmpty && segs.first is Map) {
-      firstSeg = Map<String, dynamic>.from(segs.first as Map);
-    }
+    // The DESIGN seg, not seg[0] — applyChannelFilter now emits the #67 full
+    // partition, so an apply scoped away from channel 0 puts the exclusion
+    // `{id:0, on:false}` first. Reading that as the design blanked the preview.
+    final Map<String, dynamic>? firstSeg = firstDesignSeg(payload['seg']);
 
     final effectId = _asInt(firstSeg?['fx']) ?? current.effectId;
     final speed = _asInt(firstSeg?['sx']) ?? current.speed;

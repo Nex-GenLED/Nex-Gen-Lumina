@@ -4,6 +4,10 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 // buildChannelPowerPayload moved to a pure-Dart file (bench/ CLI imports it
 // without dart:ui); re-exported so existing importers are unaffected.
 export 'package:nexgen_command/features/wled/channel_power_payload.dart';
+// #88 design-spacing defaults — pure Dart for the same reason, re-exported
+// here so nothing importing this file needs a second import.
+import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
+export 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/utils/color_naming.dart';
 import 'package:nexgen_command/utils/rgbw_validation.dart';
 
@@ -38,16 +42,39 @@ List<int> safeRGBW(List<int> color) {
   return [0, 0, 0, 0];
 }
 
-/// Rewrites a WLED payload's `seg` array so it targets only [channelIds].
+/// Rewrites a WLED payload's `seg` array into the **full partition** over the
+/// device's channels: the targeted ones carry the design, every other one
+/// carries `{id, on:false}` and nothing else.
 ///
 /// If [channelIds] is empty, or the payload has no `seg` key, the payload is
 /// returned unchanged (safe fallback). Otherwise the first segment object is
-/// used as a template and replicated once per channel ID.
+/// used as a template for the targeted channels.
 ///
-/// When [channels] is provided, each segment entry gets `start`/`stop` values
-/// from the corresponding hardware bus, so WLED targets the correct LED range.
+/// THE CONTRACT (#67's answer, brought to the interactive path — #89):
 ///
-/// Each expanded seg is emitted with `'on': true` (channel-2-dark fix —
+///  1. **"Channel unused" is `{id: N, on: false}` and NOTHING else.** Never a
+///     dropped seg entry, never a zero-length `[0,0)` bound. A design that
+///     leaves a channel out is stating "dark for this design", not "this
+///     channel does not exist" — the segment survives with its look intact,
+///     exactly as the server-side `buildFullPartitionSegArray` /
+///     `partitionBroadcastPayload` already do for Game Day and Sync.
+///  2. **An apply NEVER writes `start`/`stop`.** Bounds are provisioning's,
+///     sourced from the hardware buses (#76: state that isn't yours to state
+///     must not be stated). This function used to stamp them from
+///     [channels] — that is the Item-#82 wrong-range stomp with a friendlier
+///     face, and a stale channel map could re-bound a physically-resized
+///     channel on an ordinary pattern tap.
+///  3. **Segment ids come from the device channel list, never a literal.**
+///     [channels] is now the channel CENSUS rather than a bounds source.
+///
+/// [channelIds] is unioned into the census rather than intersected with it:
+/// the caller's target must always be represented even when [channels] is
+/// cold, stale or partial. (Same call `buildChannelPowerPayload` makes for
+/// the same reason — the server can trust its device list, a widget cannot.)
+/// With no [channels] at all the census degrades to [channelIds], which is
+/// the pre-partition behaviour: nothing to exclude, so nothing is excluded.
+///
+/// Each targeted seg is emitted with `'on': true` (channel-2-dark fix —
 /// matches the semantics of [buildParticipatingSegArray]). Inline dashboard
 /// builders put `'on'` at the top level of the payload, not inside the seg
 /// map, so without this a channel left in `on:false` on the controller
@@ -69,27 +96,49 @@ Map<String, dynamic> applyChannelFilter(
   // Use the first segment entry as a template.
   final template = Map<String, dynamic>.from(seg.first as Map);
   template.remove('id'); // strip hardcoded ID so each copy gets its own
-  template.remove('start');
+  template.remove('start'); // bounds are provisioning's — rule 2
   template.remove('stop');
   template.remove('on'); // overridden below — channel-2-dark fix forces on:true
 
-  final expandedSegs = channelIds.map((id) {
-    final s = <String, dynamic>{'id': id, ...template, 'on': true};
-    // Look up bus range — set start/stop so WLED targets the correct LEDs
-    for (final ch in channels) {
-      if (ch.id == id) {
-        s['start'] = ch.start;
-        s['stop'] = ch.stop;
-        break;
-      }
-    }
-    return s;
-  }).toList();
+  final targeted = channelIds.toSet();
+  final census = <int>{...channels.map((c) => c.id), ...channelIds}.toList()
+    ..sort();
+
+  final expandedSegs = <Map<String, dynamic>>[
+    for (final id in census)
+      if (targeted.contains(id))
+        <String, dynamic>{'id': id, ...template, 'on': true}
+      else
+        // Rule 1 — excluded, not deleted. No look fields, no bounds.
+        <String, dynamic>{'id': id, 'on': false},
+  ];
 
   final result = Map<String, dynamic>.from(payload);
   result['seg'] = expandedSegs;
-  debugPrint('🎯 applyChannelFilter: targeting channels $channelIds (${expandedSegs.length} segs)');
+  debugPrint('🎯 applyChannelFilter: targeting channels $channelIds '
+      '(${expandedSegs.length} segs over census $census)');
   return result;
+}
+
+/// The first `seg` entry that actually carries a DESIGN (an `fx` or a `col`),
+/// falling back to the first map entry and finally to null.
+///
+/// Since [applyChannelFilter] emits the full partition, `seg[0]` is no longer
+/// guaranteed to be a design seg — on a design scoped to channel 1 of a
+/// two-channel device, `seg[0]` is the exclusion `{id: 0, on: false}`. Every
+/// reader that mirrors "what did we just send" into the dashboard preview
+/// (`applyPayloadWithLabel`, `applySavedDesign`'s wire-fx lookup) must read the
+/// design seg, not the zeroth one, or an excluded channel 0 silently blanks the
+/// preview it used to drive.
+Map<String, dynamic>? firstDesignSeg(dynamic seg) {
+  if (seg is! List || seg.isEmpty) return null;
+  for (final entry in seg) {
+    if (entry is Map && (entry.containsKey('fx') || entry.containsKey('col'))) {
+      return Map<String, dynamic>.from(entry);
+    }
+  }
+  final first = seg.first;
+  return first is Map ? Map<String, dynamic>.from(first) : null;
 }
 
 // buildChannelPowerPayload (P1-43) lives in channel_power_payload.dart (pure
@@ -495,10 +544,26 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
       s['spc'] = s.remove('sp');
     }
 
-    // Default injection: only for full pattern applications (has fx)
+    // #88 — DESIGN-SPACING ASSERTION, at the boundary rather than at N call
+    // sites. The trigger widens from `fx` to "this seg states a design at all"
+    // (fx, col, or a per-pixel `i`), because the census lesson of #88 is that a
+    // hand-walked builder list under-counts its own family twice running: #76
+    // listed seven and missed four, and the BUG-GD-PICKER-1 sweep missed a
+    // third sibling. A builder cannot forget an assertion it does not make.
+    //
+    // Deliberately NOT widened:
+    //   • a partial slider payload ({'sx':200} or {'grp':N}) states neither fx
+    //     nor col, so a speed drag can never flatten a spacing the user chose;
+    //   • `of` stays on the fx-only trigger — #76 classified offset as
+    //     installation geometry and this decision reclassified only grp/spc.
+    final statesADesign = s.containsKey('fx') ||
+        s.containsKey('col') ||
+        s.containsKey('i');
+    if (statesADesign) {
+      s.putIfAbsent('grp', () => kDesignDefaultGrp);
+      s.putIfAbsent('spc', () => kDesignDefaultSpc);
+    }
     if (s.containsKey('fx')) {
-      s.putIfAbsent('grp', () => 1);
-      s.putIfAbsent('spc', () => 0);
       s.putIfAbsent('of', () => 0);
     }
 

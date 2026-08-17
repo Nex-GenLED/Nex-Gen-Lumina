@@ -121,13 +121,9 @@ List<Color> _previewColorsFromDesign(CustomDesign design) {
 /// fx=83 → "Solid Pattern" via WledEffectsCatalog (verified against
 /// device /json/effects; #82 resolved).
 int? _wireEffectIdFromPayload(Map<String, dynamic> payload) {
-  final segs = payload['seg'];
-  if (segs is List && segs.isNotEmpty) {
-    final firstSeg = segs.first;
-    if (firstSeg is Map) {
-      final fx = firstSeg['fx'];
-      if (fx is int) return fx;
-    }
-  }
-  return null;
+  // firstDesignSeg, not seg[0]: applyChannelFilter emits the #67 full
+  // partition, so a design scoped away from channel 0 leads with the
+  // exclusion `{id:0, on:false}` — which has no fx at all.
+  final fx = firstDesignSeg(payload['seg'])?['fx'];
+  return fx is int ? fx : null;
 }

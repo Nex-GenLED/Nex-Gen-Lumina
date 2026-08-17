@@ -81,11 +81,13 @@ void main() {
       expect(seg0['id'], 0);
       expect(seg1['id'], 1, reason: 'channel 2 (seg 1) MUST be addressed');
 
-      // start/stop come from the hardware bus config on each channel.
-      expect(seg0['start'], 0);
-      expect(seg0['stop'], 128);
-      expect(seg1['start'], 128);
-      expect(seg1['stop'], 188);
+      // #89 INVERTED — this used to pin start/stop to the hardware bus config.
+      // Bounds belong to provisioning; the W-track device-targeting helper
+      // builds through applyChannelFilter, so it inherits the contract.
+      for (final seg in [seg0, seg1]) {
+        expect(seg.containsKey('start'), isFalse);
+        expect(seg.containsKey('stop'), isFalse);
+      }
 
       // Both segs are explicitly lit (per-seg on:true — channel-2-dark fix).
       expect(seg0['on'], isTrue);
@@ -110,8 +112,9 @@ void main() {
     });
 
     test(
-        'single-channel device → addresses ONLY seg 0 (explicit [0] still '
-        'correct — does not broadcast to channels the user excluded)',
+        'single-channel scope on a two-channel device → the FULL PARTITION: '
+        'channel 0 lit with the design, channel 1 excluded as {id, on:false} '
+        'and NOT deleted (#89)',
         () async {
       late Map<String, dynamic> captured;
       await applyGameDayConfigToDevice(
@@ -124,11 +127,19 @@ void main() {
         deviceChannels: twoChannels,
       );
 
-      final segs = captured['seg'] as List;
-      expect(segs.length, 1);
-      expect((segs[0] as Map)['id'], 0);
-      expect((segs[0] as Map).containsKey('start'), isTrue,
-          reason: 'start/stop set from the channel-0 bus range');
+      final segs = (captured['seg'] as List).cast<Map>();
+      // Both segments still exist — the excluded channel is DARK, not GONE.
+      expect(segs.map((s) => s['id']).toList(), equals([0, 1]));
+      expect(segs[0]['on'], isTrue);
+      expect(segs[0]['fx'], 52);
+      expect(segs[1]['on'], isFalse);
+      expect(segs[1].keys.toSet(), equals({'id', 'on'}),
+          reason: 'exclusion states exclusion and nothing else — the '
+              'excluded channel keeps its own look');
+      for (final s in segs) {
+        expect(s.containsKey('start'), isFalse);
+        expect(s.containsKey('stop'), isFalse);
+      }
     });
 
     test(

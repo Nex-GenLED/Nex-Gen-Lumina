@@ -172,11 +172,13 @@ void main() {
     expect(segs[1]['id'], 1);
     expect(segs[0]['on'], isTrue);
     expect(segs[1]['on'], isTrue);
-    // Bus ranges carried from DeviceChannel config.
-    expect(segs[0]['start'], 0);
-    expect(segs[0]['stop'], 128);
-    expect(segs[1]['start'], 128);
-    expect(segs[1]['stop'], 138);
+    // #89 INVERTED — bus ranges are NOT carried. DeviceChannel is the channel
+    // census now, not a bounds source: an apply states design, never
+    // installation geometry.
+    for (final s in segs) {
+      expect((s as Map).containsKey('start'), isFalse);
+      expect(s.containsKey('stop'), isFalse);
+    }
     // Template fields preserved on each.
     expect(segs[0]['fx'], 28);
     expect(segs[1]['fx'], 28);
