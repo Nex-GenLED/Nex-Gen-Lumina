@@ -617,8 +617,22 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
       (`start stop len rev mi of grp spc`) across **all four** policy cases, deliberately not
       spot checks on the two cases someone remembered, since that is precisely how the previous
       two sweeps under-counted.
-  - Ships in **+79**, gated on new hardware smoke **(c)**: single-channel apply, recover
-    channel 2 from the app UI, JSON-verify the wake write was design-fields-only.
+  - **PARTIAL HARDWARE VERIFICATION, bench `.150` 2026-08-17 (WLED 0.15.1, vid 2507300).**
+    The wake-write half of smoke (c) is **PASS on hardware**, driven through the REAL fixed
+    `buildChannelPowerPayload` by `bench/bin/bench.dart channel-power` — **4/4** policy cases,
+    each asserting the emitted shape *and* the resulting `/json/state`.
+    - **No geometry moved.** Full field diff pre→post over both segments
+      (`start stop len rev mi grp spc of`) is **EMPTY**: `seg0 [0,128) len=128 rev=false`,
+      `seg1 [128,290) len=162 rev=true`, `grp/spc 1/0`, `of 0` — byte-identical either side of
+      four power writes. The bounds-stamp defect is disproven on the wire, not argued.
+    - Rig restored to exact pre-state (master off, both segs off, `rev:true` intact).
+  - **STILL UNVERIFIED — and it gates the +79 ship.** Smokes **(a)**, **(b)** and the **UI half
+    of (c)** all require the APP to drive a design apply / a channel recovery, and **no +79 app
+    exists on any device**: no Android +79 build, and iOS 308 is the withdrawn **+78**, which
+    still contains the lockout — testing recovery there would fail *by design* and prove
+    nothing. The bench harness exercises the real builders, not the widget layer, so it cannot
+    stand in for the tap.
+  - Ships in **+79**, gated on the remaining smokes against a +79 app on a device.
 
 - [ ] **#93 — `firebase deploy` ships `functions/lib/` WITHOUT compiling, and reports success
   either way**
