@@ -626,13 +626,40 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
       `seg1 [128,290) len=162 rev=true`, `grp/spc 1/0`, `of 0` — byte-identical either side of
       four power writes. The bounds-stamp defect is disproven on the wire, not argued.
     - Rig restored to exact pre-state (master off, both segs off, `rev:true` intact).
-  - **STILL UNVERIFIED — and it gates the +79 ship.** Smokes **(a)**, **(b)** and the **UI half
-    of (c)** all require the APP to drive a design apply / a channel recovery, and **no +79 app
-    exists on any device**: no Android +79 build, and iOS 308 is the withdrawn **+78**, which
-    still contains the lockout — testing recovery there would fail *by design* and prove
-    nothing. The bench harness exercises the real builders, not the widget layer, so it cannot
-    stand in for the tap.
-  - Ships in **+79**, gated on the remaining smokes against a +79 app on a device.
+  - **FULL HARDWARE VERIFICATION — all three smokes PASS, iOS build 310, bench `.150`,
+    2026-08-17.** Tyler drove the app; every assertion read from `/json/state`, never from UI.
+    - **Build confirmed BEHAVIOURALLY, which is worth more than the number here.** The app
+      surfaces no build number (no `package_info_plus`) and every build is version `2.5.10`
+      (**#62**), so 310-is-from-`build-79` could not be read off the device. It was settled by
+      the fix itself: the greyed, non-participating **bench ch1** chip **carried a power icon**.
+      On +78 that icon was suppressed by the `!disabled` term. Its presence *is* +79.
+    - **(a) rev-survival — PASS.** Design apply + `ps=1` + `ps=2`: both segments present,
+      bounds `[0,128) len=128` / `[128,290) len=162` unmoved, `rev:true` standing. Geometry
+      diff empty.
+    - **(b) single-channel apply — PASS.** Targeted `seg0`, excluded `seg1`. The #67 contract
+      verbatim: `seg1` went `on:false` and **not one other field moved** (`fx pal sx ix col
+      grp spc` all unchanged), bounds intact, `rev:true` intact, no true geometry written
+      anywhere. *Recorded as method, not trivia:* the first scoring pass reported FAIL because
+      the script **assumed** which segment was targeted. The device resolved it —
+      `on:true` marks the targeted seg — and the labels were then confirmed by Tyler (front of
+      the home = `seg0`; "bench ch1" is the roofline zone name on `seg1`). **An assumed mapping
+      produced a false FAIL on a passing device**, which is the same failure mode as reading
+      `seg[0]` as the design seg (#89's `firstDesignSeg`).
+    - **(c) tap-to-wake — PASS. This is the one that gates the ship.** With `seg1` dark AND
+      non-participating — the combination unrecoverable on +78 — a tap on its power icon
+      **woke it**: `on false → true`. The wake wrote **power only**: no `start`/`stop`/`len`/
+      `rev`/`mi`/`of`, no design field touched, `seg0` undisturbed.
+    - **Whole-run geometry diff against the ORIGINAL baseline is EMPTY** — across a design
+      apply, two preset loads, a single-channel apply and a tap-to-wake, nothing in
+      `start stop len rev mi of` moved on either segment.
+  - **Observation carried forward, not a failure: `spc` moved `0 → 2` on the targeted seg
+    during (b).** Under #88 `grp`/`spc` are DESIGN fields and a design that owns its spacing
+    may set them; Tyler confirmed the strip was "showing correctly", so this is design intent.
+    Recorded because a silent `spc` change is the exact #88 signature (`grp=1 spc=2` renders
+    every third pixel) and the next person to see it should know it was checked and accepted,
+    not missed. Worth one look at that design's saved payload to confirm the spacing is stored
+    rather than inherited.
+  - **Ships in +79.** Nothing further gates it.
 
 - [ ] **#93 — `firebase deploy` ships `functions/lib/` WITHOUT compiling, and reports success
   either way**
