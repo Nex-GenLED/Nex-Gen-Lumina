@@ -551,6 +551,61 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Being inert is the only reason this is P3. Left as-is, the honest state is: the model
     landed, the migration did not.
 
+- [ ] **#93 — `firebase deploy` ships `functions/lib/` WITHOUT compiling, and reports success
+  either way**
+  - Status: OPEN (filed 2026-08-17, during the `planGameDayFires` deploy) · Severity: **P2** ·
+    Evidence: **verified-by-source + verified-in-practice**
+  - `firebase.json` declares `functions` with `source` and `runtime` and **no `predeploy`
+    hook**. So `firebase deploy --only functions:<name>` uploads whatever already sits in
+    `functions/lib/`. A TypeScript edit that was never compiled deploys as **stale JS** — and
+    **the deploy still prints `Deploy complete!` and exits 0.**
+  - **A deploy's success proves DELIVERY, never CONTENT.** Same family as
+    *"a readback proves existence, never app-readability"* and *"a simulator must fail
+    everywhere the real component fails."* A green result that was never measured against the
+    thing it claims.
+  - **Caught, not suffered.** The 2026-08-17 C10/#90 deploy was preceded by an explicit
+    exit-checked `npm run build` and a `grep` proving both rows were in
+    `lib/planGameDayFires.js` before upload. Without that step it would have shipped the
+    previous compile and reported success.
+  - **Fix:** add a predeploy hook so the toolchain enforces it rather than a human
+    remembering:
+
+    ```json
+    "functions": {
+      "source": "functions",
+      "runtime": "nodejs20",
+      "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"]
+    }
+    ```
+
+    A failing `tsc` then aborts the deploy. Note the hook makes the build mandatory but still
+    does not prove the *change* is in the artifact — step 2 of the ledger convention
+    (verify the edit exists in `lib/`) stays a human step until something better exists.
+  - Interacts with **#94**: whoever does the Node 22 upgrade edits this same block, so land
+    them together rather than touching `firebase.json` twice.
+
+- [ ] **#94 — HARD DATE 2026-10-30: Node 20 is decommissioned and all 45 functions become
+  undeployable**
+  - Status: OPEN (filed 2026-08-17) · Severity: **P1 — dated, external, non-negotiable** ·
+    Evidence: **deploy-time warning from the Firebase CLI**
+  - Emitted on every deploy: *"Runtime Node.js 20 was deprecated on 2026-04-30 and will be
+    decommissioned on 2026-10-30, after which you will not be able to deploy without
+    upgrading."* Second warning alongside it: *"package.json indicates an outdated version of
+    firebase-functions."*
+  - **Scope is the whole backend, not one function.** `functions/index.js` exports **45**
+    functions, all on `nodejs20` (`firebase.json`). After the date, **no function can be
+    deployed at all** — including an emergency fix. Already-deployed functions keep running;
+    it is the *deploy path* that closes. That is the part that matters: it removes the ability
+    to respond.
+  - **Scheduled: an upgrade session within ~4 weeks** (i.e. by mid-September), deliberately
+    clear of the holiday install season. Deferring into October leaves no room for a failed
+    upgrade before the deadline.
+  - **Session scope:** `nodejs22` in `firebase.json` + `engines` in `functions/package.json`;
+    `npm install --save firebase-functions@latest`; the **full functions test suite**
+    (`npm run test:unit` — `tsc && jest`); then a deploy of every function, not a targeted one,
+    because a runtime change is not per-function.
+  - Land **#93**'s predeploy hook in the same session — same `firebase.json` block.
+
 - [ ] **P1-52 — `pdel` can leave `presets.json` UNPARSEABLE; the app then goes blind to every preset and says nothing**
   - Status: OPEN · Evidence: **bench-reproduced 2026-08-09 on `.150`** (observed, not theorised)
   - Found while cleaning up two scratch presets during the base-ladder work

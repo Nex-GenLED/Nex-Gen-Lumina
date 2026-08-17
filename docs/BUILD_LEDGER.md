@@ -155,12 +155,67 @@ deploy is the two planner rows alone:
 firebase deploy --only functions:planGameDayFires
 ```
 
-**Awaiting Tyler's confirm — not run.** Both rows are pure observability (a row
-where a counter already bumped), so an un-deployed planner and a +78 client
-disagree only about what the log *names*, never about what fires; there is no
-ordering hazard in either direction. If a Game-Day migration server half is
-written later, it joins this command and the before-+78 ordering starts to
-matter for real.
+#### DEPLOYED — `planGameDayFires`, 2026-08-17T15:38:15Z
+
+Timestamp is the function's own `updateTime` (`gcloud functions describe
+… --gen2`), not the shell's wall clock.
+
+| | |
+|---|---|
+| Function | `planGameDayFires(us-central1)`, Node 20 2nd Gen — **sole function touched** |
+| SHA | `7735cad`, ancestry-verified against main before deploy (+74 rule) |
+| Result | `Successful update operation` · **exit 0** |
+| Now live | C10 `start_time_passed` + #90 `daylight_game` rows |
+
+Planner skips are now **attributable** — `{uid, teamSlug, eventId, reason,
+fireAt}`. The next tick that skips a daylight game names the team instead of
+reporting a bare `daylight_game: N`. **The Royals-vs-Ellie asymmetry is closed:**
+two of the planner's skip reasons wrote rows and two did not, and that asymmetry
+was the bug, not either row alone.
+
+**First attempt FAILED — record it, it will recur.** `Error: User code failed to
+load. Cannot determine backend specification. Timeout after 10000.` This is the
+Firebase CLI's *source-discovery* step, not the code: the entry point loads in
+**970 ms** and exports **45** functions including `planGameDayFires`.
+**Nothing was deployed on the failed attempt** — it aborts before upload.
+Cleared by `FUNCTIONS_DISCOVERY_TIMEOUT=120`:
+
+```
+FUNCTIONS_DISCOVERY_TIMEOUT=120 firebase deploy --only functions:planGameDayFires
+```
+
+#### CONVENTION — `firebase deploy` does NOT compile. Build first, every time.
+
+`firebase.json` has **no predeploy hook**, so `firebase deploy` ships whatever
+already sits in `functions/lib/`. TypeScript edits that were never compiled
+deploy as **stale JS, and the deploy still reports success.**
+
+**A deploy's success proves DELIVERY, never CONTENT.** Same family as the
+verification lessons already in this repo — a green result that was never
+measured against the thing it claims.
+
+Every functions deploy is therefore preceded by, in order:
+
+1. `npm run build` — **exit-checked**, not eyeballed;
+2. **verification that the change exists in the compiled artifact**, e.g.
+   `grep -c 'reason: "daylight_game"' functions/lib/planGameDayFires.js`;
+3. only then `firebase deploy --only functions:<name>`.
+
+This deploy followed it. Both rows were confirmed present in
+`lib/planGameDayFires.js` before upload. Permanent fix filed as **#93** — a
+`predeploy` hook so the toolchain enforces this instead of a human remembering.
+
+#### Server-ahead-of-client — correct, and deliberate
+
+The server half now leads the client, which is the **right** direction under the
++74 rule (the rule exists to stop the inverse: a client stranded against server
+data it expects and cannot get). No client dependency exists in either
+direction here — both rows are pure observability, a row where a counter already
+bumped — so an un-upgraded client and the new planner disagree only about what
+the log *names*, never about what fires.
+
+**Still no server half of the migration** to deploy. If one is written later it
+joins this command, and the before-+78 ordering starts to matter for real.
 
 ### GEOMETRY GATE IMPLEMENTED 2026-08-14 — #76's severity cap is closed
 
