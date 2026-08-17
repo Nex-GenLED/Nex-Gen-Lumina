@@ -93,7 +93,8 @@ void main() {
 
     test('normalize-default fields (grp/spc/of) are present', () {
       // Side-benefit of routing through normalizeWledPayload — same
-      // stale-segment defense the chokepoint provides for grp/spc/of.
+      // stale-segment defense the chokepoint provides for grp/spc. NOT `of` —
+      // that is geometry, and the chokepoint stopped asserting it.
       final config = _configForTeam(
         primary: 0xFFFF0000,
         secondary: 0xFF00FF00,
@@ -107,7 +108,8 @@ void main() {
 
       expect(seg['grp'], 1);
       expect(seg['spc'], 0);
-      expect(seg['of'], 0);
+      // `of` INVERTED — geometry is not the chokepoint's to assert (#76).
+      expect(seg.containsKey('of'), isFalse);
     });
   });
 

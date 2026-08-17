@@ -139,6 +139,93 @@ indeed the only error — but it was an error of *invention*, not of *timing*.
 1. This merge (`f59299c` + `f864a84`, `f502f37`).
 2. Four filed P2s, each its own change: seg-deletion · hero-image **#80** ·
    **#88** defaults · **#3** `gateRefused`.
+3. **`of` chokepoint fix** — the one real find from the `sync_direction_clobber`
+   investigation below.
+
+#### `sync_direction_clobber` — NOT REPRODUCIBLE. No server-side twin exists.
+
+Investigated 2026-08-17 as the last blocker before the street test at Ellie's.
+**No fix was written, because there is nothing on that path to strip.** Recorded
+as evidence rather than closed as fixed — the distinction the method line exists
+to protect.
+
+**Census, by FIELD NAME across both trees** (not by walking builders — that is
+the method that under-counted three times: #76's seven, #88's four, and
+BUG-GD-PICKER-1's third sibling):
+
+| Scope | `rev` | `mi` | `of` | `start`/`stop` | `grp`/`spc` |
+|---|---|---|---|---|---|
+| `functions/src/**` | **0** | **0** | **0** | **0** | **0** |
+| `lib/features/neighborhood/**` | **0** | **0** | **0** | **0** | 14 |
+
+**`applySyncPattern` never constructs a seg.** `payload` arrives in the request
+envelope from the client and is forwarded:
+
+- **self-apply** ([:250](../functions/src/applySyncPattern.ts#L250)) —
+  `JSON.stringify(payload)`, verbatim.
+- **crew fanout** ([:770](../functions/src/applySyncPattern.ts#L770)) →
+  `partitionBroadcastPayload` ([:586](../functions/src/applySyncPattern.ts#L586)),
+  whose only seg-touching line is
+  `{ ...design, id: ch, on: true }` / `{ id: ch, on: false }`. It spreads the
+  client's design object and adds `id`/`on`. It authors no fields of its own.
+
+Chain closed end to end: the three fanout callers write no geometry and carry no
+`getState()` snapshot into the fanout; `executeWledCommand`
+([functions/index.js:440-474](../functions/index.js#L440)) uses the stored
+payload string as the HTTP body unmodified.
+
+**Why the "server-side twin" framing was wrong:** #76 was scoped to client
+BUILDERS because that is where geometry was authored. Sync has no builder at
+either end — the server is a forwarder and the client senders are thin. There
+was never a twin.
+
+**STREET TEST IS SAFE ON DIRECTION.** Ellie's `rev:true` survives a broadcast by
+construction: no code on the path is capable of writing `rev`. Client-side
+sibling: **#76** (seven builders, geometry-clean, hardware-verified in the +77
+smoke). Two riders to carry into the night, neither a blocker:
+
+1. Post-#67 the fanout partitions per target, so a member's non-participating
+   channels go `{id, on:false}` — **dark**, not unchanged. Her controller doc
+   reads `participating_channels: [0,1]`, so nothing of hers goes dark.
+2. Open design question, deliberately NOT decided here: Sync round-trips the
+   sender's `grp`/`spc` through Firestore
+   ([neighborhood_models.dart:833](../lib/features/neighborhood/neighborhood_models.dart#L833)
+   and four siblings). #88 filed that as a defect **on the assumption grp/spc
+   were geometry**; the 2026-08-17 reclassification makes them design, under
+   which sharing them is arguably the feature — a candy-cane broadcast that
+   arrives solid is the alternative. Tyler's call. Touches nothing directional.
+
+#### `of` — the chokepoint the builder-scoped audit could not see
+
+**The one real find.** [wled_payload_utils.dart](../lib/features/wled/wled_payload_utils.dart)
+carried `if (s.containsKey('fx')) s.putIfAbsent('of', () => 0);` inside
+`normalizeWledPayload`, so **every fx-bearing local apply asserted `of: 0`** and
+flattened any installed segment offset — every pattern tap, schedule fire,
+celebration and sync self-apply. `of` is on #76's geometry list and the
+2026-08-17 reclassification moved only `grp`/`spc` out of it.
+
+It outlived #76 because **it is not a builder** — it is the shared function every
+builder's output flows through, and none of the seven wrote `of`. Third
+appearance of the same census error. Removed; pinned by
+`segment_offset_survives_apply_test.dart` against a merge-semantics fake device,
+not against the pure function alone.
+
+**Does NOT affect the fanout** — that path never crosses `normalizeWledPayload`.
+No street-test risk either way.
+
+**AND A LINE THAT MUST NOT BE CROSSED, recorded at the function itself.** The
+obvious next move — make this chokepoint strip `rev`/`mi`/`of`/`start`/`stop`
+outright, finishing #76 for every builder AND every pre-#76 stored blob in one
+line — **would silently disable #76's own layer 4.** FOUR provisioning paths
+write `{id, start, stop}` *through* `applyJson`, and each is the geometry gate's
+repair arm: `ControllerDefaultsHealer._reprovisionSegments`, and the gate
+reprovisions in `SunriseOffService`, `ScheduleSyncService` and (since **#3**)
+`CalendarEntryLeaseManager`. Strip bounds here and all four report success while
+writing nothing — the gate re-reads the same drifted shape, refuses forever, and
+its legible refusal becomes a permanent one. The residual exposure that idea was
+reaching for is real (payloads authored pre-#76 and persisted still carry
+geometry, and fixing builders cannot retroactively clean them) but belongs at the
+**replay boundary**, which no provisioning path crosses — or to a migration.
 
 #### Deploy plan of record
 

@@ -185,7 +185,9 @@ void main() {
       // Verify the existing fx-default injection still ran though.
       expect(seg['grp'], equals(1));
       expect(seg['spc'], equals(0));
-      expect(seg['of'], equals(0));
+      // `of` INVERTED: it used to be injected alongside grp/spc. It is
+      // geometry (#76) and the chokepoint had no business asserting it.
+      expect(seg.containsKey('of'), isFalse);
     });
 
     test('empty col [] → NOT padded (preserves "no color info" semantics)',

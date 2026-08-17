@@ -520,6 +520,36 @@ Map<String, dynamic> normalizeWledCfgPayload(Map<String, dynamic> cfg) {
   return out;
 }
 
+/// THIS FUNCTION MUST NEVER BECOME THE GEOMETRY STRIP. Recorded because it is
+/// the obvious next move after removing the `of` assertion below, and it would
+/// break the geometry gate.
+///
+/// Everything crosses here — `WledService.applyJson`, `CloudRelayRepository`'s
+/// applyJson and savePreset, the Game Day worker's saved-design replay, the
+/// sync base-pattern build, demo. That makes it a tempting single place to
+/// delete `rev`/`mi`/`of`/`start`/`stop` from, which would finish #76 in one
+/// line for every builder AND for every pre-#76 blob still stored in Firestore.
+///
+/// It would also silently disable #76's own layer 4. FOUR provisioning paths
+/// write `{id, start, stop}` THROUGH `applyJson`, and every one of them is the
+/// geometry gate's repair arm:
+///
+///   • `ControllerDefaultsHealer._reprovisionSegments`  (controller_defaults_healer.dart:870)
+///   • `SunriseOffService`'s gate reprovision            (sunrise_off_service.dart:269)
+///   • `ScheduleSyncService`'s gate reprovision          (schedule_sync.dart:946)
+///   • `CalendarEntryLeaseManager`'s gate reprovision    (calendar_entry_lease_manager.dart:1342)
+///
+/// Strip bounds here and all four still report success while writing nothing —
+/// the gate would re-read the same drifted shape, refuse forever, and its
+/// legible refusal would become a permanent one. A green repair that repairs
+/// nothing is the exact failure class this repo keeps relearning.
+///
+/// The residual exposure the strip was reaching for is REAL but belongs
+/// elsewhere: payloads authored BEFORE #76 and persisted (savedDesignPayload,
+/// `composed_pattern.wled_payload`, scene blobs, presets) still carry geometry,
+/// and fixing builders cannot retroactively clean them. That wants a strip at
+/// the REPLAY boundary — where a stored blob is rehydrated, which no
+/// provisioning path crosses — or a migration. Not here.
 Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
   final seg = payload['seg'];
   if (seg is! List || seg.isEmpty) {
@@ -563,9 +593,24 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
       s.putIfAbsent('grp', () => kDesignDefaultGrp);
       s.putIfAbsent('spc', () => kDesignDefaultSpc);
     }
-    if (s.containsKey('fx')) {
-      s.putIfAbsent('of', () => 0);
-    }
+
+    // `of` IS NOT INJECTED. It used to be, on the same fx trigger as grp/spc:
+    //
+    //     if (s.containsKey('fx')) s.putIfAbsent('of', () => 0);
+    //
+    // #76's rule puts `of` (segment offset) with `rev`/`mi`/`start`/`stop` in
+    // INSTALLATION GEOMETRY, and the 2026-08-17 reclassification moved only
+    // grp/spc out of that set. So this line asserted a geometry field on every
+    // fx-bearing apply — it flattened any installed offset to 0, on every
+    // pattern tap, schedule fire, celebration and sync self-apply.
+    //
+    // WHY #76 MISSED IT: that audit enumerated BUILDERS, and this is not a
+    // builder — it is the shared chokepoint every builder's output crosses.
+    // A per-builder census cannot see a field none of the builders writes.
+    // Same shape as #88 (four emitters outside a seven-builder sweep) and
+    // BUG-GD-PICKER-1: an emitter census must be a grep of the FIELD NAMES,
+    // and it must include the code the builders flow THROUGH, not only the
+    // code they are.
 
     // Palette guard (single chokepoint for the pal:5 strobing/blending bug).
     //
