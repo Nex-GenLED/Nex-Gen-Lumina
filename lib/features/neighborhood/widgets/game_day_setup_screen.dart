@@ -28,9 +28,13 @@
 // through applyPayloadWithLabel — the same participation-respecting
 // chokepoint validated by the 2026-05-22 .250 hardware probe.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../autopilot/game_day_background_persistence.dart';
 
 import '../../../app_colors.dart';
 import '../../../app_router.dart';
@@ -561,6 +565,23 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
       groupId: groupId,
       participatingChannels: ref.read(effectiveChannelIdsProvider),
       deviceChannels: ref.read(deviceChannelsProvider),
+      // ARM THE REST OF THE EXPERIENCE (celebration blocker 2).
+      // Without this the tap lights the house and nothing else: the background
+      // worker finds no session for the team, so live scoring, celebrations
+      // and the end-at-final never engage. Writing through persistence is how
+      // the UI reaches the worker's in-memory state across the isolate
+      // boundary — startMonitoring() loads exactly this store.
+      registerSession: ({
+        required String teamSlug,
+        DateTime? gameStart,
+        String? activeGameId,
+      }) {
+        unawaited(registerManualGameDaySession(
+          teamSlug: teamSlug,
+          gameStart: gameStart,
+          activeGameId: activeGameId,
+        ));
+      },
     );
 
     if (!mounted) return;
@@ -885,63 +906,19 @@ class _GameDayAutopilotSectionState
 // in Phase 2b-part-2. Left intact here so the score-monitoring
 // pipeline keeps working through the part-1 review window.
 
-/// Triggers a score celebration animation across all Neighborhood Sync members
-/// who have the same team selected in Game Day mode.
-///
-/// Live pipeline: ScoreMonitorService detects scoring events → notifies
-/// SyncEventBackgroundWorker.onScoreAlertEvent() → fires celebrations on
-/// all active sync participants. This function handles the UI-layer broadcast.
-/// Also used by the debug "Test Score Trigger" button for manual QA testing.
-Future<void> triggerScoreCelebration(String teamSlug, WidgetRef ref) async {
-  final teamColors = kTeamColors[teamSlug];
-  if (teamColors == null) return;
+// triggerScoreCelebration was REMOVED (C11, 2026-08-14).
+//
+// It had no production caller: the live celebration path is
+// sports_background_service -> gameDayWorker.onScoreAlertEvent /
+// syncWorker.onScoreAlertEvent. SYNC-3 rerouted this function through the
+// broadcastSync flag gate and pinned that contract in tests, but nothing ever
+// invoked it — the verification was of dead code.
+//
+// Nothing of its gate logic was worth moving to the live path: routing
+// celebrations through broadcastSync would couple them to sync_fanout's flag
+// and group_allowlist, which is precisely the scoping the live path must NOT
+// have. Celebrations are self-apply and deliberately allowlist-free.
 
-  debugPrint('[GameDay] Score celebration triggered for $teamSlug');
-
-  final groupId = ref.read(activeNeighborhoodIdProvider);
-  if (groupId == null) {
-    debugPrint('[GameDay] No active neighborhood group for celebration');
-    return;
-  }
-
-  final members =
-      ref.read(neighborhoodMembersProvider).valueOrNull ?? [];
-  if (members.isEmpty) return;
-
-  final celebrationCommand = SyncCommand(
-    id: '',
-    groupId: groupId,
-    effectId: 88, // Fireworks
-    colors: [
-      teamColors.primary.value & 0xFFFFFF,
-      teamColors.secondary.value & 0xFFFFFF,
-    ],
-    speed: 200,
-    intensity: 220,
-    brightness: 255,
-    startTimestamp: DateTime.now().add(const Duration(seconds: 1)),
-    memberDelays: {for (var m in members) m.oderId: 0},
-    timingConfig: const SyncTimingConfig(),
-    syncType: SyncType.simultaneous,
-    patternName: '${teamColors.teamName} SCORES!',
-  );
-
-  try {
-    // SYNC-3 fanout-bypass fix: route through broadcastSync (NOT
-    // broadcastSyncCommand directly) so this celebration fans out to closed-app
-    // crew members when the sync_fanout flag is ON — uniform with the other sync
-    // paths. Flag OFF ⇒ broadcastSync just calls broadcastSyncCommand,
-    // byte-identical to before. When fanout is enabled the server rate limiter
-    // throttles rapid score celebrations (anti-strobe). FanoutResult return
-    // ignored (fire-and-forget celebration).
-    await ref
-        .read(neighborhoodNotifierProvider.notifier)
-        .broadcastSync(celebrationCommand);
-    debugPrint('[GameDay] Celebration broadcast sent for ${teamColors.teamName}');
-  } catch (e) {
-    debugPrint('[GameDay] Celebration broadcast failed: $e');
-  }
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // HELPER WIDGETS

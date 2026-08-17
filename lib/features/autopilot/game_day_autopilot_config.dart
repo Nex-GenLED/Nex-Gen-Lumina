@@ -9,6 +9,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../patterns/utils/pattern_display_name.dart';
+import '../sports_alerts/models/score_alert_config.dart' show AlertSensitivity;
 import '../sports_alerts/models/sport_type.dart';
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,34 @@ class GameDayAutopilotConfig {
   /// Whether score celebrations should fire during the game.
   final bool scoreCelebrationEnabled;
 
+  /// UNIFIED MONITORING — the "Live Scoring" toggle, and the single source of
+  /// truth for whether this team is score-monitored. There is no separate
+  /// Sports Alerts opt-in any more: selecting a team here with Live Scoring on
+  /// arms monitoring, alerts and celebrations for it, full stop.
+  ///
+  /// Deliberately SEPARATE from [enabled]:
+  ///   • [enabled]           → runs the scheduled show. The SERVER planner
+  ///                           queries exactly this field
+  ///                           (planGameDayFires.ts:342
+  ///                           `.where("enabled","==",true)`).
+  ///   • [liveScoringEnabled] → monitoring + celebrations. Client-only.
+  ///
+  /// That split is what lets a team migrated from the retired sports-alerts
+  /// list be monitored WITHOUT the planner ever seeing it — it carries
+  /// `enabled:false, liveScoringEnabled:true`, so it cannot produce a
+  /// first-pitch fire the user never asked for. Collapsing the two would have
+  /// required a planner change and a deploy-ordering constraint.
+  ///
+  /// Absent means TRUE, so every team that already had Game Day keeps its
+  /// monitoring across the upgrade.
+  final bool liveScoringEnabled;
+
+  /// Which scoring events celebrate. Moved here from the retired
+  /// `ScoreAlertConfig` because it is real, consumed behavior
+  /// (`score_monitor_service._filterBySensitivity`), and leaving it on a second
+  /// model would have kept a second place to configure monitoring.
+  final AlertSensitivity alertSensitivity;
+
   /// Whether to skip games where the entire game is in daylight at the
   /// user's location. When true (default), a game is skipped if its end
   /// time is more than 30 minutes before local sunset on the game's date.
@@ -187,6 +216,8 @@ class GameDayAutopilotConfig {
     this.intensity = 128,
     this.brightness = 200,
     this.scoreCelebrationEnabled = true,
+    this.liveScoringEnabled = true,
+    this.alertSensitivity = AlertSensitivity.majorOnly,
     this.skipDayGames = true,
     this.designVariety = AutopilotVarietyMode.rotating,
     this.motionStyle = 0.5,
@@ -305,6 +336,8 @@ class GameDayAutopilotConfig {
         'intensity': intensity,
         'brightness': brightness,
         'score_celebration_enabled': scoreCelebrationEnabled,
+        'live_scoring_enabled': liveScoringEnabled,
+        'alert_sensitivity': alertSensitivity.toJson(),
         'skip_day_games': skipDayGames,
         'design_variety': designVariety.name,
         'motion_style': motionStyle,
@@ -340,6 +373,25 @@ class GameDayAutopilotConfig {
       brightness: (data['brightness'] as num?)?.toInt() ?? 200,
       scoreCelebrationEnabled:
           data['score_celebration_enabled'] as bool? ?? true,
+      // ABSENT MEANS "WHATEVER THE USER'S OWN TOGGLE SAYS", not bare true.
+      //
+      // This branch was written believing `score_celebration_enabled` was
+      // absent fleet-wide and the feature unreachable. Measurement inverted
+      // that: 49 of 50 live configs carry `score_celebration_enabled: true`,
+      // and the switch that writes it is LABELLED "Live Scoring"
+      // (game_day_screen.dart `_toggleLiveScoring` -> setLiveScoring).
+      //
+      // So `live_scoring_enabled` is a NEW field with no history, while a
+      // field meaning the same thing to the user already exists and is set.
+      // A bare `?? true` would have made monitoring unconditional and, worse,
+      // would have overridden the intent of anyone who had deliberately turned
+      // that switch OFF — the one user-visible control for this feature.
+      // Falling back to it keeps the toggle authoritative until an explicit
+      // new value is written, so OFF genuinely means off.
+      liveScoringEnabled: data['live_scoring_enabled'] as bool? ??
+          data['score_celebration_enabled'] as bool? ??
+          true,
+      alertSensitivity: _parseSensitivity(data['alert_sensitivity'] as String?),
       skipDayGames: data['skip_day_games'] as bool? ?? true,
       designVariety: _parseVarietyMode(data['design_variety'] as String?),
       motionStyle: (data['motion_style'] as num?)?.toDouble() ?? 0.5,
@@ -366,6 +418,8 @@ class GameDayAutopilotConfig {
     int? intensity,
     int? brightness,
     bool? scoreCelebrationEnabled,
+    bool? liveScoringEnabled,
+    AlertSensitivity? alertSensitivity,
     bool? skipDayGames,
     AutopilotVarietyMode? designVariety,
     double? motionStyle,
@@ -395,6 +449,8 @@ class GameDayAutopilotConfig {
       brightness: brightness ?? this.brightness,
       scoreCelebrationEnabled:
           scoreCelebrationEnabled ?? this.scoreCelebrationEnabled,
+      liveScoringEnabled: liveScoringEnabled ?? this.liveScoringEnabled,
+      alertSensitivity: alertSensitivity ?? this.alertSensitivity,
       skipDayGames: skipDayGames ?? this.skipDayGames,
       designVariety: designVariety ?? this.designVariety,
       motionStyle: motionStyle ?? this.motionStyle,
@@ -450,6 +506,18 @@ class GameDayAutopilotConfig {
     return AutopilotVarietyMode.values.firstWhere(
       (e) => e.name == value,
       orElse: () => AutopilotVarietyMode.rotating,
+    );
+  }
+
+  /// Tolerant sensitivity parse. `AlertSensitivity.fromJson` throws on an
+  /// unknown name (bare `firstWhere`, no orElse), and this reads migrated and
+  /// hand-edited documents — so an unrecognised value must degrade to the
+  /// default rather than take down the whole config load.
+  static AlertSensitivity _parseSensitivity(String? value) {
+    if (value == null) return AlertSensitivity.majorOnly;
+    return AlertSensitivity.values.firstWhere(
+      (e) => e.name == value,
+      orElse: () => AlertSensitivity.majorOnly,
     );
   }
 

@@ -496,6 +496,26 @@ export async function runPlannerTick(
               })
             ) {
               bump(stats.skipped, "daylight_game");
+              // ATTRIBUTABLE (#90). The second silent skip, and the one that
+              // swallowed mlb_royals on 2026-08-16: the 08-16 summary read
+              // `daylight_game: 9` and named not one team, so "your team played
+              // and we deliberately sat it out" was indistinguishable from
+              // "nothing happened" — which is exactly why a scoring game with
+              // an enabled config read as a celebrations failure.
+              //
+              // The skip itself is CORRECT behaviour (per-config `skip_day_games`
+              // opt-in + user lat/lon); only its invisibility is the defect.
+              // Batched with C10's `start_time_passed` row deliberately: two of
+              // the planner's skip reasons wrote rows and two did not, and the
+              // ASYMMETRY is the bug, not either row on its own.
+              //
+              // No lead is applied here — this branch is upstream of the START
+              // block that computes `startFireAt` — so the row names the game's
+              // own start, which is the time the user would look for.
+              logRows.push({
+                uid, teamSlug, eventId, action: "skip", reason: "daylight_game",
+                fireAt: new Date(game.startMs).toISOString(),
+              });
               continue;
             }
           }
@@ -604,10 +624,23 @@ export async function runPlannerTick(
             fireAt: new Date(startFireAt).toISOString(),
           });
         } else if (startInPast) {
-          // Fire time already elapsed — a late deploy, a long outage, or a
-          // start time that moved earlier. Distinct from beyond-horizon and
+          // Fire time already elapsed — a late deploy, a long outage, a start
+          // time that moved earlier, or (the 2026-08-13 Dodgers case) a config
+          // created AFTER its own fire time. Distinct from beyond-horizon and
           // materially worse, so it must not share a bucket.
           bump(stats.skipped, "start_time_passed");
+          // ATTRIBUTABLE. This branch bumped the counter and wrote no row,
+          // while `outside_horizon` directly above it wrote one — so the
+          // Dodgers cycle reconciled perfectly (21/21) while naming no team,
+          // and "which config lost its start?" was unanswerable from the log.
+          // Same silent-skip class as #68; the 2026-08-11 "every path must
+          // increment something" pass added the counter here and left the row.
+          // fireAt is derived from game start + lead, so it is constant for a
+          // given game and the row dedupes across ticks.
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: "start_time_passed",
+            fireAt: new Date(startFireAt).toISOString(),
+          });
         }
 
         // ── END — the guards. GUARD 0 (#66) first: never end a show this

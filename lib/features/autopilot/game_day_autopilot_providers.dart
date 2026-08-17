@@ -686,9 +686,20 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     _populateCalendarInBackground(teamSlug, justWrittenConfig: freshConfig);
   }
 
-  /// Toggle the score celebration flash for a team. Writes
-  /// score_celebration_enabled to Firestore. Used by the Live Scoring
-  /// switch on the GameDay team card.
+  /// Toggle live scoring for a team — the ONE user-facing control for this
+  /// feature (the "Live Scoring" switch on the Game Day team card).
+  ///
+  /// Writes BOTH fields. `score_celebration_enabled` is what this switch has
+  /// always written and what 49 of 50 live configs carry;
+  /// `live_scoring_enabled` is the new arming field the monitoring model reads
+  /// (`BackgroundGameDayAutopilotConfig.isMonitored`). Writing only the old one
+  /// would have left the new field with no writer anywhere in the app, so the
+  /// arming gate could never be turned off; writing only the new one would
+  /// strand the 49 existing configs. Both, until the old field is retired.
+  ///
+  /// `update` (not `set(merge)`) is deliberate and unchanged: this is a toggle
+  /// on an existing card, so a missing doc SHOULD fail loudly rather than mint
+  /// a partial config the planner might later read.
   Future<void> setLiveScoring({
     required String teamSlug,
     required bool enabled,
@@ -708,6 +719,7 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         .doc(teamSlug)
         .update({
       'score_celebration_enabled': enabled,
+      'live_scoring_enabled': enabled,
       'updated_at': Timestamp.fromDate(DateTime.now()),
     });
   }

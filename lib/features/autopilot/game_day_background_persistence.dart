@@ -61,6 +61,24 @@ class BackgroundGameDayAutopilotConfig {
   // Score celebrations (future — background will handle these in D3+)
   final bool scoreCelebrationEnabled;
 
+  /// Unified monitoring model: score monitoring + celebrations armed for this
+  /// team. This is the "Live Scoring" toggle, and it is the SINGLE source of
+  /// truth — there is no separate Sports Alerts opt-in any more.
+  ///
+  /// Deliberately distinct from [enabled], which means "runs the scheduled
+  /// show" and is the field the SERVER planner queries. A team migrated from
+  /// the old sports-alerts list carries `enabled:false, liveScoringEnabled:true`
+  /// — monitored and celebrating, but invisible to the planner, so it cannot
+  /// produce a first-pitch fire the user never asked for.
+  final bool liveScoringEnabled;
+
+  /// AlertSensitivity.name — `allEvents` | `majorOnly` | `clutchOnly`.
+  /// Carried here because sensitivity is real, consumed behavior
+  /// (`score_monitor_service._filterBySensitivity`) that used to live only on
+  /// the retired ScoreAlertConfig; it moves onto the Game Day config so Game
+  /// Day is genuinely the one source.
+  final String alertSensitivity;
+
   /// Resolved participating channel (bus) ids for this config, computed at
   /// schedule time in a Riverpod context (roofline + device channels) and read
   /// by the background isolate to target the right channels (#29).
@@ -91,6 +109,8 @@ class BackgroundGameDayAutopilotConfig {
     this.onTimeOverride,
     this.offTimeOverride,
     required this.scoreCelebrationEnabled,
+    this.liveScoringEnabled = true,
+    this.alertSensitivity = 'majorOnly',
     this.participatingChannelIds,
   });
 
@@ -115,6 +135,8 @@ class BackgroundGameDayAutopilotConfig {
         'onTimeOverride': onTimeOverride,
         'offTimeOverride': offTimeOverride,
         'scoreCelebrationEnabled': scoreCelebrationEnabled,
+        'liveScoringEnabled': liveScoringEnabled,
+        'alertSensitivity': alertSensitivity,
         'participatingChannelIds': participatingChannelIds,
       };
 
@@ -144,7 +166,28 @@ class BackgroundGameDayAutopilotConfig {
           (json['leadTimeMinutesOverride'] as num?)?.toInt(),
       onTimeOverride: json['onTimeOverride'] as String?,
       offTimeOverride: json['offTimeOverride'] as String?,
-      scoreCelebrationEnabled: json['scoreCelebrationEnabled'] ?? false,
+      // ABSENT MEANS TRUE. This line read `?? false` and was celebration
+      // blocker (3): a mirrored config written before the field existed — the
+      // live Twins config is one — read back as "celebrations off", so
+      // onScoreAlertEvent returned before applying anything. Firestore's
+      // fromFirestore has always defaulted this to true, so the two layers
+      // disagreed and the background layer, the one the worker actually reads,
+      // was the pessimistic one. The config's own toggle remains the off switch.
+      scoreCelebrationEnabled: json['scoreCelebrationEnabled'] ?? true,
+      // Unified monitoring model. `enabled` means "runs the scheduled show" and
+      // is what the SERVER planner queries (planGameDayFires.ts:342
+      // .where("enabled","==",true)); `liveScoringEnabled` means "score
+      // monitoring + celebrations are armed" and is client-only. Keeping them
+      // separate is what lets a migrated alerts-only team monitor without the
+      // planner ever seeing it — no server change, no deploy ordering.
+      // Absent falls back to the user's own "Live Scoring" switch, which
+      // writes `score_celebration_enabled` — see the matching note in
+      // GameDayAutopilotConfig.fromFirestore. 49 of 50 live configs already
+      // carry that field, so a bare `?? true` would have made monitoring
+      // unconditional AND overridden anyone who had turned the switch off.
+      liveScoringEnabled:
+          json['liveScoringEnabled'] ?? json['scoreCelebrationEnabled'] ?? true,
+      alertSensitivity: json['alertSensitivity'] as String? ?? 'majorOnly',
       participatingChannelIds: (json['participatingChannelIds'] as List?)
           ?.whereType<num>()
           .map((n) => n.toInt())
@@ -183,9 +226,19 @@ class BackgroundGameDayAutopilotConfig {
       onTimeOverride: config.onTimeOverride,
       offTimeOverride: config.offTimeOverride,
       scoreCelebrationEnabled: config.scoreCelebrationEnabled,
+      liveScoringEnabled: config.liveScoringEnabled,
+      alertSensitivity: config.alertSensitivity.name,
       participatingChannelIds: participatingChannelIds,
     );
   }
+
+  /// True when this team should be SCORE-MONITORED right now.
+  ///
+  /// The unified arming predicate, in one place so the background service, the
+  /// worker and the tests cannot drift apart on it. Monitoring follows Live
+  /// Scoring — NOT [enabled] — because an alerts-only team is deliberately
+  /// `enabled:false` to stay invisible to the server planner.
+  bool get isMonitored => liveScoringEnabled;
 
   /// Effective lead time, mirroring GameDayAutopilotConfig.effectiveLeadTimeMinutes.
   int get effectiveLeadTimeMinutes => leadTimeMinutesOverride ?? 30;
@@ -330,6 +383,46 @@ Future<void> clearGameDaySession(String teamSlug) async {
 Future<void> saveGameDaySessionsFromBackground(
   List<BackgroundAutopilotSession> sessions,
 ) => _persistSessions(sessions);
+
+/// Register a MANUALLY started show ("Light It Up Now") so the background
+/// worker adopts it.
+///
+/// This is celebration blocker (2)'s crossing point. The worker's `_sessions`
+/// map is what `onScoreAlertEvent` looks in, and it was only ever written by
+/// the scheduled `evaluate()` path — a manual tap applied a pattern to the
+/// controllers and registered nothing, so every subsequent scoring event found
+/// no session and returned. The UI cannot touch the worker's memory across the
+/// isolate boundary, so it writes here instead: `startMonitoring()` loads this
+/// exact store into `_sessions`.
+///
+/// `phase: 'liveGame'` is load-bearing and is NOT a free choice — it is the
+/// only in-progress phase that is simultaneously in `isActive`
+/// (`preGame || liveGame || postGame`) and handled by `_updateActiveSession`'s
+/// switch. An invented phase reads as inactive AND never advances, which both
+/// disarms monitoring and strands the show on forever.
+///
+/// Idempotent: an existing ACTIVE session for the team is left alone, so
+/// re-tapping during a running show does not restart or duplicate it.
+Future<void> registerManualGameDaySession({
+  required String teamSlug,
+  DateTime? gameStart,
+  String? activeGameId,
+  DateTime? now,
+}) async {
+  // loadGameDaySessions returns an UNMODIFIABLE map — copy before mutating.
+  final sessions =
+      Map<String, BackgroundAutopilotSession>.from(await loadGameDaySessions());
+  final existing = sessions[teamSlug];
+  if (existing != null && existing.isActive) return;
+  sessions[teamSlug] = BackgroundAutopilotSession(
+    teamSlug: teamSlug,
+    phase: 'liveGame',
+    gameStart: gameStart,
+    activeGameId: activeGameId,
+    activatedAt: now ?? DateTime.now(),
+  );
+  await _persistSessions(sessions.values.toList());
+}
 
 Future<void> _persistSessions(
   List<BackgroundAutopilotSession> sessions,
