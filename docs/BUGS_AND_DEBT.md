@@ -1300,6 +1300,31 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - **Reproduction note:** expect it on first launch after install/update, if at all — a warm image
     cache hides the swap. Do not treat non-replication as evidence the ordering is sound; the
     source-level branch above is the evidence.
+- [ ] **#90 — `daylight_game` is a SECOND silent skip in the planner, and it is the one that
+  swallowed the 2026-08-16 Royals game**
+  - Status: OPEN (filed 2026-08-17) · Severity: **P2** · Evidence: **verified-by-live-data +
+    verified-by-source** · Sibling of **C10**/**#68**
+  - [planGameDayFires.ts:498-499](../functions/src/planGameDayFires.ts#L498) bumps
+    `stats.skipped.daylight_game` and `continue`s — **no `logRows.push`**, exactly like
+    `start_time_passed` before C10. The 2026-08-16 summary reads **`daylight_game: 9`** and names
+    not one team.
+  - **This is not a malfunction — it is correct behaviour made invisible.** The filter is
+    per-config opt-in (`c.skip_day_games === true`) and requires user lat/lon. Live data:
+
+    | account | `skip_day_games` | outcome for `mlb_royals` 08-16 |
+    |---|---|---|
+    | Tyler `wrQRUUKy…` | **`true`** | **skipped, silently** — no row, no fire, no session |
+    | Ellie `5oHhaEaf…` | `false` | `plan_start` `fireAt 2026-08-16T19:37:00Z` |
+
+    First pitch ≈ 20:07Z = **15:07 CDT**. A day game. Tyler asked for day games to be skipped and
+    they were. The defect is that **"your team played and we deliberately sat it out" is
+    indistinguishable from "nothing happened"** — which is precisely why a scoring game with an
+    enabled config read as a celebrations failure.
+  - **C10 fixes only `start_time_passed`.** When that branch merges, the same row must be added
+    here or the next silent night is this one. Two of the planner's skip reasons write rows and two
+    do not; the asymmetry is the bug, not either branch individually.
+  - **Fix:** `logRows.push({uid, teamSlug, action:"skip", reason:"daylight_game", fireAt})`,
+    batched with C10. Server-side, deploy-after-merge per the +74 rule.
 - [ ] **#89 — a design-side animation engine overwrites hardcoded segment BOUNDS and ends by
   swallowing the whole strip into seg0. It is currently caller-less.**
   - Status: OPEN (filed 2026-08-17) · Severity: **P2 — latent** · Evidence: **verified-by-source**

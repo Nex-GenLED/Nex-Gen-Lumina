@@ -98,3 +98,53 @@ regardless of green tests. A unit test cannot distinguish "fires correctly" from
   the next audit does not re-open it: the flash emits design fields only, and
   `applyChannelFilter`'s default empty `channels` list means no `start`/`stop` is
   ever written.
+
+---
+
+## 4 — The two silent games, gates named (added 2026-08-17, live data)
+
+Re-verified against a main that had moved to `b510f22`: the branch head is still
+**`47a143b`** and it still **merges clean**. C10's row is still branch-only and was
+deliberately not duplicated onto main — main has not touched
+`planGameDayFires.ts` since the fork, so a copy there would manufacture a conflict
+in that exact hunk. **C10 exists; it is one merge away, not one edit away.**
+
+### The games had DIFFERENT gates, and neither was the celebration code
+
+| game | first unsatisfied condition | legible? |
+|---|---|---|
+| **Dodgers 08-13** (~298) | `start_time_passed` — config created after its own fire time, so no show, so no session | **NO** — counter only (C10) |
+| **Royals 08-16** (301) | `daylight_game` — Tyler's `skip_day_games=true`, 15:07 CDT first pitch | **NO** — counter only (**#90**) |
+| **Twins 08-16** (301, the cycle that DID run) | `score_celebration_enabled` **absent from the config** → mirror reads `?? false` | **NO** — bare `return` at `:166` |
+
+**The unifying finding: in neither silent game did execution ever reach
+`onScoreAlertEvent`.** Both were stopped upstream, in the planner, by a skip that
+wrote no row. The celebration path was never the thing that failed — it was never
+invoked, and nothing said so.
+
+**And the one game that DID run proves blocker 3 in production.** Tyler's
+`mlb_twins` config carries only `{enabled, espn_team_id, sport, updated_at}` —
+**no `score_celebration_enabled`**. The Firestore model defaults that field `true`
+while `game_day_background_persistence.dart:147` reads `?? false`, and the worker
+reads the pessimistic one. So even with a live session and a running poller, the
+Twins celebration would have bare-returned. The branch's #79 predicted this from
+source; the live config now confirms it.
+
+### A4/A3 confirmed ABSENT in production data
+
+Live config keys on both accounts contain **no** `monitored`, `monitoring_only`,
+`live_scoring_enabled`, or any `sensitivity` field. The inventory's
+IMPLEMENTED-ON-BRANCH / ABSENT-ON-MAIN split is confirmed from the data side, not
+just the source side.
+
+### What this changes in the plan
+
+- **Item 5 (C10 deploy) grows to include #90.** Shipping one silent-skip row and
+  leaving its twin is how this recurs.
+- **Add: an acceptance query, not just a test.** "Celebrations work" must be
+  demonstrated by a `source:'game_day'` command appearing after a scoring event in a
+  **night** game on an account whose config **has** `score_celebration_enabled`.
+  Tyler's Royals config qualifies; his Twins config does not.
+- **Add (P2): backfill `score_celebration_enabled` on stub configs**, or make the
+  two layers agree on `true`. Today a config created by the shorter write path is
+  silently celebration-disabled forever.
