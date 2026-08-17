@@ -148,3 +148,32 @@ just the source side.
 - **Add (P2): backfill `score_celebration_enabled` on stub configs**, or make the
   two layers agree on `true`. Today a config created by the shorter write path is
   silently celebration-disabled forever.
+
+---
+
+## 5 — Pinned sequence (Tyler, 2026-08-17)
+
+**D1 → D2 → D3 → D4. No stage starts before its predecessor lands.**
+
+| stage | content | gate to advance |
+|---|---|---|
+| **D1** | compliant payload (#67 partition, #76 geometry, #88 grp/spc defaults), debounce, sensitivity actually consulted, **legible skips** replacing the four bare returns | a `source:'game_day'` command observed after a real scoring event |
+| **D2** | the monitored field, landing **with** D1 | D1 green |
+| **D3** | migration of orphaned alert teams | **only once a reader exists** — never migrate into a field nothing reads |
+| **D4** | UI enable — **LAST** | D1–D3 green |
+
+**The master switch stays absent-≡-off until D1 makes `on` safe.** Absent must
+read as off here, which is the opposite of the tri-state discipline elsewhere
+(#78, the geometry gate) and deliberately so: for a *capability* the safe default
+is off, while for a *fact* the safe default is unknown. Do not "fix" this to
+match the others.
+
+### Correction carried into the sequence
+
+D2/D3 were scoped on the premise that `score_celebration_enabled` is absent
+fleet-wide. **It is not** — see the ledger entry of 2026-08-17. 49 of 50 live
+configs carry it, all `true`, and a live setter exists
+([`setLiveScoring`](../lib/features/autopilot/game_day_autopilot_providers.dart#L692),
+wired to the Live Scoring switch on the Game Day team card). **D3's migration is
+therefore near-empty** — one stub config — and D2 must not assume it is
+introducing arming that is already there.

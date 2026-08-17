@@ -1468,6 +1468,63 @@ off the sports-alert list, `_sessions` unpopulated by a manual start). That trac
 run and its verdict stands; this is a fourth confirming data point, now on build 301.
 **The fix is still unmerged on `feat/gameday-unified-monitoring`.**
 
+### THE TWO SILENT GAMES — CLOSED 2026-08-17. Both questions answered; the
+### fleet-wide premise did not survive measurement.
+
+**Dodgers 08-13 and Royals 08-16 are CLOSED.** Neither was a celebrations failure,
+and in neither case did execution reach `onScoreAlertEvent` at all.
+
+| game | first unsatisfied condition | verdict |
+|---|---|---|
+| **Dodgers 08-13** | `start_time_passed` — config created after its own fire time | no show → no session |
+| **Royals 08-16** | `daylight_game` — Tyler's `skip_day_games=true`, first pitch 15:07 CDT | **worked as configured** |
+| **Twins 08-16** (the cycle that ran) | stub config lacks `score_celebration_enabled`; the worker mirror reads `?? false` | armed off |
+
+Ellie is the control for the Royals case: **same game, same tick,
+`skip_day_games=false`, and she received a `plan_start` at `19:37Z`.** One
+per-config field decided it. Both planner skips are **silent** — counter bumped,
+no row (C10, and its twin **#90**).
+
+#### The "absent fleet-wide" premise is inverted — measured, not assumed
+
+```
+50 game_day_autopilot configs across all users
+PRESENT = 49   (value true = 49, false = 0)
+ABSENT  =  1   -> wrQRUUKy / mlb_twins, a 4-key stub
+```
+
+**`score_celebration_enabled` is present and `true` on 49 of 50 live configs, and a
+live setter exists** — `setLiveScoring`
+([game_day_autopilot_providers.dart:692](../lib/features/autopilot/game_day_autopilot_providers.dart#L692)),
+wired to the **Live Scoring switch on the Game Day team card**
+(`game_day_screen.dart:385`, `:1411`). The feature is **not** unreachable by design
+accident; it is armed at the config layer fleet-wide.
+
+**The single absence is Tyler's own `mlb_twins` — which is exactly the config whose
+cycle ran on 08-16.** A 1-in-50 stub sat in the one seat where it would be mistaken
+for a fleet-wide condition. The branch's #79 saw the same stub and generalised from
+it; the count is the correction.
+
+**What that leaves standing.** The real fleet-wide blockers are unchanged and are
+NOT the config field: the score poller is armed off **sports-alert** configs, and
+`_sessions` is never populated by a manual start. Blocker 3 narrows from "celebrations
+default off" to **"a stale or stub-derived mirror reads `?? false` against a model
+that defaults `true`"** — the two layers disagreeing, which is the same defect the
+count now bounds to one config.
+
+#### Not filed: the fixed-IP fanout
+
+Asked to delete an unawaited HTTP fanout to hardcoded `192.168.1.11` / `.222` from
+the worker this week. **No such code exists in this repository.** No literal
+matching `192.168.*.11` or `192.168.*.222` appears anywhere in `lib/` or
+`functions/src/`, and none in the autopilot / sports-alerts / neighborhood service
+trees at all. The Game Day worker has exactly **one** `http.post`
+([:554](../lib/features/autopilot/game_day_autopilot_background_worker.dart#L554)) —
+to `$_functionsBaseUrl/applySyncPattern`, the Cloud Function, resolved not hardcoded —
+and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autopilot_background_worker.dart#L173)),
+the 15-second revert timer. **Nothing was deleted, because there is nothing to
+delete.** If it exists, it is in another window's tree — the ask stands there, not here.
+
 ## 2.5.10+77 — #76's cap closed and wired; geometry stops being fabricated
 
 | Field | Value |
