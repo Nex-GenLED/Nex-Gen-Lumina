@@ -1329,6 +1329,57 @@ be established, not assumed.
 
 **GREEN FOR DISTRIBUTION.**
 
+### GREYED-CHANNEL INCIDENT CLOSED 2026-08-17 — no repair was performed, because none was needed
+
+**The rig is whole and was never broken.** Capture `20260817T014938Z`, bench `.150`:
+
+```
+uptime=100700s  ver=0.15.1   presets sha256=9a5af8c6df5a23ae  (IDENTICAL to the +77 smoke)
+seg0 [0,128)   len=128  on=True rev=False grp=1 spc=2  fx=0
+seg1 [128,290) len=162  on=True rev=True  grp=1 spc=0  fx=83
+bus0 start=0 len=128 pin=[2] | bus1 start=128 len=162 pin=[14] | total=290
+```
+
+**Recorded precisely, because three things in the closeout as drafted did not happen:**
+
+| claimed | actual |
+|---|---|
+| seg1 degenerate / zero-length | seg1 is **162 px, `on`, `rev:true`** — bounds match bus1 exactly |
+| +77 greyed it via a zero-length drop | **no such code exists** — `deviceChannelsFromConfig` maps every bus unconditionally; greying is participation-only |
+| repair routed through provisioning; `rev:true` survived it | **no repair was run.** The gate never executed. `rev:true` survived because nothing touched it |
+
+**The gate did not stand aside on a legal single-segment shape — it never ran at all.** There was
+no second segment missing to classify. Recording a `match` verdict here would put a gate execution
+in the ledger that did not occur, and the gate's whole value is that its verdicts are trustworthy.
+
+**`rev:true` and the Ellie shape are intact** — verified by direct read, not inferred from a repair.
+`uptime` puts boot at ~2026-08-15 21:51Z against the smoke's 21:54Z: the **same boot**, ~3 min of
+counter drift across 28 hours. Layout and ladder have been continuous since the smoke.
+
+**Actual cause of the grey-out: participation.** `participating_channels=[0]` narrows the apply to
+seg0, so `seg id:1` is **omitted** from the payload — never sent `on:false`, which is why channel 2
+held its previous design instead of going dark. The capture corroborates: seg0 `fx=0`, seg1 `fx=83`.
+The gate dates to `d8691be` (2026-05-21) and ships in every build including the live +76.
+
+**Reclassification — the 2026-08-14 collapse was self-inflicted, and a single-channel design was NOT
+applied before it.** Per this ledger's own incident arc: the antecedent was **my `psave`/`pdel`
+against scratch slot 245**, which malformed `presets.json`; the reboot that followed collapsed
+`seglc` 2 → 1. The proposed design-apply mechanism does not fit it.
+
+**#72's intermittent-collapse phantom therefore shrinks — by a different route than expected.** Not
+because a design apply explains the sightings, but because the one well-documented sighting was
+caused by a bench experiment. What remains is the **08-15 non-event** (a power cycle the layout
+survived) and roster flips + config disables.
+
+**One real hazard found while capturing (#89):** `lumina_custom_effects.dart` overwrites hardcoded
+segment bounds and its final frame swallows the strip into `seg0 [0,290)` — **the exact recorded
+collapse signature**. It is **caller-less**, so it caused nothing, and is filed as latent rather
+than as this incident's cause. Also **#88**: four `grp`/`spc` emitters the #76 strip missed, one
+interactive — `spc=2` on seg0 in the capture above is that leak on hardware.
+
+**Distribution posture unchanged: +77 STANDS.** The greying is old participation behavior, not new
+honest behavior; the defect predates +77 and ships in every prior build, so holding protects nobody.
+
 ## 2.5.10+77 — #76's cap closed and wired; geometry stops being fabricated
 
 | Field | Value |

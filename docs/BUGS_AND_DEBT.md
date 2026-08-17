@@ -1300,6 +1300,49 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - **Reproduction note:** expect it on first launch after install/update, if at all — a warm image
     cache hides the swap. Do not treat non-replication as evidence the ordering is sound; the
     source-level branch above is the evidence.
+- [ ] **#89 — a design-side animation engine overwrites hardcoded segment BOUNDS and ends by
+  swallowing the whole strip into seg0. It is currently caller-less.**
+  - Status: OPEN (filed 2026-08-17) · Severity: **P2 — latent** · Evidence: **verified-by-source**
+    · Rides **+78**
+  - **NOT the cause of the 2026-08-16 grey-out** (that is participation) and **not observed on any
+    device**. No `[0,0)` segment has ever been captured. Filed because the shape is a device-
+    geometry destroyer sitting one wire away from live.
+  - **The shape**, [lumina_custom_effects.dart:45-93](../lib/features/wled/lumina_custom_effects.dart#L45)
+    and three siblings (`generatePulseBurstFrames`, `generateGrandRevealFrames`,
+    `generateOceanSwellFrames`):
+
+    ```dart
+    'seg': [
+      {'id': 0, 'start': reverse ? clampedPixels : 0,
+                'stop':  reverse ? totalPixels : clampedPixels, …},
+      if (clampedPixels < totalPixels && !reverse)
+        {'id': 1, 'start': clampedPixels, 'stop': totalPixels, …},
+    ]
+    ```
+
+    Segment ids are **hardcoded 0/1/2** and their bounds are **animation frames over
+    `totalPixels`**, with no reference to the installed buses. On the bench's
+    `seg0 [0,128) / seg1 [128,290)` this rewrites both.
+  - **The endgame frame is the collapse signature.** At `i == steps`,
+    `clampedPixels == totalPixels`, so seg0 becomes **`[0, totalPixels)` = `[0,290)`** and the
+    `if` guard drops seg1 from the array entirely. Compare the previously-recorded symptom:
+    *"Reboot collapses 2 segments into 1 — **seg0 spans 0–290**; per-channel power has no seg1
+    until a preset reloads."* **Identical.** The reverse branch reaches the same state from the
+    other side (`clampedPixels` clamps to 0 → `[0, totalPixels)`).
+  - **It cannot have caused anything yet: `executeEffect` has NO caller outside its own file.**
+    The catalog is referenced (`isCustomEffect`, `getName` in `pattern_explore_screen.dart` and
+    `pattern_repository.dart`) but the frame engine is never driven. **Same class as
+    `triggerScoreCelebration` (C11)** — hardened-looking, caller-less. Recording it explicitly so
+    the next audit does not "verify" it and bank the result, which is the error C11 corrected.
+  - **Fix shape — #67's answer on the interactive path** (correct as specified, and it should land
+    before anything wires this up):
+    1. An apply expresses "channel unused" as **`{id: N, on: false}`** and nothing else.
+    2. **Applies NEVER write `start`/`stop`.** Bounds are provisioning's, sourced from the buses.
+    3. Segment ids come from the device channel list, never from a literal.
+  - **Pinned test (write with the fix):** a single-channel design applied to a two-channel device
+    leaves **both segments existing**, the unused one `on:false`, and **bounds unchanged** —
+    asserted against `/json/state` bounds, not just segment count, so a full-strip swallow fails
+    it as loudly as a deletion.
 - [ ] **#88 — the #76 geometry strip missed FOUR more emitters, one of them an interactive design
   path — and `spc` is on bench hardware right now**
   - Status: OPEN (filed 2026-08-17) · Severity: **P2** · Evidence: **verified-by-source +
