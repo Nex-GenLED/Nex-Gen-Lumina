@@ -21,6 +21,7 @@ import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/participation_reconciler.dart';
+import 'package:nexgen_command/features/dashboard/hero_image_resolution.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
@@ -229,14 +230,29 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     await _checkControllersAndMaybeLaunchWizard();
   }
 
-  void _updateHeroImage(String? url, {String? rooflineMaskVersion}) {
+  /// #80 — the assignment is where the defence lives.
+  ///
+  /// Takes a resolved [HeroImageIntent] rather than a nullable url, because a
+  /// nullable url cannot express the difference between "this user has no
+  /// photo" and "the profile is momentarily unavailable" — and conflating
+  /// those is what flashed the stock house over a customer's own home.
+  void _updateHeroImage(HeroImageIntent intent) {
     try {
-      final provider = (url != null && url.isNotEmpty)
-          ? NetworkImage(url)
-          : const AssetImage('assets/images/Demohomephoto.jpg') as ImageProvider;
-      final id = (url != null && url.isNotEmpty)
-          ? '$url#${rooflineMaskVersion ?? ""}'
-          : 'asset:Demohomephoto';
+      final ImageProvider provider;
+      final String id;
+      switch (intent) {
+        case HeroHold():
+          // THE UNKNOWN CASE. Return without touching _heroImageProvider so
+          // last-known-good stays on screen (or the matte-black interim, if
+          // nothing has resolved yet). Never assign during resolution.
+          return;
+        case HeroStock():
+          provider = const AssetImage('assets/images/Demohomephoto.jpg');
+          id = 'asset:Demohomephoto';
+        case HeroPhoto(:final url, :final maskVersion):
+          provider = NetworkImage(url);
+          id = '$url#${maskVersion ?? ""}';
+      }
       if (_heroImageId == id && _heroImageProvider != null) return;
       _heroImageId = id;
       _heroImageProvider = provider;
@@ -365,15 +381,13 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
 
     final userName = profileAsync.maybeWhen(data: (u) => u?.displayName ?? 'User', orElse: () => 'User');
 
-    final profileLoaded = profileAsync.hasValue;
-    final houseImageUrl = profileAsync.maybeWhen(data: (u) => u?.housePhotoUrl, orElse: () => null);
-    final rooflineMaskVersion = profileAsync.maybeWhen(
-      data: (u) => u?.rooflineMask?.toString(),
-      orElse: () => null,
-    );
-    if (profileLoaded) {
-      _updateHeroImage(houseImageUrl, rooflineMaskVersion: rooflineMaskVersion);
-    }
+    // #80 — called UNCONDITIONALLY, from a genuine AsyncData discriminator
+    // inside the resolver. The old `hasValue` guard + `orElse: () => null`
+    // read disagreed on a loading-with-previous-value state and handed
+    // _updateHeroImage a null that meant "unknown", which it then rendered as
+    // "no photo". The gating now lives in one place with the three states
+    // named; a refresh holds last-known-good instead of flashing stock.
+    _updateHeroImage(resolveHeroImage(profileAsync));
 
     return Scaffold(
       appBar: GlassAppBar(
@@ -440,7 +454,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   ),
                 ],
               ),
-            _buildHeroSection(context, ref, state, profileAsync),
+            _buildHeroSection(context, ref, state),
             _buildAdjustmentPanel(context, ref, state),
             const SizedBox(height: 12),
             // Design Studio + Neighborhood Sync — side by side
@@ -618,7 +632,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
-  Widget _buildHeroSection(BuildContext context, WidgetRef ref, WledStateModel state, AsyncValue profileAsync) {
+  Widget _buildHeroSection(BuildContext context, WidgetRef ref, WledStateModel state) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       decoration: BoxDecoration(
@@ -643,11 +657,17 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             return SizedBox(
               height: height,
               child: Stack(fit: StackFit.expand, children: [
+            // #80 — the matte-black interim IS the answer while the profile is
+            // unresolved. The `else if (!profileAsync.isLoading)` branch that
+            // used to paint the stock house here was dead: it lived in the
+            // `else` of `_heroImageProvider != null`, so once the stock asset
+            // had been ASSIGNED it was never consulted. Somebody anticipated
+            // the right threat at the wrong layer; the defence is now at the
+            // assignment (see _updateHeroImage / resolveHeroImage), and stock
+            // reaches the screen only via an affirmative HeroStock.
             Container(color: NexGenPalette.matteBlack),
             if (_heroImageProvider != null)
-              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: Alignment.center)
-            else if (!profileAsync.isLoading)
-              Image.asset('assets/images/Demohomephoto.jpg', fit: BoxFit.cover, alignment: Alignment.center),
+              Image(image: _heroImageProvider!, fit: BoxFit.cover, alignment: Alignment.center),
             // Sky color overlay — sits above photo, below controls
             Positioned.fill(
               child: _SkyGradientOverlay(skyTheme: _currentSkyTheme),
