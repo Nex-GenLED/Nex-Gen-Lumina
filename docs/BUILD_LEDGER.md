@@ -187,13 +187,19 @@ smoke). Two riders to carry into the night, neither a blocker:
 1. Post-#67 the fanout partitions per target, so a member's non-participating
    channels go `{id, on:false}` — **dark**, not unchanged. Her controller doc
    reads `participating_channels: [0,1]`, so nothing of hers goes dark.
-2. Open design question, deliberately NOT decided here: Sync round-trips the
-   sender's `grp`/`spc` through Firestore
+2. ~~Open design question~~ **ANSWERED 2026-08-17 — keep the round-trip.** Sync
+   carries the sender's `grp`/`spc` through Firestore
    ([neighborhood_models.dart:833](../lib/features/neighborhood/neighborhood_models.dart#L833)
    and four siblings). #88 filed that as a defect **on the assumption grp/spc
-   were geometry**; the 2026-08-17 reclassification makes them design, under
-   which sharing them is arguably the feature — a candy-cane broadcast that
-   arrives solid is the alternative. Tyler's call. Touches nothing directional.
+   were geometry**; the reclassification makes them design, under which sharing
+   them IS the feature — a candy-cane broadcast arriving solid would be the bug.
+   **No code change was required:** both Sync models declare `grp`/`spc` as
+   non-nullable ints defaulting to 1/0, the payload extractor seeds those
+   defaults and only overwrites from a source seg that has them, and both
+   emitters write them unconditionally — so a Sync payload always carries the
+   sender's opinion or the default, and can never leave a receiver's stale
+   spacing in place. Verified by reading; #88's three Sync bullets struck as
+   not-a-defect. Touched nothing directional.
 
 #### `of` — the chokepoint the builder-scoped audit could not see
 
@@ -212,6 +218,15 @@ not against the pure function alone.
 
 **Does NOT affect the fanout** — that path never crosses `normalizeWledPayload`.
 No street-test risk either way.
+
+**Blast radius, stated because it narrows the claim:** Lumina **never provisions a
+nonzero `of`** — not `wled_config_pusher`, not `hardware_config_screen`, nowhere.
+A segment only acquires an offset from OUTSIDE the app: the WLED web UI, a
+dealer's manual setup, or a template flash. So the injection was a real geometry
+write on every apply, but it only ever destroyed something for customers who
+hand-configured an offset. Same shape as #76's own support answer — the app
+silently undoing what the customer set up by hand — which is why it is worth
+fixing and not why it is urgent.
 
 **AND A LINE THAT MUST NOT BE CROSSED, recorded at the function itself.** The
 obvious next move — make this chokepoint strip `rev`/`mi`/`of`/`start`/`stop`
@@ -303,6 +318,45 @@ the log *names*, never about what fires.
 
 **Still no server half of the migration** to deploy. If one is written later it
 joins this command, and the before-+78 ordering starts to matter for real.
+
+#### BENCH POKES DEFERRED — decision of record, 2026-08-17
+
+Two hardware checks are **deliberately not being run before +78 cuts.** Recorded
+with the reasoning so the gap is a decision, not an omission.
+
+Live bench state, captured 2026-08-17 (`.150`, read-only, nothing written):
+
+```
+seg0 [0,128) len=128 of=0 grp=1 spc=0 rev=false mi=false fx=0
+seg1 [128,290) len=162 of=0 grp=1 spc=0 rev=true  mi=false fx=0
+```
+
+1. **`seg1 rev=true` still holds** — the Ellie-shaped rig survives from the +77
+   smoke, so the direction assertion's precondition is intact and free.
+2. **`of=0` on both segments — the rig is BLIND to the `of` class**, exactly as
+   it was blind to `rev` before #76. A bench run against this state would prove
+   only that a function which writes no `of` writes no `of`.
+3. **`seg0 spc=0` — the #88 residue is GONE.** The `20260817T014938Z` capture
+   read `spc=2`; something has flattened it since.
+
+Making either catchable needs a durable write, and durability needs a `psave`
+against ladder presets 1/2 — the operation with the frozen-segment capture and
+ambient-seg history, on a shared rig, with the street test still ahead.
+
+**Tyler's call: don't poison the rig tonight.** The `of` bug's blast radius is
+narrow (above), the fix is removal and is already pinned by unit test regardless
+of bench state, and that same ladder `psave` has been declined twice this week
+for good reason. Both pokes — a durable nonzero `of`, and a re-poisoned `spc` —
+move to a **dedicated deliberate session AFTER Ellie's test**, not competing
+with it.
+
+**Consequence for the +78 smoke plan: staged item (c) is DROPPED as written.**
+It read *"seg0 spc residue flattened by a compliant apply"* and there is no
+residue left to flatten. The unit pin (`design_spacing_defaults_test`) plus the
+scope-check recorded in `normalizeWledPayload`'s own docstring are the evidence
+of record for the cut. The remaining smoke is (a) the rev-survival re-run —
+precondition confirmed intact above — and (b) the single-channel design apply
+proving both segments survive with bounds untouched.
 
 ### GEOMETRY GATE IMPLEMENTED 2026-08-14 — #76's severity cap is closed
 

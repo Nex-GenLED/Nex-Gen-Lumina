@@ -1577,20 +1577,53 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     it and still emit `grp`/`spc`:**
     - [colorway_effect_selector.dart:232-233,358](../lib/features/wled/colorway_effect_selector.dart#L232)
       — **interactive**: a look the user applies from the dashboard. This is the one that matters.
-    - [neighborhood_providers.dart:414-415](../lib/features/neighborhood/neighborhood_providers.dart#L414)
-    - [neighborhood_sync_engine.dart:766-767](../lib/features/neighborhood/neighborhood_sync_engine.dart#L766)
-    - [neighborhood_models.dart:833-834,858-859,1255-1256,1322-1323,1337-1338](../lib/features/neighborhood/neighborhood_models.dart#L833)
-      — the sync pattern model **round-trips** `grp`/`spc` through Firestore, so a neighbour's
-      spacing can arrive as your spacing.
+    - ~~[neighborhood_providers.dart:414-415](../lib/features/neighborhood/neighborhood_providers.dart#L414)~~
+    - ~~[neighborhood_sync_engine.dart:766-767](../lib/features/neighborhood/neighborhood_sync_engine.dart#L766)~~
+    - ~~[neighborhood_models.dart:833-834,858-859,1255-1256,1322-1323,1337-1338](../lib/features/neighborhood/neighborhood_models.dart#L833)
+      — the sync pattern model round-trips `grp`/`spc` through Firestore, so a neighbour's
+      spacing can arrive as your spacing.~~
+
+      **STRUCK 2026-08-17 — NOT A DEFECT.** All three Sync entries are withdrawn, and the
+      reason is that this bullet was written while `grp`/`spc` were still classified as
+      geometry. Under the decision of record below they are DESIGN, and *"share this look"*
+      sharing its banding is the feature — a candy-cane broadcast that arrived solid would be
+      the bug. Tyler, 2026-08-17: **keep the round-trip.**
+
+      The bullet's own worry ("a neighbour's spacing can arrive as *your* spacing") is
+      correct and is now the intent. Its unstated second half — that a sender with no
+      opinion would leave the receiver's stale spacing in place — **was already impossible,
+      verified by reading rather than assumed:** `SyncCommand`
+      ([:725,759](../lib/features/neighborhood/neighborhood_models.dart#L725)) and
+      `SyncPatternAssignment` ([:1207,1223](../lib/features/neighborhood/neighborhood_models.dart#L1207))
+      declare `grp`/`spc` as non-nullable `int` defaulting to **1 / 0**; the payload
+      extractor ([:1240-1256](../lib/features/neighborhood/neighborhood_models.dart#L1240))
+      seeds those defaults and only overwrites them when the source seg carries a value;
+      both serializers write them unconditionally and both parsers default `?? 1` / `?? 0`;
+      and both emitters write them on every payload. **A Sync payload therefore always
+      carries `grp`/`spc` — the sender's if they had one, `1`/`0` if not.** No code change
+      was required to satisfy the decision.
+
+      `colorway_effect_selector` above stays in scope and is fixed: it is an interactive
+      *local* apply, not a broadcast.
   - **This is the BUG-GD-PICKER-1 pattern again** — the sibling a "seven builders, all listed" sweep
     missed. Two sweeps in a row have now under-counted their own family. The lesson is not "look
     harder": it is that **an emitter census must be a grep of the FIELD NAMES across `lib/`, not a
     walk of the builders you already know about.** #76's own list was assembled the second way.
-  - **Open question for Tyler, not assumed:** `rev`/`mi`/`of` are unambiguously installation
-    geometry. `grp`/`spc` are arguable — a candy-cane look may legitimately own its spacing. But
-    **#76 stripped them from the seven**, so today the codebase applies two different rules to the
-    same two fields depending on which screen you came from. Either they are geometry (finish the
-    strip) or they are design (revert that part of `70726ac`). Pick one; the split is the defect.
+  - **~~Open question for Tyler, not assumed~~ — ANSWERED 2026-08-17. `grp`/`spc` are DESIGN.**
+    `rev`/`mi`/`of` are unambiguously installation geometry. `grp`/`spc` were arguable — a
+    candy-cane look may legitimately own its spacing. But **#76 stripped them from the seven**,
+    so the codebase applied two different rules to the same two fields depending on which screen
+    you came from. **The split was the defect, not either half.** Resolved toward design:
+    grouping is how a colourway distributes its colours, and spacing is part of the look.
+
+    **And the consequence, which is the half that actually changed code:** once they are design,
+    omission stops being neutral. Under #67 — *unstated design state is inherited design state,
+    and inherited state is a bug* — a design with no opinion now **asserts `grp:1`/`spc:0`**
+    rather than staying silent, or it renders through whatever the previous look left behind.
+    Landed `721e26e`: at the apply boundary (`normalizeWledPayload`, trigger widened from
+    "has `fx`" to "states a design at all") and at the builders for correctness at rest, since
+    `psave` and Firestore blobs do not all cross that boundary. `of` explicitly did **not** move
+    — it stayed geometry, and the chokepoint stopped asserting it in `25b8531`.
   - **Not the cause of the 2026-08-16 grey-out** — that is participation (see the #77-era
     diagnosis). Found while capturing for it.
 - [ ] **#83 — score celebrations do NOT assert the #67 full partition: they take the self-apply path,
