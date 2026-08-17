@@ -59,6 +59,109 @@ unknown is explicitly not bad — the original spec was the odd one out.
 **Baseline of record: 2302 / 3 skipped / 0 failed.** Lineage 2282 -> 2301 ->
 2302. **2305 discarded — unreconciled, and it appears in no measured run.**
 
+### +78 CONTENT ACCUMULATING — opened 2026-08-17
+
+Not a build row. Opened when `feat/gameday-unified-monitoring` merged; becomes a
+row when +78 is built.
+
+**METHOD LINE, verbatim and adopted:** *content gates are written from `git log`,
+never from session summaries.* The merge review that produced this section was
+run that way and it is the reason the entries below say what they say — the
+branch's own commit messages claimed a migration, a screen demotion and a 30s
+poll cadence, and the inventory found the first unwired, the second absent, and
+the third caller-less.
+
+#### Merged: `f59299c` (branch reviewed at `47a143b`, corrected at `478d18f`)
+
+Unified monitoring model, C10 `start_time_passed` + #90 `daylight_game` planner
+rows, C11 dead-code deletion. Merge-base `25a0a29`; **zero code-file overlap**
+with main's own advance, which is why it merged clean.
+
+Pre-merge correction of record: `live_scoring_enabled` shipped **with no writer
+anywhere in `lib/`**, so the arming gate was permanently on and no UI could turn
+it off — the user-facing "Live Scoring" switch writes `score_celebration_enabled`
+(49 of 50 live configs carry it). `setLiveScoring` now writes both; both parsers
+fall back `live_scoring_enabled ?? score_celebration_enabled ?? true`. See
+`BUGS_AND_DEBT.md` #79's merge-review block.
+
+#### Reconciliation — three inputs could NOT be verified against this tree
+
+Recorded rather than adopted, per the `2305 discarded` precedent on the line
+above: *unreconciled, and it appears in no measured run.*
+
+| Input | This tree measures | Disposition |
+|---|---|---|
+| **32 claimed / 82 present** | Branch git log = **2 commits, 12 files** (3 / 18 with the correction commit). | **Unreconciled.** Likely cause named below. |
+| **Unclaimed W-track** (device targeting, speed, brightness norm) | **Absent** from the branch-only diff (`25a0a29..478d18f`) under both exact and loose grep. | Needs its own source before it can carry an inventory line. Not attributable to this merge. |
+| **Migration neutered to stub-repair-only** | `migrationConfigsFor` still has **zero callers**; no stub-repair code exists. **#92 stands as filed.** | Decision recorded (below); implementation **not in this tree**. |
+| **Baseline 2389 / 3 / 0** | **2346 / 3 / 0**, measured twice on `f502f37`, delta reconciled exactly (+27 / +10 / −2 = +35 on 2311). | **2346 is the measured baseline.** 2389 appears in no run here. |
+
+**Likely cause of 82, worth naming because it is the exact failure the method
+line guards against:** diffing *merge-base → merge-commit* (`25a0a29..f59299c`)
+sweeps in main's own #76/#88/design/schedule work and reports **27 files /
+1432 insertions** for `lib/` + `functions/` alone. A content gate built that way
+attributes main's work to the branch. The branch-only range is
+`25a0a29..478d18f`.
+
+#### Decisions recorded
+
+- **monitored × celebrations = coherent-by-design** (A4 option 1's intent).
+  Adopted. One fact preserved so it is not rediscovered as a bug:
+  `AlertTriggerService.handleAlertEvent` opens `WledService('http://$ip')` per
+  controller and animates for any *monitored* team **without consulting
+  `score_celebration_enabled`**. "Monitored" therefore already means "lights the
+  house", LAN-direct. Any later monitoring-without-lighting mode must gate that
+  path too.
+- **#91 filed, not fixed** — the worker's own applies bypass the #67 full
+  partition, and this merge makes that emitter live for the first time. A fix
+  needs the full device channel list in the background isolate, which the mirror
+  does not persist.
+
+#### finding f — CLOSED. Record the reason precisely.
+
+Closed, and nothing on main — that much is agreed. But the relayed reason
+("existed in early branch commits, deleted by its own author pre-merge") is
+**not supported by this repo**, and the ledger should not credit a cleanup that
+cannot be shown to have happened:
+
+- absent at `c7d9a9e` (first branch commit) and at `47a143b`;
+- absent from the branch's cumulative diff;
+- branch reflog is **linear** — created from main at `25a0a29`, three commits,
+  no rewrite, no force-push, so there is no earlier branch commit to have held it;
+- both dangling commits in the repo are unrelated (2026-07-22 schedule-picker
+  WIP; 2026-06-03 config fix) and neither contains it.
+
+**Reason of record: never present in any reachable commit.** The relay error was
+indeed the only error — but it was an error of *invention*, not of *timing*.
+
+#### Accumulating for the +78 build session
+
+1. This merge (`f59299c` + `f864a84`, `f502f37`).
+2. Four filed P2s, each its own change: seg-deletion · hero-image **#80** ·
+   **#88** defaults · **#3** `gateRefused`.
+
+#### Deploy plan of record
+
+**Nothing is deployed.** Server halves deploy targeted and **before +78
+distributes**, per the +74 rule — assert the deployed SHA is an ancestor of main
+first (`git merge-base --is-ancestor <sha> main`).
+
+There is **no server half of the migration** to deploy: `migrationConfigsFor` is
+client-only and unwired, and `functions/src/` contains no Game-Day migration
+(the migration files there are the *schedules* subcollection work). So the
+deploy is the two planner rows alone:
+
+```
+firebase deploy --only functions:planGameDayFires
+```
+
+**Awaiting Tyler's confirm — not run.** Both rows are pure observability (a row
+where a counter already bumped), so an un-deployed planner and a +78 client
+disagree only about what the log *names*, never about what fires; there is no
+ordering hazard in either direction. If a Game-Day migration server half is
+written later, it joins this command and the before-+78 ordering starts to
+matter for real.
+
 ### GEOMETRY GATE IMPLEMENTED 2026-08-14 — #76's severity cap is closed
 
 `lib/features/schedule/geometry_gate.dart`. Geometry clobbering now has four
