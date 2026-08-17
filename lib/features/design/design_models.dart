@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 
@@ -239,6 +240,10 @@ class CustomDesign {
           : channel.effectId;
 
       segments.add({
+        // #88 — grp/spc asserted at their DESIGN defaults, first so a channel
+        // that ever gains its own banding overrides rather than fights. A
+        // saved design must not inherit the spacing of whatever ran before it.
+        ...kDesignSpacingDefaults,
         'id': channel.channelId,
         'col': colors,
         'fx': fx,

@@ -19,7 +19,8 @@
 import 'dart:ui' show Color;
 
 import '../autopilot/game_day_autopilot_config.dart';
-import '../wled/wled_payload_utils.dart' show applyChannelFilter;
+import '../wled/wled_payload_utils.dart'
+    show applyChannelFilter, kDesignSpacingDefaults;
 import '../wled/zone_providers.dart' show DeviceChannel;
 
 /// Shape of [WledNotifier.applyPayloadWithLabel], lifted to a top-
@@ -65,6 +66,11 @@ Future<bool> applyGameDayConfigToDevice({
     'bri': config.brightness.clamp(0, 255),
     'seg': [
       <String, dynamic>{
+        // #88 — grp/spc asserted at their DESIGN defaults. This is the W-track
+        // device-targeting builder both Light-it-Up-Now and the Path 1
+        // _activateNow button share, so a Game Day show would otherwise
+        // inherit whatever spacing the last pattern left on the segment.
+        ...kDesignSpacingDefaults,
         'fx': config.effectId,
         'sx': config.speed,
         'ix': config.intensity,

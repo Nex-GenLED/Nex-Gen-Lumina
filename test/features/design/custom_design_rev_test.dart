@@ -89,12 +89,32 @@ void main() {
 
     // The whole geometry set, not just rev — so a future edit cannot
     // reintroduce a sibling field and pass.
-    test('no geometry field of any kind appears in a design segment', () {
+    //
+    // #88 (2026-08-17) NARROWED the set. `grp`/`spc` were in #76's sweep, but
+    // four other emitters never stopped writing them, so the same two fields
+    // obeyed two rules depending on which screen the user came from. Tyler's
+    // decision of record resolves the split toward DESIGN: banding and spacing
+    // are what a look IS. `rev`/`mi`/`start`/`stop`/`of` are unchanged — those
+    // describe how the strip is INSTALLED, which is still not ours to state.
+    test('no INSTALLATION-geometry field appears in a design segment', () {
       final d = designWith([channel(id: 0, reverse: true)]);
       for (final seg in segsOf(d)) {
-        for (final k in const ['rev', 'mi', 'start', 'stop', 'of', 'grp', 'spc']) {
+        for (final k in const ['rev', 'mi', 'start', 'stop', 'of']) {
           expect(seg.containsKey(k), isFalse, reason: '$k is geometry (#76)');
         }
+      }
+    });
+
+    // And the complement, so the reclassification cannot silently rot back
+    // into omission: grp/spc must be PRESENT. Under #67, an unstated design
+    // field is an inherited design field — a design that stays silent about
+    // spacing renders through the previous look's `spc`.
+    test('grp/spc ARE asserted — design fields, at their defaults (#88)', () {
+      final d = designWith([channel(id: 0, reverse: true)]);
+      for (final seg in segsOf(d)) {
+        expect(seg['grp'], 1, reason: 'grp is design (#88), and silence '
+            'inherits the previous look (#67)');
+        expect(seg['spc'], 0);
       }
     });
 

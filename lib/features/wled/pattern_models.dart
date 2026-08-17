@@ -1,6 +1,7 @@
 // Models for Pattern Library
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/effect_database.dart';
 
 /// Represents a folder/category for patterns in the Pattern Library.
@@ -342,9 +343,13 @@ class GradientPattern {
           'ix': intensity,
           'pal': 5, // "Colors Only" - prevents rainbow palette blending
           'col': cols,
-          // #76 — grp/spc/of removed: geometry, not design. A gradient
-          // asserts colours and effect; how the strip is grouped or offset is
-          // the installation's business.
+          // #88 — grp/spc RESTORED as DESIGN, asserted at their defaults.
+          // #76 removed them here as geometry; the decision of record
+          // (2026-08-17) is that they are design, and a design that has no
+          // opinion on grouping states the default rather than inheriting the
+          // previous look's spacing. `of` stays out — offset IS geometry.
+          'grp': kDesignDefaultGrp,
+          'spc': kDesignDefaultSpc,
         }
       ]
     };

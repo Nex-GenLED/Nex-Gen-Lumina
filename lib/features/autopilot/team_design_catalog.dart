@@ -17,6 +17,8 @@
 
 import 'dart:ui' show Color;
 
+import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
+
 /// A single team-themed design in the rotation catalog.
 class TeamDesign {
   final String name;
@@ -199,7 +201,12 @@ class TeamDesignCatalog {
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
-          // #76 — `grp` removed: geometry, not design.
+          // #88 — `grp` RESTORED as DESIGN (decision of record 2026-08-17);
+          // a team design's colour banding is the design, and `spc` is
+          // asserted at its default so the look never inherits the previous
+          // pattern's spacing.
+          'grp': colorGroupSize,
+          'spc': kDesignDefaultSpc,
           'pal': 0,
           'col': colors,
         }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
+import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart' hide ArchitecturalRole;
@@ -666,6 +667,10 @@ class PatternComposer {
           : 0,
       'seg': [
         {
+          // #88 — grp/spc asserted at their DESIGN defaults. A composed
+          // pattern states its whole look; leaving spacing unstated let the
+          // previous look's `spc` survive underneath it.
+          ...kDesignSpacingDefaults,
           'id': 0,
           // #76 — start/stop removed: bounds are geometry (see below).
 
@@ -723,6 +728,11 @@ class PatternComposer {
           : 0,
       'seg': [
         {
+          // #88 — grp/spc asserted at their DESIGN defaults. Load-bearing on
+          // THIS payload in particular: a per-pixel `i` array painted over a
+          // segment still carrying `spc=2` renders every third pixel, so the
+          // design would land correct and read wrong.
+          ...kDesignSpacingDefaults,
           'id': 0,
           // #76 — bounds removed here too, and this is the site where the
           // old behaviour was most load-bearing: a per-pixel `i` array was

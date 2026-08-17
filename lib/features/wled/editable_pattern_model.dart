@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 
 /// Direction for pattern animation flow.
@@ -201,8 +202,15 @@ class EditablePattern {
           // the field we must not write. Mapping it to an effect substitution
           // would be a guess per effect, so direction is UNREPRESENTED until
           // the geometry layer owns it (docs/SYNC_GEOMETRY_LAYER.md).
-          // [colorGroupSize] still shapes the colour list built above; only
-          // the device-side `grp` grouping is gone.
+          // [colorGroupSize] still shapes the colour list built above.
+          //
+          // #88 — and the device-side `grp` is BACK, as design. The decision
+          // of record (2026-08-17) reclassifies grp/spc: a pattern's banding
+          // is what the pattern IS. `spc` is asserted at its default so an
+          // edited pattern never inherits a stale spacing from whatever ran
+          // before it. `of`/`rev`/`mi` stay out — those remain geometry.
+          'grp': colorGroupSize,
+          'spc': kDesignDefaultSpc,
           'col': cols,
         }
       ],
