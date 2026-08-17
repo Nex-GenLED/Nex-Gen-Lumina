@@ -1886,6 +1886,51 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+78 — unified monitoring merged, four P2 fixes, the `of` chokepoint
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-78`** — points at `dc7fa54`. |
+| **Git SHA (app bytes)** | **`dc7fa54`** — `chore(release): bump to 2.5.10+78`. **iOS↔Android join key.** |
+| **App-bytes ancestry** | `100174a` (+77) **+** the `feat/gameday-unified-monitoring` merge (`f59299c`, incl. C10 + #90 planner rows and the Live-Scoring writer fix `478d18f`), the four P2 fixes, and the #76 `of` chokepoint (`25b8531`). |
+| **Ledger SHA (tagged)** | `build-78` == `dc7fa54`; the ledger row for this build is committed **after** the tag, so `git diff --stat dc7fa54 build-78 -- . ':(exclude)docs'` is EMPTY by construction. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **78** — `kStaffAuthTelemetryAppVersion` verified at `2.5.10+78` in the same tree **before** building. |
+| **Android artifact** | `app-release.aab` · **68,367,494 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="78"` / `versionName="2.5.10"` · built 2026-08-17 from isolated worktree `lumina-b78` at tag `build-78`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64). **versionCode 78 CONSUMED.** |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — the **release** keystore, checked explicitly (see below). The `PKIX path building failed` warning is expected for a self-signed release key and is not a signing failure. |
+| **iOS** | **NOT YET BUILT.** Chain incomplete until a `build-78`-triggered Codemagic build is recorded here. |
+| **Test suite at build time** | **2379 passed · 3 skipped · 0 failed**, run in `lumina-b78` at `build-78` **before** the build. |
+| **Server state at build** | `planGameDayFires` deployed 2026-08-17T15:38:15Z (C10 + #90 rows). Server leads client — correct per +74, no client dependency either way. |
+
+### Two build-input failures worth recording — both cost a code in the past
+
+**1. The first `bundleRelease` FAILED and consumed nothing.**
+`Execution failed for task ':app:processReleaseGoogleServices' — File
+google-services.json is missing.` A fresh worktree does not get it: it is
+**gitignored** (`.gitignore:105`), along with the signing material. No AAB was
+produced, so **versionCode 78 was not consumed by the failure** — the code is
+consumed by a *built artifact*, not by an attempt.
+
+**Three ignored inputs must be copied into every build worktree**, from the main
+repo (the source of truth), not from the previous build worktree:
+
+```
+android/app/google-services.json        712 B
+android/app/nex-gen-lumina.keystore    2776 B
+android/key.properties                  112 B
+```
+
+Sizes were diffed against the source after copying, and `git status` in the
+worktree stayed **empty** — all three are ignored, so they cannot dirty the tree
+or leak into a commit.
+
+**2. Signing was verified by IDENTITY, not by exit code.** Without
+`key.properties` + the keystore, a release build does **not** fail — Gradle falls
+back to debug signing and reports success, and Play rejects the upload later. So
+the signer CN was read out of the artifact and checked to be the Nex-Gen release
+key. Same rule as the functions deploy earlier today: **a successful build proves
+delivery, never content.**
+
 ## 2.5.10+77 — #76's cap closed and wired; geometry stops being fabricated
 
 | Field | Value |
