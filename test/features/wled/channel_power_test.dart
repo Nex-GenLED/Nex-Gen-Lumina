@@ -40,9 +40,9 @@ void main() {
       expect(segs, hasLength(2));
       expect(segs.firstWhere((s) => s['id'] == 0)['on'], isTrue);
       expect(segs.firstWhere((s) => s['id'] == 1)['on'], isFalse);
-      // bounds present by default
-      expect(segs.firstWhere((s) => s['id'] == 1)['start'], 128);
-      expect(segs.firstWhere((s) => s['id'] == 1)['stop'], 288);
+      // #95: bounds are NEVER emitted, not even on the enumerating case.
+      expect(segs.firstWhere((s) => s['id'] == 1).containsKey('start'), isFalse);
+      expect(segs.firstWhere((s) => s['id'] == 1).containsKey('stop'), isFalse);
     });
 
     // (b) Single-channel OFF while others stay lit → seg-scoped off, NO master.
@@ -89,26 +89,57 @@ void main() {
       expect(segs, hasLength(1));
       expect(segs.first['id'], 1);
       expect(segs.first['on'], isTrue);
-      expect(segs.first['start'], 128);
-      expect(segs.first['stop'], 288);
+      expect(segs.first.containsKey('start'), isFalse);
+      expect(segs.first.containsKey('stop'), isFalse);
     });
 
-    test('withBounds:false (stale/failed config) → id-only seg, NO start/stop',
-        () {
-      final p = buildChannelPowerPayload(
-        channelId: 1,
-        on: true,
-        masterOn: true,
-        litChannelIds: const {0},
-        channels: _twoChannels,
-        withBounds: false,
-      );
-      final seg = (p['seg'] as List).first as Map;
-      expect(seg['id'], 1);
-      expect(seg['on'], isTrue);
-      expect(seg.containsKey('start'), isFalse,
-          reason: 'never write stale bounds over a resized channel (P1-42)');
-      expect(seg.containsKey('stop'), isFalse);
+    // ── #95 PIN: a power write states POWER and states nothing else ────────
+    //
+    // This builder used to stamp start/stop whenever a config refresh had
+    // succeeded. That is geometry, and an apply never writes geometry (#76 for
+    // the seven design builders, #89 for applyChannelFilter). This builder was
+    // in neither census — the third time a geometry sweep under-counted its own
+    // family — so the pin is written as a FIELD SWEEP over every policy case
+    // rather than as spot checks on the two cases someone remembered.
+    test('#95 — NO geometry field, in ANY case, ever', () {
+      const geometry = {
+        'start', 'stop', 'len', 'rev', 'mi', 'of', 'grp', 'spc',
+      };
+
+      final cases = <String, Map<String, dynamic>>{
+        'ON while master OFF (enumerates every channel)':
+            buildChannelPowerPayload(
+          channelId: 0, on: true, masterOn: false,
+          litChannelIds: const {}, channels: _twoChannels,
+        ),
+        'ON while master ON': buildChannelPowerPayload(
+          channelId: 1, on: true, masterOn: true,
+          litChannelIds: const {0}, channels: _twoChannels,
+        ),
+        'OFF while others lit': buildChannelPowerPayload(
+          channelId: 0, on: false, masterOn: true,
+          litChannelIds: const {0, 1}, channels: _twoChannels,
+        ),
+        'OFF last lit channel': buildChannelPowerPayload(
+          channelId: 0, on: false, masterOn: true,
+          litChannelIds: const {0}, channels: _twoChannels,
+        ),
+      };
+
+      cases.forEach((name, payload) {
+        final segs = payload['seg'];
+        if (segs is! List) return; // master-only payload carries no seg at all
+        for (final s in segs.cast<Map>()) {
+          for (final field in geometry) {
+            expect(s.containsKey(field), isFalse,
+                reason: '$name: seg ${s['id']} emitted geometry "$field" — '
+                    'a power change must state power and nothing else (#95)');
+          }
+          // And it must still say the two things it IS for.
+          expect(s.containsKey('id'), isTrue, reason: name);
+          expect(s.containsKey('on'), isTrue, reason: name);
+        }
+      });
     });
 
     test('case 3 includes the target even when channels is empty', () {
@@ -169,9 +200,14 @@ void main() {
       expect(segs, hasLength(2));
       expect(segs.firstWhere((s) => s['id'] == 0)['on'], isTrue);
       expect(segs.firstWhere((s) => s['id'] == 1)['on'], isFalse);
-      // fresh bounds from getConfig
-      expect(segs.firstWhere((s) => s['id'] == 1)['start'], 128);
-      expect(segs.firstWhere((s) => s['id'] == 1)['stop'], 288);
+
+      // #95: the getConfig refresh still runs — but for the CENSUS, not for
+      // bounds. It must produce both segs (below) and no geometry (above).
+      // Dropping the refresh as "bounds-only" collapsed this to one seg, which
+      // would let master-on relight the whole house.
+      expect(segs.firstWhere((s) => s['id'] == 1).containsKey('start'), isFalse,
+          reason: 'a power change states power and nothing else (#95)');
+      expect(segs.firstWhere((s) => s['id'] == 1).containsKey('stop'), isFalse);
     });
 
     test('single-channel OFF (others lit) never writes a top-level on', () async {

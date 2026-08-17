@@ -1117,28 +1117,31 @@ class WledNotifier extends Notifier<WledStateModel> {
       // Fall back to cached master + empty lit set; better to act than stall.
     }
 
-    // 2. FRESH BOUNDS (P1-42): invalidate + re-fetch the hardware config so a
-    //    physically-resized channel isn't re-bounded with stale start/stop.
-    //    Capture the cached channels first so case-3 enumeration still has ids
-    //    if the refresh fails. On failure → id-only seg entries (no bounds).
+    // 2. CHANNEL CENSUS (#95: ids only — the builder no longer emits bounds).
+    //
+    //    The refresh stays. It was introduced for FRESH BOUNDS (P1-42), and
+    //    bounds are gone — but it also does a second job that is easy to miss
+    //    and expensive to get wrong: it guarantees the census is POPULATED.
+    //    Case 3 (master off + channel on) enumerates every channel so master-on
+    //    doesn't relight the whole house; with a cold `deviceChannelsProvider`
+    //    and no re-fetch, that enumeration collapses to the target alone and
+    //    the house comes up lit. Removing the refresh as "bounds-only" caused
+    //    exactly that, and the integration test caught it.
+    //
+    //    Cached list captured first so the enumeration still has ids if the
+    //    refresh fails.
     final cachedChannels = ref.read(deviceChannelsProvider);
     List<DeviceChannel> channels;
-    bool withBounds;
     try {
       ref.invalidate(deviceHardwareConfigProvider);
       final cfg = await ref
           .read(deviceHardwareConfigProvider.future)
           .timeout(const Duration(seconds: 3), onTimeout: () => null);
       channels = deviceChannelsFromConfig(cfg);
-      withBounds = channels.isNotEmpty;
     } catch (_) {
       channels = const [];
-      withBounds = false;
     }
-    if (channels.isEmpty) {
-      channels = cachedChannels; // ids only — NEVER trusted as fresh bounds
-      withBounds = false;
-    }
+    if (channels.isEmpty) channels = cachedChannels;
 
     // 3. Build the policy payload.
     final payload = buildChannelPowerPayload(
@@ -1147,7 +1150,6 @@ class WledNotifier extends Notifier<WledStateModel> {
       masterOn: masterOn,
       litChannelIds: litChannelIds,
       channels: channels,
-      withBounds: withBounds,
     );
 
     // 4. Optimistic master reflection: only the master-writing cases carry a

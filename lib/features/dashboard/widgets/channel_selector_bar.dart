@@ -213,16 +213,28 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                         : null,
                     channelColor: kChannelColors[ch.id % kChannelColors.length],
                     channelOn: chOn,
-                    onPowerTap: isParticipating
-                        ? () async {
-                            final newOn = !(chOn ?? false);
-                            await ref
-                                .read(wledStateProvider.notifier)
-                                .setChannelPower(ch.id, newOn);
-                            // Refresh the chips from the device's new seg[] state.
-                            ref.invalidate(channelPowerStatesProvider);
-                          }
-                        : null,
+                    // #95 — POWER IS NEVER GATED ON PARTICIPATION.
+                    //
+                    // Participation scopes SHOWS ("not in my shows"); it is not
+                    // a claim that the channel is absent, and it must not remove
+                    // manual control of hardware the user owns. This callback
+                    // used to be null for a non-participating channel, and the
+                    // icon was hidden as well — so such a channel had NO
+                    // affordance at all.
+                    //
+                    // Harmless while those channels stayed lit. #89 made the
+                    // full partition interactive, so an unused channel now
+                    // correctly goes `{id, on:false}` — and a DARK channel with
+                    // no control reads as a channel that is GONE, recoverable
+                    // only by applying another design that targets it.
+                    onPowerTap: () async {
+                      final newOn = !(chOn ?? false);
+                      await ref
+                          .read(wledStateProvider.notifier)
+                          .setChannelPower(ch.id, newOn);
+                      // Refresh the chips from the device's new seg[] state.
+                      ref.invalidate(channelPowerStatesProvider);
+                    },
                   );
                 }),
             ],
@@ -336,12 +348,19 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     bool? channelOn,
     VoidCallback? onPowerTap,
   }) {
-    // Disabled (non-participating) chips render at low opacity, are not
-    // tappable, and don't show the selected highlight even if some
-    // upstream state would otherwise mark them selected. The semantic:
-    // this channel is NOT part of your shows, so it can't be targeted
-    // from the dashboard. To enable it, change participation (Bundle 5
-    // picker UI) — not here.
+    // Non-participating chips render dimmed and are not SELECTABLE for design
+    // targeting — participation is the outer gate and `effectiveChannelIdsProvider`
+    // would filter them out anyway, so offering selection would be a silent
+    // no-op. To change that, change participation (Bundle 5 picker UI).
+    //
+    // #95 — "not in shows" MUST NOT read as "not there", and must never remove
+    // the power control:
+    //   • no strikethrough. Strikethrough is the typography of DELETED, and
+    //     this channel is neither deleted nor absent — it is simply out of
+    //     scope for shows. Dimming carries "out of scope" without claiming
+    //     the channel is gone.
+    //   • the power icon renders regardless of [disabled] (see [onPowerTap]),
+    //     so every channel the device reports can always be woken by hand.
     final effectiveColor = disabled
         ? Colors.white.withValues(alpha: 0.25)
         : (channelColor ?? NexGenPalette.cyan);
@@ -393,13 +412,16 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                   color: disabled
                       ? Colors.white38
                       : (showSelected ? effectiveColor : Colors.white54),
-                  decoration: disabled ? TextDecoration.lineThrough : null,
-                  decorationColor: Colors.white38,
+                  // #95: never lineThrough — see the note in this method.
                 ),
               ),
               // Per-channel power toggle (P1-43): a distinct tap target so the
               // chip body still selects/filters. Lit = cyan, dark = dim.
-              if (channelOn != null && onPowerTap != null && !disabled) ...[
+              //
+              // #95: NOT gated on [disabled]. The `&& !disabled` that used to be
+              // here is what left a dark, non-participating channel with no
+              // control of any kind — the release-blocking lockout.
+              if (channelOn != null && onPowerTap != null) ...[
                 const SizedBox(width: 8),
                 GestureDetector(
                   onTap: onPowerTap,

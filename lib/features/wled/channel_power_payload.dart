@@ -20,32 +20,34 @@ import 'package:nexgen_command/features/wled/device_channel.dart';
 ///  4. ON a channel while master is already ON → `{"seg":[{id,on:true}]}` only.
 ///
 /// [litChannelIds] = channels whose segment is currently `on` (from live
-/// `/json/state` seg[]). [channels] supplies `start`/`stop` bounds AND the full
-/// channel set for case 3's enumeration. When [withBounds] is false (a stale or
-/// failed config refresh — P1-42), seg entries are id-only: WLED applies them to
-/// the existing segments without touching bounds, so a physically-resized
-/// channel is never re-bounded with stale start/stop.
+/// `/json/state` seg[]). [channels] supplies the full channel SET for case 3's
+/// enumeration — and nothing else.
+///
+/// NEVER EMITS BOUNDS (#95, 2026-08-17). This builder used to stamp
+/// `start`/`stop` from [channels] whenever a config refresh had succeeded
+/// (`withBounds`). That is geometry, and **an apply never writes geometry** —
+/// bounds are provisioning's, sourced from the hardware buses. It is the same
+/// rule #89 applied to `applyChannelFilter` and #76 applied to the seven design
+/// builders; this builder was simply not in either census, which is the third
+/// time a geometry sweep has under-counted its own family (#88's lesson: an
+/// emitter census must be a grep of the FIELD NAMES across `lib/`, not a walk of
+/// the builders you already know about).
+///
+/// The old `withBounds:false` path — id-only seg entries — is now the ONLY
+/// path, so a physically-resized channel can never be re-bounded by a power tap
+/// with a stale channel map. WLED applies id-only seg entries to the existing
+/// segments, leaving their ranges untouched.
 Map<String, dynamic> buildChannelPowerPayload({
   required int channelId,
   required bool on,
   required bool masterOn,
   required Set<int> litChannelIds,
   required List<DeviceChannel> channels,
-  bool withBounds = true,
 }) {
-  Map<String, dynamic> seg(int id, bool segOn) {
-    final m = <String, dynamic>{'id': id, 'on': segOn};
-    if (withBounds) {
-      for (final ch in channels) {
-        if (ch.id == id) {
-          m['start'] = ch.start;
-          m['stop'] = ch.stop;
-          break;
-        }
-      }
-    }
-    return m;
-  }
+  // id + on ONLY. No start/stop, no rev/mi/of, no grp/spc — a power change
+  // states power and states nothing else.
+  Map<String, dynamic> seg(int id, bool segOn) =>
+      <String, dynamic>{'id': id, 'on': segOn};
 
   if (!on) {
     // Would anything remain lit after this channel goes off?
