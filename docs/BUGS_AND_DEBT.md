@@ -1300,6 +1300,39 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - **Reproduction note:** expect it on first launch after install/update, if at all — a warm image
     cache hides the swap. Do not treat non-replication as evidence the ordering is sound; the
     source-level branch above is the evidence.
+- [ ] **#88 — the #76 geometry strip missed FOUR more emitters, one of them an interactive design
+  path — and `spc` is on bench hardware right now**
+  - Status: OPEN (filed 2026-08-17) · Severity: **P2** · Evidence: **verified-by-source +
+    verified-on-hardware**
+  - **Hardware proof, bench `.150`, capture `20260817T014938Z`:**
+
+    ```
+    seg0 [0,128)   len=128  grp=1 spc=2  fx=0   rev=False
+    seg1 [128,290) len=162  grp=1 spc=0  fx=83  rev=True
+    ```
+
+    `spc=2` with `grp=1` renders **every third pixel** on channel 1 — ~43 of 128 lit. The two
+    segments disagree in a geometry-family field, which is the #76 signature.
+  - **The strip (`70726ac`) covered seven builders across `design/` and `wled/`. These were not in
+    it and still emit `grp`/`spc`:**
+    - [colorway_effect_selector.dart:232-233,358](../lib/features/wled/colorway_effect_selector.dart#L232)
+      — **interactive**: a look the user applies from the dashboard. This is the one that matters.
+    - [neighborhood_providers.dart:414-415](../lib/features/neighborhood/neighborhood_providers.dart#L414)
+    - [neighborhood_sync_engine.dart:766-767](../lib/features/neighborhood/neighborhood_sync_engine.dart#L766)
+    - [neighborhood_models.dart:833-834,858-859,1255-1256,1322-1323,1337-1338](../lib/features/neighborhood/neighborhood_models.dart#L833)
+      — the sync pattern model **round-trips** `grp`/`spc` through Firestore, so a neighbour's
+      spacing can arrive as your spacing.
+  - **This is the BUG-GD-PICKER-1 pattern again** — the sibling a "seven builders, all listed" sweep
+    missed. Two sweeps in a row have now under-counted their own family. The lesson is not "look
+    harder": it is that **an emitter census must be a grep of the FIELD NAMES across `lib/`, not a
+    walk of the builders you already know about.** #76's own list was assembled the second way.
+  - **Open question for Tyler, not assumed:** `rev`/`mi`/`of` are unambiguously installation
+    geometry. `grp`/`spc` are arguable — a candy-cane look may legitimately own its spacing. But
+    **#76 stripped them from the seven**, so today the codebase applies two different rules to the
+    same two fields depending on which screen you came from. Either they are geometry (finish the
+    strip) or they are design (revert that part of `70726ac`). Pick one; the split is the defect.
+  - **Not the cause of the 2026-08-16 grey-out** — that is participation (see the #77-era
+    diagnosis). Found while capturing for it.
 - [ ] **#83 — score celebrations do NOT assert the #67 full partition: they take the self-apply path,
   which never partitions**
   - Status: OPEN (filed 2026-08-15) · Severity: **P2** · Evidence: **verified-by-source** · Answers the
