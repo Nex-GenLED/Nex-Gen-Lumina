@@ -373,8 +373,24 @@ class GameDayAutopilotConfig {
       brightness: (data['brightness'] as num?)?.toInt() ?? 200,
       scoreCelebrationEnabled:
           data['score_celebration_enabled'] as bool? ?? true,
-      // Absent means TRUE: a team that already had Game Day keeps monitoring.
-      liveScoringEnabled: data['live_scoring_enabled'] as bool? ?? true,
+      // ABSENT MEANS "WHATEVER THE USER'S OWN TOGGLE SAYS", not bare true.
+      //
+      // This branch was written believing `score_celebration_enabled` was
+      // absent fleet-wide and the feature unreachable. Measurement inverted
+      // that: 49 of 50 live configs carry `score_celebration_enabled: true`,
+      // and the switch that writes it is LABELLED "Live Scoring"
+      // (game_day_screen.dart `_toggleLiveScoring` -> setLiveScoring).
+      //
+      // So `live_scoring_enabled` is a NEW field with no history, while a
+      // field meaning the same thing to the user already exists and is set.
+      // A bare `?? true` would have made monitoring unconditional and, worse,
+      // would have overridden the intent of anyone who had deliberately turned
+      // that switch OFF — the one user-visible control for this feature.
+      // Falling back to it keeps the toggle authoritative until an explicit
+      // new value is written, so OFF genuinely means off.
+      liveScoringEnabled: data['live_scoring_enabled'] as bool? ??
+          data['score_celebration_enabled'] as bool? ??
+          true,
       alertSensitivity: _parseSensitivity(data['alert_sensitivity'] as String?),
       skipDayGames: data['skip_day_games'] as bool? ?? true,
       designVariety: _parseVarietyMode(data['design_variety'] as String?),

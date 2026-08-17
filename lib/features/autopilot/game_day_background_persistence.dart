@@ -180,8 +180,13 @@ class BackgroundGameDayAutopilotConfig {
       // monitoring + celebrations are armed" and is client-only. Keeping them
       // separate is what lets a migrated alerts-only team monitor without the
       // planner ever seeing it — no server change, no deploy ordering.
-      // Absent means true so every existing Game Day team keeps monitoring.
-      liveScoringEnabled: json['liveScoringEnabled'] ?? true,
+      // Absent falls back to the user's own "Live Scoring" switch, which
+      // writes `score_celebration_enabled` — see the matching note in
+      // GameDayAutopilotConfig.fromFirestore. 49 of 50 live configs already
+      // carry that field, so a bare `?? true` would have made monitoring
+      // unconditional AND overridden anyone who had turned the switch off.
+      liveScoringEnabled:
+          json['liveScoringEnabled'] ?? json['scoreCelebrationEnabled'] ?? true,
       alertSensitivity: json['alertSensitivity'] as String? ?? 'majorOnly',
       participatingChannelIds: (json['participatingChannelIds'] as List?)
           ?.whereType<num>()

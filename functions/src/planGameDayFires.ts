@@ -496,6 +496,26 @@ export async function runPlannerTick(
               })
             ) {
               bump(stats.skipped, "daylight_game");
+              // ATTRIBUTABLE (#90). The second silent skip, and the one that
+              // swallowed mlb_royals on 2026-08-16: the 08-16 summary read
+              // `daylight_game: 9` and named not one team, so "your team played
+              // and we deliberately sat it out" was indistinguishable from
+              // "nothing happened" — which is exactly why a scoring game with
+              // an enabled config read as a celebrations failure.
+              //
+              // The skip itself is CORRECT behaviour (per-config `skip_day_games`
+              // opt-in + user lat/lon); only its invisibility is the defect.
+              // Batched with C10's `start_time_passed` row deliberately: two of
+              // the planner's skip reasons wrote rows and two did not, and the
+              // ASYMMETRY is the bug, not either row on its own.
+              //
+              // No lead is applied here — this branch is upstream of the START
+              // block that computes `startFireAt` — so the row names the game's
+              // own start, which is the time the user would look for.
+              logRows.push({
+                uid, teamSlug, eventId, action: "skip", reason: "daylight_game",
+                fireAt: new Date(game.startMs).toISOString(),
+              });
               continue;
             }
           }

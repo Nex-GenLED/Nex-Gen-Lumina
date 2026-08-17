@@ -480,6 +480,76 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `lib/features/sports_alerts/services/sports_background_service.dart`,
     `lib/features/game_day/light_it_up_now.dart`, `functions/src/planGameDayFires.ts`
     (edited, **NOT deployed**). Related **#66**, **#67**, **#68**, **#76**, **P1-44**.
+  - **MERGE-REVIEW CORRECTIONS, 2026-08-16 (pre-merge, applied on the branch).** The branch
+    was authored on the premise that `score_celebration_enabled` was absent fleet-wide and the
+    feature unreachable. **Measurement inverts that: 49 of 50 live configs carry
+    `score_celebration_enabled: true`**, and the switch writing it is the one labelled
+    **"Live Scoring"** (`game_day_screen.dart:385` → `setLiveScoring`). Three consequences,
+    all fixed before merge:
+    1. **`live_scoring_enabled` had NO WRITER anywhere in `lib/`.** Grep-verified at
+       `47a143b`: declared, defaulted, mirrored, read by `isMonitored` — never written. With
+       `?? true` the arming gate was permanently on and **could not be turned off by any UI**.
+       Fixed: `setLiveScoring` now writes both fields, and both parsers fall back
+       `live_scoring_enabled ?? score_celebration_enabled ?? true`, so the existing switch
+       stays authoritative and an explicit OFF is honoured instead of overridden.
+    2. **Blast radius restated.** The `?? false → ?? true` mirror flip was described as
+       unblocking one stub config; with 49 configs already `true`, merging arms monitoring +
+       celebrations for **49 accounts at once** on the +78 client. Not a defect — but it is a
+       launch-risk number, and it is Tyler's call, not the branch's.
+    3. **`migrationConfigsFor` and `monitoringPollInterval` have NO production callers** —
+       library + tests only. The A4 migration does **not** run; see **#92**.
+
+- [ ] **#91 — the Game Day worker's own applies bypass the #67 full partition, and the
+  celebration path just became reachable**
+  - Status: OPEN (filed 2026-08-16, merge review of `feat/gameday-unified-monitoring`) ·
+    Severity: **P2** · Evidence: **verified-by-source** · Sibling of **#67**
+  - #67 closed with *"fires assert the full partition; non-participating segments get
+    `{id:N, on:false}` ONLY"* and *"unstated segment state is inherited state, and inherited
+    state is a bug"*. It was fixed and hardware-verified in **two server builders** —
+    `buildFullPartitionSegArray` (`gameDayPlanning.ts:163`, used by the planner) and
+    `partitionBroadcastPayload` (`applySyncPattern.ts:586`, used by the **fanout** arm).
+  - **The worker is on neither path.** `buildCelebrationPayloadForTest` and
+    `buildBasePayloadForTest` build through `expandForChannels` → `applyChannelFilter`
+    (`wled_payload_utils.dart:59`), which emits **only the participating segs, each with an
+    explicit `id`** — no `{id:N, on:false}` for the excluded ones. It then dispatches via
+    `applySyncPattern` as a **background self-apply**, which by design
+    (`applySyncPattern.ts:56-61`) takes the **self-only path** — and that path stringifies the
+    payload verbatim and enqueues it with **no partitioning at all**.
+  - Even had it reached the fanout arm, `partitionBroadcastPayload` requires
+    `seg.length === 1` **and** `design.id === undefined`; a client-filtered array fails both
+    and returns `pass("segment_already_addressed" | "not_single_segment")` — whose own log line
+    reads *"excluded channels stay UNCHANGED, not dark"*.
+  - **Why it is filed and not fixed here.** Pre-existing on `main`; the branch does not touch
+    either builder. But it was **harmless while dead** — zero `game_day`-sourced commands have
+    ever existed — and this merge makes the celebration emitter live, so a latent
+    non-compliance becomes an emitting one. The fix needs the **full device channel list** in
+    the background isolate, and `BackgroundGameDayAutopilotConfig` persists only
+    `participatingChannelIds`; a full partition is therefore impossible without a new
+    persisted field. That is a change of its own, not a merge rider.
+  - **Symptom to expect meanwhile:** on a multi-channel install with partial participation, a
+    celebration flashes the participating channels and the others hold their prior look —
+    the Twins failure shape, not a swallow.
+
+- [ ] **#92 — the A4 monitoring-only migration is written, tested, and NOT WIRED**
+  - Status: OPEN (filed 2026-08-16, merge review) · Severity: **P3 — inert** ·
+    Evidence: **verified-by-source (grep)**
+  - `migrationConfigsFor` (`unified_monitoring.dart:141`) has **no caller in `lib/`** — only
+    `unified_monitoring_test.dart`. `MonitoringPlan.orphanedLegacy` is computed and returned
+    on every poll and **nothing consumes it**. `monitoringPollInterval:119` is likewise
+    caller-less; the live cadence still comes from `intervalInfo.intervalSeconds` and, on the
+    else-branch, from `loadActiveSession()` — the **neighborhood sync** session, not the Game
+    Day one, so the "mid-game join gets 30s polling" claim is not in force.
+  - **Do not wire it without deciding the lighting question first.** It mints
+    `enabled:false, liveScoringEnabled:true, scoreCelebrationEnabled:true` under the comment
+    *"monitored, not shown … no lighting they did not ask for"*. That is **not what the code
+    does**: `enabled:false` only hides the team from the planner's first-pitch fire. A
+    migrated team still lights the house on every qualifying score, by **two** independent
+    paths — `gameDayWorker.onScoreAlertEvent` (sparkle flash + a base-pattern apply 15s
+    later) and `AlertTriggerService.handleAlertEvent`, which opens
+    `WledService('http://$ip')` per controller and runs an LED animation **without checking
+    `scoreCelebrationEnabled` at all**.
+  - Being inert is the only reason this is P3. Left as-is, the honest state is: the model
+    landed, the migration did not.
 
 - [ ] **P1-52 — `pdel` can leave `presets.json` UNPARSEABLE; the app then goes blind to every preset and says nothing**
   - Status: OPEN · Evidence: **bench-reproduced 2026-08-09 on `.150`** (observed, not theorised)

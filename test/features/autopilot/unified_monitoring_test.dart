@@ -276,6 +276,35 @@ void main() {
       expect(c.isMonitored, isTrue);
     });
 
+    // THE PREMISE CORRECTION. This branch assumed score_celebration_enabled was
+    // absent fleet-wide; measurement says 49 of 50 live configs carry it, and
+    // the switch that writes it is the one LABELLED "Live Scoring". So an
+    // absent liveScoringEnabled must inherit that switch, not default to true —
+    // otherwise a user who deliberately turned Live Scoring OFF gets monitored,
+    // polled and celebrated at anyway, having used the only control they have.
+    test('absent liveScoringEnabled inherits an explicit celebration OFF', () {
+      final c = BackgroundGameDayAutopilotConfig.fromJson({
+        'teamSlug': 'mlb_twins',
+        'enabled': true,
+        'scoreCelebrationEnabled': false,
+        // liveScoringEnabled deliberately absent — pre-upgrade mirror
+      });
+      expect(c.liveScoringEnabled, isFalse);
+      expect(c.isMonitored, isFalse,
+          reason: 'the user turned the only Live Scoring switch off');
+    });
+
+    test('an explicit liveScoringEnabled still wins over the fallback', () {
+      final c = BackgroundGameDayAutopilotConfig.fromJson({
+        'teamSlug': 'mlb_twins',
+        'liveScoringEnabled': true,
+        'scoreCelebrationEnabled': false,
+      });
+      expect(c.isMonitored, isTrue);
+      // Monitored, but the last celebration gate still refuses the apply.
+      expect(c.scoreCelebrationEnabled, isFalse);
+    });
+
     test('round-trips the new fields through toJson/fromJson', () {
       final original = _gd(liveScoring: false, sensitivity: 'clutchOnly');
       final back =
