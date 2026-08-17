@@ -47,7 +47,6 @@ import '../../sports_alerts/data/team_colors.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../../wled/wled_providers.dart';
 import '../../wled/zone_providers.dart';
-import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../providers/group_autopilot_providers.dart';
 import '../services/path1_game_day_snapshot.dart';
