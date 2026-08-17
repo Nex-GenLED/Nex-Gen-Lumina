@@ -1898,9 +1898,41 @@ delete.** If it exists, it is in another window's tree — the ask stands there,
 | **Android versionCode** | **78** — `kStaffAuthTelemetryAppVersion` verified at `2.5.10+78` in the same tree **before** building. |
 | **Android artifact** | `app-release.aab` · **68,367,494 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="78"` / `versionName="2.5.10"` · built 2026-08-17 from isolated worktree `lumina-b78` at tag `build-78`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64). **versionCode 78 CONSUMED.** |
 | **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — the **release** keystore, checked explicitly (see below). The `PKIX path building failed` warning is expected for a self-signed release key and is not a signing failure. |
-| **iOS** | **NOT YET BUILT.** Chain incomplete until a `build-78`-triggered Codemagic build is recorded here. |
+| **iOS** | **Build 306** — `2.5.10 (306)`, bundle `com.nexgenled.command`, App Store distribution, min iOS 15.0, signing cert expires 2027-04-28. Built by Codemagic 2026-08-17 after `build-78` was pushed. **Identity fields verified against the tagged source** (`PRODUCT_BUNDLE_IDENTIFIER`, `IPHONEOS_DEPLOYMENT_TARGET = 15.0`, version name `2.5.10` all match at `dc7fa54`). **Trigger and checked-out SHA NOT independently confirmed** — see below. |
 | **Test suite at build time** | **2379 passed · 3 skipped · 0 failed**, run in `lumina-b78` at `build-78` **before** the build. |
 | **Server state at build** | `planGameDayFires` deployed 2026-08-17T15:38:15Z (C10 + #90 rows). Server leads client — correct per +74, no client dependency either way. |
+
+### iOS 306 — what is evidenced, and what is not
+
+**Evidenced** (from the Codemagic artifact summary): `2.5.10 (306)`, bundle
+`com.nexgenled.command`, App Store distribution, iPhoneOS, min 15.0, cert expiry
+2027-04-28, and an upload of `Lumina.ipa` to App Store Connect **beginning** at
+2026-08-17 18:08:46 via `altool`.
+
+**NOT evidenced — do not read these as confirmed:**
+
+- **The upload's OUTCOME.** The record ends at `INFO: ContentDelivery.Uploader`
+  — altool *starting*. No success line, no App Store Connect acceptance. Uploads
+  fail after this point (ITMS validation, missing privacy declarations — this
+  app has an open one, see `PrivacyInfo.xcprivacy` in the diagnostics gap).
+  Treat 306 as **built and upload-attempted**, not as delivered, until App Store
+  Connect shows it.
+- **The trigger and the checked-out SHA.** The summary names no commit and no
+  trigger. Attribution to `dc7fa54` rests on the tag having been pushed
+  immediately before, plus the identity fields matching — **not** on a read of
+  the build record. Same standing as the +75 row, and for the same reason: no
+  Codemagic credential in this session.
+
+**BUILD-NUMBER GAP: 302–305 are unaccounted for.** Lineage is 295 (+74) → 296
+(+75) → 297/298 (+76) → 301 (+77) → **306** (+78). Codemagic's
+`PROJECT_BUILD_NUMBER` increments per *run*, not per released artifact, so four
+runs happened between `build-77` and `build-78`. This inverts the corroboration
+the +75 row leaned on — there, *no* gap was evidence that no stray push-build ran
+between tags. Here the gap says stray runs **did**. Harmless if they were
+branch/PR builds; it means "one tag, one build" is **not** currently true of this
+project, and a bare `2.5.10` version name cannot distinguish them (**#62**).
+Worth one look at the Codemagic build list to confirm 302–305 were not release
+uploads.
 
 ### Two build-input failures worth recording — both cost a code in the past
 
