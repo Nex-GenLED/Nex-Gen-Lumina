@@ -1380,6 +1380,94 @@ interactive — `spc=2` on seg0 in the capture above is that leak on hardware.
 **Distribution posture unchanged: +77 STANDS.** The greying is old participation behavior, not new
 honest behavior; the defect predates +77 and ships in every prior build, so holding protects nobody.
 
+### FIRST FULL UNATTENDED CYCLE UNDER THE POST-#76 STACK — verified 2026-08-17
+
+**Tyler = `wrQRUUKyXyc0deyuu0ORS6wsovO2`. Two clean cycles, both on 2026-08-16.**
+Correction to the framing: the verified end-to-end cycle is **`mlb_twins`
+(`gd_mlb_twins_401816555`)**, not Royals, and it ran **yesterday**. Today's log
+(`2026-08-17`) has **zero plan_start rows for anybody** and no Tyler rows at all.
+The Royals cycle is real but earlier — `gd_mlb_royals_401816544`, planned 08-15,
+ended 08-16T03:55Z.
+
+**Plan rows → command execution, paired:**
+
+| event | plan row | command | delta |
+|---|---|---|---|
+| `mlb_royals_…544` | `plan_end` `03:55:04.807Z` `confirmed_final` | `fire_job` `03:56:08.915Z` `{"ps":1}` | +64s |
+| `mlb_twins_…555` | `plan_start` `17:40:00.000Z` ch `[0]` 133 B `partitioned:true` | `fire_job` `17:40:03.362Z` | **+3s** |
+| `mlb_twins_…555` | `plan_end` `21:20:12.654Z` `confirmed_final` | `fire_job` `21:21:03.939Z` `{"ps":2}` | +51s |
+
+**START FIRE, VERBATIM** (`2026-08-16T17:40:03.362Z`, `status=completed`):
+
+```json
+{"on":true,"bri":200,"seg":[
+  {"id":0,"on":true,"fx":0,"sx":128,"ix":128,
+   "col":[[255,255,255,0],[255,255,255,0]]},
+  {"id":1,"on":false}]}
+```
+
+- **#67 FULL PARTITION — PASS.** Participation is `[0]`; seg1 is **named and
+  explicitly `on:false`** rather than omitted. Every channel asserted. The row's
+  `bytes:133` matches the stored payload exactly, so the planner's accounting and
+  the wire agree.
+- **#76 CLEAN — PASS.** `fx`/`sx`/`ix`/`col` only. **No `rev`, `mi`, `grp`, `spc`,
+  `of`, no `start`/`stop`.** Contrast Ellie's pre-strip 08-13 payload, still in her
+  queue, which carries `"grp":1,"spc":0,"of":0,"frz":false` — the shape the strip
+  removed.
+- **#88 note:** `grp`/`spc` are **absent**, not asserted. This cycle **predates** the
+  assert-to-`1`/`0`-when-unused rule, exactly as expected. Absence now, assertion is
+  the future state.
+- **GUARD 0 (#66) — PASS, and visible.** `end_skipped_no_start` rows appear for
+  `…twins_401816555` on both 08-15 and 08-16 **before** its start was planned, then
+  stop once the start exists. The guard refused an unrequested end and said so.
+- **Base restore picked the right rung, twice.** Royals → `{"ps":1}` (NGL **On**) at
+  03:56Z = **22:56 CDT**; Twins → `{"ps":2}` (NGL **Off**) at 21:21Z = **16:21 CDT**.
+  Lights on at night, off in daylight. The ladder chose by time of day, not by habit.
+
+**Device state across the window** (post-cycle capture `2026-08-17T01:58:27Z`):
+`presets sha256 9a5af8c6df5a23ae` — **unchanged** from the closeout baseline, so the
+cycle psaved nothing. `seg0 [0,128)`, `seg1 [128,290)` both present; **`seg1 rev=true`**.
+The layout's continuity here is **native, not repaired** — no repair has ever been
+performed on this rig.
+
+#### Allowlist removal: this cycle is necessary evidence, and it is NOT sufficient
+
+**Tyler is the only un-scoped uid.** Every other account's `plan_start` carries
+`scopedOut:true` — planned, then suppressed by the `write_jobs` uid allowlist. So
+"the fleet planned 7 starts on 08-16" means **one** of them reached hardware.
+
+**The blocker, straight out of the same log:**
+
+```
+uid=Ayf0rqwN  ch=[0,1,2]  partitioned=FALSE  note=partition_unavailable   08-15
+uid=Ayf0rqwN  ch=[0,1,2]  partitioned=true                                08-15
+uid=Ayf0rqwN  ch=[0,1,2]  partitioned=FALSE  note=partition_unavailable   08-16
+```
+
+A three-channel account whose partition facts **come and go between ticks**. Remove
+the allowlist today and that account fires an **unpartitioned** payload at a
+3-channel house — #67's exact failure mode, live, on a schedule nobody is watching.
+Intermittent is worse than absent: a pre-flight check would have passed it on 08-15.
+
+**Second limit, stated plainly so it is not glossed:** every Tyler fire is
+`channels:[0]` on a 2-channel rig. It proves the pipeline and the 2-channel
+partition. It does **not** exercise 3+ channels, which is precisely where
+`partition_unavailable` lives.
+
+**Verdict: bank it as the pipeline's first clean production-shaped cycle. The gate
+for widening is `partitioned:true` on EVERY plan_start for a candidate uid across
+consecutive ticks — not this cycle's success.**
+
+#### Celebrations, 4th check: still silent
+
+Tyler's newest 12 commands: `fire_job` ×3, `health_probe`, and un-sourced writes.
+**Zero `game_day`-sourced commands.** His `mlb_royals` config has
+`score_celebration_enabled=true`, so the config gate would have passed — consistent
+with the trace earlier this session, which found the blockers upstream (poller armed
+off the sports-alert list, `_sessions` unpopulated by a manual start). That trace DID
+run and its verdict stands; this is a fourth confirming data point, now on build 301.
+**The fix is still unmerged on `feat/gameday-unified-monitoring`.**
+
 ## 2.5.10+77 — #76's cap closed and wired; geometry stops being fabricated
 
 | Field | Value |
