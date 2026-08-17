@@ -1932,6 +1932,42 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+79 — #95, the channel that could not be woken
+
+Supersedes the withdrawn **+78**. Same content plus the one fix that withdrew it.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-79`** — points at `7367e4b`, the bump commit itself (standing convention 1). |
+| **Git SHA (app bytes)** | **`7367e4b`** — `chore(release): bump to 2.5.10+79`. **iOS↔Android join key.** |
+| **App-bytes ancestry** | `100174a` (+77) **+** the +78 content (`f59299c` unified monitoring & C10/#90 rows, `9735ed7` #89, `46b0d97` #80, `721e26e` #88, `ee28686` #3, `25b8531` #76 `of`) **+** `c204577` **#95**. |
+| **Ledger SHA** | Ledger row committed AFTER the tag, outside it — so the tag **is** the app-bytes SHA, no exclusion diff to compute. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **79** — `kStaffAuthTelemetryAppVersion` moved in the same commit, verified in-tree before building. |
+| **Android artifact** | `app-release.aab` · **68,366,071 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="79"` / `versionName="2.5.10"` · built 2026-08-17 from isolated worktree `lumina-b79` at tag `build-79`, `git status` empty **before and after**. Obfuscated; symbols at `build/debug-info/android/` (arm, arm64, x64). **versionCode 79 CONSUMED.** |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — verified by **identity**, per standing convention 2. |
+| **iOS** | **Build 310**, `2.5.10`. Built from `build-79` — **confirmed behaviourally on hardware**, see below. |
+| **Test suite at build time** | **2382 passed · 3 skipped · 0 failed**, run in `lumina-b79` at `build-79` **before** the build. |
+| **Hardware smokes** | **(a), (b), (c) ALL PASS** on bench `.150`, read from `/json/state`. See **#95** in `BUGS_AND_DEBT.md`. |
+| **Server state** | `planGameDayFires` deployed 2026-08-17T15:38:15Z (C10 + #90 rows). Server leads client — correct per +74; both rows pure observability, no client dependency. |
+
+### The iOS build number was confirmed by BEHAVIOUR, not by a build record
+
+The app carries no `package_info_plus` and every build is version `2.5.10`
+(**#62**), so "310 came from `build-79`" could not be read off the device, and
+this session has no Codemagic credential. It was settled by the fix itself: the
+greyed, non-participating **bench ch1** chip **rendered a power icon**. On +78
+that icon was suppressed by the `!disabled` term #95 removed — so its presence
+*is* the +79 bytes. A behavioural discriminator beats an unverifiable
+attribution, and this one is worth reusing whenever a build number cannot be
+traced.
+
+### Distribution
+
+Android AAB and iOS 310 both exist and are smoke-verified. **Neither is
+distributed by this session** — Play closed track and TestFlight are Tyler's
+step.
+
 ## 2.5.10+78 — WITHDRAWN PRE-DISTRIBUTION. Chain complete, smokes passed, does NOT ship.
 
 > **STATUS: WITHDRAWN 2026-08-17, before any distribution.** Chain complete
