@@ -177,3 +177,62 @@ configs carry it, all `true`, and a live setter exists
 wired to the Live Scoring switch on the Game Day team card). **D3's migration is
 therefore near-empty** — one stub config — and D2 must not assume it is
 introducing arming that is already there.
+
+---
+
+## 6 — MERGE REVIEW SCOPE: `feat/gameday-unified-monitoring` (its own session)
+
+**Head `47a143b` (`c7d9a9e` + `47a143b`), forked `25a0a29`, merges CLEAN into
+`b510f22`** (`git merge-tree --write-tree`, no conflicts). Only shared file is
+`docs/BUGS_AND_DEBT.md`, different regions. Worktree `C:/Flutter Projects/lumina-gameday`.
+
+### Full inventory — 12 files, +1089 / −138. The content gate is written from THIS, not from memory.
+
+| file | Δ | what it is |
+|---|---|---|
+| `lib/features/autopilot/unified_monitoring.dart` | **+168 new** | the A4 model — `liveScoringEnabled`, client-only |
+| `lib/features/autopilot/game_day_autopilot_config.dart` | +52 | `live_scoring_enabled`; **defaults `true`**, reads `?? true` (:219, :377) |
+| `lib/features/autopilot/game_day_background_persistence.dart` | +90 | **mirror default flipped `?? false` → `?? true`** (:176 vs main :147) |
+| `lib/features/autopilot/game_day_autopilot_background_worker.dart` | +120 | skip legibility in `onScoreAlertEvent` |
+| `lib/features/sports_alerts/services/sports_background_service.dart` | +49 | arming moves off sports-alert configs → `shouldPollScores` (**blocker 1**) |
+| `lib/features/game_day/light_it_up_now.dart` | +35 | manual start registers a session (**blocker 2**) |
+| `lib/features/neighborhood/widgets/game_day_setup_screen.dart` | ±89 | C11 — `triggerScoreCelebration` removed (:909 note) |
+| `functions/src/planGameDayFires.ts` | +17 | **C10** — `start_time_passed` log row |
+| `test/…/unified_monitoring_test.dart` | **+288 new** | A4 coverage |
+| `test/…/manual_session_registration_test.dart` | **+182 new** | blocker-2 coverage |
+| `test/…/fanout_trigger_flag_gate_test.dart` | −70 | C11 — SYNC-3 group deleted with its subject |
+| `docs/BUGS_AND_DEBT.md` | +67 | the branch's **#79** |
+
+### Content gate — what the review must carry
+
+1. **C10's row**, and **#90's `daylight_game` row in the SAME hunk**. Shipping one
+   silent-skip row and leaving its twin is how the next silent night happens.
+   **Do not merge C10 alone.**
+2. **Correct the branch's #79 premise** against the 50-config measurement. It reads
+   *"The live Twins config has no such field"* and generalises to celebrations
+   defaulting off. True of that config, false of the fleet: **49/50 present and
+   `true`, live setter exists**. Blocker 3 narrows to *stale-or-stub mirror vs model
+   default* — still worth the `?? true` flip, but its blast radius is **one config**,
+   not the fleet. Annotate; the entry is otherwise sound.
+3. **#79 NUMBER COLLISION** — the branch's #79 vs main's Codemagic item, already
+   renumbered to **#87** on main. Git merges both cleanly into different regions and
+   would have silently produced a document with two #79s. Verify after merge.
+4. **Verify the skip-legibility claim, site by site.** The branch's #79 says *"the
+   four bare returns become counted, named skips."* The `debugPrint('[GameDayBg]…`
+   count is **13 on branch vs 11 on main — +2, not +4**. Either two skips use a
+   different mechanism or two remain bare. **This is the finding that started the
+   trace; do not accept it on the branch's own description.**
+5. **`liveScoringEnabled` defaults `true`** on both construct and read. Confirm that
+   is intended for migrated alerts-only teams (A4: absent ≡ monitored, so yes) and
+   that it cannot reach the **server** planner, which queries `enabled` at
+   `planGameDayFires.ts:342`. That separation is the entire safety argument.
+6. **Finding f — not on this branch.** 0 hits in `lib/`; the two `192.168.1.11`
+   matches are installer TEST FIXTURES. If the originating window locates it
+   elsewhere, it is not this review's business.
+7. **Post-merge**: suite vs **2311/3/0**, then `flutter analyze lib/ test/`.
+
+### Deploy ordering (unchanged, +74 rule)
+
+Merge → **then** deploy the server pair (C10 + #90 rows, plus #83's partition if
+ready) from merged main → then ship the client. **Never deploy `planGameDayFires.ts`
+from the branch.**
