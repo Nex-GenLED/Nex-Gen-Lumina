@@ -479,6 +479,15 @@ class CalendarScheduleNotifier
           result.outcome == LeaseOutcome.updated) {
         debugPrint(
             'CalendarLease: Lease created after eviction for ${entry.dateKey}');
+      } else if (result.outcome == LeaseOutcome.gateRefused) {
+        // #3 — NOT "lease failed". The eviction landed, the record is
+        // registered, and no save was attempted; the day is un-armed until the
+        // geometry is right. Saying "failed" here is the illegibility the
+        // gateRefused state exists to remove.
+        debugPrint(
+            'CalendarLease: eviction landed but the lease for ${entry.dateKey} '
+            'is NOT ARMED — geometry gate refused: ${result.errorMessage}. '
+            'Registry kept; the next sweep re-attempts.');
       } else {
         debugPrint(
             'CalendarLease: applyEvictionAndLease returned ${result.outcome} '

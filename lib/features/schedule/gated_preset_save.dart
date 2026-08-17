@@ -61,6 +61,20 @@ List<SegmentShape> expectedShapeFromChannels(List<DeviceChannel> channels) => [
         if (c.stop > c.start) SegmentShape(c.id, c.start, c.stop),
     ];
 
+/// The shape of [gatedPresetSave], lifted to a typedef so callers can hold it
+/// as an injectable seam (CalendarEntryLeaseManager does) without each one
+/// re-spelling a six-parameter function type — and so a signature change
+/// breaks every seam at compile time rather than one of them at runtime.
+typedef GatedPresetSaveCall = Future<GatedSaveOutcome> Function({
+  required int presetId,
+  required String presetName,
+  required List<SegmentShape> expected,
+  required GeometryReader read,
+  required GeometryProvisioner reprovision,
+  required Future<bool> Function() save,
+  String label,
+});
+
 /// Gate, then save. Never throws.
 ///
 /// ORDERING IS THE POINT. The gate runs BEFORE anything else records an

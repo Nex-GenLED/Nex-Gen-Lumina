@@ -13,6 +13,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dart';
+import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
+import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -319,6 +321,194 @@ void main() {
       // savePreset still ran — the preset is orphaned on the controller until
       // the re-arm overwrites it (expected, harmless).
       expect(h.service.lastSimulatedPresetSave, isNotNull);
+    });
+  });
+
+  // ==========================================================================
+  // #3 — THE PINNED TEST. A gate refusal is NOT a write failure.
+  //
+  // CalendarEntryLeaseManager was the last of gated_preset_save.dart's four
+  // named callers still saving ungated, and `psave` captures LIVE segment
+  // geometry whatever the payload says — so a lease preset taken over a
+  // collapsed layout reloads on its date with the wrong shape baked in.
+  //
+  // The state it joins with matters as much as the gating. `savePresetFailed`
+  // ROLLS BACK, because a half-written controller must not be described as
+  // armed. A gate refusal attempted no save at all: rolling back would report
+  // a failure that did not happen and would un-register a day the user still
+  // has on their calendar.
+  // ==========================================================================
+  group('#3 — gate refusal ≠ write failure', () {
+    /// Force gatedPresetSave's verdict without a live controller. Mirrors
+    /// production's own shape: the refusal carries the gate's classification.
+    void refuseGate(CalendarEntryLeaseManager manager) {
+      manager.gatedSaveFn = ({
+        required int presetId,
+        required String presetName,
+        required List<SegmentShape> expected,
+        required GeometryReader read,
+        required GeometryProvisioner reprovision,
+        required Future<bool> Function() save,
+        String label = 'preset',
+      }) async =>
+          GatedSaveOutcome(
+            saved: false,
+            gateRefused: true,
+            gate: const GateResult(
+              proceed: false,
+              branch: GateBranch.totalLoss,
+              repaired: false,
+              expected: [SegmentShape(0, 0, 128), SegmentShape(1, 128, 290)],
+              actual: [SegmentShape(0, 0, 290)],
+            ),
+            message: '$label $presetId ($presetName) not saved',
+          );
+    }
+
+    test(
+        'gate refuses → NO rollback, NO attempt recorded, distinct outcome '
+        'naming the gate\'s classification', () async {
+      final h = buildIntegrationHarness();
+      await h.manager.initialize();
+      refuseGate(h.manager);
+      h.service.lastSimulatedPresetSave = null;
+      h.service.lastSimulatedConfigPayload = null;
+
+      final entry = insideWindowEntry();
+      final result = await h.manager.handleEntryCreated(entry);
+
+      // DISTINCT. Not writeFailed, not leased.
+      expect(result.outcome, LeaseOutcome.gateRefused);
+      expect(result.outcome, isNot(LeaseOutcome.writeFailed));
+
+      // NO SAVE WAS ATTEMPTED — the ordering the gate exists for.
+      expect(h.service.lastSimulatedPresetSave, isNull,
+          reason: 'the gate runs BEFORE anything records an attempt');
+      expect(h.service.lastSimulatedConfigPayload, isNull,
+          reason: 'no preset, so no timer write either');
+
+      // NO ROLLBACK — the record survives, un-armed, for the next sweep.
+      expect(h.manager.activeLeases, hasLength(1),
+          reason: 'rolling back would report a failure that did not happen');
+      expect(h.manager.activeLeases.single.dateKey, entry.dateKey);
+      expect(result.lease, isNotNull,
+          reason: 'the caller can name the un-armed day without re-reading');
+
+      // LEGIBLE — the message names what the gate decided, not just "failed".
+      expect(result.errorMessage, isNotNull);
+      expect(result.errorMessage, contains('gated_geometry_mismatch'),
+          reason: 'a refusal that does not say which shape was wrong is a '
+              'counter, not a diagnosis (#68)');
+      expect(result.errorMessage, contains('totalLoss'));
+    });
+
+    test('the UPDATE path refuses the same way — record kept, not restored',
+        () async {
+      final h = buildIntegrationHarness();
+      await h.manager.initialize();
+
+      // First lease succeeds and arms.
+      final entry = insideWindowEntry(patternName: 'Warm White');
+      expect((await h.manager.handleEntryCreated(entry)).outcome,
+          LeaseOutcome.leased);
+      final slot = h.manager.activeLeases.single.slotIndex;
+      final preset = h.manager.activeLeases.single.presetId;
+
+      // Now the geometry goes wrong and the user edits the entry.
+      refuseGate(h.manager);
+      h.service.lastSimulatedPresetSave = null;
+      final edited = insideWindowEntry(patternName: 'Cool White');
+      final result = await h.manager.handleEntryCreated(edited);
+
+      expect(result.outcome, LeaseOutcome.gateRefused);
+      expect(h.service.lastSimulatedPresetSave, isNull);
+      expect(h.manager.activeLeases, hasLength(1),
+          reason: 'neither restored to the prior record nor dropped');
+      expect(h.manager.activeLeases.single.slotIndex, slot,
+          reason: 'no slot churn — nothing on the controller moved');
+      expect(h.manager.activeLeases.single.presetId, preset);
+    });
+
+    test(
+        'a GENUINE save failure still rolls back — the two paths did not '
+        'merge', () async {
+      // The control. If gateRefused had been bolted on by widening the
+      // failure branch, this assertion and the one above could not both hold.
+      final h = buildIntegrationHarness();
+      h.service.simulateSavePresetReturns = false;
+      await h.manager.initialize();
+      h.service.lastSimulatedPresetSave = null;
+
+      final result = await h.manager.handleEntryCreated(insideWindowEntry());
+
+      expect(result.outcome, LeaseOutcome.writeFailed);
+      expect(h.service.lastSimulatedPresetSave, isNotNull,
+          reason: 'here the save WAS attempted — that is the difference');
+      expect(h.manager.activeLeases, isEmpty,
+          reason: 'rollback is still correct when a write really failed');
+    });
+
+    // THE INTERACTION, extended to this path. In schedule sync a refusal must
+    // not burn the non-convergence budget; here the equivalent currency is the
+    // REGISTRY, because promotion skips registered dateKeys — a record dropped
+    // on a refusal would never re-arm, and a record kept costs nothing. So
+    // repeated refusals must be free, and the day must still arm the moment
+    // the geometry is right.
+    test('N refusals cost nothing, and the lease arms once the gate allows',
+        () async {
+      final h = buildIntegrationHarness();
+      await h.manager.initialize();
+      final entry = insideWindowEntry();
+
+      refuseGate(h.manager);
+      for (var sweep = 0; sweep < 10; sweep++) {
+        final r = await h.manager.handleEntryCreated(entry);
+        expect(r.outcome, LeaseOutcome.gateRefused, reason: 'sweep $sweep');
+      }
+      expect(h.service.lastSimulatedPresetSave, isNull,
+          reason: 'ten refusals, zero saves attempted');
+      expect(h.manager.activeLeases, hasLength(1),
+          reason: 'ten refusals must not exhaust anything');
+
+      // Geometry gets repaired; the very next attempt arms.
+      h.manager.gatedSaveFn = ({
+        required int presetId,
+        required String presetName,
+        required List<SegmentShape> expected,
+        required GeometryReader read,
+        required GeometryProvisioner reprovision,
+        required Future<bool> Function() save,
+        String label = 'preset',
+      }) async =>
+          GatedSaveOutcome(saved: await save(), gateRefused: false);
+
+      final armed = await h.manager.handleEntryCreated(entry);
+      expect(armed.outcome, LeaseOutcome.updated,
+          reason: 'the kept record is what lets this be an update, not a '
+              'fresh slot allocation');
+      expect(h.service.lastSimulatedPresetSave, isNotNull);
+    });
+
+    test('gate ALLOWS → the lease arms exactly as before (no regression)',
+        () async {
+      final h = buildIntegrationHarness();
+      await h.manager.initialize();
+      h.manager.gatedSaveFn = ({
+        required int presetId,
+        required String presetName,
+        required List<SegmentShape> expected,
+        required GeometryReader read,
+        required GeometryProvisioner reprovision,
+        required Future<bool> Function() save,
+        String label = 'preset',
+      }) async =>
+          GatedSaveOutcome(saved: await save(), gateRefused: false);
+
+      final result = await h.manager.handleEntryCreated(insideWindowEntry());
+
+      expect(result.outcome, LeaseOutcome.leased);
+      expect(h.service.lastSimulatedPresetSave, isNotNull);
+      expect(h.manager.activeLeases, hasLength(1));
     });
   });
 }

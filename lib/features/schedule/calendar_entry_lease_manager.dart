@@ -42,9 +42,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
+import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/wled/device_channel.dart'
+    show deviceChannelsFromConfig;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 export 'package:nexgen_command/features/wled/wled_preset_ranges.dart'
@@ -250,6 +254,20 @@ enum LeaseOutcome {
   /// write. That path returns [leased] with the lease record
   /// populated.
   writeFailed,
+
+  /// #3 — the GEOMETRY GATE refused the lease preset write. NOT a failure:
+  /// no save was attempted, so nothing was rolled back and nothing is
+  /// inconsistent on the controller. The lease record is kept exactly as it
+  /// was and the next sweep re-attempts once the layout is right.
+  ///
+  /// DISTINCT FROM [writeFailed] ON PURPOSE. Collapsing the two is the
+  /// illegibility this exists to remove: "we tried and the controller said no"
+  /// and "we declined to try because the segments were wrong" need different
+  /// fixes and different words to the customer. [LeaseResult.errorMessage]
+  /// carries the gate's own classification (drift / totalLoss / …), because a
+  /// refusal that does not say which shape was wrong is a counter, not a
+  /// diagnosis (#68).
+  gateRefused,
 }
 
 /// P0-9 (part a) — the tri-state result of [CalendarEntryLeaseManager.activeLeaseTimers].
@@ -434,6 +452,16 @@ class LeaseResult {
       const LeaseResult(outcome: LeaseOutcome.alreadyExpired);
   factory LeaseResult.writeFailed(String reason) =>
       LeaseResult(outcome: LeaseOutcome.writeFailed, errorMessage: reason);
+
+  /// #3 — the gate declined; NO save was attempted and NOTHING was rolled
+  /// back. [lease] is the record that is still registered, so a caller can
+  /// tell the user which day is un-armed without re-reading the registry.
+  factory LeaseResult.gateRefused(String reason, {CalendarEntryLease? lease}) =>
+      LeaseResult(
+        outcome: LeaseOutcome.gateRefused,
+        lease: lease,
+        errorMessage: reason,
+      );
 }
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
@@ -478,6 +506,13 @@ class CalendarEntryLeaseManager {
     List<Map<String, dynamic>> ins,
   ) cfgPushFn = (repo, payload, ins) =>
       pushCfgWithVerify(repo: repo, payload: payload, ins: ins);
+
+  /// Test seam over the #3 gate-then-save chokepoint. Production delegates to
+  /// the shared [gatedPresetSave] — the SAME function ScheduleSyncService, the
+  /// healer and SunriseOffService call — so a test can drive a refusal without
+  /// a live controller while production keeps exactly one gate implementation.
+  @visibleForTesting
+  GatedPresetSaveCall gatedSaveFn = gatedPresetSave;
 
   // ─── Public surface ──────────────────────────────────────────────
 
@@ -617,30 +652,58 @@ class CalendarEntryLeaseManager {
       );
       _activeLeases[entry.dateKey] = updated;
       await _saveToPrefs();
-      final attempt = await _writeLeaseToWled(updated);
-      if (attempt == _WriteAttempt.savePresetFailed) {
-        // Rollback — preset write failed, lease never reached controller. The
-        // prior preset+timer are untouched on the device, so restore the prior
-        // lease record: the manager's view stays accurate.
-        _activeLeases[entry.dateKey] = existing;
-        await _saveToPrefs();
-        debugPrint('$_kLogPrefix update rolled back for ${entry.dateKey} '
-            '— savePreset failed');
-        return LeaseResult.writeFailed(
-            'savePreset failed for preset ${updated.presetId}');
-      }
-      if (attempt == _WriteAttempt.cfgWriteFailed) {
-        // The updated preset was saved but its timer write was NOT verified.
-        // Don't restore `existing` (its timer may also be gone) and don't keep
-        // `updated` (unverified) — DROP the record so the next sweep re-promotes
-        // and re-arms this dateKey cleanly. Registry must reflect verified-armed
-        // only.
-        _activeLeases.remove(entry.dateKey);
-        await _saveToPrefs();
-        debugPrint('$_kLogPrefix update DROPPED for ${entry.dateKey} — cfg '
-            'write not verified; will re-arm on next sweep');
-        return LeaseResult.writeFailed(
-            'cfg write not verified for slot ${updated.slotIndex}');
+      final write = await _writeLeaseToWled(updated);
+      // EXHAUSTIVE ON PURPOSE (#3). This was a chain of `if (attempt == …)`
+      // with an implicit fall-through tail, which is precisely how a new state
+      // inherits somebody else's semantics without anyone noticing. A switch
+      // makes the analyzer refuse to compile the next omission.
+      switch (write.attempt) {
+        case _WriteAttempt.savePresetFailed:
+          // Rollback — preset write failed, lease never reached controller. The
+          // prior preset+timer are untouched on the device, so restore the
+          // prior lease record: the manager's view stays accurate.
+          _activeLeases[entry.dateKey] = existing;
+          await _saveToPrefs();
+          debugPrint('$_kLogPrefix update rolled back for ${entry.dateKey} '
+              '— savePreset failed');
+          return LeaseResult.writeFailed(
+              'savePreset failed for preset ${updated.presetId}');
+
+        case _WriteAttempt.cfgWriteFailed:
+          // The updated preset was saved but its timer write was NOT verified.
+          // Don't restore `existing` (its timer may also be gone) and don't
+          // keep `updated` (unverified) — DROP the record so the next sweep
+          // re-promotes and re-arms this dateKey cleanly. Registry must
+          // reflect verified-armed only.
+          _activeLeases.remove(entry.dateKey);
+          await _saveToPrefs();
+          debugPrint('$_kLogPrefix update DROPPED for ${entry.dateKey} — cfg '
+              'write not verified; will re-arm on next sweep');
+          return LeaseResult.writeFailed(
+              'cfg write not verified for slot ${updated.slotIndex}');
+
+        case _WriteAttempt.gateRefused:
+          // NO ROLLBACK. The save was never attempted, so there is no failed
+          // write to undo and the controller is byte-for-byte where it was.
+          // Restoring `existing` would report a failure that did not happen;
+          // dropping the record would un-register a day the user still has on
+          // their calendar. Keep `updated` — its payload is the newest truth,
+          // it simply is not armed yet — and let the next sweep re-attempt
+          // once the geometry is right.
+          debugPrint('$_kLogPrefix update NOT ARMED for ${entry.dateKey} — '
+              'gate refused, registry untouched');
+          return LeaseResult.gateRefused(
+            'lease preset ${updated.presetId} not saved — '
+            '${write.gateSummary ?? "geometry gate refused"}',
+            lease: updated,
+          );
+
+        case _WriteAttempt.success:
+        case _WriteAttempt.noRepo:
+        case _WriteAttempt.cfgUnsupported:
+        case _WriteAttempt.flagOff:
+          // Armed, or DEFERRED with no controller traffic — keep `updated`.
+          break;
       }
       debugPrint('$_kLogPrefix updated ${entry.dateKey} '
           '(slot=${updated.slotIndex}, preset=${updated.presetId})');
@@ -672,27 +735,49 @@ class CalendarEntryLeaseManager {
     );
     _activeLeases[entry.dateKey] = lease;
     await _saveToPrefs();
-    final attempt = await _writeLeaseToWled(lease);
-    if (attempt == _WriteAttempt.savePresetFailed ||
-        attempt == _WriteAttempt.cfgWriteFailed) {
-      // savePreset failed (nothing on device) OR the timer write was not
-      // verified (preset orphaned, timer absent). Either way the lease is NOT
-      // armed — remove it so the registry never claims armed, and the next
-      // sweep re-promotes and re-arms it. Promotion skips registered dateKeys
-      // (:759), so a KEPT record would never re-arm — the days-of-presets /
-      // zero-timers silent-failure bug this hardening exists to kill.
-      _activeLeases.remove(entry.dateKey);
-      await _saveToPrefs();
-      final reason = attempt == _WriteAttempt.savePresetFailed
-          ? 'savePreset failed for preset $presetId'
-          : 'cfg write not verified for slot $slotIndex';
-      debugPrint('$_kLogPrefix lease rolled back for ${entry.dateKey} — $reason');
-      return LeaseResult.writeFailed(reason);
+    final write = await _writeLeaseToWled(lease);
+    // EXHAUSTIVE ON PURPOSE (#3) — see the update path above for why.
+    switch (write.attempt) {
+      case _WriteAttempt.savePresetFailed:
+      case _WriteAttempt.cfgWriteFailed:
+        // savePreset failed (nothing on device) OR the timer write was not
+        // verified (preset orphaned, timer absent). Either way the lease is NOT
+        // armed — remove it so the registry never claims armed, and the next
+        // sweep re-promotes and re-arms it. Promotion skips registered dateKeys
+        // (:759), so a KEPT record would never re-arm — the days-of-presets /
+        // zero-timers silent-failure bug this hardening exists to kill.
+        _activeLeases.remove(entry.dateKey);
+        await _saveToPrefs();
+        final reason = write.attempt == _WriteAttempt.savePresetFailed
+            ? 'savePreset failed for preset $presetId'
+            : 'cfg write not verified for slot $slotIndex';
+        debugPrint(
+            '$_kLogPrefix lease rolled back for ${entry.dateKey} — $reason');
+        return LeaseResult.writeFailed(reason);
+
+      case _WriteAttempt.gateRefused:
+        // NO ROLLBACK — the save was never attempted. The rollback above
+        // exists because a half-written controller must not be described as
+        // armed; here the controller was never touched, so removing the
+        // record would be inventing a failure. The record stays, un-armed,
+        // and re-attempts on the next sweep exactly like the deferred cases.
+        debugPrint('$_kLogPrefix lease NOT ARMED for ${entry.dateKey} — '
+            'gate refused, registry untouched');
+        return LeaseResult.gateRefused(
+          'lease preset $presetId not saved — '
+          '${write.gateSummary ?? "geometry gate refused"}',
+          lease: lease,
+        );
+
+      case _WriteAttempt.success:
+      case _WriteAttempt.noRepo:
+      case _WriteAttempt.cfgUnsupported:
+      case _WriteAttempt.flagOff:
+        // Keep the lease in registry. The last three are DEFERRED (not
+        // failures): no controller traffic happened, so the record is retained
+        // for a later on-LAN/flag-on retry.
+        break;
     }
-    // success | noRepo | cfgUnsupported | flagOff — keep the lease in registry.
-    // The last three are DEFERRED (not failures): no controller traffic
-    // happened, so the record is retained for a later on-LAN/flag-on retry.
-    // (cfgWriteFailed is handled above — it rolls back.)
     debugPrint('$_kLogPrefix leased ${entry.dateKey} '
         '(slot=$slotIndex, preset=$presetId, '
         'expires=${expiresAt.toIso8601String()})');
@@ -1103,7 +1188,7 @@ class CalendarEntryLeaseManager {
   /// flag — when off, returns [_WriteAttempt.flagOff] without
   /// touching the controller. Serialized through [_wledWriteLock]
   /// against [_writeZeroedSlot] and [sweepExpiredLeases].
-  Future<_WriteAttempt> _writeLeaseToWled(CalendarEntryLease lease) async {
+  Future<_LeaseWrite> _writeLeaseToWled(CalendarEntryLease lease) async {
     final liveEnabled = _readLiveWritesEnabled();
     if (!liveEnabled) {
       debugPrint(
@@ -1112,7 +1197,7 @@ class CalendarEntryLeaseManager {
         'preset=${lease.presetId}) but skipping actual /json/cfg + '
         '/json/state writes',
       );
-      return _WriteAttempt.flagOff;
+      return (attempt: _WriteAttempt.flagOff, gateSummary: null);
     }
     return _wledWriteLock.synchronized(() async {
       final repo = _readRepo();
@@ -1121,7 +1206,7 @@ class CalendarEntryLeaseManager {
           '$_kLogPrefix _writeLeaseToWled: no repo — lease ${lease.dateKey} '
           'registered but device not updated. Next sweep retries.',
         );
-        return _WriteAttempt.noRepo;
+        return (attempt: _WriteAttempt.noRepo, gateSummary: null);
       }
       // Arming needs /json/cfg, which the bridge cannot deliver. Check before
       // savePreset (which DOES work off-LAN via /json/state) so we don't strand
@@ -1131,20 +1216,51 @@ class CalendarEntryLeaseManager {
           '$_kLogPrefix off-LAN — lease ${lease.dateKey} not armed (bridge '
           'cannot write /json/cfg). Lease kept; next on-LAN sweep arms it.',
         );
-        return _WriteAttempt.cfgUnsupported;
+        return (attempt: _WriteAttempt.cfgUnsupported, gateSummary: null);
       }
       try {
-        final presetOk = await repo.savePreset(
+        // #3 — THE LAST UNGATED SAVE PATH JOINS THE GATE.
+        //
+        // `psave` captures LIVE segment geometry whatever the inline state
+        // says, so a lease preset baked over a collapsed layout is exactly as
+        // durable as a baked ladder — it reloads on its date and renders the
+        // wrong shape. gated_preset_save.dart already named this manager as
+        // caller 3 of 4; it was the one that had not been wired.
+        final gate = await _geometryGateInputsFor(repo);
+        final presetName = 'Lease ${lease.dateKey}';
+        final gated = await gatedSaveFn(
           presetId: lease.presetId,
-          state: lease.wledPayload,
-          presetName: 'Lease ${lease.dateKey}',
+          presetName: presetName,
+          expected: gate.expected,
+          read: gate.read,
+          reprovision: gate.reprovision,
+          label: 'lease preset',
+          save: () => repo.savePreset(
+            presetId: lease.presetId,
+            state: lease.wledPayload,
+            presetName: presetName,
+          ),
         );
-        if (!presetOk) {
+        if (gated.gateRefused) {
+          // NO ROLLBACK, and the ordering is why: gatedPresetSave runs the
+          // gate BEFORE anything records an attempt, so there is no attempt
+          // to undo. The controller holds exactly what it held a moment ago.
+          debugPrint(
+            '$_kLogPrefix GATE REFUSED lease ${lease.dateKey} '
+            '(slot=${lease.slotIndex}, preset=${lease.presetId}) — '
+            '${gated.message}',
+          );
+          return (
+            attempt: _WriteAttempt.gateRefused,
+            gateSummary: gated.gate?.summary ?? gated.message,
+          );
+        }
+        if (!gated.saved) {
           debugPrint(
             '$_kLogPrefix savePreset failed for lease ${lease.dateKey} '
             'preset=${lease.presetId} — aborting timer write',
           );
-          return _WriteAttempt.savePresetFailed;
+          return (attempt: _WriteAttempt.savePresetFailed, gateSummary: null);
         }
         // Route the timer write through the SAME hardened path the schedule
         // sync uses (readback-verified, stall-patient) instead of the old
@@ -1166,13 +1282,13 @@ class CalendarEntryLeaseManager {
             '— timer not verified on controller; rolling back registration so '
             'the next sweep re-arms it (registry must not claim armed).',
           );
-          return _WriteAttempt.cfgWriteFailed;
+          return (attempt: _WriteAttempt.cfgWriteFailed, gateSummary: null);
         }
         debugPrint(
           '$_kLogPrefix WROTE+VERIFIED lease ${lease.dateKey} on controller '
           '(slot=${lease.slotIndex}, preset=${lease.presetId})',
         );
-        return _WriteAttempt.success;
+        return (attempt: _WriteAttempt.success, gateSummary: null);
       } catch (e) {
         debugPrint('$_kLogPrefix _writeLeaseToWled exception: $e');
         // Treat as savePreset failure for rollback purposes — we
@@ -1180,9 +1296,64 @@ class CalendarEntryLeaseManager {
         // is to assume the controller state is inconsistent and
         // roll back the in-memory record. The next sweep + retry
         // will re-attempt.
-        return _WriteAttempt.savePresetFailed;
+        //
+        // NOT gateRefused: gatedPresetSave never throws (it swallows the save
+        // and resolves an unreadable gate to "stand aside"), so anything
+        // arriving here happened at or after a save that WAS attempted.
+        return (attempt: _WriteAttempt.savePresetFailed, gateSummary: null);
       }
     });
+  }
+
+  /// Geometry-gate inputs for the lease preset write.
+  ///
+  /// Only a direct-LAN [WledService] can read the controller's bus layout, and
+  /// the bus layout is the only expectation worth gating against: the gate
+  /// exists to defend the installation FROM the app, so its expectation must
+  /// not come from the app's beliefs about the installation. Over the relay —
+  /// and on any read failure — the expectation is empty and [gatedPresetSave]
+  /// saves UNGATED rather than blocking every lease on a controller it could
+  /// not describe. Same disposition as ScheduleSyncService and
+  /// SunriseOffService; a fourth interpretation of "uninformed" would be a
+  /// fourth thing to get wrong.
+  Future<
+      ({
+        List<SegmentShape> expected,
+        GeometryReader read,
+        GeometryProvisioner reprovision,
+      })> _geometryGateInputsFor(WledRepository repo) async {
+    const uninformed = (
+      expected: <SegmentShape>[],
+      read: _noGeometryRead,
+      reprovision: _noGeometryProvision,
+    );
+    if (repo is! WledService) return uninformed;
+    final svc = repo;
+    try {
+      final cfg = await svc.getConfig();
+      if (cfg == null) return uninformed;
+      return (
+        expected: expectedShapeFromChannels(deviceChannelsFromConfig(cfg)),
+        read: () async => segmentShapeFromState(await svc.getState()),
+        reprovision: (want) async {
+          try {
+            // Bounds ONLY — a repair must not smuggle geometry FIELDS
+            // (rev/mi/of/grp/spc) in, which would be #76 with the sign flipped.
+            return await svc.applyJson({
+              'seg': [
+                for (final s in want)
+                  {'id': s.id, 'start': s.start, 'stop': s.stop},
+              ],
+            });
+          } catch (_) {
+            return false;
+          }
+        },
+      );
+    } catch (e) {
+      debugPrint('$_kLogPrefix expected-shape read failed — $e');
+      return uninformed;
+    }
   }
 
   /// Defensive zero-write on lease expiry / deletion. Re-sends the
@@ -1524,5 +1695,29 @@ enum _WriteAttempt {
   /// Feature flag is off — no controller traffic occurred. Caller
   /// keeps the lease in registry for when the flag flips.
   flagOff,
+
+  /// #3 — the geometry gate refused BEFORE savePreset ran. THE SAVE WAS NEVER
+  /// ATTEMPTED, which is why this is not [savePresetFailed]: rolling back
+  /// would report a failure that did not happen, and the registry would drop
+  /// a record whose controller state is exactly as it was. Nothing to undo.
+  ///
+  /// The lease stays registered, un-armed, and the next sweep re-attempts —
+  /// same disposition as [cfgUnsupported] / [noRepo], and for the same reason
+  /// (no controller traffic occurred), but with a diagnosis attached.
+  gateRefused,
 }
+
+/// What [CalendarEntryLeaseManager._writeLeaseToWled] reports back: the
+/// classification, plus the gate's own one-line summary when it refused.
+///
+/// The summary rides along rather than living in a field because the write
+/// runs inside `_wledWriteLock` while the caller reads after it releases —
+/// a field would be a race between two concurrent lease writes, and the
+/// message would name the wrong day.
+typedef _LeaseWrite = ({_WriteAttempt attempt, String? gateSummary});
+
+/// "We could not read the device's shape." Top-level so the uninformed gate
+/// inputs can be a `const` record — a closure literal cannot be.
+Future<List<SegmentShape>?> _noGeometryRead() async => null;
+Future<bool> _noGeometryProvision(List<SegmentShape> _) async => false;
 
