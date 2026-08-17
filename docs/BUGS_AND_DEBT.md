@@ -551,6 +551,75 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Being inert is the only reason this is P3. Left as-is, the honest state is: the model
     landed, the migration did not.
 
+- [x] **#95 — a channel that is OFF reads as a channel that is GONE. Release-blocking; WITHDREW
+  +78. FIXED, awaiting +79 hardware smoke (c).**
+  - Status: **FIXED on main** (filed + fixed 2026-08-17) · Severity: **P1 — release-blocking,
+    customer-visible, no recovery path** · Evidence: **verified-on-hardware (bench `.150`) +
+    verified-by-source**
+  - **Symptom.** After a single-channel design apply, the untargeted channel rendered greyed
+    with a strikethrough and was completely non-interactive. WLED-side state was **correct and
+    healthy** (JSON read: seg 1 present, bounds `128/290/162` intact, `rev:true` intact, exactly
+    `on:false`), and direct WLED control still worked. **App-side lockout only**, with no
+    re-enable path except applying another design that happened to target that channel.
+  - **THE REPORTED DIAGNOSIS WAS WRONG, and the difference decides the fix.** The hypothesis was
+    "channel availability is derived from the segment's `on` state rather than segment
+    existence/bounds." **It is not.** Traced and disproven:
+    - the chip's predicate is
+      [channel_selector_bar.dart:210](../lib/features/dashboard/widgets/channel_selector_bar.dart#L210)
+      `disabled: !isParticipating`, sourced from `participatingChannelIdsProvider` →
+      `peekCachedParticipatingChannels()` → the SharedPreferences participation cache;
+    - that cache is written by exactly three places (Game Day config save, sync engine
+      start/stop, and the reconciler clearing it to `null`) — **none reachable from a design
+      apply**;
+    - `resolveParticipatingChannels` derives from roofline segments + the bus census, **never**
+      from seg `on`;
+    - the only reader of seg `on` is `channelPowerStatesProvider`, and it drives **only the
+      power icon's colour**.
+    Implementing the requested fix as stated ("availability = segment exists with `len > 0`")
+    would have changed nothing, because availability was never computed from segments at all.
+  - **What actually happened — a latent lockout that #89 made visible.** A non-participating
+    channel got `disabled:true` → dimmed, struck through, `onTap:null`, **and its power icon
+    suppressed** by `&& !disabled` at the chip's power block. Every affordance gone.
+    That was survivable only because such a channel stayed **lit**: nobody noticed. **#89**
+    brought the #67 full partition to the interactive path, so an unused channel now correctly
+    writes `{id, on:false}` and goes **dark**. Dark **plus** no control reads as *gone*. Neither
+    half was new; the combination was.
+  - **Fixes (3):**
+    1. **Power is never gated on participation.** Participation scopes *shows*; it is not a
+       claim the channel is absent and must not remove manual control of hardware the device
+       reports. Selection stays gated (the apply chokepoint would filter it anyway, so offering
+       it would be a silent no-op).
+    2. **No strikethrough, ever.** Strikethrough is the typography of *deleted*. Dimming says
+       "out of scope for shows" without claiming the channel is gone.
+    3. **`buildChannelPowerPayload` no longer emits geometry** — see below.
+  - **SECOND DEFECT, found while fixing the first: the wake payload wrote BOUNDS.**
+    `buildChannelPowerPayload` stamped `start`/`stop` from the channel map whenever a config
+    refresh had succeeded (`withBounds`). That is geometry on an apply — forbidden by **#76**
+    (seven design builders) and by **#89**'s own rule 2 (*"an apply NEVER writes `start`/`stop`;
+    bounds are provisioning's"*). This builder was in **neither** census. That is the **third**
+    time a geometry sweep has under-counted its own family (**#76** → **#88** → this), and it
+    re-proves #88's lesson verbatim: *an emitter census must be a grep of the FIELD NAMES across
+    `lib/`, not a walk of the builders you already know about.* The `withBounds` parameter is
+    gone; id+`on` only. The config re-fetch that existed solely to make those bounds fresh went
+    with it — a power tap can no longer re-bound anything, stale map or not.
+  - **Blast radius swept — clear.** Every seg-`on` reader in `lib/` was enumerated: the
+    remaining ones (`schedule_sync` all-off preset detection, `controller_defaults_healer`
+    master read, `setChannelPower`'s `litChannelIds`, `schedule_enforcement`) are all genuinely
+    *about* on-ness. **No other site derives availability, existence or readiness from `on`** —
+    grep-verified for the availability/exists/missing/readiness family against `['on']`.
+  - **Pins (proved able to fail, not just observed to pass):**
+    - `test/features/dashboard/channel_availability_not_from_on_state_test.dart` — an OFF
+      channel and a NON-PARTICIPATING channel each keep a power control, and no label is ever
+      struck through. **Verified by reintroducing `&& !disabled`: the pin fails.** Both a
+      chips-rendered and a power-states-resolved guard are asserted first, so a broken setup
+      cannot produce a vacuous pass.
+    - `channel_power_test.dart` `#95 — NO geometry field, in ANY case, ever` — a **field sweep**
+      (`start stop len rev mi of grp spc`) across **all four** policy cases, deliberately not
+      spot checks on the two cases someone remembered, since that is precisely how the previous
+      two sweeps under-counted.
+  - Ships in **+79**, gated on new hardware smoke **(c)**: single-channel apply, recover
+    channel 2 from the app UI, JSON-verify the wake write was design-fields-only.
+
 - [ ] **#93 — `firebase deploy` ships `functions/lib/` WITHOUT compiling, and reports success
   either way**
   - Status: OPEN (filed 2026-08-17, during the `planGameDayFires` deploy) · Severity: **P2** ·

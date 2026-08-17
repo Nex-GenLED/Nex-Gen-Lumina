@@ -1932,7 +1932,24 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
-## 2.5.10+78 — unified monitoring merged, four P2 fixes, the `of` chokepoint
+## 2.5.10+78 — WITHDRAWN PRE-DISTRIBUTION. Chain complete, smokes passed, does NOT ship.
+
+> **STATUS: WITHDRAWN 2026-08-17, before any distribution.** Chain complete
+> (Android AAB + iOS 308), both smokes passed on hardware — and then
+> post-smoke hardware testing found a **release-blocking regression**, **#95**:
+> after a single-channel design apply, the untargeted channel rendered with no
+> control of any kind and no way back. **versionCode 78 is CONSUMED** and is not
+> reusable. Superseded by **+79**.
+>
+> Nothing reached the Play closed track or TestFlight. iOS 308 exists on App
+> Store Connect as an uploaded build and must not be promoted.
+>
+> **Kept in full, not deleted.** The row below is the identity record for an
+> artifact that exists, was signed, and was uploaded to ASC — exactly what this
+> ledger is for. A withdrawn build with a consumed versionCode is the case where
+> identity matters most, because it is the one nobody remembers a year later.
+
+
 
 | Field | Value |
 |---|---|
