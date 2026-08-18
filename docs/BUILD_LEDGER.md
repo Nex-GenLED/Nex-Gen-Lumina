@@ -67,8 +67,8 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ### SUITE BASELINE — authoritative line, corrected 2026-08-18
 
-**Current baseline: `2435 passed · 4 skipped · 0 failed`** — as of `2026-08-18`,
-post-#95-item-1. Start every delta from this number.
+**Current baseline: `2441 passed · 4 skipped · 0 failed`** — as of `2026-08-18`,
+post-#95-item-1 and post-orientation-pin. Start every delta from this number.
 
 **Two movements since the +80 row's `2416 / 3 / 0`, and both are accounted for:**
 
@@ -76,7 +76,8 @@ post-#95-item-1. Start every delta from this number.
 |---|---|---|---|
 | +80 build-time | 2416 | 3 | the row below |
 | \+ #95 item 1 tests | **2436** | 3 | +18 `participation_override_test`, +2 header pins |
-| \+ ladder test gated | **2435** | **4** | **−1 pass, +1 skip — same test, moved** |
+| \+ ladder test gated | 2435 | 4 | −1 pass, +1 skip — same test, moved |
+| \+ orientation pin tests | **2441** | **4** | +6 `geometry_wire_pin_test` — `rev`/`mi` fenced |
 
 **The −1 is not a lost test.** `base_ladder_repair_live_test` was passing
 *silently and vacuously* (see below); gating it on `skip: !kRunHw` moves it from
@@ -144,6 +145,28 @@ above), real socket construction (`HttpClient()` / `Socket.connect` /
 early-return-on-unreachable (**1 hit, this file**). Every other test naming
 `192.168.x.x` uses it as a mock string. **No other live-hardware test exists in
 the tree.**
+
+### BENCH RIG FACTS — corrections standing as of 2026-08-18
+
+**1. THE BENCH CONTROLLER IS THE ETHERNET BUILD. `wifi.ap:true` IS NOT AN
+OUTAGE.** Two notes — one from earlier on 2026-08-18, one from the overnight
+session — read `ap:true` with an empty `bssid` as an AP-fallback event, i.e. as
+evidence the controller had lost connectivity. **Both are WRONG and are
+superseded by this line.** The rig is wired via a mesh node; `ap:true` with an
+empty `bssid` is simply the **idle radio** on a controller that is not using
+Wi-Fi for its uplink. Nothing was falling back, and no outage occurred.
+
+Any future reading of `ap:true` on this rig must be interpreted against the
+Ethernet uplink before it is called a fault. *(The two superseded notes could
+not be located in the tracked tree — not in this ledger, `BUGS_AND_DEBT.md`,
+`audit/` or `docs/`. If they live in a session log or scratch file, annotate
+them there and point at this line.)*
+
+**2. THE ARMED SUNRISE TIMER IN FLASH IS BENIGN RESIDUE — LEAVE IT.** The
+controller carries an armed sunrise timer (`macro:2` = **NGL Off**, `dow:127`).
+It is **Game-Day-era residue**: it turns the strip **off** at dawn, which is the
+desired end state anyway. Noted so a future audit does not read it as a live
+schedule or "repair" it. **Do not remove it** without a reason beyond tidiness.
 
 ### DISK CLEANUP 2026-08-18 — build worktrees retired, symbols preserved
 
