@@ -1545,9 +1545,38 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     classifying as **drifted** and get re-provisioned. That is correct behaviour but it is a
     LIVE change on devices previously considered healthy, and it needs its own bench
     verification rather than riding on the +80 pin.
+  - ⚠️ **NEW TENSION, added 2026-08-19 — the UI can now set `rev`, and this bug will
+    overwrite it.** The L→R / R→L direction controls
+    (`pattern_grid_widgets.dart`, `pattern_adjustment_panel.dart`) were routed through
+    `applyGeometryJson` so they actually reach the device — they had been silent no-ops since
+    the wire pin was widened to fence `rev`/`mi`. That makes them the **first
+    `applyGeometryJson` caller that derives its payload from a TAP** rather than from the
+    controller's own buses, which is precisely what the approved principle above forbids
+    asserting.
+    - **The collision:** once this bug's shape-check ships, a user's direction flip that
+      disagrees with the bus config's `rev` is classified as **drift** and "repaired" back.
+      The user's choice silently reverts on the next heal, and the control looks broken
+      again — differently.
+    - **The resolution is NOT to exempt the UI write.** The bus config is the source of
+      truth the healer restores from, so the UI write must **also update the installation
+      record** (`hw.led.ins[].rev`), so the two agree and the heal is a no-op. Until then,
+      a direction flip is durable only until the next re-provision.
+    - **REMOTE GAP, deferred deliberately (2026-08-19):** `applyGeometryJson` is
+      **LAN-only**. `CloudRelayRepository` throws `UnsupportedError` — the bridge
+      dispatches live state and has no provisioning branch, the same boundary
+      `applyConfig` hits with `CfgWriteUnsupportedException`. **A customer off
+      their home network therefore cannot change a channel's direction.** The
+      control is the only affected caller; `applyChannelDirection` catches the
+      throw and reports "not applied" rather than crashing a button tap. Every
+      other geometry writer (healer, geometry gate, sunrise-off, lease manager)
+      is already LAN-only by construction, so nothing else regresses. Closing
+      this means giving the relay a provisioning door — out of scope for +81.
+    - Not resolved on either side; **made visible on both**. See
+      `lib/features/wled/channel_direction.dart` for the same note at the write site.
   - Files: `lib/features/schedule/geometry_gate.dart:27`,
     `lib/features/wled/controller_defaults_healer.dart` (`_reprovisionSegments`),
-    `lib/features/wled/wled_hardware_config.dart:41` (client-only).
+    `lib/features/wled/wled_hardware_config.dart:41` (client-only),
+    `lib/features/wled/channel_direction.dart` (the new UI writer).
 
 - [ ] **#103 — the Lumina custom-effects catalog animates by MOVING SEGMENT BOUNDARIES.
   UNREACHABLE on +79 (two gates) — pre-launch redesign, NOT a hotfix**

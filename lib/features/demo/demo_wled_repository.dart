@@ -122,6 +122,28 @@ class DemoWledRepository implements WledRepository {
     return true;
   }
 
+  /// Geometry writes the demo accepted, most recent last.
+  ///
+  /// Recorded rather than discarded so a test can assert that a control
+  /// actually reached the PROVISIONING door — the distinction a silent no-op
+  /// erases, and the one that made the direction control look fine while doing
+  /// nothing for a build.
+  final List<Map<String, dynamic>> appliedGeometry = [];
+
+  /// Demo has no hardware to re-provision, so this records and succeeds.
+  ///
+  /// Returning true is the honest answer here: from the caller's point of view
+  /// the write was accepted by this transport. Returning false would make demo
+  /// mode indistinguishable from an off-LAN transport that genuinely cannot
+  /// provision, and the UI reports that case to the user.
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async {
+    appliedGeometry.add(payload);
+    debugPrint('DemoWLED applyGeometryJson: '
+        '${(payload['seg'] as List?)?.length ?? 0} seg(s)');
+    return true;
+  }
+
   @override
   Future<bool> applyJson(Map<String, dynamic> payload) async {
     payload = normalizeWledPayload(payload);

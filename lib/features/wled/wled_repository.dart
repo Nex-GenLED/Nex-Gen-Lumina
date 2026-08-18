@@ -28,6 +28,18 @@ abstract class WledRepository {
   Future<bool> setState({bool? on, int? brightness, int? speed, Color? color, int? white, bool? forceRgbwZeroWhite});
   Future<bool> applyJson(Map<String, dynamic> payload);
 
+  /// The PROVISIONING door: geometry (`start`/`stop`/`rev`/`mi`) is ALLOWED.
+  ///
+  /// [applyJson] strips geometry at the wire — that is the pin, and it is why
+  /// this is a separate method rather than a flag (a bool parameter is one
+  /// typo away from disabling the fence at the call site that needed it most,
+  /// and would not show up in a grep for "who writes geometry").
+  ///
+  /// Defaults to **false — wrote nothing**, deliberately. A transport that
+  /// cannot state geometry must report that rather than silently accept it:
+  /// only implementations that can actually provision override this.
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
+
   /// Posts configuration payloads to /json/cfg (e.g., timers).
   ///
   /// Returns false for a genuine delivery failure. Throws

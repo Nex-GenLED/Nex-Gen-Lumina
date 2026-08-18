@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/channel_direction.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -259,12 +260,16 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return;
       try {
+        // LOOK ONLY. `rev` used to ride along here, so every speed/intensity
+        // DRAG re-asserted direction from this panel's local state — an
+        // incidental geometry write on a control that had nothing to do with
+        // direction. Direction now has its own discrete path
+        // (`_applyDirection`) through the provisioning door.
         var payload = <String, dynamic>{
           'seg': [
             {
               'sx': _speed,
               'ix': _intensity,
-              'rev': _reverse,
             }
           ]
         };
@@ -279,6 +284,25 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
         debugPrint('PatternAdjustmentPanel apply failed: $e');
       }
     });
+  }
+
+  /// User-initiated DIRECTION change → the provisioning door. Discrete, not
+  /// debounced. See `channel_direction.dart` (incl. the #102 tension).
+  Future<void> _applyDirection(bool reverse) async {
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isEmpty) {
+      debugPrint('PatternAdjustmentPanel _applyDirection: skip (U1 gate)');
+      return;
+    }
+    final ok = await applyChannelDirection(
+      repo: ref.read(wledRepositoryProvider),
+      channelIds: channels,
+      reverse: reverse,
+    );
+    if (!ok) {
+      debugPrint('PatternAdjustmentPanel _applyDirection: transport cannot '
+          'state geometry (off-LAN or demo) — direction NOT applied');
+    }
   }
 
   void _scheduleDebouncedLayoutApply() {
@@ -374,7 +398,10 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                     final rev = s.isNotEmpty ? s.first : false;
                     setState(() => _reverse = rev);
                     _notifyChanged();
-                    _scheduleDebouncedApply();
+                    // Direction is GEOMETRY — provisioning door, not the
+                    // debounced look apply (which no longer carries `rev` at
+                    // all, and whose door strips it).
+                    _applyDirection(rev);
                   },
                   style: ButtonStyle(
                     visualDensity: VisualDensity.compact,

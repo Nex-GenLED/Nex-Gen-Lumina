@@ -558,15 +558,23 @@ class WledService
   /// site that needed it most, and it would not show up in a grep for "who
   /// writes geometry". This name does.
   ///
-  /// Legitimate callers, all of which derive `want` from the controller's OWN
-  /// hardware buses (never from the app's model of the installation):
+  /// Legitimate callers. All but the last derive `want` from the controller's
+  /// OWN hardware buses (never from the app's model of the installation):
   ///   • `ControllerDefaultsHealer._reprovisionSegments`
   ///   • `ScheduleSyncService`'s geometry-gate re-provision
   ///   • `SunriseOffService` / `CalendarEntryLeaseManager` gate re-provision
+  ///   • ⚠️ the user-facing DIRECTION control (`channel_direction.dart`) — the
+  ///     ONE caller whose payload comes from a TAP rather than from the buses.
+  ///     It is here because `rev` is geometry and [applyJson] strips it, so the
+  ///     control was a silent no-op otherwise. It also breaks the invariant the
+  ///     line above states, which is the #102 tension: until the UI write also
+  ///     updates `hw.led.ins[].rev`, a heal will classify the user's flip as
+  ///     drift and revert it. Noted at the write site and on #102.
   ///
   /// Skips participation expansion on purpose: a re-provision states the FULL
   /// expected shape and must not be narrowed to the participating subset, or
   /// it would repair half a strip.
+  @override
   Future<bool> applyGeometryJson(Map<String, dynamic> payload) {
     debugPrint('🧭 WLED applyGeometryJson (provisioning, bounds ALLOWED)');
     return _postJson(payload, allowGeometry: true);

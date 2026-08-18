@@ -12,6 +12,7 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/dashboard/main_scaffold.dart' show showDemoExitSheet;
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
+import 'package:nexgen_command/features/wled/channel_direction.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
@@ -1995,6 +1996,29 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     });
   }
 
+  /// User-initiated DIRECTION change → the provisioning door.
+  ///
+  /// Not debounced and not routed through [_applyChange]: this is a discrete
+  /// tap, not a dragged value, and it must not travel with look fields. See
+  /// `channel_direction.dart` for why it needs a different door — and for the
+  /// #102 tension it inherits.
+  Future<void> _applyDirection(bool reverse) async {
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isEmpty) {
+      debugPrint('PatternGrid _applyDirection: skip (U1 gate)');
+      return;
+    }
+    final ok = await applyChannelDirection(
+      repo: ref.read(wledRepositoryProvider),
+      channelIds: channels,
+      reverse: reverse,
+    );
+    if (!ok) {
+      debugPrint('PatternGrid _applyDirection: transport cannot state '
+          'geometry (off-LAN or demo) — direction NOT applied');
+    }
+  }
+
   /// Recompute gradient colors from the current preset + base color and
   /// send the full segment payload (col + fx + grp) to the device.
   void _applyGradientChange() {
@@ -2261,7 +2285,11 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                       onSelectionChanged: (s) {
                         final rev = s.isNotEmpty ? s.first : false;
                         setState(() => _reverse = rev);
-                        _applyChange({'rev': rev});
+                        // Direction is GEOMETRY, so it takes the provisioning
+                        // door. Routed through _applyChange (applyJson) this
+                        // control was a silent no-op from a356b5f onward — the
+                        // widened wire pin stripped its only field.
+                        _applyDirection(rev);
                       },
                       style: ButtonStyle(
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,

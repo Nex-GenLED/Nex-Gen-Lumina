@@ -383,6 +383,34 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
     return _executeBool('applyJson', pinned);
   }
 
+  /// The PROVISIONING door is **LAN-ONLY**. Always throws.
+  ///
+  /// WHY THIS THROWS RATHER THAN RETURNING FALSE. `false` from this method
+  /// means "this transport declined the write", which a caller may reasonably
+  /// treat as a transient failure and retry. This is not transient: the relay
+  /// has no provisioning door at all. The bridge dispatches live-state commands
+  /// only, exactly as `applyConfig` cannot carry `/json/cfg`
+  /// (`CfgWriteUnsupportedException`, same shape, same reason) — so this is a
+  /// capability boundary, and a hard error is what stops it being mistaken for
+  /// a flaky one.
+  ///
+  /// WHAT THIS COSTS TODAY: a customer off their home network cannot change a
+  /// channel's DIRECTION. The L->R / R->L control is the only affected caller;
+  /// `applyChannelDirection` catches this and reports "not applied" rather than
+  /// letting it surface as a crash. Every other geometry writer (the healer,
+  /// the geometry gate, sunrise-off, the lease manager) is already LAN-only by
+  /// construction, so nothing else regresses.
+  ///
+  /// Deferred deliberately — see the #102 tension note in `BUGS_AND_DEBT.md`.
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async {
+    throw UnsupportedError(
+      'geometry writes are LAN-only until the relay grows a provisioning door. '
+      'The bridge relays live state and has no geometry dispatch branch; '
+      'segments: ${(payload['seg'] as List?)?.length ?? 0}',
+    );
+  }
+
   /// Typed per-pixel (`i`) write — Design Studio Slice 0, remote path.
   ///
   /// Each range-compressed chunk becomes ONE command doc, posted via
