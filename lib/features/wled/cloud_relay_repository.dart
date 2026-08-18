@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
+import 'package:nexgen_command/features/wled/geometry_wire_pin.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -371,7 +372,15 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
     final participating = await getCachedParticipatingChannels();
     final normalized = normalizeWledPayload(payload);
     final expanded = expandForParticipation(normalized, participating);
-    return _executeBool('applyJson', expanded);
+    // +80 wire pin — the relay is a wire exit too, and an off-LAN geometry
+    // stomp is HARDER to catch than a local one: there is no bench in the room
+    // and the bridge reports only a transport status. Same pin, same rule.
+    final pinned = pinNoGeometryOnWire(
+      expanded,
+      caller: 'relay',
+      onViolation: debugPrint,
+    );
+    return _executeBool('applyJson', pinned);
   }
 
   /// Typed per-pixel (`i`) write — Design Studio Slice 0, remote path.

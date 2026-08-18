@@ -867,7 +867,9 @@ class ControllerDefaultsHealer {
   Future<bool> _reprovisionSegments(
       WledService svc, List<SegmentShape> want) async {
     try {
-      return await svc.applyJson({
+      // applyGeometryJson, not applyJson: this is the provisioning door. The
+      // wire pin refuses bounds on every other path (+80).
+      return await svc.applyGeometryJson({
         'seg': [
           for (final s in want) {'id': s.id, 'start': s.start, 'stop': s.stop},
         ],

@@ -266,7 +266,8 @@ class SunriseOffService {
         read: () async => segmentShapeFromState(await svc.getState()),
         reprovision: (want) async {
           try {
-            return await svc.applyJson({
+            // Provisioning door (+80 wire pin).
+            return await svc.applyGeometryJson({
               'seg': [
                 for (final s in want)
                   {'id': s.id, 'start': s.start, 'stop': s.stop},

@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/schedule/timer_landing.dart'
     show timerInstancesFromCfg;
 import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
+import 'package:nexgen_command/features/wled/geometry_wire_pin.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -451,7 +452,16 @@ class WledService
     return applyJson(payload);
   }
 
-  Future<bool> _postJson(Map<String, dynamic> data) async {
+  /// [allowGeometry] — ONLY for provisioning paths that legitimately state
+  /// segment bounds (see [applyGeometryJson] and [updateSegmentConfig]).
+  /// Everything else is pinned: an apply never states geometry.
+  Future<bool> _postJson(
+    Map<String, dynamic> data, {
+    bool allowGeometry = false,
+  }) async {
+    if (!allowGeometry) {
+      data = pinNoGeometryOnWire(data, caller: 'local', onViolation: debugPrint);
+    }
     if (_simulate) {
       // Best-effort: update local state from payload and pretend success.
       try {
@@ -491,6 +501,11 @@ class WledService
       final body = jsonEncode(data);
       debugPrint('📤 WLED POST /json/state');
       debugPrint('   Payload: $body');
+      // LUMINA_WIRE — one short, greppable line per apply carrying the two
+      // facts a geometry investigation needs, INDEPENDENT of the payload dump
+      // above (which logcat truncates on a large design and which debugPrint
+      // wraps across lines). `adb logcat -d | grep LUMINA_WIRE`.
+      _logWireSummary(data, allowGeometry: allowGeometry);
 
       final response = await http.post(
         _uri('/json/state'),
@@ -533,6 +548,48 @@ class WledService
     final normalized = normalizeWledPayload(payload);
     final expanded = expandForParticipation(normalized, participating);
     return _postJson(expanded);
+  }
+
+  /// PROVISIONING ENTRY POINT — the only door through which segment bounds may
+  /// reach the device.
+  ///
+  /// Deliberately a separate METHOD rather than a flag on [applyJson]: a
+  /// boolean parameter is one typo away from disabling the pin at the call
+  /// site that needed it most, and it would not show up in a grep for "who
+  /// writes geometry". This name does.
+  ///
+  /// Legitimate callers, all of which derive `want` from the controller's OWN
+  /// hardware buses (never from the app's model of the installation):
+  ///   • `ControllerDefaultsHealer._reprovisionSegments`
+  ///   • `ScheduleSyncService`'s geometry-gate re-provision
+  ///   • `SunriseOffService` / `CalendarEntryLeaseManager` gate re-provision
+  ///
+  /// Skips participation expansion on purpose: a re-provision states the FULL
+  /// expected shape and must not be narrowed to the participating subset, or
+  /// it would repair half a strip.
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) {
+    debugPrint('🧭 WLED applyGeometryJson (provisioning, bounds ALLOWED)');
+    return _postJson(payload, allowGeometry: true);
+  }
+
+  /// One-line wire summary for geometry investigations. See LUMINA_WIRE above.
+  void _logWireSummary(
+    Map<String, dynamic> data, {
+    required bool allowGeometry,
+  }) {
+    final seg = data['seg'];
+    final segCount = seg is List ? seg.length : 0;
+    final ids = seg is List
+        ? seg
+            .whereType<Map>()
+            .map((s) => s['id'])
+            .map((v) => v == null ? '-' : '$v')
+            .join(',')
+        : '';
+    final violations = findGeometryViolations(data);
+    debugPrint('LUMINA_WIRE segs=$segCount ids=[$ids] '
+        'bounds=${violations.isEmpty ? 'NONE' : violations.join('|')} '
+        'provisioning=$allowGeometry');
   }
 
   /// Typed per-pixel (`i`) write — Design Studio Slice 0.
@@ -1293,7 +1350,8 @@ class WledService
     };
 
     debugPrint('📤 WLED updateSegmentConfig: $payload');
-    return _postJson(payload);
+    // Allowlisted: this method's entire purpose is to state bounds.
+    return _postJson(payload, allowGeometry: true);
   }
 
   @override

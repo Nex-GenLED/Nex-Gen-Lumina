@@ -1339,7 +1339,8 @@ class CalendarEntryLeaseManager {
           try {
             // Bounds ONLY — a repair must not smuggle geometry FIELDS
             // (rev/mi/of/grp/spc) in, which would be #76 with the sign flipped.
-            return await svc.applyJson({
+            // Provisioning door (+80 wire pin): bounds are refused on applyJson.
+            return await svc.applyGeometryJson({
               'seg': [
                 for (final s in want)
                   {'id': s.id, 'start': s.start, 'stop': s.stop},

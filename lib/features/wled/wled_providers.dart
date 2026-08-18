@@ -1444,7 +1444,10 @@ class WledNotifier extends Notifier<WledStateModel> {
   ///      Never POST an empty seg array.
   ///   2. **[applyChannelFilter]** (RAW payloads only — see discriminator) —
   ///      rewrites the single template seg into one seg per effective channel
-  ///      id, each with explicit `id`/`start`/`stop`/`on:true`. The result is
+  ///      id, each with explicit `id`/`on:true` and **NO `start`/`stop`**
+  ///      (corrected +80 — this comment claimed bounds were emitted, which
+  ///      stopped being true at #89 and read as a licence to expect geometry
+  ///      on this path; bounds are provisioning's). The result is
   ///      multi-seg-with-ids that survives the [expandForParticipation]
   ///      chokepoint via Rule 4, and is **cache-independent** — it does NOT
   ///      depend on the SharedPreferences participation cache being warm

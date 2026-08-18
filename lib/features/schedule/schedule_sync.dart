@@ -943,7 +943,9 @@ class ScheduleSyncService {
           gateRead = () async => segmentShapeFromState(await svc.getState());
           gateReprovision = (want) async {
             try {
-              return await svc.applyJson({
+              // Provisioning door (+80 wire pin) — bounds are refused on
+              // applyJson and allowed only here.
+              return await svc.applyGeometryJson({
                 'seg': [
                   for (final s in want)
                     {'id': s.id, 'start': s.start, 'stop': s.stop},
