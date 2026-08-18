@@ -1463,6 +1463,77 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P2 — hardening & platform
 
+- [ ] **#102 — a geometry re-provision restores bounds but NOT `rev`, so a repaired channel
+  runs backwards (+81)**
+  - Status: OPEN (filed 2026-08-18, +80 geometry work) · Severity: **P2** ·
+    Evidence: **bench-measured 2026-08-18 on `.150`**
+  - `_reprovisionSegments` emits `{id, start, stop}` only. After the +79 destruction the
+    bench's seg1 lost `rev:true`; the repair restored its bounds and left it running in the
+    wrong direction. A customer sees half the house animating backwards and has no control
+    that fixes it.
+  - **`rev` is NOT smuggling — measured.** Bus config vs live segments on `.150`:
+
+    | | bus `rev` (`hw.led.ins`) | segment `rev` (`/json/state`) |
+    |---|---|---|
+    | 0 | `false` | `false` |
+    | 1 | **`true`** | **`true`** |
+
+    They agree, and `WledHardwareConfig` already parses `rev`
+    (`wled_hardware_config.dart:41`). So `rev` comes from **the controller's own buses** —
+    the same source the bounds come from.
+  - **The healer's comment conflates two things.** *"must not smuggle geometry FIELDS
+    (rev/mi/of/grp/spc)"* is right about `mi`/`of`/`grp`/`spc` — **look/rendering** properties
+    with no bus-config counterpart, which the app would be *inventing*. `rev` is different:
+    it is **physical wiring direction**, readable from `hw.led.ins`. Restoring it is the same
+    act as restoring `start`/`stop`.
+  - **Approved principle, verbatim (Tyler, 2026-08-18):** *"restore what the controller's own
+    buses state; never assert what only the app believes."* Amend the comment to that
+    principle rather than a field blacklist — a blacklist has to be maintained by hand, which
+    is the failure mode of the four emitter censuses.
+  - **Shape:** `SegmentShape` gains `rev`; `expectedShapeFromChannels` sources it from
+    `WledHardwareConfig.rev`; `segmentShapeFromState` reads seg `rev`; `_reprovisionSegments`
+    emits `{id, start, stop, rev}`.
+  - ⚠️ **Why this is +81 and not +80.** Adding `rev` to `SegmentShape.==` changes the geometry
+    gate's equality: devices whose segment `rev` disagrees with their bus `rev` would start
+    classifying as **drifted** and get re-provisioned. That is correct behaviour but it is a
+    LIVE change on devices previously considered healthy, and it needs its own bench
+    verification rather than riding on the +80 pin.
+  - Files: `lib/features/schedule/geometry_gate.dart:27`,
+    `lib/features/wled/controller_defaults_healer.dart` (`_reprovisionSegments`),
+    `lib/features/wled/wled_hardware_config.dart:41` (client-only).
+
+- [ ] **#103 — three Lumina custom effects animate by MOVING SEGMENT BOUNDARIES; under the
+  +80 pin they degrade to a static two-tone and leave half the strip dark**
+  - Status: OPEN (filed 2026-08-18) · Severity: **P2** · Evidence: **bench-proven 2026-08-18
+    on `.150`, 20 frames posted, readback cited below**
+  - `generateRisingTideFrames`, `generatePulseBurstFrames` and `generateGrandRevealFrames`
+    (`lumina_custom_effects.dart`) carry their animation **entirely in `start`/`stop`** — the
+    "motion" is a boundary sweeping across the strip. `generateOceanSwellFrames` does not and
+    is unaffected.
+  - **Bench result with the pin's strip path forced** (this is release behaviour):
+    - **Geometry SURVIVED** — `seg0[0,128) seg1[128,290) rev=true` identical before and after
+      all 20 frames. The pin does its job; nothing crashed; every POST returned OK.
+    - **The effect is dead.** Stripped, frames 1–19 are byte-identical:
+      `[{id:0,on,col:[0,128,255,0],fx:0},{id:1,on,col:[0,0,0,0],fx:0}]`. Twenty frames render
+      one static image.
+    - **It ends in a WRONG state.** The final frame omits seg 1 entirely (its
+      `clampedPixels < totalPixels` guard goes false), so seg 1 keeps frame 19's **black** and
+      stays dark until something else lights it. Half a dark house, persistent.
+  - **Verdict: DEGRADES (badly), does not BREAK.** Correctly not a reason to allowlist them —
+    an allowlist would restore the animation by restoring the destruction.
+  - **Redesign scope (do not allowlist):**
+    1. **Prefer a NATIVE WLED effect.** Rising Tide ≈ Percent/Wipe; Pulse Burst ≈
+       Ripple/Fireworks. Zero geometry, zero custom frames, and the controller runs it
+       locally — which also deletes 20 sequential HTTP POSTs per effect (20 command DOCS over
+       the relay, where this is currently unusable regardless of the pin).
+    2. **Fall back to per-pixel (`i`)** where no native equivalent exists: `applyPerPixel` /
+       `postPixelSpansChunked` (Design Studio Slice 0) paints spans **within fixed segments**
+       and states no geometry — the correct primitive for a growing span. Must handle the
+       `frz:true` side-effect (a per-pixel write freezes the segment; `psave` captures it →
+       poisoned preset fires dark forever — fixed +63, reuse that handling).
+    3. Per-segment colour ramps are NOT viable — 2 steps on a 2-channel device is not a tide.
+  - Files: `lib/features/wled/lumina_custom_effects.dart` (client-only).
+
 - [ ] **#100 — client and server derive a config's team slug from DIFFERENT sources, so the
   client can go blind to a config the server still acts on**
   - Status: OPEN (filed 2026-08-18) · Severity: **P2** · Evidence: **verified-by-source +

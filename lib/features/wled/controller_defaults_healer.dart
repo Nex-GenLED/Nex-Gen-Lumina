@@ -122,6 +122,44 @@ int? _asInt(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
 
 // ── Pure planners (no I/O — unit-tested directly) ────────────────────────────
 
+/// What the connect-time geometry check decided (+80).
+enum GeometryHealVerdict {
+  /// Expectation or live shape unavailable. Repair a KNOWN mismatch, never a
+  /// suspicion — one flaky read must not re-provision a controller we cannot
+  /// describe. Same stand-aside-on-ignorance boundary the geometry gate settled.
+  standAside,
+
+  /// Live layout matches the controller's own buses. Zero writes.
+  healthy,
+
+  /// Live layout disagrees with the buses. Re-provision to [expected].
+  drifted,
+}
+
+/// PURE. Decide whether the live segment layout needs re-provisioning.
+///
+/// Extracted from `_healSegmentGeometry` so the DECISION is unit-testable
+/// without a WledService or HTTP — the same reason `buildChannelPowerPayload`
+/// is pure Dart, and the reason this file has a "pure planners" section at all.
+///
+/// [expected] comes from the controller's OWN buses
+/// (`expectedShapeFromChannels(deviceChannelsFromConfig(cfg))`), never from the
+/// app's model of the installation: the check defends the installation against
+/// the app, so its expectation must not come from the app's beliefs.
+///
+/// [live] is nullable on purpose — null means the state read failed, which is
+/// ignorance, not disagreement.
+GeometryHealVerdict decideGeometryHeal({
+  required List<SegmentShape> expected,
+  required List<SegmentShape>? live,
+}) {
+  if (expected.isEmpty) return GeometryHealVerdict.standAside;
+  if (live == null || live.isEmpty) return GeometryHealVerdict.standAside;
+  return listEquals(live, expected)
+      ? GeometryHealVerdict.healthy
+      : GeometryHealVerdict.drifted;
+}
+
 /// True when the controller's NTP host should be healed to [kHealNtpHost].
 ///
 /// Fires when the clock is unset (NTP never synced — current host unreachable
@@ -340,6 +378,10 @@ class ControllerHealReport {
   /// System ON preset slots (1/3/4/5) repaired to assert ROOT master power.
   /// Empty on a healthy controller — the heal is readback-gated.
   final List<int> onPresetsHealed = [];
+
+  /// The live segment layout disagreed with the controller's own buses and was
+  /// re-provisioned on connect (+80). Bounds only — `rev` restoration is +81.
+  bool geometryReprovisioned = false;
   bool rebooted = false;
 
   /// The ntp-host heal was written but the reboot was DEFERRED to the next
@@ -376,6 +418,7 @@ class ControllerHealReport {
       coordsHealed ||
       gammaHealed ||
       audioReactiveHealed ||
+      geometryReprovisioned ||
       onPresetsHealed.isNotEmpty;
 
   @override
@@ -386,6 +429,7 @@ class ControllerHealReport {
       if (coordsHealed) 'coords',
       if (gammaHealed) 'gamma',
       if (audioReactiveHealed) 'audioreactive',
+      if (geometryReprovisioned) 'geometry',
       if (onPresetsHealed.isNotEmpty) 'on-presets${onPresetsHealed.join('/')}',
       if (rebooted) 'reboot',
       if (rebootDeferred) 'reboot-deferred',
@@ -563,6 +607,38 @@ class ControllerDefaultsHealer {
     final arSource = repo;
     if (arSource is AudioReactiveConfigSource) {
       await _healAudioReactive(arSource as AudioReactiveConfigSource, report);
+    }
+
+    // (d.5) SEGMENT GEOMETRY — the connect-time shape check (+80).
+    //
+    // WHY THIS STEP EXISTS AT ALL. Before +80 the ONLY code that could repair a
+    // collapsed segment layout was the geometry gate, and every one of its call
+    // sites sits INSIDE a preset-save path — `_healOnPresetMasterPower` reaches
+    // it only after `if (broken.isEmpty) return;`, and ScheduleSync reaches it
+    // only when a preset actually needs writing. So the repair machinery existed
+    // and had NO TRIGGER of its own: a controller that booted with its segments
+    // collapsed but its presets healthy stayed collapsed indefinitely, and did
+    // — for ~30 minutes on the bench, with the app connected the whole time,
+    // while a customer's per-channel control silently addressed one segment
+    // that spanned the whole strip.
+    //
+    // The gate was always a GUARD ON PSAVE ("don't bake collapsed geometry into
+    // the base layer"), never a HEALER OF GEOMETRY. This is the healer.
+    //
+    // ORDERED BEFORE (e) DELIBERATELY. The preset heal psaves, and psave
+    // captures LIVE geometry whatever the inline state says. Repairing the
+    // shape first means the gate at (e) has less to refuse and any psave that
+    // does run captures the correct layout — the two mechanisms compose instead
+    // of racing.
+    //
+    // BOUNDS ONLY for +80. `rev` is also in the controller's own bus config and
+    // restoring it is legitimate (see #+81), but adding it to SegmentShape
+    // changes the gate's equality and would start classifying rev-disagreeing
+    // devices as drifted — a live behaviour change that needs its own bench
+    // verification, not a rider on this one.
+    final geometrySource = repo;
+    if (geometrySource is WledService) {
+      await _healSegmentGeometry(geometrySource, report);
     }
 
     // (e) ON-preset master power — repair presets 1/3/4/5 that store segments
@@ -858,6 +934,63 @@ class ControllerDefaultsHealer {
     } catch (e) {
       debugPrint('[Healer] expected-shape read failed: $e');
       return const [];
+    }
+  }
+
+  /// Connect-time segment-shape check (+80, step (d.5)).
+  ///
+  /// Compares the LIVE layout against the controller's OWN buses and
+  /// re-provisions when they disagree. Heal-only-broken: a matching layout
+  /// writes nothing, so the common case costs one `/json/state` read on top of
+  /// the cfg read the healer has already done.
+  ///
+  /// STANDS ASIDE ON IGNORANCE, GATES ON DISAGREEMENT — the same boundary the
+  /// geometry gate settled. An unreadable cfg or state yields an empty
+  /// expectation and we do nothing: this repairs a KNOWN mismatch, never a
+  /// suspicion. Refusing on ignorance would let one flaky read re-provision a
+  /// controller we cannot describe.
+  Future<void> _healSegmentGeometry(
+      WledService svc, ControllerHealReport report) async {
+    final want = await _expectedShapeFor(svc);
+
+    List<SegmentShape>? live;
+    try {
+      live = segmentShapeFromState(await svc.getState());
+    } catch (e) {
+      report.log.add('geometry: live shape unreadable ($e) — stood aside');
+      return;
+    }
+
+    switch (decideGeometryHeal(expected: want, live: live)) {
+      case GeometryHealVerdict.standAside:
+        report.log.add('geometry: shape unavailable — stood aside');
+        return;
+      case GeometryHealVerdict.healthy:
+        return; // Zero writes, and nothing to say.
+      case GeometryHealVerdict.drifted:
+        break;
+    }
+
+    report.log.add('geometry DRIFT: live=$live expected=$want');
+    final ok = await _reprovisionSegments(svc, want);
+    if (!ok) {
+      report.log.add('geometry re-provision POST failed');
+      return;
+    }
+
+    // READBACK-GATED, like every other heal here. A 2xx proves delivery, never
+    // content — the same rule the build ledger applies to a deploy. Report only
+    // what actually landed.
+    try {
+      final after = segmentShapeFromState(await svc.getState());
+      if (after != null && listEquals(after, want)) {
+        report.geometryReprovisioned = true;
+        report.log.add('geometry re-provisioned: $after');
+      } else {
+        report.log.add('geometry re-provision did NOT land: got $after');
+      }
+    } catch (e) {
+      report.log.add('geometry re-provision readback failed: $e');
     }
   }
 

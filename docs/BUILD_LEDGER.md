@@ -65,6 +65,56 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### THE "HEALER" WAS A PSAVE GUARD, NEVER A CONNECT-TIME HEALER — 2026-08-18
+
+Recorded because the machinery looked present and was reported as present. It
+was not, and the gap cost ~30 minutes of a destroyed bench layout with the app
+connected the whole time.
+
+**The claim that was wrong.** "The healer re-provisions collapsed geometry on
+connect." Everyone reading `ControllerDefaultsHealer._reprovisionSegments` and
+`evaluateGeometryGate` concluded that, including this session at first.
+
+**What was actually true.** Every geometry-repair call site in the codebase sat
+INSIDE a preset-save path:
+
+| Call site | Gate it sat behind |
+|---|---|
+| `controller_defaults_healer.dart` on-preset heal | `if (broken.isEmpty) return;` — only when an ON-preset was *unsatisfied* |
+| `schedule_sync.dart` `psaveIfChanged` | only when a preset needed writing |
+| `sunrise_off_service.dart` | a preset save |
+| `calendar_entry_lease_manager.dart` | a preset save |
+
+`_expectedShapeFor` was not called until *after* the `broken.isEmpty` early
+return, so on a healthy-preset controller **the segment shape was never read at
+all**. The healer's own comment says it plainly — *"One extra GET, and only on
+the broken path."*
+
+**So the gate was a GUARD ON PSAVE** — "don't bake collapsed geometry into the
+base layer" — **not a HEALER OF GEOMETRY.** Prevention, not repair. Geometry
+repair had **no trigger of its own**: a controller that booted collapsed but had
+healthy presets stayed collapsed indefinitely.
+
+**Closed by the +80 connect-time check** (step (d.5), ordered BEFORE the preset
+heal so any psave that does run captures the corrected layout). Heal-only-broken
+— a matching layout writes nothing. Stands aside on ignorance (unreadable buses
+or unreadable state), gates on disagreement — the same boundary the geometry
+gate settled. Readback-gated: a 2xx proves delivery, never content.
+
+**Bounds only.** `rev` restoration is +81: bus `rev` and segment `rev` were
+measured to agree on the bench (bus1 `rev=true` / seg1 `rev=true`), so restoring
+it is legitimate — but adding `rev` to `SegmentShape` changes the gate's
+equality and would start classifying rev-disagreeing devices as drifted, which
+is a live behaviour change needing its own bench verification. Approved
+principle, recorded verbatim: **"restore what the controller's own buses state;
+never assert what only the app believes."**
+
+**The generalisable lesson.** *Repair machinery reachable only as a side-effect
+of an unrelated trigger is not repair machinery.* Four censuses under-counted
+the geometry EMITTERS (#76 → #88 → #89 → #95); this is the same failure one
+level up — the geometry REPAIRER was counted as existing because the function
+existed, without anyone asking what calls it.
+
 ### GAME DAY TEARDOWN 2026-08-18 — two armed fires retracted, gate rolled back, ghost config removed
 
 Not a build row. A fleet-affecting operational event, recorded here because it
