@@ -59,7 +59,12 @@ Future<void> _pumpExpanded(WidgetTester tester, ProviderContainer c) async {
 
   // Expand the bar so the chips render. The power-state provider is only
   // watched from inside the chip builder, so it does not resolve until here.
-  await tester.tap(find.text('All Channels'));
+  //
+  // textContaining, not text: the header now appends "· N of M in shows"
+  // whenever participation narrows (#95 item 3), which is precisely the
+  // participating:[0] case two of these pins run. An exact-match finder here
+  // made those two fail for a reason that has nothing to do with affordances.
+  await tester.tap(find.textContaining('All Channels'));
   await tester.pumpAndSettle();
 
   // Guard against a vacuous pass: if the chips or the power states are missing,
@@ -105,6 +110,39 @@ void main() {
           'of hardware the device reports (#95 — the release-blocking lockout '
           'was `&& !disabled` on this icon)',
     );
+  });
+
+  // #95 item 3 — "All Zones" was a LIE whenever participation narrowed.
+  // effectiveChannelIdsProvider intersects the selector with participation even
+  // in the null-selector "All" case, so an apply labelled "All Zones" silently
+  // skipped a channel: no seg emitted, no warning, "Applied: <design>" after.
+  // These two pins are a pair — the second is what makes the first mean
+  // something, by proving the suffix is not simply always present.
+  testWidgets('the header admits when participation narrows an "All" apply',
+      (tester) async {
+    final c = ProviderContainer(overrides: _overrides(participating: [0]));
+    addTearDown(c.dispose);
+
+    await _pumpExpanded(tester, c);
+
+    expect(
+      find.textContaining('1 of 2 in shows'),
+      findsOneWidget,
+      reason: '"All Channels" with a channel gated out is a claim the apply '
+          'path does not honour — the count is the truth it acts on',
+    );
+  });
+
+  testWidgets('...and says nothing extra when it does not', (tester) async {
+    final c = ProviderContainer(overrides: _overrides(participating: null));
+    addTearDown(c.dispose);
+
+    await _pumpExpanded(tester, c);
+
+    expect(find.text('All Channels'), findsOneWidget);
+    expect(find.textContaining('in shows'), findsNothing,
+        reason: 'no narrowing, no caveat — otherwise the caveat is noise and '
+            'stops being read');
   });
 
   testWidgets(

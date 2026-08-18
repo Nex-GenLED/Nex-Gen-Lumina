@@ -118,14 +118,22 @@ class ParticipationInput {
   /// not collapse (see `participationShapeIsKnown`).
   final List<int> deviceChannelIds;
 
+  /// True when [resolved] came from the user's EXPLICIT participation set
+  /// rather than from roofline geometry. Travels with the pair for the same
+  /// reason the pair travels together: a reader who cannot tell a stated set
+  /// from a derived one cannot tell a customer's choice from an inference, and
+  /// that ambiguity is what let a derived exclusion look permanent.
+  final bool explicitOverride;
+
   const ParticipationInput({
     required this.resolved,
     required this.deviceChannelIds,
+    this.explicitOverride = false,
   });
 
   @override
-  String toString() =>
-      'ParticipationInput($resolved of $deviceChannelIds)';
+  String toString() => 'ParticipationInput($resolved of $deviceChannelIds'
+      '${explicitOverride ? ', explicit' : ''})';
 }
 
 /// Why the participation family did or did not reach the write.
@@ -292,6 +300,7 @@ class FirestoreControllerFactsPublisher extends ControllerFactsPublisher {
           deviceChannelIds:
               participation?.deviceChannelIds ?? const <int>[],
           source: source,
+          explicitOverride: participation?.explicitOverride ?? false,
         ),
         prepareBaseBoundaryFacts(
           controllerId: id,

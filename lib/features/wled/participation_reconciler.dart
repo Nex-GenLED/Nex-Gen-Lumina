@@ -58,14 +58,15 @@ bool isParticipationCacheStale({
   if (cached == null) return false;
   if (deviceIds.isEmpty) return false;
 
-  // TODO(participation-pickers): when a channel picker UI ships that writes
-  // GameDayAutopilotConfig/NeighborhoodMember.participatingChannelIndices to
-  // a non-null value, `explicit: null` below becomes wrong — the recompute
-  // must source `explicit` from the writer-of-record (see Addendum 1
-  // extension path: provenance tag, per-source Firestore read, or
-  // _explicitListEverSet flag). Until then explicit is provably null for
-  // every cache write, so the comparison against the default-policy
-  // recompute is correct.
+  // RESOLVED (was TODO(participation-pickers)): a picker now ships, so a cache
+  // written from a user's EXPLICIT set is no longer comparable to the
+  // default-policy recompute. The provenance flag is the override's existence
+  // (`participationOverrideNotifier` / `getParticipationOverride`), and the
+  // caller — [runParticipationReconciliationIfReady] — checks it BEFORE calling
+  // this predicate, routing override-sourced caches to
+  // [pruneOverrideToDevice] instead. This function keeps its narrow contract:
+  // it answers "is a DERIVED cache stale", and `explicit: null` is correct for
+  // that question and only that question.
   final expected = resolveParticipatingChannels(
     explicit: null,
     segments: segments,
@@ -73,6 +74,33 @@ bool isParticipationCacheStale({
   );
 
   return !setEquals(cached.toSet(), expected.toSet());
+}
+
+/// Reconciliation for an OVERRIDE-sourced participation set.
+///
+/// A user's explicit set must not be judged against the geometry — that is the
+/// whole point of it outranking the geometry. But it can still name a channel
+/// the device no longer reports (bus removed, controller swapped), and a
+/// participation entry for a channel that does not exist is dead weight that
+/// would survive every future reconcile.
+///
+/// So the only reconciliation an override gets is a PRUNE to live device ids.
+/// Returns the pruned list, or null when nothing survives — a null result means
+/// "drop the override entirely", handing control back to the default policy
+/// rather than leaving the user with an empty participation set they cannot see
+/// or clear. Returns [override] unchanged (same instance semantics not
+/// guaranteed, only equality) when every channel still exists.
+///
+/// Pure — no I/O, so the decision is testable without SharedPreferences.
+List<int>? pruneOverrideToDevice({
+  required List<int> override,
+  required List<int> deviceIds,
+}) {
+  if (deviceIds.isEmpty) return override; // device not loaded — never prune
+  final live = deviceIds.toSet();
+  final kept = override.where(live.contains).toList();
+  if (kept.isEmpty) return null;
+  return kept;
 }
 
 // Module-level once-per-session flag. CRITICAL: only set true AFTER both
@@ -109,6 +137,26 @@ Future<bool> runParticipationReconciliationIfReady(WidgetRef ref) async {
   // listener tick (from the other provider firing at nearly the same
   // moment) doesn't re-enter.
   _reconciledThisSession = true;
+
+  // PROVENANCE BRANCH. Read the override from disk (not the peek — it may not
+  // be warm this early) before touching the cache. A non-null override means
+  // the cache downstream of it is the user's statement, not a derivation, and
+  // the staleness predicate below would clear it on the very next launch —
+  // rebuilding the one-way door from the other side.
+  final override = await getParticipationOverride();
+  if (override != null) {
+    final pruned = pruneOverrideToDevice(
+      override: override,
+      deviceIds: deviceIds,
+    );
+    if (!setEquals(pruned?.toSet(), override.toSet())) {
+      await saveParticipationOverride(pruned);
+      debugPrint(
+          'participation_reconciler: pruned override to live device shape '
+          '(override=$override, pruned=$pruned, deviceIds=$deviceIds)');
+    }
+    return true;
+  }
 
   // Read the persisted value directly — not the peek — so a cold cache
   // (chokepoint hasn't run applyJson yet this session) still gets

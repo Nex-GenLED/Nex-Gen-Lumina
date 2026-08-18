@@ -81,6 +81,7 @@ import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/channel_participation_resolver.dart';
+import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
@@ -809,13 +810,37 @@ class ControllerDefaultsHealer {
           ParticipationDisposition d;
           try {
             final segments = await pending.timeout(kParticipationInputTimeout);
+            // The user's explicit set, if any, outranks the geometry — and it
+            // is AWAITED, not peeked. The healer PUBLISHES its answer on every
+            // LAN connect, so a peek that came back cold would write a derived
+            // set over a stated one and re-exclude the channel server-side on
+            // the next fire.
+            //
+            // SWALLOWED ON FAILURE, deliberately. This read is an authority
+            // OVERLAY, not one of the inputs the dispositions describe — those
+            // are the bus list and the roofline, which is what participation is
+            // derived FROM. Letting a SharedPreferences failure reach the outer
+            // catch would demote the whole leg to `inputsFailed` and publish
+            // NOTHING, on every connect, for every account — trading a
+            // fleet-wide silent stop for an overlay that is null for almost
+            // everyone. A derived publish is also self-healing: the next
+            // connect with a working read republishes the override, because the
+            // memo dedups on VALUE. The log line is the trace if it ever fires.
+            List<int>? override;
+            try {
+              override = await getParticipationOverride();
+            } catch (e) {
+              debugPrint('[Healer] participation override read failed '
+                  '(publishing the derived set instead): $e');
+            }
             input = ParticipationInput(
               resolved: resolveParticipatingChannels(
-                explicit: null,
+                explicit: override,
                 segments: segments,
                 allDeviceChannelIds: ids,
               ),
               deviceChannelIds: ids,
+              explicitOverride: override != null,
             );
             d = ParticipationDisposition.offered;
           } on TimeoutException {

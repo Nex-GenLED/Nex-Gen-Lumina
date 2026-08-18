@@ -106,11 +106,36 @@ final isChannelFilterActiveProvider = Provider<bool>((ref) {
   return ref.watch(selectedChannelIdsProvider) != null;
 });
 
+/// The user's EXPLICIT participation set, or null when they have not made one.
+///
+/// Bridges [participationOverrideNotifier] into Riverpod and kicks the one-time
+/// disk load so the value is warm by the time the dashboard first builds.
+///
+/// This is the writer-of-record for participation *intent*, as opposed to
+/// [participatingChannelIdsProvider] which reports the resolved *outcome*. A
+/// non-null value here is also the provenance flag the reconciler keys off —
+/// see `participation_reconciler.dart`.
+final participationOverrideProvider = Provider<List<int>?>((ref) {
+  void listener() => ref.invalidateSelf();
+  participationOverrideNotifier.addListener(listener);
+  ref.onDispose(() => participationOverrideNotifier.removeListener(listener));
+  // Warm on first read; the listener above rebuilds this provider when the
+  // load lands. Fire-and-forget — never block a build on disk.
+  unawaited(getParticipationOverride());
+  return peekParticipationOverride();
+});
+
 /// Sync-readable participation list, exposed for Riverpod consumers.
 ///
 /// Bridges the module-level [participationCacheNotifier] (Bundle 3b.2's
 /// in-memory cache) into Riverpod: any consumer that `ref.watch`es this
 /// rebuilds when [saveLocalParticipatingChannels] is called.
+///
+/// An explicit user override OUTRANKS the cache. The cache holds the
+/// resolver's last output, which is recomputed from roofline geometry; the
+/// override is what the user said. Preferring it here means the dashboard
+/// honours an include-back on the very next frame, without waiting for a Game
+/// Day or sync resolve to re-derive and re-cache.
 ///
 /// Returns:
 ///   - `null`  → no preference set (cache cold, or never written) — the
@@ -120,6 +145,9 @@ final isChannelFilterActiveProvider = Provider<bool>((ref) {
 ///               list and callers should skip-apply.
 ///   - `[..]`  → explicit set — outer gate on [effectiveChannelIdsProvider].
 final participatingChannelIdsProvider = Provider<List<int>?>((ref) {
+  final override = ref.watch(participationOverrideProvider);
+  if (override != null) return override;
+
   void listener() => ref.invalidateSelf();
   participationCacheNotifier.addListener(listener);
   ref.onDispose(() => participationCacheNotifier.removeListener(listener));

@@ -37,6 +37,19 @@ const String kParticipatingChannelsDeviceIdsField =
     'participating_channels_device_ids';
 const String kParticipatingChannelsSourceField = 'participating_channels_source';
 
+/// Provenance: was this set the user's EXPLICIT statement, or derived from
+/// roofline geometry?
+///
+/// The server does not branch on it today, and must not be made to without a
+/// deliberate decision — an explicit set is not more trustworthy about the
+/// DEVICE SHAPE than a derived one (both are still bounded by
+/// `_device_ids` and [kParticipationMaxAge]). It exists so that a future
+/// reader — or a human debugging a dark house — can tell "the customer said
+/// so" apart from "the geometry implied it", which is precisely the
+/// distinction whose absence made participation a one-way door.
+const String kParticipatingChannelsExplicitField =
+    'participating_channels_explicit';
+
 /// How old a denormalized set may be before a server-side fire refuses it.
 ///
 /// WHY 90 DAYS, and why an age check at all. The set is only correct for the
@@ -67,11 +80,13 @@ Map<String, Object?> buildParticipationDoc({
   required List<int> resolved,
   required List<int> deviceChannelIds,
   required String source,
+  bool explicitOverride = false,
 }) {
   return <String, Object?>{
     kParticipatingChannelsField: List<int>.from(resolved),
     kParticipatingChannelsDeviceIdsField: List<int>.from(deviceChannelIds),
     kParticipatingChannelsSourceField: source,
+    kParticipatingChannelsExplicitField: explicitOverride,
     // The caller substitutes a server timestamp for this key; it is named here
     // so the shape is complete and testable in one place.
     kParticipatingChannelsAtField: null,
@@ -134,11 +149,13 @@ void rememberPublishedParticipation(String controllerId, List<int> resolved) {
 /// Skipping costs one interval: the next resolve, or the next connect,
 /// republishes once the bus list has landed.
 ///
-/// TODO(participation-picker): when a channel picker ships, an EXPLICIT set is
-/// meaningful even with an unknown device shape (`resolveParticipatingChannels`
-/// returns it verbatim). This guard would then wrongly suppress it and must
-/// gain an explicit-source exemption. Today `explicit` is provably null at
-/// every call site, so the guard is exactly right.
+/// RESOLVED (was TODO(participation-picker)): the picker shipped, so the
+/// exemption it called for is now implemented — see [explicitOverride] on
+/// [prepareParticipationFacts]. An explicit set is returned verbatim by
+/// `resolveParticipatingChannels` and does not depend on the bus list at all,
+/// so suppressing it for an unknown device shape would discard a real user
+/// statement over a missing input it never consumed. The guard below still
+/// governs every DERIVED resolution, which is all it was ever reasoning about.
 bool participationShapeIsKnown(List<int> deviceChannelIds) =>
     deviceChannelIds.isNotEmpty;
 
@@ -154,9 +171,13 @@ PreparedFacts prepareParticipationFacts({
   required List<int>? resolved,
   required List<int> deviceChannelIds,
   required String source,
+  bool explicitOverride = false,
 }) {
   if (resolved == null) return PreparedFacts.none;
-  if (!participationShapeIsKnown(deviceChannelIds)) return PreparedFacts.none;
+  // Explicit-source exemption: only a DERIVED set needs a known device shape.
+  if (!explicitOverride && !participationShapeIsKnown(deviceChannelIds)) {
+    return PreparedFacts.none;
+  }
 
   final last = publishedParticipationMemo[controllerId];
   if (!shouldPublishParticipation(resolved: resolved, lastPublished: last)) {
@@ -167,6 +188,7 @@ PreparedFacts prepareParticipationFacts({
     resolved: resolved,
     deviceChannelIds: deviceChannelIds,
     source: source,
+    explicitOverride: explicitOverride,
   );
   stampFactFamily(
     fields,
@@ -212,6 +234,7 @@ Future<void> publishParticipatingChannels({
   required List<int>? resolved,
   required List<int> deviceChannelIds,
   required String source,
+  bool explicitOverride = false,
   FirebaseFirestore? firestore,
   String? uidOverride,
 }) async {
@@ -224,6 +247,7 @@ Future<void> publishParticipatingChannels({
         resolved: resolved,
         deviceChannelIds: deviceChannelIds,
         source: source,
+        explicitOverride: explicitOverride,
       ),
     ],
     label: 'participation/$source',

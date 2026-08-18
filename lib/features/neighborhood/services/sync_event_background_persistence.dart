@@ -333,8 +333,17 @@ bool _participationCacheLoaded = false;
 ///               payloads to these channel ids).
 Future<List<int>?> getCachedParticipatingChannels() async {
   if (!_participationCacheLoaded) {
-    participationCacheNotifier.value = await loadLocalParticipatingChannels();
-    _participationCacheLoaded = true;
+    final loaded = await loadLocalParticipatingChannels();
+    // Re-check: [saveLocalParticipatingChannels] sets the value synchronously
+    // and marks the cache loaded before its own disk write completes, so a
+    // save that lands during this load is NEWER than what we just read. Without
+    // this guard the load wins and the resolve that just ran is discarded —
+    // the same race the override loader documents, in the path the dashboard
+    // gate reads on every apply.
+    if (!_participationCacheLoaded) {
+      participationCacheNotifier.value = loaded;
+      _participationCacheLoaded = true;
+    }
   }
   return participationCacheNotifier.value;
 }
@@ -482,6 +491,117 @@ Future<List<int>?> loadLocalParticipatingChannels() async {
   final raw = prefs.getStringList(_kLocalParticipatingChannelsKey);
   if (raw == null) return null;
   return raw.map(int.parse).toList();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PARTICIPATION OVERRIDE — the user's EXPLICIT set, and its provenance
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// The key above stores the resolver's OUTPUT. This one stores a user's INPUT,
+// and the distinction is the entire point.
+//
+// Before this existed, participation was derived-only: every call site passed
+// `explicit: null`, so the answer came wholly from roofline geometry + the live
+// bus list. That made it a ONE-WAY DOOR. A channel that the default policy
+// excluded — "traced but no isPrimary segment" — could not be put back from any
+// screen in the app, because the only writers were recomputes of the same
+// derivation, and the reconciler compares the cache against that same
+// derivation so it never sees such a value as stale. "All Zones" excluded it
+// too (participation is the OUTER gate), silently.
+//
+// This key is the re-entry path: a non-null value here is a user statement
+// ("these channels are in my shows") which `resolveParticipatingChannels`
+// returns verbatim via its `explicit` branch, outranking the geometry.
+//
+// PROVENANCE. The value's EXISTENCE is the provenance flag. The reconciler
+// (participation_reconciler.dart) keys off it: with an override present, the
+// default-policy recompute is no longer the right thing to compare against, so
+// reconciliation switches from "clear if it differs from the derivation" to
+// "prune to channels the device still reports". That is what stops the
+// reconciler from immediately undoing the user's choice — the exact hazard the
+// TODO(participation-pickers) in that file was filed against.
+//
+// Lives in SharedPreferences alongside the cache, not in Firestore, for one
+// reason: the background isolate resolves participation too, has no Firestore
+// listener, and must reach the same answer as the foreground.
+
+const _kParticipationOverrideKey = 'bg_participation_override';
+
+/// ValueNotifier exposing the override, mirroring [participationCacheNotifier]
+/// so Riverpod consumers can rebuild on change without polling disk.
+final ValueNotifier<List<int>?> participationOverrideNotifier =
+    ValueNotifier<List<int>?>(null);
+
+bool _participationOverrideLoaded = false;
+
+/// Load the override from disk, warming the in-memory copy. Cheap after the
+/// first call.
+///
+///   - `null`  → no override. The default policy governs (previous behaviour).
+///   - `[..]`  → the user's explicit set, returned verbatim by the resolver.
+///
+/// `[]` is NOT a legal override value and is normalised to `null` on write:
+/// "no channels are in my shows" is indistinguishable in effect from a
+/// disabled system, and offering a UI that can reach it would rebuild the
+/// lockout this key exists to remove.
+Future<List<int>?> getParticipationOverride() async {
+  if (!_participationOverrideLoaded) {
+    final prefs = await SharedPreferences.getInstance();
+    // RE-CHECK after the await. A write can land while this load is in flight
+    // — the dashboard warms this provider on first build, and an include-back
+    // moments later sets the value synchronously and marks it loaded. Reading
+    // disk unconditionally here would then clobber the user's brand-new choice
+    // with the pre-write bytes and silently re-exclude the channel. A write is
+    // always newer than a read that started before it, so it wins.
+    if (!_participationOverrideLoaded) {
+      final raw = prefs.getStringList(_kParticipationOverrideKey);
+      participationOverrideNotifier.value = raw?.map(int.parse).toList();
+      _participationOverrideLoaded = true;
+    }
+  }
+  return participationOverrideNotifier.value;
+}
+
+/// Synchronous peek. Returns null when the override has not been loaded yet —
+/// same "never block an apply on disk" contract as
+/// [peekCachedParticipatingChannels]. Callers that need certainty (the healer,
+/// which PUBLISHES its answer) must await [getParticipationOverride] instead,
+/// or they will publish a derived answer over a user's explicit one.
+List<int>? peekParticipationOverride() {
+  return _participationOverrideLoaded ? participationOverrideNotifier.value : null;
+}
+
+/// Persist the user's explicit participation set.
+///
+/// `null` clears it, restoring pure default-policy derivation — that is the
+/// "Reset to roofline" affordance, and it is what keeps this from being a
+/// one-way door in the opposite direction.
+///
+/// Updates the in-memory copy synchronously before the disk write so a resolve
+/// on the very next frame already sees it.
+Future<void> saveParticipationOverride(List<int>? channels) async {
+  final normalized = (channels == null || channels.isEmpty)
+      ? null
+      : (List<int>.from(channels)..sort());
+  participationOverrideNotifier.value = normalized;
+  _participationOverrideLoaded = true;
+
+  final prefs = await SharedPreferences.getInstance();
+  if (normalized == null) {
+    await prefs.remove(_kParticipationOverrideKey);
+  } else {
+    await prefs.setStringList(
+      _kParticipationOverrideKey,
+      normalized.map((i) => i.toString()).toList(),
+    );
+  }
+}
+
+/// Test helper: clear the override so each test starts cold.
+@visibleForTesting
+void resetParticipationOverrideForTest() {
+  participationOverrideNotifier.value = null;
+  _participationOverrideLoaded = false;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

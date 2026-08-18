@@ -155,8 +155,14 @@ final gameDayAutopilotServiceProvider =
       );
       final deviceChannelIds =
           ref.read(deviceChannelsProvider).map((c) => c.id).toList();
+      // Explicit precedence: a per-config choice (dead schema today — no UI
+      // writes it) is more specific than the account-wide override, so it wins
+      // when both exist. The override is the dashboard include-back; without
+      // it here, a Game Day resolve would re-derive from geometry and write the
+      // user's re-included channel straight back out of the cache.
+      final override = peekParticipationOverride();
       final resolved = resolveParticipatingChannels(
-        explicit: config.participatingChannelIndices,
+        explicit: config.participatingChannelIndices ?? override,
         segments: segments,
         allDeviceChannelIds: deviceChannelIds,
       );
@@ -174,6 +180,8 @@ final gameDayAutopilotServiceProvider =
         resolved: resolved,
         deviceChannelIds: deviceChannelIds,
         source: 'game_day',
+        explicitOverride: config.participatingChannelIndices != null ||
+            override != null,
       ));
       return resolved;
     } catch (e) {
@@ -256,10 +264,15 @@ final _gameDayBackgroundPersistenceProvider = Provider<void>((ref) {
 
   // Persist configs on any change
   final configsAsync = ref.watch(gameDayAutopilotConfigsProvider);
+  // Same precedence as the live resolve site above. The background isolate has
+  // its own module memory, so it re-reads the override from SharedPreferences
+  // itself; this peek only affects what gets baked into the persisted configs.
+  final override = ref.watch(participationOverrideProvider);
+
   configsAsync.whenData((configs) {
     final bgConfigs = configs.map((config) {
       final resolved = resolveParticipatingChannels(
-        explicit: config.participatingChannelIndices,
+        explicit: config.participatingChannelIndices ?? override,
         segments: segments,
         allDeviceChannelIds: deviceChannelIds,
       );

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -84,7 +85,8 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildHeader(context, channels, selectedIds, hasZoneNames),
+              _buildHeader(
+                  context, channels, selectedIds, hasZoneNames, participatingSet),
               if (_expanded)
                 _buildChannelChips(context, channels, selectedIds, zoneLabels, hasZoneNames, participatingSet),
             ],
@@ -99,15 +101,28 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     List<DeviceChannel> channels,
     Set<int>? selectedIds,
     bool hasZoneNames,
+    Set<int>? participatingSet,
   ) {
     final isFiltered = selectedIds != null;
     final selectedCount = isFiltered ? selectedIds.length : channels.length;
     final totalCount = channels.length;
     final zoneTerm = hasZoneNames ? 'Zones' : 'Channels';
 
+    // #95 item 3 — "All Zones" was a LIE whenever participation narrowed.
+    // `effectiveChannelIdsProvider` intersects the selector with participation
+    // even in the null-selector "All" case, so an apply labelled "All Zones"
+    // could silently skip a channel: no seg emitted for it, no warning, and a
+    // cheerful "Applied: <design>" afterwards. The count below is the truth the
+    // apply path already acts on.
+    final excludedCount = participatingSet == null
+        ? 0
+        : channels.where((c) => !participatingSet.contains(c.id)).length;
+
     final String label;
     if (!isFiltered || selectedCount == totalCount) {
-      label = 'All $zoneTerm';
+      label = excludedCount == 0
+          ? 'All $zoneTerm'
+          : 'All $zoneTerm · ${totalCount - excludedCount} of $totalCount in shows';
     } else {
       label = '$selectedCount of $totalCount $zoneTerm';
     }
@@ -197,8 +212,9 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                 },
               ),
               // Individual channel/zone chips. Non-participating channels (U1)
-              // render disabled — user can't target a channel that's been
-              // marked "not in shows" via the participation field.
+              // render disabled — selecting one would be a silent no-op, since
+              // participation is the outer gate. Tapping one instead offers to
+              // change participation itself (see onTap below).
               for (final ch in channels)
                 Builder(builder: (_) {
                   final isParticipating = participatingSet == null ||
@@ -208,9 +224,22 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                     label: zoneLabels[ch.id] ?? ch.name,
                     selected: isAllMode || selectedIds.contains(ch.id),
                     disabled: !isParticipating,
+                    // #95 item 1 — THE RE-ENTRY PATH. This used to be null,
+                    // which is what made participation a one-way door: every
+                    // writer of participation was a re-derivation from roofline
+                    // geometry, so a channel the default policy excluded
+                    // ("traced but no isPrimary segment") could not be put back
+                    // from anywhere in the app. Tapping a dimmed chip now opens
+                    // the include-back sheet, which writes a real explicit set.
                     onTap: isParticipating
                         ? () => _toggleChannel(ch.id, channels, selectedIds)
-                        : null,
+                        : () => _promptIncludeBack(
+                              context,
+                              ch,
+                              zoneLabels[ch.id] ?? ch.name,
+                              channels,
+                              participatingSet,
+                            ),
                     channelColor: kChannelColors[ch.id % kChannelColors.length],
                     channelOn: chOn,
                     // #95 — POWER IS NEVER GATED ON PARTICIPATION.
@@ -239,6 +268,13 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                 }),
             ],
           ),
+          // Reset affordance — only when an explicit set is in force. Without
+          // it, include-back would be a one-way door in the opposite
+          // direction: no screen could hand control back to the roofline.
+          if (ref.watch(participationOverrideProvider) != null) ...[
+            const SizedBox(height: 8),
+            _buildOverrideFooter(context),
+          ],
           const SizedBox(height: 10),
           // Recovery affordance: from a partial-on state (e.g. "1 on, 2 off")
           // there was no way to get every channel back on — and a colour
@@ -308,6 +344,166 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     );
   }
 
+  /// Footer shown while an explicit participation set is in force.
+  Widget _buildOverrideFooter(BuildContext context) {
+    return Row(
+      children: [
+        Icon(Icons.push_pin_outlined,
+            size: 13, color: Colors.white.withValues(alpha: 0.45)),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Custom show channels',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.white.withValues(alpha: 0.45),
+            ),
+          ),
+        ),
+        GestureDetector(
+          onTap: _resetOverride,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text(
+              'Reset',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: NexGenPalette.cyan.withValues(alpha: 0.8),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Hand participation back to the roofline. Clearing the override does NOT
+  /// restore the previous exclusion by itself — the next resolve re-derives
+  /// from geometry, which is the correct authority once the user stops
+  /// overriding it.
+  Future<void> _resetOverride() async {
+    await saveParticipationOverride(null);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Show channels reset to your roofline design'),
+      ),
+    );
+  }
+
+  /// The include-back sheet, shown when a user taps a dimmed chip.
+  ///
+  /// It explains the state before offering the action, because "dimmed" alone
+  /// has never told the user WHY — and the two things it could mean ("this
+  /// channel isn't on my roof" vs "skip it this once") have opposite fixes.
+  /// This wording commits to the first, which is what participation was built
+  /// to express; the per-apply meaning belongs to the selector filter, which is
+  /// transient and already works.
+  Future<void> _promptIncludeBack(
+    BuildContext context,
+    DeviceChannel channel,
+    String label,
+    List<DeviceChannel> channels,
+    Set<int>? participatingSet,
+  ) async {
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$label isn\'t in your shows',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Patterns, colours and designs skip this channel — including '
+                'when you apply to All Zones. Its power switch still works.',
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.4,
+                  color: Colors.white.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'This came from your roofline design, where this channel has no '
+                'primary run. If it should be in your shows, include it here.',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: Colors.white.withValues(alpha: 0.45),
+                ),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: NexGenPalette.cyan,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                  onPressed: () => Navigator.of(sheetContext).pop(true),
+                  child: const Text('Include in Shows',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(false),
+                  child: Text(
+                    'Leave it out',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+    await _includeChannel(channel.id, channels, participatingSet);
+  }
+
+  /// Write the explicit set: everything that participates today, plus the
+  /// channel being re-included.
+  ///
+  /// Seeding from the CURRENT participation rather than from all device
+  /// channels is deliberate — including one channel back must not silently
+  /// re-include every other channel the roofline excluded.
+  Future<void> _includeChannel(
+    int channelId,
+    List<DeviceChannel> channels,
+    Set<int>? participatingSet,
+  ) async {
+    final base = participatingSet ?? channels.map((c) => c.id).toSet();
+    final next = (Set<int>.from(base)..add(channelId)).toList()..sort();
+    await saveParticipationOverride(next);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Channel added to your shows')),
+    );
+  }
+
   void _toggleChannel(
     int channelId,
     List<DeviceChannel> channels,
@@ -351,7 +547,8 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     // Non-participating chips render dimmed and are not SELECTABLE for design
     // targeting — participation is the outer gate and `effectiveChannelIdsProvider`
     // would filter them out anyway, so offering selection would be a silent
-    // no-op. To change that, change participation (Bundle 5 picker UI).
+    // no-op. Tapping one now opens the include-back sheet (#95 item 1), which
+    // changes participation itself rather than pretending to select.
     //
     // #95 — "not in shows" MUST NOT read as "not there", and must never remove
     // the power control:

@@ -693,8 +693,13 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       );
       final deviceChannelIds =
           _ref.read(deviceChannelsProvider).map((c) => c.id).toList();
+      // Account-wide include-back override (dashboard channel selector) is the
+      // fallback `explicit`. Without it a sync command would re-derive from
+      // geometry and overwrite the cache the user just corrected — the
+      // re-exclusion path that made participation a one-way door.
+      final override = peekParticipationOverride();
       final participating = resolveParticipatingChannels(
-        explicit: currentMember?.participatingChannelIndices,
+        explicit: currentMember?.participatingChannelIndices ?? override,
         segments: segments,
         allDeviceChannelIds: deviceChannelIds,
       );
@@ -710,6 +715,8 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
         resolved: participating,
         deviceChannelIds: deviceChannelIds,
         source: 'neighborhood_sync',
+        explicitOverride:
+            currentMember?.participatingChannelIndices != null || override != null,
       ));
 
       // (REMOVED) The b4a6f46 empty-participation skip-apply gate used
