@@ -65,6 +65,49 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### SUITE BASELINE — authoritative line, corrected 2026-08-18
+
+**Current baseline: `2416 passed · 3 skipped · 0 failed`** — the +80 row's
+build-time run at tag `build-80`. Start every delta from this number.
+
+**Why this block exists.** A session reading down this file hit
+*"**2164 is the new baseline**"* (in the **+73** section) and did its arithmetic
+from there — 250 tests stale. That line is not wrong; it is **dated**, and
+nothing marked it as superseded. Ledger rows are historical records, so the
+"current" baseline must live in exactly one place or the newest reader finds
+the oldest number. This is that place.
+
+| build | passed | skipped | failed |
+|---|---|---|---|
+| +72 | 2160 | 3 | 1 |
+| +73 | 2164 | 3 | 1 |
+| +79 | 2382 | 3 | 0 |
+| **+80** | **2416** | **3** | **0** |
+
+**The 3 skips are fully accounted for**, and it is always the same 3: the three
+`skip: !kRunHw` cases in `test/hardware/preset_heal_live_test.dart`
+(`RUN_HW=false` by default). Nothing else in the tree carries a `skip:`.
+
+**`base_ladder_repair_live_test` is NOT one of them, and the "pre-existing
+hardware red" note in the +72/+73 rows is STALE.** It is neither skipped nor
+failing today — it **runs in the default suite and passes**. Three corrections
+to what was believed about it:
+
+1. **Its own header comment is wrong.** It says *"excluded from the default
+   suite by the `hardware` tag"* — but there is **no `dart_test.yaml`** in this
+   repo, so `@Tags(['hardware'])` excludes nothing. The tag is inert.
+2. **It self-guards with `if (!reachable) return;`** — an early return, which
+   the runner reports as a **PASS**, not a skip. So "it passed" does not by
+   itself mean it exercised anything.
+3. **⚠️ On THIS machine it is not inert.** `192.168.1.150` answers
+   `/json/state` with HTTP 200 from the dev box, so a plain `flutter test`
+   **damages and repairs preset slot 3 (`NGL Dim`) on the live bench
+   controller** — real POSTs, real flash writes. It ran that way **three times
+   on 2026-08-18** during the #95 item-1 work, passing each time (so the ladder
+   is left repaired, not damaged). **Re-verify slot 3 before any smoke run that
+   depends on the base ladder**, and prefer `flutter test test/` scoped to a
+   directory when the bench is mid-experiment.
+
 ### DISK CLEANUP 2026-08-18 — build worktrees retired, symbols preserved
 
 **Fleet state at time of cleanup:** Play closed track and TestFlight both serve
@@ -2978,7 +3021,9 @@ lease integration test, reproduced at pre-change HEAD in a clean worktree.
 
 Re-run after local midnight on the same tree, no code change:
 **2164 passed · 3 skipped · 1 failed** — the pre-existing hardware test alone.
-**2164 is the new baseline**, up 4 from +72's 2160 (3 parser / one-fetch tests,
+**2164 was the baseline AT +73** — superseded; see "SUITE BASELINE —
+authoritative line" near the top of this file for the current number, and for
+why `base_ladder_repair_live_test` is no longer red. Up 4 from +72's 2160 (3 parser / one-fetch tests,
 1 disposition test). #64 is deterministic, not flaky: the same five went red at
 23:45 and green at 23:59.
 
