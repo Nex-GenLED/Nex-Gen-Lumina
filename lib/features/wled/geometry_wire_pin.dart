@@ -60,13 +60,32 @@ class GeometryViolation {
       ':${keys.join('+')}';
 }
 
-/// The bound-stating keys. `start`/`stop` are the segment RANGE.
+/// The geometry-stating keys.
+///
+/// `start`/`stop` are the segment RANGE. `rev`/`mi` are its ORIENTATION —
+/// which end the pixels start from, and whether the run mirrors. All four
+/// describe how a segment maps onto physical hardware, which is provisioning's
+/// to state and an apply's to leave alone.
+///
+/// **`rev` and `mi` added 2026-08-18, after `rev` was cleared twice on the
+/// bench in one evening on +80 with this pin live.** The pin was not routed
+/// around: it simply never looked at `rev`. A payload carrying `rev:false`
+/// walked through both fenced exits, and the reversed channel silently flipped
+/// direction — the identical failure `start`/`stop` were fenced for, in the one
+/// axis the fence did not cover. `mi` is included on the same reasoning before
+/// it costs an evening too; nothing in `lib/` writes it today.
 ///
 /// Deliberately NOT included: `len`. WLED reports `len` in `/json/state`
 /// readbacks as a derived convenience, so a payload echoing a readback would
 /// trip on it constantly while stating nothing new — and `len` alone cannot
-/// move a boundary. `start`/`stop` are the two that re-bound a segment.
-const List<String> kGeometryKeys = ['start', 'stop'];
+/// move a boundary.
+///
+/// ⚠️ `rev` IS present in every `/json/state` readback, so unlike `len` it can
+/// be echoed innocently — scene restores and `getState` snapshots carry it. That
+/// is deliberate and not an exemption: **a restore must not re-assert direction
+/// either.** Stripping it there is correct, and a debug assert firing on such a
+/// path is the pin reporting a real violation, not a false positive.
+const List<String> kGeometryKeys = ['start', 'stop', 'rev', 'mi'];
 
 /// Find every `seg` entry that states geometry. Pure; no side effects.
 ///
@@ -97,7 +116,7 @@ List<GeometryViolation> findGeometryViolations(Map<String, dynamic> payload) {
   return out;
 }
 
-/// Return a copy of [payload] with every `start`/`stop` removed from `seg`
+/// Return a copy of [payload] with every [kGeometryKeys] entry removed from `seg`
 /// entries. Structure, order, ids and every other field are preserved — this
 /// removes the two keys and changes nothing else.
 ///
@@ -150,7 +169,8 @@ Map<String, dynamic> pinNoGeometryOnWire(
   if (violations.isEmpty) return payload;
 
   final report = 'GEOMETRY ON THE WIRE ($caller): an apply tried to state '
-      'segment bounds — ${violations.join(', ')}. Bounds are provisioning\'s '
+      'segment geometry — ${violations.join(', ')}. Bounds AND orientation '
+      '(start/stop/rev/mi) are provisioning\'s '
       '(#76/#88/#89/#95). STRIPPED; the rest of the apply proceeds. If this '
       'caller legitimately provisions geometry it must use the geometry entry '
       'point, not applyJson.';

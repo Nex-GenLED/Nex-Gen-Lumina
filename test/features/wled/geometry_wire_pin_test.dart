@@ -209,4 +209,103 @@ void main() {
           reason: 'the LOOK must survive — only the SHAPE is removed');
     });
   });
+
+  // ── ORIENTATION (added 2026-08-18) ──────────────────────────────────────
+  //
+  // THE INCIDENT THESE PIN: on +80, with the wire pin live and passing, `rev`
+  // was cleared on the bench's seg 1 TWICE in one evening. The pin was never
+  // routed around — `kGeometryKeys` was `['start','stop']`, so it simply never
+  // looked at `rev`. A reversed channel silently flipped direction: the exact
+  // failure bounds were fenced for, in the one axis the fence did not cover.
+  //
+  // A test's value is its ability to fail. Removing 'rev' or 'mi' from
+  // kGeometryKeys fails these.
+  group('orientation is geometry too', () {
+    test("catches tonight's exact payload — {'id':1,'rev':false}", () {
+      final dirty = <String, dynamic>{
+        'seg': [
+          {'id': 1, 'rev': false}
+        ]
+      };
+      final seen = <String>[];
+      Map<String, dynamic>? out;
+      try {
+        out = pinNoGeometryOnWire(dirty, caller: 'test', onViolation: seen.add);
+      } on AssertionError {
+        out = stripGeometry(dirty);
+      }
+
+      expect(seen, hasLength(1));
+      // seg[0] is the ARRAY INDEX; (id=1) is the segment id. The payload has
+      // one entry, so index 0 carries id 1.
+      expect(seen.single, contains('seg[0](id=1):rev'));
+      expect((out!['seg'] as List).single, isNot(contains('rev')),
+          reason: 'rev must not reach the wire from an apply');
+      expect((out['seg'] as List).single, containsPair('id', 1),
+          reason: 'the seg must survive — only its orientation is removed');
+    });
+
+    test('rev:TRUE is stripped too — a payload may not assert direction in '
+        'EITHER direction', () {
+      // The #4 lesson, applied to orientation: "omit when false" was a partial
+      // fix for bounds and would be a partial fix here. Asserting rev:true over
+      // a device the installer wired forward is the same defect mirrored.
+      expect(
+        findGeometryViolations({
+          'seg': [
+            {'id': 1, 'rev': true}
+          ]
+        }),
+        hasLength(1),
+      );
+    });
+
+    test('mirror (mi) is fenced on the same reasoning', () {
+      expect(
+        findGeometryViolations({
+          'seg': [
+            {'id': 0, 'mi': true}
+          ]
+        }),
+        hasLength(1),
+      );
+    });
+
+    test('bounds and orientation together are reported as one violation, '
+        'naming every offending key', () {
+      final v = findGeometryViolations({
+        'seg': [
+          {'id': 1, 'start': 128, 'stop': 290, 'rev': false, 'mi': false}
+        ]
+      });
+      expect(v, hasLength(1));
+      expect(v.single.toString(), 'seg[0](id=1):start+stop+rev+mi');
+    });
+
+    test('a pure LOOK payload is still untouched — the fence has not widened '
+        'onto colour, effect or speed', () {
+      // Guards the other direction: over-fencing would break every ordinary
+      // apply, which is a worse outcome than the leak being fixed.
+      expect(
+        findGeometryViolations({
+          'seg': [
+            {'id': 0, 'fx': 27, 'sx': 128, 'ix': 200, 'pal': 5, 'on': true}
+          ]
+        }),
+        isEmpty,
+      );
+    });
+
+    test('len is STILL exempt — readback echoes must not trip on a derived '
+        'convenience field', () {
+      expect(
+        findGeometryViolations({
+          'seg': [
+            {'id': 0, 'len': 128}
+          ]
+        }),
+        isEmpty,
+      );
+    });
+  });
 }
