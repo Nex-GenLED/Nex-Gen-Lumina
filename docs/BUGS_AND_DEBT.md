@@ -1502,9 +1502,38 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `lib/features/wled/controller_defaults_healer.dart` (`_reprovisionSegments`),
     `lib/features/wled/wled_hardware_config.dart:41` (client-only).
 
-- [ ] **#103 — three Lumina custom effects animate by MOVING SEGMENT BOUNDARIES; under the
-  +80 pin they degrade to a static two-tone and leave half the strip dark**
-  - Status: OPEN (filed 2026-08-18) · Severity: **P2** · Evidence: **bench-proven 2026-08-18
+- [ ] **#103 — the Lumina custom-effects catalog animates by MOVING SEGMENT BOUNDARIES.
+  UNREACHABLE on +79 (two gates) — pre-launch redesign, NOT a hotfix**
+  - Status: OPEN (filed 2026-08-18, updated same day with the sweep) · Severity: **P2 — no
+    field exposure** · Evidence: **bench-proven on `.150` + verified-by-source**
+  - 🚩 **NO FIELD EXPOSURE ON +79. Two independent gates make this dead code:**
+    1. `LuminaCustomEffectsCatalog.isCustomEffect(int id) => false`
+       (`lumina_custom_effects.dart:325`) — hardcoded. Every dispatch site asks it first
+       (`pattern_repository.dart:255`, `pattern_explore_screen.dart:33`), so no id ever
+       routes to a custom effect.
+    2. `LuminaEffectController._isRunning` is initialised `false` and only ever assigned
+       `false`. There is **no `_isRunning = true` anywhere in the file.**
+    So **this was NOT the +79 field destruction** (see the ledger's incident closeout — root
+    cause was a power-cycle + `bootps:0`, software attribution ruled out). This is a **latent
+    class**, and the redesign is **pre-launch work, not a hotfix.**
+  - 🔒 **STANDING CONSTRAINT: do not re-enable the custom-effects catalog without the geometry
+    wire pin in place.** Flipping `isCustomEffect` to a real lookup without
+    `geometry_wire_pin.dart` at the wire exit re-arms the exact class that can destroy a
+    layout. The pin is the PRECONDITION for re-enabling, not a companion to it. Recorded in
+    the source file's own library header so it is unmissable at the point of edit, and pinned
+    by `test/features/wled/lumina_custom_effects_geometry_test.dart`, which **fails if the
+    catalog is re-enabled**.
+  - **THE SWEEP — every bounds-stating builder, and what each states:**
+
+    | id | Effect | What it states | Note |
+    |---|---|---|---|
+    | 1001 | Rising Tide | final frame `{id:0,start:0,stop:290}`, seg 1 **omitted** | the +79 collapsed shape verbatim |
+    | 1002 | Falling Tide | same builder, `reverse:true` | sweeps `start` instead of `stop` |
+    | 1003/1004 | Pulse Burst / Gather | boundary sweep from/to centre | |
+    | 1005 | Grand Reveal | final frame emits **ZERO-LENGTH** segs `[0,0)` and `[290,290)` | a zero-length bound is exactly what `applyChannelFilter` **Rule 1 forbids** — *"never a zero-length `[0,0)` bound"* — because it reads as "this channel does not exist" |
+    | 1006 | Curtain Call | terminal split **hardcoded to `totalPixels ~/ 2`** = 145 on a 290 strip | a boundary derived from PIXEL COUNT that **matches no bus**; the bench's real split is **128** |
+    | 1007 | Ocean Swell | nothing — animates colour/phase | **already contract-clean; excluded from the redesign** |
+  - Severity: **P2** · Evidence: **bench-proven 2026-08-18
     on `.150`, 20 frames posted, readback cited below**
   - `generateRisingTideFrames`, `generatePulseBurstFrames` and `generateGrandRevealFrames`
     (`lumina_custom_effects.dart`) carry their animation **entirely in `start`/`stop`** — the
@@ -1532,7 +1561,14 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
        `frz:true` side-effect (a per-pixel write freezes the segment; `psave` captures it →
        poisoned preset fires dark forever — fixed +63, reuse that handling).
     3. Per-segment colour ramps are NOT viable — 2 steps on a 2-channel device is not a tide.
-  - Files: `lib/features/wled/lumina_custom_effects.dart` (client-only).
+  - **Dead-code removal candidate, found in the same sweep:**
+    `lib/services/segment_pattern_generator.dart` has **ZERO importers** across `lib/` and
+    `test/`. It emits `start`/`stop` at `:479` and elsewhere, so it is a bounds-stating
+    builder that nothing can reach. Not a risk today; delete it rather than carry a fifth
+    geometry emitter that no census will remember to check. Verify the zero-importer claim
+    again at removal time — that is the whole basis for calling it dead.
+  - Files: `lib/features/wled/lumina_custom_effects.dart`,
+    `lib/services/segment_pattern_generator.dart` (removal candidate) — client-only.
 
 - [ ] **#100 — client and server derive a config's team slug from DIFFERENT sources, so the
   client can go blind to a config the server still acts on**

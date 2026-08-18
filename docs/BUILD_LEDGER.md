@@ -65,6 +65,90 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### +79 GEOMETRY INCIDENT — CLOSED 2026-08-18
+
+**Reported as:** a design apply on the +79 field build destroyed a controller's
+segment layout — post-apply `/json/state` showed ONE segment spanning 0-290,
+seg 1 deleted with its `rev:true`, seg 0 re-bound 0-128 → 0-290.
+
+**ROOT CAUSE: a power-cycle plus `bootps:0`. Not a software geometry write.**
+Software attribution is **ruled out**, not merely unproven — both candidate
+paths are dead or unreachable on +79:
+
+- The **custom-effects catalog** (the leading hypothesis, and the only builder
+  family whose output matches the observed shape byte-for-byte) is behind **two
+  independent gates**: `isCustomEffect` is hardcoded `false`, and
+  `LuminaEffectController._isRunning` is never assigned `true`. Nothing can
+  route to it. See **#103**.
+- Every **live** apply path was traced to a fence that holds on +79 —
+  `applyChannelFilter` (#89) strips bounds, `buildChannelPowerPayload` (#95)
+  emits id-only segs, the seven design builders (#76) are clean.
+
+The collapse is the documented reboot behaviour: seg 0 spans the strip and
+there is no seg 1 until a preset reloads. With `bootps:0` no preset reloaded,
+so nothing restored the layout — and, as below, nothing was ever going to.
+
+**THE FALSE ALARM FOUND A REAL CLASS.** The reported cause was wrong and the
+investigation was still worth every hour of it: chasing a geometry write that
+had not happened turned up a geometry *repairer* that could not fire, four
+under-counted emitter censuses, and a catalog of dead builders that would have
+re-armed the whole class the day anyone flipped one boolean. A wrong hypothesis
+that is investigated properly is not a wasted investigation.
+
+**FIXES LANDED**
+
+| SHA | What |
+|---|---|
+| `23a00c1` | **Chokepoint geometry pin at both wire exits.** Debug: assert. Release: strip + log. Provisioning gets a separate DOOR (`applyGeometryJson`), not a flag. Fences `applyToDevice`'s bypass, the custom effects, `_postUpdate` and the relay by construction. |
+| `e5c39c8` | **Connect-time segment-shape check** (healer step (d.5)), ordered before the preset heal. Heal-only-broken; stands aside on ignorance; readback-gated. Bounds only. |
+
+**LESSONS RECORDED**
+
+1. *A census of builders is a list maintained by hand; a pin at the single exit
+   cannot under-count.* Four censuses (#76 → #88 → #89 → #95) each missed a
+   member of the same family.
+2. *Repair machinery reachable only as a side-effect of an unrelated trigger is
+   not repair machinery.* See the entry below.
+3. *Dead code that states geometry is a loaded gun pointed at whoever re-enables
+   it.* Hence #103's standing constraint, recorded in the source file itself.
+
+**STILL OPEN:** the hang-point trace (the app must DEGRADE, never freeze, on
+shape mismatch — the connect-time check shrinks the window, it does not remove
+it), then smokes and the cut.
+
+### SMOKE (d) — GEOMETRY SURVIVAL. Standard pre-distribution from +80.
+
+Two halves; **both** must pass, and the readback must be pasted, not summarised.
+
+**(d1) Boot survival.** Power-cycle the bench → wait for WiFi rejoin → open the
+app → read `/json/state`:
+
+- segment **count** == 2
+- **bounds** `seg0[0,128)` `seg1[128,290)`
+- **`rev`**: seg0 `false`, seg1 **`true`**
+- **app control works** — a power toggle lands and reads back
+
+**(d2) Apply with a channel deselected.** Deselect Bench Ch1 → apply the pattern
+from the +79 repro → read `/json/state`:
+
+- segment **count still 2** (seg 1 not deleted)
+- **bounds unchanged** — seg 0 still `[0,128)`, *not* `0-290`
+- **seg 1 `rev` still `true`**
+- and the wire log shows no bounds on that apply:
+
+```
+adb logcat -d | grep LUMINA_WIRE
+```
+
+Expect `bounds=NONE` on the apply's line. A line reading
+`bounds=seg[0](id=0):start+stop` is a FAIL even if the geometry happened to
+survive — it means a builder is still stating geometry and only the pin saved it.
+
+**Why `rev` is non-negotiable here:** it is the field the recovery path does
+*not* restore (#102/+81), so a smoke checking only count and bounds would pass
+on a half-repaired rig — the layout would look healed while one channel ran
+backwards.
+
 ### THE "HEALER" WAS A PSAVE GUARD, NEVER A CONNECT-TIME HEALER — 2026-08-18
 
 Recorded because the machinery looked present and was reported as present. It

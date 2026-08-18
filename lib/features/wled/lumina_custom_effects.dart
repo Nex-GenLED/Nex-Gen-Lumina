@@ -3,6 +3,44 @@
 ///
 /// Effect IDs 1000+ are reserved for Lumina custom effects to avoid
 /// collision with WLED's native effect IDs (0-186).
+///
+/// ───────────────────────────────────────────────────────────────────────────
+/// ⚠️ STANDING CONSTRAINT (+80, 2026-08-18):
+/// **DO NOT RE-ENABLE THIS CATALOG WITHOUT THE GEOMETRY WIRE PIN IN PLACE.**
+/// ───────────────────────────────────────────────────────────────────────────
+///
+/// "Timed segment manipulation" is the problem. Four of the seven effects
+/// animate by MOVING SEGMENT BOUNDARIES — the motion IS a `start`/`stop` sweep —
+/// and segment bounds are provisioning's, not an apply's (#76/#88/#89/#95).
+/// Re-enabling them without `geometry_wire_pin.dart` at the wire exit re-arms
+/// the exact class that destroyed a controller's layout on +79.
+///
+///   1001 Rising Tide   — final frame states `{id:0, start:0, stop:total}` and
+///                        OMITS seg 1: the +79 collapsed state, verbatim.
+///   1002 Falling Tide  — same builder, `reverse: true`.
+///   1003/1004 Pulse    — boundary sweep from/to centre.
+///   1005 Grand Reveal  — final frame emits ZERO-LENGTH segs [0,0) and
+///                        [total,total); a zero-length bound is what
+///                        `applyChannelFilter` Rule 1 forbids outright, because
+///                        it reads as "this channel does not exist".
+///   1006 Curtain Call  — terminal split is `totalPixels ~/ 2` (145 on a 290
+///                        strip), a boundary derived from PIXEL COUNT that
+///                        matches no bus. The bench's real split is 128.
+///   1007 Ocean Swell   — the one clean builder: animates colour/phase, states
+///                        no bounds, needs no redesign.
+///
+/// TWO INDEPENDENT GATES currently make this dead code, which is why +79 had no
+/// field exposure from it: [isCustomEffect] is hardcoded `false`, and
+/// `LuminaEffectController._isRunning` is never assigned `true`.
+///
+/// The redesign, not an allowlist: prefer a NATIVE WLED effect (Rising Tide ≈
+/// Percent/Wipe, Pulse ≈ Ripple) — zero geometry, and it deletes 20 sequential
+/// POSTs per effect, which over the relay are 20 command documents. Fall back to
+/// per-pixel `i` writes (`applyPerPixel`, Design Studio Slice 0), which paint
+/// WITHIN fixed segments; handle the `frz:true` side-effect per the +63 fix.
+///
+/// Pinned by `test/features/wled/lumina_custom_effects_geometry_test.dart`,
+/// which fails if the catalog is re-enabled. Tracked as **#103**.
 library lumina_custom_effects;
 
 import 'dart:async';
