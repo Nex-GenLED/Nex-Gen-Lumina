@@ -65,6 +65,66 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### DISK CLEANUP 2026-08-18 — build worktrees retired, symbols preserved
+
+**Fleet state at time of cleanup:** Play closed track and TestFlight both serve
+**build 79** (iOS 310). **+77 was never distributed on either platform.** Nothing
+removed below backs a build any user can currently be running.
+
+**ARCHIVED FIRST, verified before anything was deleted.** Seven symbol sets
+copied to `debug-info-archive/{version}+{code}/` (gitignored at `.gitignore:203`,
+deliberately outside `build/` so `flutter clean` cannot reach it). Flat
+`.symbols` layout, matching the existing `2.3.0+15`/`+16` convention:
+
+| Archive path | Files | Bytes |
+|---|---|---|
+| `2.5.10+74/` | 3 | 22,067,948 |
+| `2.5.10+75/` | 3 | 22,080,184 |
+| `2.5.10+76/` | 3 | 22,110,908 |
+| `2.5.10+77/` | 3 | 22,127,600 |
+| `2.5.10+78/` | 3 | 22,183,664 |
+| `2.5.10+unlabelled-0811/` | 3 | 22,263,632 |
+| `2.5.10+54/` | 3 | 21,994,892 |
+
+Every set verified by file count, total bytes, **and** byte-for-byte `cmp`
+against its source before the corresponding worktree was touched. +78 archived
+as insurance despite being withdrawn pre-distribution — iOS 308 exists on ASC.
+
+**REMOVED:**
+
+- Build worktrees `lumina-b74` … `lumina-b78` (all five clean; all five detached
+  HEADs confirmed ancestors of `main`, so no unique commits were lost).
+- The stale scratchpad worktree `…/6cbcf28d-…/scratchpad/rebase-wt`. Its HEAD
+  `3dcab54` was **not** an ancestor of main — but `git patch-id` proved both its
+  commits byte-identical to commits already on `main` (`bcf6ea3`) and on the
+  pushed branch `fix/neighborhood-join-membership` (`315b400`/`ab00f35`), and
+  carried forward in the kept `lumina-r75`. Nothing unique was lost.
+- Stale `build/` in the five kept feature worktrees (`lumina-sunrise-off`,
+  `lumina-gameday`, `lumina-p0-3`, `lumina-r75`, `lumina-f3`) — worktrees
+  themselves retained and verified clean afterward.
+- `submission_artifacts/` — 3× v2.3.0 AABs from May 2026, superseded; this
+  ledger records their distribution history.
+
+**KEPT:** `lumina-b79` (current build), `lumina-b80` (build in flight at cleanup
+time), and all seven feature worktrees.
+
+**Reclaimed: ~8.97 GB.**
+
+**GOTCHA worth keeping — `git worktree remove` fails on Windows MAX_PATH.** All
+five removes died with `Filename too long` against the deep `build/`
+intermediates, **but git had already unlinked the worktree admin data before
+failing** — leaving the trees deregistered from `git worktree list` while the
+directories survived on disk. Recovery is just deleting the orphaned folders;
+`rm -rf` clears the long paths git itself could not. If a worktree vanishes from
+the list but its folder remains, this is why: it is a half-completed remove, not
+a corrupted repo.
+
+**DEFERRED, not skipped:** `flutter clean` in the main repo and the
+`~/.gradle/caches` wipe were both held — the +80 release build was actively
+writing when the cleanup ran, and a Gradle cache wipe mid-build would burn
+versionCode 80. Run both once +80 lands. Pub cache (`%LOCALAPPDATA%\Pub\Cache`)
+is a deliberate keep.
+
 ### +79 GEOMETRY INCIDENT — CLOSED 2026-08-18
 
 **Reported as:** a design apply on the +79 field build destroyed a controller's
