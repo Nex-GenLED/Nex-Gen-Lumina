@@ -67,8 +67,22 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ### SUITE BASELINE — authoritative line, corrected 2026-08-18
 
-**Current baseline: `2416 passed · 3 skipped · 0 failed`** — the +80 row's
-build-time run at tag `build-80`. Start every delta from this number.
+**Current baseline: `2435 passed · 4 skipped · 0 failed`** — as of `2026-08-18`,
+post-#95-item-1. Start every delta from this number.
+
+**Two movements since the +80 row's `2416 / 3 / 0`, and both are accounted for:**
+
+| | passed | skipped | why |
+|---|---|---|---|
+| +80 build-time | 2416 | 3 | the row below |
+| \+ #95 item 1 tests | **2436** | 3 | +18 `participation_override_test`, +2 header pins |
+| \+ ladder test gated | **2435** | **4** | **−1 pass, +1 skip — same test, moved** |
+
+**The −1 is not a lost test.** `base_ladder_repair_live_test` was passing
+*silently and vacuously* (see below); gating it on `skip: !kRunHw` moves it from
+the pass column to the skip column. **Nothing regressed, and no test was
+deleted.** Expect `2436 / 3` again — one more pass, one fewer skip — on any run
+with `--dart-define=RUN_HW=true`, plus 3 more from `preset_heal_live_test`.
 
 **Why this block exists.** A session reading down this file hit
 *"**2164 is the new baseline**"* (in the **+73** section) and did its arithmetic
@@ -84,29 +98,52 @@ the oldest number. This is that place.
 | +79 | 2382 | 3 | 0 |
 | **+80** | **2416** | **3** | **0** |
 
-**The 3 skips are fully accounted for**, and it is always the same 3: the three
-`skip: !kRunHw` cases in `test/hardware/preset_heal_live_test.dart`
-(`RUN_HW=false` by default). Nothing else in the tree carries a `skip:`.
+**The 4 skips are fully accounted for, and the count is now the signal.** All 4
+are `skip: !kRunHw` (`RUN_HW=false` by default): 3 in
+`test/hardware/preset_heal_live_test.dart` and 1 in
+`test/hardware/base_ladder_repair_live_test.dart`. **Nothing else in the tree
+carries a `skip:`, so any other number is a real finding** — a 5th skip is a
+test someone quietly disabled.
 
-**`base_ladder_repair_live_test` is NOT one of them, and the "pre-existing
-hardware red" note in the +72/+73 rows is STALE.** It is neither skipped nor
-failing today — it **runs in the default suite and passes**. Three corrections
-to what was believed about it:
+**`base_ladder_repair_live_test`: the "pre-existing hardware red" note in the
++72/+73 rows is STALE, and until 2026-08-18 the test was worse than red — it
+was a test that could not fail.** What was believed, and what was true:
 
-1. **Its own header comment is wrong.** It says *"excluded from the default
-   suite by the `hardware` tag"* — but there is **no `dart_test.yaml`** in this
-   repo, so `@Tags(['hardware'])` excludes nothing. The tag is inert.
-2. **It self-guards with `if (!reachable) return;`** — an early return, which
-   the runner reports as a **PASS**, not a skip. So "it passed" does not by
-   itself mean it exercised anything.
-3. **⚠️ On THIS machine it is not inert.** `192.168.1.150` answers
+1. **Its header claimed the `hardware` tag excluded it from the default suite.**
+   There is **no `dart_test.yaml`** in this repo, so `@Tags(['hardware'])` acts
+   on nothing. **It ran in every default `flutter test`.**
+2. **It self-guarded with `if (!reachable) return;`** — an early return, which
+   the runner reports as a **PASS**, not a skip. On a machine that could not see
+   the bench it could not fail; on one that could, it wrote to the live rig.
+3. **⚠️ On THIS machine it was not inert.** `192.168.1.150` answers
    `/json/state` with HTTP 200 from the dev box, so a plain `flutter test`
-   **damages and repairs preset slot 3 (`NGL Dim`) on the live bench
+   **damaged and repaired preset slot 3 (`NGL Dim`) on the live bench
    controller** — real POSTs, real flash writes. It ran that way **three times
-   on 2026-08-18** during the #95 item-1 work, passing each time (so the ladder
-   is left repaired, not damaged). **Re-verify slot 3 before any smoke run that
-   depends on the base ladder**, and prefer `flutter test test/` scoped to a
-   directory when the bench is mid-experiment.
+   on 2026-08-18** during the #95 item-1 work, passing each time, so **the
+   ladder is left repaired, not damaged**. Re-verify slot 3 before any smoke run
+   that depends on the base ladder.
+
+**FIXED 2026-08-18** — gated on `skip: !kRunHw`, the proven in-tree mechanism,
+and the reachability probe is now a hard `expect` **inside** the body: a run
+explicitly requested with `RUN_HW=true` against a missing bench now FAILS, which
+is the thing the operator needs told. `@Tags(['hardware'])` is kept as correct
+intent — it starts working the day a `dart_test.yaml` lands — but is never again
+the guard. **A plain `flutter test` no longer touches hardware.**
+
+**Filed, not fixed:** `test/features/ai/lumina_security_test.dart:19` claims its
+end-to-end tests "are marked `@Tags(['integration'])`". **No test in that file
+carries any annotation** — the header describes a convention that was never
+applied. Not the same one-line shape (those want a Firebase emulator, not a
+LAN), and nothing there opens a socket, so it is a stale comment rather than a
+live hazard. Worth a pass when someone next touches that file.
+
+**Sweep, so this class is closed rather than spot-fixed:** `test/` was checked
+for every other instance — `@Tags` (2 hits: this file, and the stale comment
+above), real socket construction (`HttpClient()` / `Socket.connect` /
+`RawDatagramSocket` / `http.Client()` — **1 hit, this file**), and
+early-return-on-unreachable (**1 hit, this file**). Every other test naming
+`192.168.x.x` uses it as a mock string. **No other live-hardware test exists in
+the tree.**
 
 ### DISK CLEANUP 2026-08-18 — build worktrees retired, symbols preserved
 
