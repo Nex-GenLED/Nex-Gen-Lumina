@@ -65,6 +65,100 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### GAME DAY TEARDOWN 2026-08-18 — two armed fires retracted, gate rolled back, ghost config removed
+
+Not a build row. A fleet-affecting operational event, recorded here because it
+changed `config/gameday_planner` and because it closes one **#72** instance.
+
+**Trigger.** A customer-visible ghost card on the Game Day screen — mono two-dot
+icon, bare "MLB" label, no team name, live "Light Up Now" — reported after the
+Royals were deleted, and appearing/disappearing with the Chiefs entry.
+
+**What it actually was.** Not Royals residue. The Royals were removed *cleanly*
+(profile arrays stripped, `mlb_royals` config deleted). The ghost was
+`users/wrQRUUKyXyc0deyuu0ORS6wsovO2/game_day_autopilot/**mlb_twins**`, a
+**four-key** document:
+
+```
+{ enabled: true, espn_team_id: "9", sport: "mlb", updated_at: 2026-08-13T15:42:20.112Z }
+```
+
+`created_at` null; no `team_name`, no `team_slug`, no colors. Every rendered
+symptom is a `fromFirestore` default: absent name -> `''`; absent colors ->
+`0xFF000000`/`0xFFFFFFFF` (the mono dots); `sport:"mlb"` -> the bare label. It
+rendered at all because `gameDayTeamsProvider` matches on
+`token.contains(configName)` and **`anyString.contains('')` is always true** in
+Dart, and it vanished with the last team because that provider returns early on
+an empty selection set. Chiefs was never coupled to it — Chiefs merely satisfied
+the non-empty precondition. Filed **#101**.
+
+**Live exposure at discovery, 2026-08-18T18:57Z.** Two `state:"scheduled"`,
+`type:"applyJson"` jobs, both on the bench uid, both `fireAt`
+**2026-08-18T23:10:00Z** — **4 h 13 m out** — both targeting `192_168_1_150`:
+
+| job | planned | payload | why it existed |
+|---|---|---|---|
+| `gd_mlb_royals_401816580_start` | 17:10:06Z | 130 B `on+bri+seg` | planned while the config still existed; team deleted after; **nothing tore it down** |
+| `gd_mlb_twins_401816596_start` | 17:10:07Z | 133 B `on+bri+seg` | the ghost was `enabled:true`, so the planner kept selecting it |
+
+Not ping. Real payloads. The gate was `write_jobs:true` scoped to exactly this
+uid, so the exposure was real rather than theoretical.
+
+**Actions, in order, each verified by readback:**
+
+| # | Action | Verification |
+|---|---|---|
+| 1 | both jobs `state` -> `"cancelled"` + `cancelled_reason` + `cancelled_at` (19:05:15Z) | re-read: state `cancelled`, `fireAt` and payload **preserved** |
+| 2 | `game_day_autopilot/mlb_twins` **deleted** (content preserved first) | re-read `exists:false`; account left with `nfl_chiefs` only, matching its `sports_teams:["Kansas City Chiefs"]` |
+| 3 | `config/gameday_planner` `write_jobs` -> **false** | re-read: `uid_allowlist`, `notes`, `armedReason`, `scopedBy` all **byte-identical**; `rollback_note` + `rolled_back_at` appended |
+
+**Final sweep:** `fire_jobs` fleetwide **17 total / 15 completed / 2 cancelled /
+0 scheduled / 0 missing a `state` field**; **47 configs fleetwide, 0 malformed**
+(none missing `team_name` or `team_slug`). The ghost was a **single artifact**,
+not a class already in the field.
+
+**RETRACTED, NOT DELETED — the convention this session set.** A retracted job is
+`state:"cancelled"` + `cancelled_reason` + `cancelled_at`, with `fireAt` and
+`payload` left intact. `"cancelled"` is deliberately **not** in the
+`FireJobState` union yet; it is inert everywhere (`decideDispatch` tests
+`!== "scheduled"`; both dispatch queries filter `scheduled`/`dispatched`), which
+is the safe way to introduce a state. Tyler's ruling, recorded: *"a state that
+means deliberately retracted by a human is semantically distinct from skipped
+(the system declining automatically), and blurring those two would destroy the
+audit trail's meaning at exactly the moment it matters."* Formalizing it in the
+union is follow-through under **#98**.
+
+**#72 INSTANCE 3 — EXPLAINED, and closed as drift.** The entry under
+`### GLOBAL-ARM WORKSHEET — census 2026-08-13` reads *"No session and no commit
+accounts for the change … Bench re-armed via `mlb_twins`"* and files it under
+**rig state moves between sessions**. It was not drift. The re-arm *was* the write: someone hand-minted `mlb_twins` with exactly
+the fields `planGameDayFires` reads — `enabled` for the `.where()` clause,
+`sport`+`espn_team_id` for the ESPN lookup — and none the Game Day card reads.
+The doc's `updated_at` is that same day. **One unexplained-drift instance
+converted to an explained, attributed hand-write.** #72's pattern claim drops
+from three-for-three to two-for-three; re-read the remaining two before treating
+the pattern as established.
+
+**LESSON — binding on the next shadow run.** *Bench arming by hand-minted document
+leaves artifacts the UI renders as ghosts.* A doc written against the server's
+query is not a doc the client can display, remove, or reason about — this one was
+**unremovable from the UI** (`_confirmRemove` passes an empty slug; the profile
+strip matches nothing and the `.doc('')` delete throws and is swallowed, while
+the snackbar reports success). Arm either **through the client path**, or with the
+**full field set** a real `addTeam` would write. Never with the server's minimum.
+
+**Defects filed from this session:** **#98** (no fire-job teardown on team delete
+— production-proven), **#99** (`decideDispatch` never re-reads config/team; the
+#66 guard's blind spot), **#100** (client/server slug divergence), **#101** (the
+ghost-rendering pair + the live button). **#92** gained a HOLD: `migrationConfigsFor`
+falls back to the same `0xFF000000`/`0xFFFFFFFF` pair, so wiring it would mint
+this exact shape **fleetwide** on accounts that never opted into Game Day.
+
+**RE-ARM IS A DELIBERATE ACT.** `uid_allowlist` and the original `notes` were left
+intact for the next test session. **#98 and #99 are marked 🚫 BLOCKS RE-ARM** —
+setting `write_jobs:true` again before they are fixed reopens the same orphan
+class, unattended.
+
 ### #76 SEVERITY CAP — CLOSED AND WIRED, 2026-08-14
 
 | # | Layer | Where | Status |
@@ -1143,6 +1237,15 @@ cycle on 08-12. No session and no commit accounts for the change. Same class as
 the `participationStatus` flip. Bench re-armed via `mlb_twins`, and the pattern —
 **rig state moves between sessions** — is now three-for-three on being worth
 re-reading rather than assuming.
+
+> ⚠️ **SUPERSEDED 2026-08-18 — this instance was NOT drift.** The "re-armed via
+> `mlb_twins`" clause is the whole explanation: that re-arm hand-minted
+> `game_day_autopilot/mlb_twins` with only the four fields the server planner
+> reads, and the doc survived to render as a customer-visible ghost card with a
+> live fire button. Attributed and torn down in
+> `### GAME DAY TEARDOWN 2026-08-18`. **The pattern claim drops to
+> two-for-three** — re-read the other two instances before treating "rig state
+> moves between sessions" as established.
 
 ### #71 — CLOSED 2026-08-13. Consent > pause, verified on the rig.
 

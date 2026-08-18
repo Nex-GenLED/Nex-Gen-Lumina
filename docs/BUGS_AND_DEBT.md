@@ -550,6 +550,15 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `scoreCelebrationEnabled` at all**.
   - Being inert is the only reason this is P3. Left as-is, the honest state is: the model
     landed, the migration did not.
+  - 🚫 **HOLD ADDED 2026-08-18 — do not wire until #101 is fixed.** `migrationConfigsFor`
+    falls back to `primaryColorValue: meta?.primary ?? 0xFF000000` and
+    `secondary ?? 0xFFFFFFFF` (`unified_monitoring.dart:152-153`) — **the exact black/white
+    pair that rendered the `mlb_twins` ghost's mono two-dot icon.** Any orphan whose slug is
+    absent from `teamMetadata` mints a config in the ghost's shape. Today that is one
+    hand-made doc on the bench; wired, it is a **fleetwide batch** of them, each with a live
+    "Light Up Now" button, on the very accounts that never opted into Game Day. #101 is the
+    prerequisite: once a malformed config cannot render or match, this migration is safe to
+    wire. Filing this as a second reason to hold, independent of the lighting question above.
 
 - [x] **#95 — a channel that is OFF reads as a channel that is GONE. Release-blocking; WITHDREW
   +78. FIXED, awaiting +79 hardware smoke (c).**
@@ -1353,9 +1362,126 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     discipline applies; assumes **#94** Node 22 has landed). Do not start before the
     replacement arc's Stage 1.
 
+- [ ] **#98 — removing a Game Day team does NOT tear down its scheduled fire jobs; the job
+  fires for a team that no longer exists. 🚫 BLOCKS RE-ARM**
+  - Status: OPEN (filed 2026-08-18, ghost-config teardown session) · Severity: **P1** ·
+    Evidence: **PRODUCTION-PROVEN — caught armed and 4 h from firing**
+  - `removeTeam` ([team_registration_service.dart:105](../lib/features/sports_alerts/services/team_registration_service.dart))
+    strips the profile arrays, deletes `game_day_autopilot/{slug}`, cancels the in-memory
+    session — and **cannot** touch fire jobs, because **`fire_jobs` has ZERO references
+    anywhere in `lib/`**. There is no client teardown path to call. Nothing server-side reaps
+    them either: there is no `.delete()` on a fire job in `functions/src/`, and
+    `dispatchFireJobs`' "reconcile" reconciles *dispatched* jobs against their command
+    outcomes (`:164-198`), not orphaned `scheduled` ones.
+  - **The live instance.** On the bench uid `wrQRUUKyXyc0deyuu0ORS6wsovO2`:
+    `fire_jobs/gd_mlb_royals_401816580_start`, planned **2026-08-18T17:10:06Z**,
+    `state:"scheduled"`, `type:"applyJson"`, 130-byte `on+bri+seg` payload,
+    `controllerId:"192_168_1_150"`, `fireAt` **2026-08-18T23:10:00Z**. The user deleted the
+    Royals *after* 17:10; the config is gone (the account's only remaining config is
+    `nfl_chiefs`) and the job survived untouched. Found at 18:57Z with **4 h 13 m to
+    go** and retracted by hand.
+  - **Why it would have fired.** See **#99** — the dispatcher never re-reads the config.
+  - **Retraction convention set by this session** (follow it, or supersede it deliberately):
+    retracted jobs are `state:"cancelled"` + `cancelled_reason` + `cancelled_at`, **never
+    deleted** — `fireAt` and `payload` stay for the audit trail.
+  - ⚠️ **`"cancelled"` is NOT in the `FireJobState` union** (`fireJobs.ts:110-116`:
+    `scheduled|dispatched|completed|failed|expired|skipped`). It is *inert and safe* —
+    `decideDispatch` only tests `!== "scheduled"` and both dispatch queries filter on
+    `"scheduled"`/`"dispatched"` — but it is an undeclared value that any future exhaustive
+    switch will not handle, and it will bucket as unknown in stats. **Add it to the union as
+    part of this fix.**
+  - **Gated, not fixed:** exposure is currently zero only because `config/gameday_planner`
+    `write_jobs` was rolled back to `false` on 2026-08-18. Re-arming without this fix
+    reopens it.
+
+- [ ] **#99 — `decideDispatch` never re-reads the config or the team before firing; the #66
+  guard's blind spot. 🚫 BLOCKS RE-ARM**
+  - Status: OPEN (filed 2026-08-18) · Severity: **P1** · Evidence: **verified-by-source +
+    production instance (#98)** · Sibling of **#66**
+  - `decideDispatch` ([fireJobs.ts:214-253](../functions/src/fireJobs.ts)) checks exactly
+    five things: `state === "scheduled"`, `fireAt` present, lateness ≤
+    `MAX_FIRE_LATENESS_MS` (90 s), payload fire-safety, non-empty `controllerId`.
+    **There is no check that the team's config still exists, or that it is still `enabled`.**
+    `dispatchFireJobs` re-reads only the job and the controller doc — never
+    `game_day_autopilot`.
+  - **This is precisely the gap #66's guard does not cover.** The gate's own `armedReason`
+    records GUARD 0/0b as *"confirmed live with two production sightings … both refused
+    `end_skipped_no_start`"* — i.e. it protects the **end** fire from firing with no recorded
+    start. A **start** fire whose team was deleted is a different shape and passes cleanly.
+  - **Fix shape:** a config-existence + `enabled` recheck at dispatch, refusing terminally
+    with a legible reason (`team_removed` / `config_disabled`) in the same style as
+    `unresolvable_target`. Note this is the one place the codebase already models correctly
+    for *addresses* (`dispatchFireJobs:275-293` re-resolves the controller IP server-side and
+    never trusts the job's copy) — the same discipline simply was not extended to the team.
+  - Files: `functions/src/fireJobs.ts:214-253`, `functions/src/dispatchFireJobs.ts:239-300`
+    (`functions/` — assumes **#94**).
+
+- [ ] **#101 — `gameDayTeamsProvider` renders any malformed config as a ghost card with a
+  LIVE fire button, and couples its visibility to unrelated teams**
+  - Status: OPEN (filed 2026-08-18) · Severity: **P1** · Evidence: **PRODUCTION-PROVEN**
+  - Two clauses in [game_day_providers.dart:70-110](../lib/features/game_day/game_day_providers.dart):
+
+    ```dart
+    if (selectedTokens.isEmpty) return const [];        // (A)
+    ...
+    configName.contains(token) || token.contains(configName) || …   // (B)
+    ```
+
+    **(B)** — `configName` is `''` when a config lacks `team_name`, and in Dart
+    `anyString.contains('')` is **always true**, so a nameless config matches *every* token.
+    **(A)** — with no teams in the profile the provider returns before examining any config.
+    Together: the ghost appears whenever **any** team is selected and vanishes when the last
+    one is removed. The customer reads that as "the ghost is coupled to the Chiefs"; it is
+    not — Chiefs merely satisfies (A).
+  - The provider's own doc comment claims the invariant (B) breaks: *"orphaned subcollection
+    docs from prior sessions are ignored."*
+  - **The card is not cosmetic.** Its "Light Up Now"
+    ([game_day_screen.dart:351 → :488-555](../lib/features/game_day/game_day_screen.dart))
+    calls `applyGameDayConfigToDevice` against the live controller with the config's
+    *defaults* — `0xFF000000`/`0xFFFFFFFF`, `effect_id:52`, `brightness:200` — then calls
+    `toggleAutopilot(enabled: true)`, whose `existing.exists` branch is a bare
+    `update({'enabled': true})` with **no slug validation** (`game_day_autopilot_providers.dart:585`).
+    On a malformed doc that is a one-tap arm of the server planner.
+  - **Production instance:** `users/wrQRUUKyXyc0deyuu0ORS6wsovO2/game_day_autopilot/mlb_twins`
+    — a **four-key** doc (`enabled, espn_team_id, sport, updated_at`), no `team_name`, no
+    `team_slug`, no colors, `enabled:true`. Rendered as "⚾ " with a bare "MLB" label and
+    black/white `_TeamColorDots`. **Origin CONFIRMED**, not hypothesised: the 2026-08-13
+    bench re-arm recorded in `docs/BUILD_LEDGER.md` as *"#72 instance 3 … Bench re-armed via
+    `mlb_twins`"*. Its field set is exactly what `planGameDayFires` needs (`enabled` for the
+    where-clause, `sport`+`espn_team_id` for the ESPN lookup) and nothing the card needs —
+    the signature of a write authored against the server, not the UI. Full content preserved
+    before deletion.
+  - **It was also unremovable.** `_confirmRemove` passes `config.teamSlug` (`''`) →
+    `_stripTeamFromProfile(uid, '')` matches nothing → **no write**, then `.doc('')` throws →
+    **swallowed** at `team_registration_service.dart:123` → snackbar reports success. See
+    **#100**.
+  - **Fix shape:** filter malformed configs out of `gameDayTeamsProvider` (a config with no
+    `team_name` or no `team_slug` is not renderable), and make (B) require a non-empty
+    `configName`. Both halves — a nameless config must neither render nor match.
+
 ---
 
 ## P2 — hardening & platform
+
+- [ ] **#100 — client and server derive a config's team slug from DIFFERENT sources, so the
+  client can go blind to a config the server still acts on**
+  - Status: OPEN (filed 2026-08-18) · Severity: **P2** · Evidence: **verified-by-source +
+    production instance (#101)**
+  - **Client:** `GameDayAutopilotConfig.fromFirestore(doc.data())` reads
+    `data['team_slug'] ?? ''` (`game_day_autopilot_config.dart:358`) — and is handed
+    **`doc.data()` only**, never the snapshot, so the doc id is not even available to fall
+    back on (`game_day_autopilot_providers.dart:219`).
+  - **Server:** `const teamSlug = cfgDoc.id` (`planGameDayFires.ts:425`).
+  - When the `team_slug` *field* is missing but the doc id is valid — the `mlb_twins` shape in
+    **#101** — the client resolves `''` and the server resolves `mlb_twins`. Every client
+    action keyed on the slug (remove, toggle, session cancel) silently fails on `.doc('')`
+    while the planner happily keeps planning fires. The customer's UI is blind to a document
+    the backend is acting on.
+  - **Fix shape:** pass the snapshot (or its id) into `fromFirestore` and prefer the doc id,
+    matching the server. The field then becomes a redundant convenience rather than the sole
+    source. Cheap, and it removes a whole class of divergence rather than this one instance.
+  - Files: `lib/features/autopilot/game_day_autopilot_config.dart:355-358`,
+    `lib/features/autopilot/game_day_autopilot_providers.dart:219` (client-only).
 
 - [ ] **P2-12 — Slot-cap guard (WLED preset max 250)**
   - Status: OPEN · Evidence: bench-proven (251+ silently no-ops)
