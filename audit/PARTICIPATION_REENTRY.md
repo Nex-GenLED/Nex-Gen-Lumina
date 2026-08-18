@@ -199,8 +199,50 @@ better smoke test of the two.
 
 | # | check | status |
 |---|---|---|
-| 1 | `participation_override_test.dart` — 20 cases | written |
-| 2 | Include-back on hardware: dimmed chip → sheet → both channels take an All-Zones design apply | **OWED** |
-| 3 | Survives relaunch — the reconciler prunes, does not clear | **OWED** |
+| 0 | **Bench field remediation — both chips selectable** | ✅ **2026-08-18** (see below) |
+| 1 | `participation_override_test.dart` — 18 cases | ✅ green; suite **2435 / 4 / 0** |
+| 2 | Include-back on hardware: dimmed chip → sheet → both channels take an All-Zones design apply | **OWED — needs +81.** The affordance is committed but is NOT in the +80 field build, where that chip is still `onTap: null` |
+| 3 | Survives relaunch — the reconciler prunes, does not clear | **OWED — needs +81** (no override can exist on a build without the writer) |
 | 4 | **§7.2d re-verify.** The healer's participation leg changed (awaits the override, publishes `_explicit`). Its dispositions, dedup memo and single-write property are unchanged by inspection, but §7.2d GREEN was measured on +73 without this await — re-run Leg A (dedup) and confirm `participation_publish_disposition` still transitions `offered` and writes zero on a second heal | **OWED — blocks the +81 ledger entry** |
 | 5 | Firestore rules: `participating_channels_explicit` is a new field on an already-owner-writable doc; no rules change expected — confirm | **OWED** |
+
+### Check 0 — bench remediation VERIFIED, 2026-08-18
+
+Ran `scripts/_fix_bench_participation.js --mode=flip --commit` against
+`.../pixelMap/1`, then a cold relaunch on LAN. **Both chips selectable; the
+lockout is gone.**
+
+Read back rather than trusted to the exit code, per the ledger's own convention:
+
+| | before | after flip | after relaunch |
+|---|---|---|---|
+| `ch1-secondary.is_primary` | `false` | **`true`** | `true` |
+| default policy for ch 1 | `EXCLUDED` | **`PARTICIPATES`** | `PARTICIPATES` |
+| resolver output | `[0]` | `[0,1]` | `[0,1]` |
+| `participating_channels` (server) | `[0]` | `[0]` *(unchanged — healer publishes on connect)* | **`[0,1]`** |
+| `participating_channels_publish_count` | 43 | 43 | **44** |
+
+**What actually healed the phone: the reconciler's derived path**, not the
+override — the override does not exist on +80. Cached `[0]` vs recompute
+`[0,1]` ⇒ stale ⇒ cleared to null ⇒ every channel participates. This is the
+first observed hardware exercise of that clear on this account, and it confirms
+the mechanism the §1 table lists as the one that *could not* fire while the
+input still derived to `[0]`.
+
+**`participating_channels_previous` stayed null, and that is correct.** It was
+predicted to record `[0]`. It does not, because the dedup memo is per-PROCESS:
+a cold start has `last == null`, which sets `previousKnown: false` and omits the
+field. `_previous` only writes on an IN-SESSION change — which is exactly how
+§7.2d Leg B captured it, with a warm memo. The prediction was wrong; the code is
+right.
+
+**The rig is no longer discriminating for the roofline leg** (ledger §7.2d Leg
+B). Flip the one boolean back — `--mode=flip` writes `true`; set it to `false`
+by hand or re-run Leg B's write — when that branch needs exercising again.
+
+**Drift found while reading:** the Leg B doc no longer matches its ledger
+record. §7.2d logged `pixel_count: 10`; it now reads `pixel_count: 128` with
+`anchor_pixels: [0,126]` and `is_connected_to_previous: false`. Something
+rewrote it after 2026-08-12 — most likely a roofline save. Doesn't affect the
+flip. Note `pixel_count: 128` against bus 1's real length of **162**, which may
+trip `pixelMapStalenessProvider`.
