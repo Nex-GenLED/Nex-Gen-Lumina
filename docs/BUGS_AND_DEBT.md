@@ -1463,6 +1463,53 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P2 — hardening & platform
 
+- [ ] **#104 — Game Day entry stalls when hardware geometry disagrees with the installation
+  record; the app must DEGRADE LEGIBLY, never freeze (+81)**
+  - Status: OPEN (filed 2026-08-18, carried out of +80) · Severity: **P1 — customer-visible**
+    · Evidence: **field-reported; NOT reproduced from source**
+  - **The requirement, which stands regardless of the diagnosis:** when the controller's shape
+    disagrees with the installation record, the screen **renders from the installation record
+    immediately**, fills in device truth **asynchronously**, marks untrusted channels
+    **inline** as *"controller layout out of sync"*, and offers a **re-provision button**. No
+    modal traps. No infinite spinners.
+  - **Why it is still open after +80:** the connect-time heal (`e5c39c8`) **shrinks the
+    mismatch window; it cannot remove it.** A device can be mid-drift when the app attaches,
+    and the heal deliberately stands aside on an unreadable read. Do not close this item on
+    the grounds that the heal exists — that is the trap this note is written to prevent.
+  - **TRACE RESULT — the hang is NOT where it was expected, and the timeout audit is CLEAN:**
+    - Game Day's build path is shape-independent. `effectiveChannelIdsProvider`,
+      `deviceChannelsProvider` and `applyGameDayConfigToDevice` are read in `_activateNow`
+      (`game_day_screen.dart:514-515`) — a **tap** handler, not a build.
+    - Cleared: `resolveParticipatingChannels` (pure); `_gameDayBackgroundPersistenceProvider`
+      (every write `unawaited`); `runParticipationReconciliationIfReady` (self-gating, and
+      **dashboard-only** — not reachable from Game Day); `CloudRelayRepository.getConfig()`
+      (returns null immediately).
+    - **Every controller-facing call on the path is bounded.** `WledService`: **24 I/O sites,
+      all with `connectionTimeout` + `.timeout()`** (5s/10s/15s/30s). Relay `_executeCommand`:
+      bounded by `_commandTimeout` with listener auto-cancel. ESPN
+      (`espn_api_service.dart:96`): 15s. **No user-facing controller call lacks a timeout.**
+  - **Two surviving hypotheses, and they need DIFFERENT fixes — which is why no fix shipped
+    in +80:**
+    1. **Serial-timeout stall.** Several 15s timeouts in sequence = 45–60s of
+       unresponsiveness, which a user reports as a freeze. Bounded but neither fast nor
+       legible. **A degraded-state widget alone does NOT fix this** — it would still sit
+       behind 45s of timeouts. Needs render-then-fill (or parallelised reads).
+    2. **A never-resolving loading state** → permanent spinner. Cured by the degraded state.
+  - **THE EXPERIMENT THAT SETTLES IT** (post-cut, Tyler drives the app): collapse the bench to
+    1 seg, enter Game Day, **time it**, with `adb logcat | grep -E "LUMINA_WIRE|TimeoutException"`
+    running. Under ~60s and self-recovering ⇒ (1). Indefinite ⇒ (2).
+  - **Design already settled** (implement after the diagnosis): trust boundary from the shape
+    comparison that already exists — `expectedShapeFromChannels` (buses) vs
+    `segmentShapeFromState` (live) — yielding trusted/untrusted channel ids in the same
+    `SegmentShape` vocabulary as `decideGeometryHeal` and the repro suite. The re-provision
+    button is **a button to `applyGeometryJson` via the healer's existing
+    `_reprovisionSegments`** — not new machinery. Extract as a pure
+    `evaluateShapeAgreement(expected, live)` so it is testable without a widget, matching
+    `decideGeometryHeal` and `buildChannelPowerPayload`.
+  - Files: `lib/features/game_day/game_day_screen.dart`,
+    `lib/features/wled/controller_defaults_healer.dart` (existing re-provision), plus a new
+    pure shape-agreement helper (client-only).
+
 - [ ] **#102 — a geometry re-provision restores bounds but NOT `rev`, so a repaired channel
   runs backwards (+81)**
   - Status: OPEN (filed 2026-08-18, +80 geometry work) · Severity: **P2** ·

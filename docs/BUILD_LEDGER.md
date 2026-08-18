@@ -116,6 +116,48 @@ that is investigated properly is not a wasted investigation.
 shape mismatch — the connect-time check shrinks the window, it does not remove
 it), then smokes and the cut.
 
+### PRE-DISTRIBUTION SMOKE SET (a)–(d2) — standard from +80
+
+The full set in one place. **Every one is run on the TAG BUILD installed on
+hardware, and every result cites the readback** — `curl /json/state` (or
+`/json/cfg`) output pasted, not summarised. "Verified" with no readback is not
+verified.
+
+(a)–(c) are the +79 set, carried forward verbatim. (d1)–(d2) are new at +80 and
+exist because +79's set passed on a rig whose geometry happened to be intact.
+
+**(a) rev-survival.** Design apply, then `ps=1`, then `ps=2`. After each:
+
+- both segments present
+- bounds `seg0[0,128) len=128` and `seg1[128,290) len=162` **unmoved**
+- `seg1 rev:true` **standing**
+- geometry diff **empty**
+
+**(b) single-channel apply.** Target `seg0`, exclude `seg1`. The #67 contract
+verbatim:
+
+- `seg1` goes **`on:false` and NOT ONE OTHER FIELD MOVES** — `fx pal sx ix col
+  grp spc` all unchanged
+- bounds intact, `rev:true` intact
+- **no true geometry written anywhere**
+
+> **Method note, recorded because it produced a false FAIL on a passing device.**
+> The first +79 scoring pass failed because the script **assumed** which segment
+> was targeted. The device resolves it — `on:true` marks the targeted seg — and
+> the labels were then confirmed by Tyler (front of the home = `seg0`; "bench
+> ch1" is the roofline zone name on `seg1`). **Never assume the mapping; read it
+> from the device.** Same failure mode as reading `seg[0]` as the design seg
+> (#89's `firstDesignSeg`).
+
+**(c) tap-to-wake — THE ONE THAT GATES THE SHIP.** With `seg1` **dark AND
+non-participating** (the combination that was unrecoverable on +78), tap its
+power icon:
+
+- it **wakes**: `on false → true`
+- the wake writes **power only** — no `start`/`stop`/`len`/`rev`/`mi`/`of`, no
+  design field touched
+- `seg0` undisturbed
+
 ### SMOKE (d) — GEOMETRY SURVIVAL. Standard pre-distribution from +80.
 
 Two halves; **both** must pass, and the readback must be pasted, not summarised.
