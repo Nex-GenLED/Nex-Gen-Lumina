@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
@@ -58,13 +57,22 @@ final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
   });
 });
 
-/// Deletes a controller document by id
+/// Deletes a controller document by id.
+///
+/// Scoped to [effectiveUserUidProvider], NOT `FirebaseAuth.currentUser` (#96).
+/// An installer in the Existing Customer flow is shown the customer's
+/// controllers by [controllersStreamProvider]; a delete keyed on the installer's
+/// own uid would look for that doc id in the installer's subcollection, where it
+/// does not exist — and Firestore deletes are idempotent, so it would return
+/// `true` having deleted nothing. Read at provider-build time (not inside the
+/// closure) so consumers rebuild when the impersonation target changes, matching
+/// [controllersStreamProvider].
 final deleteControllerProvider = Provider<Future<bool> Function(String)>((ref) {
+  final uid = ref.watch(effectiveUserUidProvider);
   return (String id) async {
+    if (uid == null || uid.isEmpty) return false;
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return false;
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).collection('controllers').doc(id).delete();
+      await FirebaseFirestore.instance.collection('users').doc(uid).collection('controllers').doc(id).delete();
       return true;
     } catch (e) {
       debugPrint('Delete controller failed: $e');
@@ -73,15 +81,21 @@ final deleteControllerProvider = Provider<Future<bool> Function(String)>((ref) {
   };
 });
 
-/// Renames a controller in Firestore
+/// Renames a controller in Firestore.
+///
+/// Scoped to [effectiveUserUidProvider] for the same reason as
+/// [deleteControllerProvider] (#96) — with one difference in failure mode: an
+/// `update()` on a missing document THROWS rather than no-opping, so the
+/// pre-fix rename surfaced as a caught "Rename controller failed" instead of a
+/// false success.
 final renameControllerProvider = Provider<Future<bool> Function(String, String)>((ref) {
+  final uid = ref.watch(effectiveUserUidProvider);
   return (String id, String newName) async {
+    if (uid == null || uid.isEmpty) return false;
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return false;
       await FirebaseFirestore.instance
           .collection('users')
-          .doc(user.uid)
+          .doc(uid)
           .collection('controllers')
           .doc(id)
           .update({

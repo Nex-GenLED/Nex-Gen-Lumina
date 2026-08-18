@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/models/user_role.dart';
 
@@ -382,8 +383,13 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         });
         return;
       }
-      // Use the new ProvisioningService to handle Improv BLE flow
-      final service = ProvisioningService();
+      // Use the new ProvisioningService to handle Improv BLE flow.
+      // #96 — the provisioned controller is saved under the impersonation-aware
+      // uid, so an installer in the Existing Customer flow provisions INTO the
+      // customer's account rather than their own.
+      final service = ProvisioningService(
+        targetUserId: ref.read(effectiveUserUidProvider) ?? '',
+      );
       final result = await service.provisionDevice(device: d, ssid: ssid, password: pass);
       if (!mounted) return;
       // Persisted inside service; update UI state and navigate

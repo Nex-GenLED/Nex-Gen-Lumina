@@ -8,7 +8,7 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:http/http.dart' as http;
 
 /// Manual WLED controller setup
@@ -141,8 +141,13 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
       }
       debugPrint('📶 WiFi configured (from /json/info): $wifiIsConfigured');
 
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
+      // #96 — scope the write to the impersonation-aware uid, not
+      // FirebaseAuth.currentUser. An installer adding a controller from inside
+      // the Existing Customer flow must write it to the CUSTOMER's account;
+      // keyed on currentUser it would land under the installer's own uid and the
+      // customer would still have no controller.
+      final uid = ref.read(effectiveUserUidProvider);
+      if (uid == null || uid.isEmpty) {
         throw Exception('No user logged in');
       }
 
@@ -150,7 +155,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
       final repository = DeviceRepository();
       await repository.saveDevice(
-        userId: user.uid,
+        userId: uid,
         serial: ip.replaceAll('.', '_'),
         ip: ip,
         name: deviceName,

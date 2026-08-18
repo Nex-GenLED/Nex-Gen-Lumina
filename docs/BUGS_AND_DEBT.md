@@ -1261,6 +1261,98 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `lib/features/game_day/game_day_providers.dart:112-200`,
     `functions/src/planGameDayFires.ts` (read-only — decision source). Related **#68**, **#66**.
 
+- [ ] **#96 — installer-serviced controller writes land under the INSTALLER's uid, not the
+  customer's: the read stream honours impersonation and every write ignores it**
+  - Status: OPEN (filed 2026-08-18, controller-identity census) · Severity: **P1** ·
+    Evidence: **verified-by-source**
+  - `effectiveUserUidProvider` (`installer_access_providers.dart:39`) exists precisely so the
+    "Existing Customer" flow redirects customer-data scopes at the customer's
+    `/users/{uid}` documents while leaving the Firebase Auth identity alone.
+    `controllersStreamProvider` honours it (`controllers_providers.dart:14`). **Nothing that
+    writes does.**
+  - **The four scoped call sites** (Stage 1 of the controller-replacement arc):
+    - `lib/features/site/controllers_providers.dart:65` — `deleteControllerProvider`
+    - `lib/features/site/controllers_providers.dart:81` — `renameControllerProvider`
+    - `lib/features/ble/provisioning_service.dart:206` — `_saveToRepository` (BLE add)
+    - `lib/features/ble/wled_manual_setup.dart:144` — manual-IP add
+    All four take `FirebaseAuth.instance.currentUser.uid`.
+  - **Consequence.** An installer inside Existing Customer sees the *customer's* controller
+    list, then: an add writes a controller doc under the **installer's** account (the customer
+    still has nothing, and the installer accumulates strangers' hardware); a delete or rename
+    targets a doc id **in the installer's own subcollection** — usually absent, so it is a
+    silent no-op that reports success. `deleteControllerProvider` returns `true` on a delete of
+    a non-existent doc, because Firestore deletes are idempotent.
+  - **Two further sites found during filing, NOT in the Stage 1 scope** — file-and-hold, they
+    need their own decision:
+    - `lib/features/wled/controller_facts_writer.dart:139` — `uidOverride ?? currentUser`.
+      `uidOverride` is a **test seam only**: no production caller passes it (the sole forwarder
+      is `participation_denormalizer.dart:231`, itself never called with one). So device-fact
+      publishing (participation + base boundaries, one write per app session) writes to
+      `users/{installerUid}/controllers/{controllerId}` during impersonation — **creating a
+      stray controller doc under the installer's account** via `SetOptions(merge: true)`.
+      That doc then feeds `syncControllerIps`, so the installer's own `controller_ips[]`
+      allowlist grows a customer's IP.
+    - `lib/features/dashboard/wled_dashboard_page.dart:213` — a **read**, not a write: the
+      `limit(1)` probe that decides whether to show the "no controller" banner. Under
+      impersonation it counts the installer's controllers, so the banner shows or hides on the
+      wrong account's data. Cosmetic, but it is the same defect class.
+  - **Why it matters beyond installer mode.** This blocks **Stage 1 of the controller-
+    replacement arc** (`docs/design/controller_replacement.md` §2.4, §5.0): dealer-RMA
+    replacement is by definition installer-performed, so a replace flow built on these paths
+    would migrate a customer's home into the installer's account. Fixing this is the
+    prerequisite, not a nicety.
+  - **Fix shape.** `controllers_providers` reads `ref.watch(effectiveUserUidProvider)` at
+    provider-build time (matching `controllersStreamProvider:14`, so consumers rebuild when the
+    impersonation target changes). `ProvisioningService` is a plain class with no `ref` — inject
+    the uid through its constructor from its single construction site
+    (`device_setup_page.dart:386`, a `ConsumerState`). `WledManualSetup` is already a
+    `ConsumerState` and can read the provider directly.
+  - **Note for the auth boundary:** `effectiveUserUidProvider`'s own doc comment is explicit
+    that auth-side providers (login, signup, password reset, claim checks) MUST keep using
+    `FirebaseAuth.instance.currentUser`. This fix is only for data scopes. Do not sweep
+    `currentUser` globally.
+
+- [ ] **#97 — Game Day fires only ONE controller in multi-controller homes, chosen
+  arbitrarily**
+  - Status: OPEN (filed 2026-08-18, controller-identity census) · Severity: **P1** ·
+    Evidence: **verified-by-source** · Related **#91**, **#67**
+  - `planGameDayFires.ts:348-349`:
+
+    ```ts
+    const controllers = await db.collection("users").doc(uid).collection("controllers").get();
+    const controller = controllers.docs[0] ?? null;
+    ```
+
+    One controller read per user, and **`docs[0]` with no `orderBy`**. Every fire job the
+    planner writes names that single controller (`:588`, `:727`).
+  - **Two distinct defects in one line.**
+    1. **Coverage:** a home with two or more controllers has fires planned for exactly one of
+       them. The rest of the house stays dark for the whole event. This is the same failure
+       *shape* as #91 (partial-house fire) but a different cause — #91 is a payload-partition
+       gap, this is a target-enumeration gap.
+    2. **Determinism:** with no ordering clause the selection is Firestore's default document-id
+       order, which for controller docs is the MAC-derived id
+       (`device_discovery.dart:210-222`). So *which* controller fires is effectively arbitrary
+       and can change. After a hardware replacement that left the predecessor's doc in place —
+       today's normal outcome, since no replace flow exists — `docs[0]` can select the **dead**
+       controller. `dispatchFireJobs` then resolves its stale `ip` and dispatches there.
+  - **Why the dispatch half does NOT save it.** `dispatchFireJobs:275-293` correctly re-resolves
+    the IP server-side and terminally skips `unresolvable_target` when the doc is gone. But an
+    orphaned predecessor doc is **not** gone — it exists, with a stale `ip` — so dispatch
+    succeeds into a dead or DHCP-reassigned host. The one robust pattern in the codebase cannot
+    compensate for a wrong reference handed to it.
+  - **Deliberately NOT bundled into the replacement arc.** Stage 1 of
+    `docs/design/controller_replacement.md` repoints this call at the shared resolver's
+    `primaryForExternalBinding()` — decision R-3, 2026-08-18 — which fixes **determinism and
+    tombstone-awareness only**. It leaves the coverage defect exactly as it is: still one
+    controller, just a predictable and live one. Widening to all controllers is this item, and
+    it is its own change: it needs a per-controller job fan-out, the one-in-flight-per-controller
+    guard re-examined across siblings (`dispatchFireJobs:317`), and a decision about whether
+    partial delivery to a subset of a home's controllers is a success or a failure.
+  - Files: `functions/src/planGameDayFires.ts:348-349, 588, 727` (`functions/` — deploy
+    discipline applies; assumes **#94** Node 22 has landed). Do not start before the
+    replacement arc's Stage 1.
+
 ---
 
 ## P2 — hardening & platform

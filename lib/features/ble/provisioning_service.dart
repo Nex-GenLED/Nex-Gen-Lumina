@@ -6,7 +6,6 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 /// Result of a provisioning attempt
 class ProvisionResult {
@@ -33,6 +32,20 @@ class ProvisioningException implements Exception {
 
 /// Implements Improv Standard provisioning over BLE and hands off to Wi‑Fi
 class ProvisioningService {
+  /// The account the provisioned controller is saved under.
+  ///
+  /// #96 — REQUIRED, and deliberately not defaulted to
+  /// `FirebaseAuth.currentUser`. This class has no Riverpod `ref`, so the uid is
+  /// injected by its caller from [effectiveUserUidProvider]; an installer
+  /// provisioning hardware from inside the Existing Customer flow must save it
+  /// to the CUSTOMER's account. A nullable-with-fallback parameter would let a
+  /// future caller silently reintroduce the defect by omitting it, so it is
+  /// required — there is exactly one construction site
+  /// (`device_setup_page.dart`) and it has a `ref`.
+  final String targetUserId;
+
+  ProvisioningService({required this.targetUserId});
+
   static final Guid _improvUuid = Guid('00000000-0090-0016-0128-633215502390');
 
   /// Provisions a device to the given Wi‑Fi network using Improv BLE RPC.
@@ -202,10 +215,12 @@ class ProvisioningService {
 
   Future<void> _saveToRepository({required String ip, required String serial, String? ssid}) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      if (targetUserId.isEmpty) {
+        debugPrint('ProvisioningService: no target uid — controller not saved');
+        return;
+      }
       final repo = DeviceRepository();
-      await repo.saveDevice(userId: user.uid, serial: serial, ip: ip, ssid: ssid);
+      await repo.saveDevice(userId: targetUserId, serial: serial, ip: ip, ssid: ssid);
     } catch (e) {
       debugPrint('ProvisioningService: save repository failed: $e');
     }
