@@ -2271,6 +2271,69 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+80 — the geometry contract: pinned at the wire, healed on connect
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-80`** — points at `53a9f53`, **the bump commit itself** (standing convention 1). |
+| **Git SHA (app bytes)** | **`53a9f53`** — `chore(release): bump to 2.5.10+80`. **iOS↔Android join key.** |
+| **Ledger SHA** | This row is committed **AFTER** the tag, outside it — so the tag **is** the app-bytes SHA and there is **no exclusion diff to compute**. |
+| **App-bytes ancestry** | `7367e4b` (+79) **+** `1bc76ee` (#96) **+** `23a00c1` (wire pin) **+** `e5c39c8` (connect-time heal) **+** `2e55685` (repro pin; its `lib/` change is a library-header comment only). |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **80** — `kStaffAuthTelemetryAppVersion` moved in the SAME commit and verified in-tree before building. **versionCode 80 CONSUMED.** |
+| **Android artifact** | `app-release.aab` · **68,384,006 bytes** · `jarsigner -verify` → **jar verified** · merged manifest `versionCode="80"` / `versionName="2.5.10"` (read from the **merged manifest**, not pubspec) · built 2026-08-18 from isolated worktree `lumina-b80` at tag `build-80`, `git status` **empty before AND after**. Obfuscated; symbols at `build/debug-info/android/` (arm 6.41 MB, arm64 7.37 MB, x64 7.37 MB). |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — verified by **IDENTITY**, per standing convention 2, never by exit code. |
+| **Test suite at build time** | **2416 passed · 3 skipped · 0 failed**, run in `lumina-b80` at `build-80` **BEFORE** the build. (+79 was 2382 — the delta is the 34 new geometry tests.) |
+| **Hardware smokes** | ⏳ **PENDING — (a)–(d2). The AAB is HELD until they pass on the tag build**, same posture as +79. |
+| **iOS** | Not built by this session. |
+| **Server state** | Unchanged. `functions/` freeze held throughout; **`config/gameday_planner` `write_jobs` remains `false`** (rolled back 2026-08-18) — re-arming is a deliberate act and is blocked on **#98/#99**. |
+
+### Content gate — `build-79..build-80`, every commit attributed
+
+**Written from `git log`, never from a session summary** (the method line, applied).
+Eight commits; **four touch app bytes**:
+
+| SHA | App bytes | What |
+|---|---|---|
+| `f68ceba` | — | docs: #95 wake-write half passes |
+| `8006027` | — | docs: #95 all three smokes pass |
+| `774c489` | — | docs: +79 AAB row |
+| **`1bc76ee`** | **4 files** | **#96** — controller add/delete/rename through `effectiveUserUid` |
+| `9622c51` | — | docs: Game Day teardown |
+| **`23a00c1`** | **8 files** | chokepoint geometry pin at both wire exits; `applyToDevice` contract comment corrected |
+| **`e5c39c8`** | **1 file** | connect-time segment-shape check |
+| **`2e55685`** | **1 file** | repro pin (the `lib/` change is a library-header constraint comment) |
+| `a466671` | — | docs: smoke set (a)–(d2), #104 |
+
+> **#96 RIDES ALONG, and it was NOT in the stated scope.** The scope call named
+> three landed items; the gate is **four**, because `1bc76ee` sits between the
+> tags. Recorded here rather than discovered later — this is exactly the check
+> that caught the sports-alerts restructure NOT being in +77.
+
+### What this build actually changes
+
+1. **A geometry pin at the single wire exit** (`23a00c1`). An apply never states
+   geometry. Debug asserts; release strips and logs. Provisioning gets a
+   separate DOOR (`applyGeometryJson`), not a flag. Fences `applyToDevice`'s
+   bypass, the custom-effects builders, `_postUpdate` and the relay **by
+   construction** — four builder-shaped censuses (#76/#88/#89/#95) each
+   under-counted this family; a pin at the exit cannot.
+2. **Geometry repair gets a trigger of its own** (`e5c39c8`). Every prior repair
+   call site sat inside a preset-save path, so a controller that booted
+   collapsed with healthy presets stayed collapsed indefinitely. Step (d.5)
+   runs on connect, ordered before the preset heal so any `psave` captures the
+   corrected layout.
+3. **Installer-serviced controller writes hit the right account** (`1bc76ee`).
+
+### Carried OPEN, not fixed
+
+- **#104** — Game Day shape-mismatch stall. Degrade-legibly requirement stands;
+  the connect-time heal shrinks the window and **cannot** remove it. Diagnosis
+  experiment runs post-cut.
+- **#102** — `rev` restoration (+81).
+- **#103** — custom-effects redesign. Catalog **unreachable** behind two gates;
+  standing constraint recorded in the source file itself.
+
 ## 2.5.10+79 — #95, the channel that could not be woken
 
 Supersedes the withdrawn **+78**. Same content plus the one fix that withdrew it.
