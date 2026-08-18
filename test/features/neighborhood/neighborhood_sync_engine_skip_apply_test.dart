@@ -154,6 +154,13 @@ ProviderContainer _makeContainer({
 /// (false return skips the wledStateProvider.notifier path in
 /// _executePattern, avoiding the need to wire that notifier in tests).
 class _RecordingWledRepository implements WledRepository {
+  /// Geometry (`start`/`stop`/`rev`/`mi`) is the PROVISIONING door — a separate
+  /// method so `applyJson` can strip geometry unconditionally. This fake does
+  /// not exercise it; `false` matches the interface default ("this transport
+  /// cannot provision").
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
+
   final List<Map<String, dynamic>> applyJsonCalls = [];
 
   @override

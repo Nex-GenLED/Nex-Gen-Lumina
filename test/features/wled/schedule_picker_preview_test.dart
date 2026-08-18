@@ -24,6 +24,13 @@ import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeWledRepository implements WledRepository {
+  /// Geometry (`start`/`stop`/`rev`/`mi`) is the PROVISIONING door — a separate
+  /// method so `applyJson` can strip geometry unconditionally. This fake does
+  /// not exercise it; `false` matches the interface default ("this transport
+  /// cannot provision").
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
+
   final List<Map<String, dynamic>> applyJsonCalls = [];
   final List<Map<String, dynamic>> applyConfigCalls = [];
   final List<int> loadPresetCalls = [];

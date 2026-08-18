@@ -34,6 +34,13 @@ ProviderContainer _makeContainerWithRepo(_RecordingWledRepository repo) {
 /// Minimal stub repository — preview-sync tests don't exercise device IO,
 /// they drive the notifier through its test-only entry points.
 class _FakeWledRepository implements WledRepository {
+  /// Geometry (`start`/`stop`/`rev`/`mi`) is the PROVISIONING door — a separate
+  /// method so `applyJson` can strip geometry unconditionally. This fake does
+  /// not exercise it; `false` matches the interface default ("this transport
+  /// cannot provision").
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
+
   @override
   Future<Map<int, String>> fetchPresetNames() async => const <int, String>{};
   @override

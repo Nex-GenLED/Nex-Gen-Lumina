@@ -13,6 +13,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// [WledNotifier._resolvePresetName]; everything else throws if exercised
 /// so tests fail loudly if a future change starts touching unrelated paths.
 class _FakeWledRepository implements WledRepository {
+  /// Geometry (`start`/`stop`/`rev`/`mi`) is the PROVISIONING door — a separate
+  /// method so `applyJson` can strip geometry unconditionally. This fake does
+  /// not exercise it; `false` matches the interface default ("this transport
+  /// cannot provision").
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
+
   Map<int, String> presetNames;
 
   _FakeWledRepository({Map<int, String>? presetNames})

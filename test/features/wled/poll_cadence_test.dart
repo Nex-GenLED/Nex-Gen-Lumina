@@ -13,6 +13,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Configurable fake repo: counts getState calls, can block (to test the
 /// in-flight guard) or return a scripted result (to drive failure/success).
 class _PollFakeRepo implements WledRepository {
+  /// Geometry (`start`/`stop`/`rev`/`mi`) is the PROVISIONING door — a separate
+  /// method so `applyJson` can strip geometry unconditionally. This fake does
+  /// not exercise it; `false` matches the interface default ("this transport
+  /// cannot provision").
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
+
   int getStateCalls = 0;
   Completer<Map<String, dynamic>?>? blockOn;
   Map<String, dynamic>? Function()? nextResult;

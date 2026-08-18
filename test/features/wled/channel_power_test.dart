@@ -312,6 +312,13 @@ const _twoBusConfig = WledHardwareConfig(
 );
 
 class _FakeRepo implements WledRepository {
+  /// Geometry (`start`/`stop`/`rev`/`mi`) is the PROVISIONING door — a separate
+  /// method so `applyJson` can strip geometry unconditionally. This fake does
+  /// not exercise it; `false` matches the interface default ("this transport
+  /// cannot provision").
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
+
   final List<Map<String, dynamic>> applyJsonCalls = [];
   Map<String, dynamic>? stateResult;
   WledHardwareConfig? config;
