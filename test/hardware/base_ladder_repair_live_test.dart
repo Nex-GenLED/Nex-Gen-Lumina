@@ -6,10 +6,34 @@
 // repairs it using the REAL shipping code — ScheduleSyncService's own predicate
 // and payload builder — against real hardware.
 //
-// Run explicitly (excluded from the default suite by the `hardware` tag):
-//   flutter test test/hardware/base_ladder_repair_live_test.dart --tags hardware
+// Run explicitly:
+//   flutter test test/hardware/base_ladder_repair_live_test.dart --dart-define=RUN_HW=true
 //
-// Requires the bench controller on the LAN. Skips (does not fail) if absent.
+// ⚠️ THIS TEST WRITES TO REAL HARDWARE — it deliberately damages preset slot 3
+// (`NGL Dim`) on the bench controller and repairs it. Real POSTs, real flash.
+//
+// HOW IT USED TO GUARD ITSELF, AND WHY THAT WAS WORSE THAN NO GUARD (fixed
+// 2026-08-18):
+//
+//   1. `@Tags(['hardware'])` — INERT. There is **no `dart_test.yaml`** in this
+//      repo, so nothing acts on the tag and this file ran in every default
+//      `flutter test`. The annotation is kept below because it is correct
+//      intent and would start working the moment a `dart_test.yaml` lands, but
+//      it must never again be relied on as the guard.
+//   2. `if (!reachable) return;` — an early return, which the runner reports as
+//      a **PASS**. So on a machine that could not see the bench, this test
+//      could not fail; and on a machine that could — the dev box, where
+//      192.168.1.150 answers — it silently wrote to the live rig on every
+//      suite run. A test that cannot fail, inverted twice.
+//
+// The guard is now `skip: !kRunHw`, the same mechanism the three cases in
+// `preset_heal_live_test.dart` already use, so the ledger's skip-count
+// invariant holds: 4 skips is this file and that one, hardware-gated as
+// designed, and any OTHER number is a signal.
+//
+// Reachability is now a HARD FAILURE inside the body, not a silent exit. If a
+// run was explicitly requested with RUN_HW=true, a missing bench is the thing
+// the run needed to tell you about.
 
 @Tags(['hardware'])
 library;
@@ -19,6 +43,11 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+
+/// Opt-in switch for hardware runs. Identical to the one in
+/// `preset_heal_live_test.dart` — same name, same default — so the two files
+/// are enabled by the one `--dart-define=RUN_HW=true`.
+const bool kRunHw = bool.fromEnvironment('RUN_HW', defaultValue: false);
 
 const String kIp = '192.168.1.150';
 const int kSlot = 3; // NGL Dim — the least visually disruptive ON slot
@@ -66,22 +95,24 @@ Future<Map<String, dynamic>?> _storedPreset(int id) async {
 }
 
 void main() {
-  late bool reachable;
-
-  setUpAll(() async {
-    reachable = (await _getJson('/json/state')) != null;
-    if (!reachable) {
-      // ignore: avoid_print
-      print('SKIP: bench controller $kIp unreachable');
-    }
-  });
-
+  // No setUpAll reachability probe: it would fire a live GET on every default
+  // suite run just to decide whether to do nothing.
   test('the app repairs a deliberately damaged ladder slot', () async {
-    if (!reachable) return;
+    // ── 0. REACHABILITY IS AN ASSERTION, NOT AN EXIT. Reaching this line means
+    //       RUN_HW=true was passed deliberately, so a missing bench is a failed
+    //       run — the thing the operator needs told. The old `return` here
+    //       reported that same state as a pass.
+    final live = await _getJson('/json/state');
+    expect(
+      live,
+      isNotNull,
+      reason: 'RUN_HW=true was requested but the bench controller at $kIp did '
+          'not answer /json/state. A hardware run with no hardware is a '
+          'FAILURE, not a pass.',
+    );
 
     // ── 1. DAMAGE IT the way the defect did: psave with NO seg key, from a
     //       strip whose segments are off. This is the exact ambient capture.
-    final live = await _getJson('/json/state');
     final segs = (live?['seg'] as List?) ?? const [];
     expect(segs.length, greaterThanOrEqualTo(2),
         reason: 'rig should expose both channels');
@@ -151,5 +182,5 @@ void main() {
 
     // ── 6. Leave the house dark, as found.
     await _postState({'ps': 2});
-  }, timeout: const Timeout(Duration(minutes: 2)));
+  }, timeout: const Timeout(Duration(minutes: 2)), skip: !kRunHw);
 }
