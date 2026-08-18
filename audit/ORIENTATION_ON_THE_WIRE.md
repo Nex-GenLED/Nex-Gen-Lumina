@@ -142,8 +142,151 @@ shape change observed on any state read. Same code region as #102.
 | check | status |
 |---|---|
 | 6 new pin tests, incl. the exact payload | ✅ green |
-| full suite | ✅ **2441 / 4 / 0** (2435 + 6) |
+| full suite | ✅ **2449 / 4 / 0** (2441 + 8 — §7) |
 | `flutter analyze` on changed files | ✅ clean |
 | L→R control routed to `applyGeometryJson` | ❌ **OPEN — §3** |
-| celebration revert / schedule-sync replay under test | ❌ **OWED — §2** |
+| celebration revert / schedule-sync replay under test | ✅ **CLOSED — §6 / §7** |
 | bench re-verify: `rev` survives a celebration cycle on +81 | ❌ **OWED — hardware** |
+
+---
+
+## 6. CAPTURE-REPLAY IS A NAMED CLASS — the full census
+
+§2 found the celebration revert and, next to it, `schedule_sync.dart:1279`. Two
+instances of one shape is not a coincidence, so the shape gets a name and a
+census, the same way #76/#88/#89/#95 forced the emitter census that produced the
+wire pin.
+
+**CAPTURE-REPLAY: a stored `/json/state` snapshot, trusted at use-time.** The
+third sibling of **stored-intent** (a design/preset built once and fired later)
+and **stored-addresses** (a controller list held past the point it was true).
+All three fail the same way: something was correct when it was written down, and
+is asserted as still-correct when it is played back. Capture-replay is the
+worst-behaved of the three because the thing written down is *the controller's
+own readback* — which necessarily carries every field the controller reports,
+including the ones the app has no business restating.
+
+**Method:** `grep getState() lib/`, then read each call site for whether the
+snapshot is replayed through `applyJson`. Not a walk of the sites already known
+— that is the census method #88 recorded as insufficient.
+
+### Identical shape — full `seg[]` replayed verbatim
+
+| # | capture → replay | durability of the snapshot | notes |
+|---|---|---|---|
+| 1 | `foreground_celebration_providers.dart:43` → `:74` | in-memory, one celebration cycle | **THE incident writer.** Covered by `celebration_revert_capture_replay_test.dart` |
+| 2 | `schedule_sync.dart:892` → `:1279` | in-memory, one sync | Covered by `schedule_sync_capture_replay_test.dart` |
+| 3 | `alert_trigger_service.dart:183` → `:206` (`_restoreZoneState`) | in-memory, one animation | **NEW.** Near-verbatim the same code as #1, `ps` short-circuit included. The header of `foreground_celebration_providers.dart` calls this "the dead direct-IP AlertTriggerService path" — dead-ness is the only thing keeping it quiet, and dead-ness is not a fence |
+| 4 | `sports_alert_service.dart:222` (`_basePayload`) → `:233` | in-memory, one alert | **NEW.** The widest of them all: replays the **entire** `getState()` map, not even field-picked to on/bri/seg |
+| 5 | `autopilot_scheduler.dart:123` → `releaseOverride` | in-memory, one override window | **NEW.** Routes via `applyPayloadWithLabel` → `applyJson`, so it is fenced, but the extra hop means a `grep applyJson` census misses it |
+| 6 | `pre_sync_scene_snapshot.dart:155` → `sync_teardown_resolver.dart:245` | **SharedPreferences — survives app restart, days** | **NEW.** Neighborhood Sync's pre-sync scene. The staleness window is bounded by `kPreSyncSceneMaxStaleness`, which bounds *how wrong the look is*, not *how wrong the geometry is* |
+| 7 | `scene_providers.dart:248` (`captureSnapshotProvider`) → `Scene.toWledPayload()` → `applySceneProvider` | **Firestore — permanent, cross-device** | **NEW.** A snapshot Scene stores the readback `seg[]` under `wled_payload`. Geometry captured on one controller can be replayed onto another, months later |
+
+**Nothing here is fenced site-by-side, and nothing needs to be.** All seven exit
+through `applyJson`, and `applyJson` is the pin. That is the whole argument for
+putting the fence at the wire instead of in the builders: this census found five
+new sites and **changed no production code**, because they were already covered
+the day they were written. A builder-side census would have owed five patches.
+
+**Fenced ≠ clean, though.** Sites 6 and 7 write geometry into *durable storage*
+(SharedPreferences, Firestore), so the bad data outlives the session that made
+it. The wire pin means it can never reach hardware — but on a debug build the
+pin *asserts*, so a snapshot scene captured today is a latent debug-build crash
+whenever it is applied. **FILED, not fixed here:** #7 in particular should strip
+geometry at *capture* time, so Firestore never holds a bound. That is a data
+change with a migration question attached and wants its own call.
+
+### Same class, already safe by construction — field-selective replay
+
+| site | why it is safe |
+|---|---|
+| `refine_roofline_screen.dart:84` → `:118` | Rebuilds the seg from an **allowlist** — `id`/`on`/`fx`/`col`/`i` only. Geometry is never copied out of the snapshot |
+| `map_roofline_step.dart:81` → `:113` | Same allowlist shape, plus `sx`/`ix` |
+
+**This is the shape the seven should converge on.** An allowlist replay states
+the look and nothing else, and it is correct with the fence *removed* — it does
+not depend on a downstream strip to be right. Worth noting that the two sites
+that got this right are the two written by someone staring at segment boundaries
+at the time.
+
+### Not in the class
+
+| site | why |
+|---|---|
+| `schedule_enforcement.dart:136` | Reads the snapshot to **compare** (power/bri/fx drift). No replay |
+| `controller_defaults_healer.dart`, `sunrise_off_service.dart`, `calendar_entry_lease_manager.dart` | Read via `segmentShapeFromState` and re-provision through `applyGeometryJson` — the provisioning door. Geometry is the **point** there, and it is derived from the controller's own buses, not from a snapshot |
+| `site_providers.dart:214`, `current_colors_provider.dart:84`, `zone_providers.dart:79`, `wled_providers.dart` polls | Read-only state for UI |
+
+---
+
+## 7. Coverage — the zero-assertions gap, closed
+
+§2 recorded the reason a live pin missed a live leak: the suite was
+`2441 / 4 / 0` with **zero** geometry assertions on either replay site, because
+no test drove either path. Two files close it.
+
+| file | site | tests |
+|---|---|---|
+| `test/features/wled/celebration_revert_capture_replay_test.dart` | `WledCelebrationDelivery` capture→revert | 4 |
+| `test/features/schedule/schedule_sync_capture_replay_test.dart` | `ScheduleSyncService` live-state restore | 4 |
+
+**Suite: 2449 / 4 / 0** (2441 + 8). `flutter analyze` clean on both files.
+
+Each file asserts the same three things, and all three are needed:
+
+- **A — the tap point (pre-strip).** The raw payload the site hands `applyJson`
+  *does* carry geometry. Without this, "the wire is geometry-free" would pass
+  just as happily against a payload that never had geometry in it. Asserted with
+  raw `containsKey`, deliberately **not** `findGeometryViolations` — the tap
+  point must not depend on the fence it is testing, or a narrowed `kGeometryKeys`
+  fails at A and masks the regression at B.
+- **B — the wire (post-strip).** `stripGeometry` is the production release-path
+  function, so what it emits is what the controller receives. `start`/`stop`/
+  `rev`/`mi` gone; `id`/`on`/`col`/`fx`/`pal`/`sx`/`ix` intact; `len` still
+  exempt, so over-fencing is caught too.
+- **C — the real exit.** Driven against an un-stubbed `WledService.applyJson`,
+  so the payload takes `normalizeWledPayload` → `expandForParticipation` →
+  `_postJson` → `pinNoGeometryOnWire`, the real chain, and trips the debug
+  assert. B is therefore not a bench-side simulation of the wire; it *is* the
+  wire.
+
+Both files use the evening's exact payload (`rev: false` on seg 1) and the
+mirrored `rev: true` case — a genuinely reversed channel, where re-stamping the
+snapshot is the more damaging direction.
+
+### Proven able to fail
+
+Same standard as every pin this week. With `kGeometryKeys` temporarily reverted
+to its pre-`a356b5f` value `['start', 'stop']`:
+
+**6 of the 8 fail.** Every geometry-bearing assertion, on both sites — B reports
+`rev: false` still on the wire, C reports the pin enumerating only
+`seg[n]:start+stop`. The 2 that stay green are the negative controls (the
+celebration `ps >= 0` preset branch, and the no-preset-written no-restore case),
+which carry no geometry and correctly do not care. Re-greened to 8/8 by
+restoring `['start', 'stop', 'rev', 'mi']`.
+
+**One real assertion bug was caught by doing this**, and it is worth recording
+because it is the exact failure mode the exercise exists to find. C originally
+matched `contains('rev')` on the violation report — which **passed under the
+reverted fence**, because the report's static prose reads *"Bounds AND
+orientation (start/stop/rev/mi) are provisioning's"* regardless of what the
+fence actually caught. The assertion was matching the pin's boilerplate, not its
+finding. It now matches the enumerated keys
+(`seg[1](id=1):start+stop+rev+mi`). A test that asserts on an error message must
+assert on the part of it that varies.
+
+### Two things the tests had to work around, both worth knowing
+
+- **The schedule-sync fixture's bounds are the simulator's bus layout
+  (0–100 / 100–200), not the bench's 0–291 / 291–441.** `syncAll` runs the #76
+  layer-4 geometry gate before every psave; a readback that disagrees with the
+  controller's *own* buses is drift, the gate refuses the batch,
+  `didWriteAnyPreset` stays false, and the restore at `:1274` never arms. A
+  bench-literal bounds pair makes the file assert nothing at all. The value
+  under test is `rev`, which the gate does not look at.
+- **On a debug build, the schedule-sync restore is FATAL, not degraded.**
+  Nothing between `syncAll`'s restore call and the pin catches, so the
+  `AssertionError` propagates straight out of `syncAll`. Release strips and
+  proceeds as designed; debug dies mid-sync. That is the pin working as
+  specified, recorded here so it is not diagnosed as a sync bug.

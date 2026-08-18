@@ -67,17 +67,41 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ### SUITE BASELINE — authoritative line, corrected 2026-08-18
 
-**Current baseline: `2441 passed · 4 skipped · 0 failed`** — as of `2026-08-18`,
-post-#95-item-1 and post-orientation-pin. Start every delta from this number.
+**Current baseline: `2449 passed · 4 skipped · 0 failed`** — as of `2026-08-18`,
+post-#95-item-1, post-orientation-pin, post-capture-replay-coverage. Start every
+delta from this number.
 
-**Two movements since the +80 row's `2416 / 3 / 0`, and both are accounted for:**
+**Three movements since the +80 row's `2416 / 3 / 0`, and all are accounted for:**
 
 | | passed | skipped | why |
 |---|---|---|---|
 | +80 build-time | 2416 | 3 | the row below |
 | \+ #95 item 1 tests | **2436** | 3 | +18 `participation_override_test`, +2 header pins |
 | \+ ladder test gated | 2435 | 4 | −1 pass, +1 skip — same test, moved |
-| \+ orientation pin tests | **2441** | **4** | +6 `geometry_wire_pin_test` — `rev`/`mi` fenced |
+| \+ orientation pin tests | 2441 | 4 | +6 `geometry_wire_pin_test` — `rev`/`mi` fenced |
+| \+ capture-replay coverage | **2449** | **4** | +4 celebration revert, +4 schedule-sync restore |
+
+**CAPTURE-REPLAY IS NOW A NAMED CLASS, and the coverage gap behind the `rev`
+leak is closed.** `a356b5f` fenced `rev`/`mi` at the wire but recorded that the
+suite went `2441 / 4 / 0` with **zero** geometry assertions on either replay
+site — the pin was working and nothing drove the paths that leaked. Both sites
+are now driven end-to-end:
+`celebration_revert_capture_replay_test.dart` and
+`schedule_sync_capture_replay_test.dart`, 4 tests each, asserting the tap point
+(pre-strip, fence-independent), the wire (post-strip, look intact, `len` still
+exempt) and the real exit (un-stubbed `applyJson`, the pin actually fires).
+**Proven able to fail:** with `kGeometryKeys` reverted to `['start', 'stop']`,
+6 of the 8 fail; the 2 that hold are the negative controls, which carry no
+geometry.
+
+**The census found 5 more instances of the shape and changed no production
+code** — `alert_trigger_service`, `sports_alert_service`, `autopilot_scheduler`,
+the Neighborhood pre-sync scene (SharedPreferences-durable) and snapshot Scenes
+(**Firestore-durable**). All exit through `applyJson`, so all were already
+fenced the day they were written. That is the wire-pin bet paying out. **Still
+filed:** the two durable sites write geometry into storage that outlives the
+session, so a snapshot Scene is a latent debug-build assert whenever it is
+applied. Full census: `audit/ORIENTATION_ON_THE_WIRE.md` §6–§7.
 
 **The −1 is not a lost test.** `base_ladder_repair_live_test` was passing
 *silently and vacuously* (see below); gating it on `skip: !kRunHw` moves it from
