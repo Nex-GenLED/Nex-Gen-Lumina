@@ -1463,6 +1463,47 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P2 — hardening & platform
 
+- [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
+  full restart**
+  - Status: OPEN (filed 2026-08-19) · Severity: **P2 — UX, installer-facing**
+    · Slot: **September UX arc, alongside per-channel previews**
+  - **The symptom:** every step is forward-only. A typo in the customer email, a wrong
+    controller selection, a mis-set site mode — none can be corrected in place. The
+    installer restarts the wizard, in front of the customer.
+  - **⚠️ THIS IS A STATE-MANAGEMENT TASK, NOT A BUTTON.** Do not scope it as "add a Back
+    control". The steps have SIDE EFFECTS, and each one needs a defined answer to *what
+    un-happens on back*:
+    - **Account creation** (`_completeSetup` → `createUserWithEmailAndPassword` /
+      `createCustomerAccount`) — an auth user and a `/users` doc may already exist.
+      Backing past this step cannot simply forget the uid: re-running forward hits
+      `email-already-in-use` and drops into the existing-customer lookup branch.
+    - **Controller selection set** (`selectedControllerIds` / `linkedControllerIds`) —
+      backing out of zone setup must decide whether the selection survives, and whether
+      any controller-side write already made is reverted.
+    - **Draft autosave** (`installer_draft_service.dart`, `_saveDraft()` fires on EVERY
+      `_goToStep`) — back-nav writes a draft too, so a naive implementation persists the
+      *backward* step index and makes resume land on the step the installer just left.
+  - **BACK-NAV MUST RECONCILE WITH DRAFT-RESUME**, which already carries the
+    **stale-controller-ID hazard** filed separately: a resumed draft can name controller
+    ids that no longer exist on the network. Back-nav multiplies the paths into that
+    state, so the two features have to be designed together, not sequenced.
+  - **INTERIM MITIGATION EXISTS, AND ITS LIMITS ARE NOW VERIFIED** (not assumed —
+    read out of `InstallerDraft.toJson`, `installer_providers.dart:754`). Autosave/resume
+    genuinely reduces restart cost. It restores:
+    `currentStepIndex`, `customerInfo`, `selectedControllerIds`, `linkedControllerIds`,
+    `zones`, `siteMode`, `photoUrl`, `sessionPin`, `savedAt`.
+    It does **NOT** restore:
+    - the **handoff preference draft** (`installerPreferenceDraftProvider` —
+      sportsTeams, favoriteHolidays, vibeLevel, changeTolerance, autonomy, managerEmail).
+      It is a separate object collected at the LAST step, so the loss is small, but the
+      mitigation does not cover it and should not be described as if it does.
+    - any **account-creation state** (`userId`, `isExistingAccount`) — those are local to
+      `_completeSetup` and are re-derived, not resumed.
+    - commercial **brand setup** progress.
+    So: resume restores the data-entry steps, not the side-effecting tail. That is the
+    honest scope of the mitigation.
+
+
 - [ ] **#106 — firebase-admin v13 → v14: the namespaced API is gone; 183 call sites across
   31 backend files (filed out of #94)**
   - Status: OPEN (filed 2026-08-18) · Severity: **P2 — no external deadline**
