@@ -34,6 +34,10 @@ exports.joinNeighborhood = joinNeighborhood;
 const { triggerSyncFailover } = require("./lib/triggerSyncFailover");
 exports.triggerSyncFailover = triggerSyncFailover;
 
+// #98 - retract a deleted team's still-scheduled fires (onDelete of the config)
+const { teardownTeamFires } = require("./lib/teardownTeamFires");
+exports.teardownTeamFires = teardownTeamFires;
+
 // Import TypeScript-compiled referral code assignment (onCreate /users/{uid})
 const { assignReferralCode } = require("./lib/assignReferralCode");
 exports.assignReferralCode = assignReferralCode;

@@ -113,7 +113,21 @@ export type FireJobState =
   | "completed"
   | "failed"
   | "expired"
-  | "skipped";
+  | "skipped"
+  // #98 — RETRACTED BY A HUMAN, and deliberately distinct from "skipped".
+  //
+  // Tyler's ruling, 2026-08-18: "a state that means deliberately retracted by a
+  // human is semantically distinct from skipped (the system declining
+  // automatically), and blurring those two would destroy the audit trail's
+  // meaning at exactly the moment it matters."
+  //
+  // It was ALREADY IN THE DATA before it was in this union — the 2026-08-18
+  // teardown wrote two `cancelled` rows by hand, and that was safe precisely
+  // because the state is inert everywhere: `decideDispatch` tests
+  // `!== "scheduled"`, and both dispatch queries filter on
+  // `scheduled`/`dispatched`. Naming it here is the follow-through, not a
+  // behaviour change.
+  | "cancelled";
 
 export interface FireJobDoc {
   /** Stable identity of the logical event this fire belongs to. */
@@ -293,6 +307,39 @@ export function teamSlugFromEventId(eventId: unknown): string | null {
   if (typeof eventId !== "string") return null;
   const m = /^gd_(.+?)_(\d+)$/.exec(eventId);
   return m ? m[1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// #98 — retraction (the removeTeam teardown)
+// ---------------------------------------------------------------------------
+
+/** `cancelled_reason` written when a team is deleted out from under its fires. */
+export const CANCELLED_REASON_TEAM_DELETED = "team_deleted";
+
+/**
+ * Does this fire job belong to [teamSlug], and is it still live enough to
+ * retract? Pure; the caller supplies the docs.
+ *
+ * MATCHED BY EXACT SLUG, not by raw string prefix. The brief says "the team's
+ * event-id prefix", and this is that prefix disambiguated: a literal
+ * `startsWith("gd_" + teamSlug)` also matches a DIFFERENT team whose slug
+ * merely begins with this one. `ncaa_missouri` would retract
+ * `ncaa_missouri_state`'s fires, and `mlb_royals` would catch any future
+ * `mlb_royals_*`. Reusing [teamSlugFromEventId] makes the boundary exact and
+ * shares the parsing that is already pinned by test.
+ *
+ * ONLY `scheduled` is retractable. A `dispatched` job has already produced a
+ * command document — the fire is in flight and cancelling the job row would
+ * misreport what actually happened. Terminal states are history and are never
+ * rewritten.
+ */
+export function shouldRetractForTeam(args: {
+  eventId: unknown;
+  state: unknown;
+  teamSlug: string;
+}): boolean {
+  if (args.state !== "scheduled") return false;
+  return teamSlugFromEventId(args.eventId) === args.teamSlug;
 }
 
 /** Structural shape of the single read this gate performs. No firebase-admin import. */
