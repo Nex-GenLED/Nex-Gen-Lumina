@@ -252,6 +252,118 @@ export function decideDispatch(args: {
   return { dispatch: true, reason: "due", terminal: false };
 }
 
+// ---------------------------------------------------------------------------
+// #99 — the team-config existence gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Terminal skip reason when a Game Day job outlives the config that planned it.
+ *
+ * ONE reason string for BOTH shapes (deleted config, and `enabled` flipped
+ * off). They are the same fact from the dispatcher's side — "this team is not
+ * armed any more" — and splitting them would invite a caller to handle one and
+ * miss the other.
+ */
+export const CONFIG_GATE_SKIP_REASON = "config_missing_or_disabled";
+
+/**
+ * The team slug embedded in a Game Day `eventId`, or `null` when this is not a
+ * Game Day event at all.
+ *
+ * `eventIdFor` builds `gd_${teamSlug}_${gameId}`, and **team slugs contain
+ * underscores** — `mlb_royals`, `mls_sporting_kc`, `ncaamb_kansas_state` and
+ * `nwsl_kc_current` are all live in the fleet today. So the slug is everything
+ * between the `gd_` prefix and the trailing all-digit gameId, NOT the second
+ * `_`-separated token. A naive `eventId.split("_")[1]` returns `mlb` for the
+ * Royals and misses the config entirely, which fails OPEN — the gate reads a
+ * nonexistent team, finds nothing, and skips a job it should have dispatched.
+ * Eleven tests in teamConfigGate.test.js fail on exactly that mistake.
+ *
+ * The split is UNIQUE and needs no greediness tricks: the tail must be all
+ * digits, so it contains no underscore, so exactly one split position can
+ * satisfy the pattern. (Verified — a greedy `(.+)` and a lazy `(.+?)` return
+ * identical results on every fleet slug. Recorded so nobody "fixes" one into
+ * the other believing it matters.)
+ *
+ * Returns `null` — meaning THE GATE DOES NOT APPLY — for any id that is not
+ * `gd_<slug>_<digits>`. A non-Game-Day fire job has no team config to check and
+ * must never be terminal-skipped for failing to have one.
+ */
+export function teamSlugFromEventId(eventId: unknown): string | null {
+  if (typeof eventId !== "string") return null;
+  const m = /^gd_(.+?)_(\d+)$/.exec(eventId);
+  return m ? m[1] : null;
+}
+
+/** Structural shape of the single read this gate performs. No firebase-admin import. */
+export interface TeamConfigReader {
+  collection(path: string): {
+    doc(id: string): {
+      collection(path: string): {
+        doc(id: string): {
+          get(): Promise<{ exists: boolean; get(field: string): unknown }>;
+        };
+      };
+    };
+  };
+}
+
+export interface ConfigGateResult {
+  ok: boolean;
+  /** Set only when `ok` is false. */
+  reason?: string;
+}
+
+/**
+ * Re-read `users/{uid}/game_day_autopilot/{teamSlug}` at DISPATCH time and
+ * refuse a job whose config no longer arms it.
+ *
+ * WHY THIS EXISTS (#99, caught in the wild). `gd_mlb_royals_401816580_start`
+ * was planned while `mlb_royals` existed, the team was deleted afterwards, and
+ * **nothing tore the job down**. It sat `state:"scheduled"` with a real
+ * 130-byte `on+bri+seg` payload aimed at a live controller, 4 h 13 m from
+ * firing, for a team the user had removed. Planning-time consent is not
+ * dispatch-time consent: the planner's `.where("enabled","==",true)` was true
+ * when the row was written and says nothing about now.
+ *
+ * TERMINAL, not transient. A deleted config does not come back on its own, so
+ * retrying every minute until `too_late` would defer the same answer while
+ * leaving an armed row in the table.
+ *
+ * SKIPPED, not cancelled. Per the 2026-08-18 retraction convention `cancelled`
+ * means a human deliberately retracted a fire and `skipped` means the system
+ * declined it automatically. This is the system declining; blurring the two
+ * would destroy the audit trail at the moment it matters. #98 owns `cancelled`.
+ *
+ * NO FAIL-OPEN ON A READ ERROR, deliberately: this lets the error propagate to
+ * the dispatcher's existing per-job try/catch, which counts it as an error.
+ * Swallowing it would convert a transient Firestore fault into a permanent skip.
+ */
+export async function checkTeamConfigGate(args: {
+  db: TeamConfigReader;
+  uid: string;
+  eventId: unknown;
+}): Promise<ConfigGateResult> {
+  const teamSlug = teamSlugFromEventId(args.eventId);
+  // Not a Game Day job — there is no team config, so there is nothing to gate.
+  if (teamSlug === null) return { ok: true };
+
+  const snap = await args.db
+    .collection("users")
+    .doc(args.uid)
+    .collection("game_day_autopilot")
+    .doc(teamSlug)
+    .get();
+
+  if (!snap.exists) return { ok: false, reason: CONFIG_GATE_SKIP_REASON };
+  // STRICTLY `=== true`, mirroring the planner's .where("enabled","==",true).
+  // A missing field, null, 0, or the string "true" are all NOT armed.
+  if (snap.get("enabled") !== true) {
+    return { ok: false, reason: CONFIG_GATE_SKIP_REASON };
+  }
+  return { ok: true };
+}
+
 /**
  * The command document a dispatched job produces.
  *

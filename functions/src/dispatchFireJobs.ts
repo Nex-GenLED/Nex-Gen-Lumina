@@ -39,6 +39,7 @@ import {
   FireType,
   appendSamples,
   buildFireCommand,
+  checkTeamConfigGate,
   decideDispatch,
   jobStateForCommandStatus,
   rollup,
@@ -269,6 +270,28 @@ export async function runDispatchTick(
           } else {
             bump(stats.skippedTransient, decision.reason.split(":")[0]);
           }
+          continue;
+        }
+
+        // ── #99: dispatch-time team-config gate ─────────────────────────
+        // Planning-time consent is not dispatch-time consent. A Game Day job
+        // outlives the config that planned it (the Royals case: config deleted
+        // after planning, job still armed with a real payload 4 h out), so the
+        // team is re-read HERE, immediately before the job is allowed to fire.
+        //
+        // Placed AFTER decideDispatch on purpose: decideDispatch is pure and
+        // free, and it has already discarded not-yet-due and too-late jobs.
+        // Reading the config first would spend a Firestore read per tick on
+        // every future job in the table to answer a question that only matters
+        // for the ones about to fire.
+        const gate = await checkTeamConfigGate({ db, uid, eventId: job.eventId });
+        if (!gate.ok) {
+          await jobSnap.ref.update({
+            state: "skipped",
+            skipReason: gate.reason,
+            skippedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          bump(stats.skippedTerminal, gate.reason as string);
           continue;
         }
 
