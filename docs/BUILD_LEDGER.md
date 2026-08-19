@@ -65,6 +65,102 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### FUNCTIONS RUNTIME nodejs20 -> nodejs22 — DEPLOYED AND READ BACK 2026-08-19
+
+**Deployed SHA `a836a3e`, which IS `origin/main`.** Node.js 20 was deprecated
+2026-04-30 and is **decommissioned 2026-10-30**, after which this project could not
+have deployed functions at all. Moved before that became an outage rather than after.
+
+| item | before | after |
+|---|---|---|
+| `firebase.json` runtime | nodejs20 | **nodejs22** |
+| `engines.node` | "20" | **"22"** |
+| firebase-functions | ^7.0.3 | **^7.3.2** |
+| @types/node | ^20.11.0 | **^22.20.1** |
+| firebase-admin | ^13.6.0 | **UNCHANGED** (13.10.0) |
+| typescript | 5.9.3 | **UNCHANGED** |
+| deployed function count | 46 | **45** (one orphan deleted) |
+
+**#93 — THE PREDEPLOY HOOK, AND IT WAS PROVEN ABLE TO FAIL BEFORE IT WAS TRUSTED**
+(`a8fd7d2`). `firebase deploy` uploaded whatever `functions/lib/` happened to hold;
+nothing tied that directory to `src/`. Now `predeploy: ["npm --prefix functions run
+build"]` runs `tsc` exit-checked on every deploy. **Not** the `$RESOURCE_DIR` template
+— firebase spawns predeploy through `cmd.exe` here, where `$VAR` does not expand.
+
+The proof, not the config line, was the deliverable. With a deliberate TS2322 planted:
+`Error: functions predeploy error: Command terminated with non-zero exit code 2`,
+exit 1, **stopped AT predeploy — never reached "preparing functions directory for
+uploading"**. Restored: `+ functions: Finished running predeploy script.` -> `Dry run
+complete!`, exit 0. Both runs `--dry-run`, so the refusal cost production nothing.
+
+⚠️ **`noEmitOnError` is NOT set, and the broken artifact DID land in `lib/`.** tsc
+emitted `lib/_predeploy_proof.js` while failing. The deploy was blocked by the **exit
+code alone**, not by tsc withholding output. The hook makes bad output unshippable; it
+does not make `lib/` self-consistent. Setting the flag trades broken-fresh for
+stale-working — a different failure mode, not a better one. Left as a deliberate call.
+
+**#94 — CLOSED. firebase-admin was deliberately LEFT BEHIND, and that is the decision.**
+v14 was attempted first as the obvious companion and measured: **183 compile errors
+across 31 backend files** — it removes the namespaced API (`admin.firestore()`,
+`admin.auth()`, `admin.firestore.FieldValue`, every `admin.firestore.*` type position).
+It is **not required**: v13 declares `engines: node >=18` and runs on nodejs22
+unchanged. Taking it would have rewritten every backend function on the same night as a
+45-function production deploy, where a regression could not be attributed to either
+change. Filed **#106 (P2)** with the census; it must land **solo**. The 23 TS7006s are
+the real work — those implicit `any`s were inferred FROM the namespaced types and now
+need signatures written by hand, where a wrong one type-checks while changing what the
+code accepts.
+
+**THE ORPHAN, and it blocked the first deploy.** `firebase deploy` aborted exit 1:
+`processLuminaCommand` was deployed but absent from source, and deletion cannot proceed
+non-interactively. **Nothing was deployed on that run** — no partial state. It was dead:
+removed from source in `c007325` (2026-07-09), whose own commit message reads *"next
+`firebase deploy --only functions` will prompt to delete processLuminaCommand -- answer
+yes for that function only"*. Zero callers in `lib/` or `esp32-bridge/`. Deleted, then
+redeployed. **46 deployed = 45 real + 1 orphan** — which is exactly why the expected
+count was 45.
+
+**VERIFICATION — READBACKS, NEVER EXIT CODES:**
+
+- **(a) RUNTIME.** `firebase functions:list`: **45/45 `nodejs22`**, zero stragglers,
+  `processLuminaCommand` absent.
+- **(b) SHA ANCESTRY.** Deployed `a836a3e` == `origin/main`; `18b61c9` is an ancestor.
+  Working tree clean at deploy time — nothing uncommitted in `functions/`.
+- **(c) CONTENT — a deploy proves delivery, never content.** Two independent proofs:
+  the #78 marker (`ledCount: null` present, stale `ledCount: 300` **absent**) AND
+  `lib/` **byte-identical to a fresh compile** of the committed src (sha256 over all
+  `lib/**/*.js` unchanged across a rebuild). The chain `src@a836a3e -> lib/ -> uploaded`
+  is closed.
+
+**POST-DEPLOY SMOKE — all readback-verified:**
+
+- **Remote command end-to-end, to the bench.** Forced `probeControllerHealth`:
+  `controllers=15 written=8 skipped={"backoff_weekly":7} errors=0`. `executeWledCommand`
+  fired on doc-create and routed to **ESP32 Bridge Mode** (`type: getInfo`). Command
+  `fire_health_192_168_1_150_1787104515` -> **status `completed`**, `controllerIp
+  192.168.1.150`, no error, **completed 6 s after write** (01:55:15 -> 01:55:21), result
+  carrying live WLED info (`ver,vid,cn,release,leds,...`). Health record:
+  `lastProbeOutcome: completed`, `consecutiveFailures: 0`, **WLED 0.15.1 / 290 LEDs** —
+  the pinned firmware and the known seg0 span. Doc -> bridge -> controller -> readback.
+- **`collectControllerHealth` tick completing.** `{"controllers":15,"probed":8,
+  "missing":7,"seeded":0,"written":15}` — the pre-deploy baseline exactly.
+- **`joinNeighborhood` answering, WITHOUT joining.** HTTP **401** in **0.44 s** with the
+  function's OWN message `"Sign-in required to join a crew."` / `UNAUTHENTICATED` — not a
+  generic platform 401, so the module graph loaded and the handler ran. The auth guard is
+  the first statement, before any join logic. `/neighborhoods` re-read after: **0 docs,
+  still empty.** The street test is undisturbed.
+
+⚠️ **A FORCED OFF-CYCLE COLLECT READS `probed:0` AND IT IS NOT A REGRESSION.** The first
+forced tick returned `probed:0, missing:15` against a baseline of `probed:8`. `missing`
+means *no probe document to fold*: `probeControllerHealth` runs **09:15 UTC** and
+`collectControllerHealth` **09:30** folds what it wrote, so a collect with no preceding
+probe has nothing to classify — and the `alreadyFolded` idempotence guard re-classifies
+already-folded probes as missing too. Running probe-then-collect restored `probed:8`.
+Recorded so it is never diagnosed as a runtime fault.
+
+**ROLLBACK:** redeploy from `18b61c9` (pre-#93/#94). That is why the SHA-ancestry check
+is a gate and not a formality.
+
 ### SUITE BASELINE — authoritative line, corrected 2026-08-18
 
 **Current baseline: `2449 passed · 4 skipped · 0 failed`** — as of `2026-08-18`,
