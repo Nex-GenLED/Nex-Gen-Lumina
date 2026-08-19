@@ -158,6 +158,53 @@ probe has nothing to classify — and the `alreadyFolded` idempotence guard re-c
 already-folded probes as missing too. Running probe-then-collect restored `probed:8`.
 Recorded so it is never diagnosed as a runtime fault.
 
+**`noEmitOnError` — FINDING CLOSED 2026-08-19.** The #93 entry left this open as
+a deliberate call: the flag trades broken-fresh output for stale-working output,
+which is a different failure mode rather than a strictly better one. **Ruled:
+set it.** The asymmetry is in the DEFENDERS, not the failure modes. Stale-working
+`lib/` now has two — the predeploy hook rebuilds on every deploy, and the 3c
+byte-comparison against a fresh compile catches it — while broken-fresh has
+none: a `lib/` holding half-emitted output from a failed compile is invisible to
+everything that reads it locally. **Consistency beats freshness when the
+inconsistency is invisible.**
+
+**Verified, same standard as the hook.** A deliberate `TS2322` planted in a new
+`src/_noemit_proof.ts`, AND a valid `export const NOEMIT_PROOF_MARKER` appended
+to the real `src/fireJobs.ts` — so the proof covers the case the ruling is
+actually about, a half-emitted directory, not merely the bad file. Build exit 1,
+`error TS2322`, and `lib/` measured before and after:
+
+| measure | before | after failed build |
+|---|---|---|
+| sha256 over all `lib/**/*.js` + `*.d.ts` | `f72b87b2…5e00` | **`f72b87b2…5e00`** |
+| file count | 144 | **144** |
+| newest mtime | `1787107128.22` | **`1787107128.22`** |
+
+`lib/_noemit_proof.js` **ABSENT** — under the old config the identical input
+emitted it. And `NOEMIT_PROOF_MARKER` appears **0** times in `lib/fireJobs.js`:
+the VALID change was withheld too. That is the whole point — tsc now emits all
+or nothing, so a failed compile can no longer leave a directory that is part-new
+and part-old with nothing to reveal it. Restored, rebuilt, hash back to
+`f72b87b2…5e00` and 144 files.
+
+**#98 END-TO-END SMOKE — DEFERRED BY DESIGN, not owed.** `teardownTeamFires` is
+deployed and unit-proven (10 tests; naive prefix fails exactly the collision
+test, `delete()` fails 3 including "NEVER deletes"), but it has not been driven
+against a real planner-minted job: there were **0 scheduled `fire_jobs`
+fleetwide** at deploy time, so any smoke tonight would have had to fabricate the
+document under test. **Ruled: wait for Thursday's paired-cycle session.** The
+re-armed planner mints real `scheduled` rows on the bench uid, and deleting a
+test team config then exercises the `onDocumentDeleted` teardown against genuine
+planner output — a simulator must fail everywhere the real component fails, or
+its passes are void. The fabricated-doc version is the **fallback only** if
+Thursday's cycle is descoped.
+
+**STANDING STATE INTO THURSDAY:** `write_jobs` **false** — not re-armed, and it
+stays that way until that deliberate session. `nfl_chiefs` is `enabled:true`, so
+re-arming from known state is a decision to make rather than a default to
+inherit. Order: re-arm deliberately → full paired start/end on the bench →
+#98 teardown live → gate decision for the Greece window.
+
 **ROLLBACK:** redeploy from `18b61c9` (pre-#93/#94). That is why the SHA-ancestry check
 is a gate and not a formality.
 
