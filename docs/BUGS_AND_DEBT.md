@@ -1463,6 +1463,44 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P2 — hardening & platform
 
+- [ ] **#106 — firebase-admin v13 → v14: the namespaced API is gone; 183 call sites across
+  31 backend files (filed out of #94)**
+  - Status: OPEN (filed 2026-08-18) · Severity: **P2 — no external deadline**
+    · Evidence: **full compile census, measured — not estimated**
+  - **Not urgent, and the reason matters:** `firebase-admin@13` declares `engines: node >=18`,
+    so it runs on the **nodejs22** runtime unchanged. #94’s runtime migration did **not**
+    require this bump and deliberately did not take it. There is no decommission date driving
+    this the way 2026-10-30 drove Node 20 — v14 is available, not mandatory.
+  - **What breaks:** v14 removes the namespaced surface. `admin.firestore()`, `admin.auth()`,
+    `admin.firestore.FieldValue`, `admin.firestore.Timestamp` and the `admin.firestore.*`
+    **types** all resolve to nothing. The replacement is the modular entry points —
+    `getFirestore()` / `getAuth()` from `firebase-admin/firestore` and `firebase-admin/auth`,
+    with `FieldValue` and `Timestamp` imported as values.
+  - **THE CENSUS, taken 2026-08-18 against `firebase-admin@14.2.0` — 183 errors, 31 files:**
+
+    | code | count | what it is |
+    |---|---|---|
+    | TS2339 | 122 | `.firestore` / `.auth` not on the admin module |
+    | TS2694 | 37 | `admin.firestore` used as a **namespace** (type positions) |
+    | TS7006 | 23 | implicit `any` — callback params inferred from the old types |
+    | TS2322 | 1 | assignment mismatch |
+
+    Heaviest files: `dispatchFireJobs.ts` (23), `planGameDayFires.ts` (17),
+    `applySyncPattern.ts` (14), `staffAuth.ts` (13), `collectControllerHealth.ts` (10),
+    `sendSyncNotification.ts` (9), `sendWeeklyBrief.ts` (8), `endSyncSession.ts` (7);
+    23 more files with 1–6 each.
+  - **The 23 TS7006s are the real work.** The other 160 are a mechanical import rewrite. The
+    implicit-`any`s were previously inferred **from the namespaced types**; with the namespace
+    gone they need **real signatures written** (`QueryDocumentSnapshot`, `DocumentData`), and a
+    wrong one type-checks while changing what the code accepts. Do not treat the whole number
+    as find-and-replace.
+  - **⚠️ IT MUST LAND SOLO — do not let it ride along with other functions work.** It touches
+    every backend function, so bundling it means a deploy where a behavioural regression
+    cannot be attributed. Own branch, own commit, own full test pass, and its own **content
+    gate** (`functions/lib/` readback proving the compiled output is the migrated code) before
+    it goes near the fleet — the same gate #94 used.
+
+
 - [ ] **#104 — Game Day entry stalls when hardware geometry disagrees with the installation
   record; the app must DEGRADE LEGIBLY, never freeze (+81)**
   - Status: OPEN (filed 2026-08-18, carried out of +80) · Severity: **P1 — customer-visible**
