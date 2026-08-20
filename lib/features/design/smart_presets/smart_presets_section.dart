@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_apply.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
@@ -63,7 +64,14 @@ class SmartPresetsSection extends ConsumerWidget {
             left: 20,
             right: 20,
             top: 20,
-            bottom: 20 + MediaQuery.of(sheetCtx).viewInsets.bottom,
+            // Clear MainScaffold's always-visible GlassDockNavBar. The sheet
+            // is anchored to the branch navigator, a sibling of the dock in
+            // the same Stack, so the dock paints over the sheet's lower edge.
+            // navBarTotalHeight = dock content height + device bottom inset;
+            // viewInsets.bottom still lifts above the keyboard when present.
+            bottom: 20 +
+                navBarTotalHeight(sheetCtx) +
+                MediaQuery.of(sheetCtx).viewInsets.bottom,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
