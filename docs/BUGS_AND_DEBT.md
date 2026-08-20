@@ -1459,6 +1459,70 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `team_name` or no `team_slug` is not renderable), and make (B) require a non-empty
     `configName`. Both halves — a nameless config must neither render nor match.
 
+- [ ] **#108 — Roofline Mapping redesign to the PARENT SEGMENT model. Segments float free of
+  channels, coverage is unverifiable, and direction has no home (+ September headline)**
+  - Status: **OPEN — FILE ONLY, no implementation on main** (filed 2026-08-19) ·
+    Severity: **P1 — promised feature, September headline** · Evidence: **reported**
+    (first real-user walkthrough — Tyler + Ellie's install, 2026-08-19)
+  - Surface: Design Studio → roofline setup (`lib/features/design/roofline_setup_wizard.dart`,
+    `lib/features/design/segment_setup_screen.dart`, `lib/widgets/roofline_editor.dart`).
+
+  **THREE OBSERVED DEFECTS**
+  1. **Segments float free of channels.** Add-segment cannot target a channel, and nothing in
+     the UI tells the user which pixels belong to which channel. Channel membership is an
+     afterthought rather than a constraint.
+  2. **Coverage is unverifiable.** No allocated/total accounting anywhere. A user cannot know
+     whether every pixel is accounted for, so a partial map looks identical to a complete one.
+  3. **Direction (`rev`) has no control in the roofline surface at all.** A misconfigured
+     direction today requires hand-correction in the WLED UI. Direction is
+     **provisioning-domain truth** per the wire-pin work; the pattern-grid L→R control
+     (`2f5db8b`, routed through `applyGeometryJson`) is currently its only UI, which is the
+     wrong home for it.
+
+  **THE SPEC — Parent Segment model + two capture-time mechanics**
+  1. **Parent Segment = channel.** Auto-derived from bus config (`hw.led.ins`), immutable, one
+     per channel, showing hardware truth (name, total px, current direction). Children
+     subdivide a parent, so **every segment belongs to exactly one channel by construction** —
+     defect 1 becomes structurally impossible rather than validated against.
+  2. **Identity is classification.** Each child is exactly one of Run / Corner / Peak / Column /
+     Connector — the semantic types the map-driven presets already consume
+     (`SegmentType` / `ArchitecturalRole` in `lib/models/roofline_segment.dart`). Coverage
+     enforced: per-parent allocated/total px, unassigned ranges flagged.
+  3. **Direction test per parent.** Fire a chase from pixel 0, user confirms visually, and the
+     answer writes to the **bus config** via the provisioning door — not to a segment.
+  4. **Live pixel identification.** Adjusting a child's range lights exactly those pixels on the
+     physical strip, recomposed from the per-pixel write spine. ⚠️ Mind the `frz:true` / +63
+     `psave` hazard (`audit/FROZEN_SEGMENT.md`) — a per-pixel `i` write sets `frz=true`, and a
+     `psave` that captures it produces a preset that fires dark forever.
+
+  **CAUTION for the design pass — this editor writes the pixelMap docs participation derives
+  from.** The design must state explicitly what it writes to `is_primary`, `pixel_count`, and
+  segment structure, plus the migration story for existing docs (`map_version` exists — use it,
+  `lib/models/pixel_map_channel.dart:128,143`).
+  - ⚠️ **Citation correction (verified 2026-08-19).** The spec as dictated cited
+    "`roofline_editor.dart:690` hardcodes `is_primary` true". That line is a **false lead** —
+    [roofline_editor.dart:690](../lib/widgets/roofline_editor.dart) is
+    `_ControlButton(isPrimary: true)`, a Save-**button styling** prop with no relation to the
+    `is_primary` data field. `pixel_map_channel.dart` does not carry `is_primary` at all.
+    The real defaults-to-true writes are the **deserializers**:
+    [roofline_segment.dart:721](../lib/models/roofline_segment.dart) and
+    [led_channel_config.dart:111](../lib/models/led_channel_config.dart), both
+    `json['is_primary'] as bool? ?? true`, serialized back at `roofline_segment.dart:764`.
+    A doc that never carried the field reads back as primary. Send the design pass there, not
+    to line 690. See **#95 / #101**.
+  - ⚠️ **Leg B drift** — `pixel_count` 128 vs bus 162. The design must say which one the
+    Parent Segment displays as "hardware truth" and which loses.
+
+  **RESOLVES #102's open UI-ownership question.** Direction-correction belongs in the roofline
+  surface, writing bus config — which is exactly the "UI write must also update the
+  installation record" resolution #102 asks for and defers.
+
+  **SIBLING, not part of this:** the per-channel photo-preview arc — same model, two views.
+  Note the integration point only; do not scope it in.
+
+  **Permitted work:** Phase 0 (design doc) may begin **in an isolated worktree**. The full
+  design prompt exists. No implementation on `main`.
+
 ---
 
 ## P2 — hardening & platform
@@ -1652,6 +1716,10 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
       this means giving the relay a provisioning door — out of scope for +81.
     - Not resolved on either side; **made visible on both**. See
       `lib/features/wled/channel_direction.dart` for the same note at the write site.
+    - **UI-OWNERSHIP QUESTION RESOLVED 2026-08-19 — see #108.** Direction-correction's home
+      is the **roofline surface** (a per-parent direction test writing bus config), not the
+      pattern grid. That is the "UI write must also update the installation record" half
+      above. #108 is FILE-ONLY; this stays open until it lands.
   - Files: `lib/features/schedule/geometry_gate.dart:27`,
     `lib/features/wled/controller_defaults_healer.dart` (`_reprovisionSegments`),
     `lib/features/wled/wled_hardware_config.dart:41` (client-only),
