@@ -116,6 +116,20 @@ class TimelineRowTile extends StatelessWidget {
   final String timeFormat;
   final VoidCallback? onTap;
 
+  /// D4 — channel scope, e.g. `"Channel 2"` or `"2 of 4 channels"`. Null for an
+  /// all-channel row, which is every row today, so the common case gains no
+  /// chrome at all.
+  ///
+  /// Passed in rather than read from a provider so this widget stays pure and
+  /// testable without a ProviderScope; the surfaces resolve it from
+  /// `deviceChannelsProvider`.
+  final String? scopeLabel;
+
+  /// The controller's display name. Shown ONLY when the home has more than one
+  /// controller (P5) — with a single controller it would be noise on every
+  /// scoped row.
+  final String? controllerLabel;
+
   /// Compact mode drops the provenance chip and tightens padding — used by the
   /// dashboard card, where vertical space is scarce.
   final bool compact;
@@ -126,6 +140,8 @@ class TimelineRowTile extends StatelessWidget {
     this.timeFormat = '12h',
     this.onTap,
     this.compact = false,
+    this.scopeLabel,
+    this.controllerLabel,
   });
 
   @override
@@ -195,6 +211,30 @@ class TimelineRowTile extends StatelessWidget {
                       color: NexGenPalette.textMedium,
                     ),
                   ),
+                  if (scopeLabel != null) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Icon(Icons.tune_rounded,
+                            size: compact ? 10 : 11, color: accent),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            controllerLabel == null
+                                ? scopeLabel!
+                                : '$scopeLabel · $controllerLabel',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: compact ? 10 : 11,
+                              fontWeight: FontWeight.w600,
+                              color: accent,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   if (consequence != null) ...[
                     const SizedBox(height: 2),
                     Text(
@@ -281,6 +321,14 @@ class DayTimelineList extends StatelessWidget {
   final VoidCallback? onRowTap;
   final VoidCallback? onMoreTap;
 
+  /// D4 — resolves a row's channel-scope label. Null ⇒ no scope chrome, which
+  /// is what every all-channel surface passes.
+  final String? Function(TimelineEntry)? scopeLabelFor;
+
+  /// D4 — resolves a row's controller name. Surfaces pass null unless the home
+  /// has more than one controller.
+  final String? Function(TimelineEntry)? controllerLabelFor;
+
   const DayTimelineList({
     super.key,
     required this.timeline,
@@ -289,6 +337,8 @@ class DayTimelineList extends StatelessWidget {
     this.compact = false,
     this.onRowTap,
     this.onMoreTap,
+    this.scopeLabelFor,
+    this.controllerLabelFor,
   });
 
   @override
@@ -308,6 +358,8 @@ class DayTimelineList extends StatelessWidget {
             timeFormat: timeFormat,
             compact: compact,
             onTap: onRowTap,
+            scopeLabel: scopeLabelFor?.call(e),
+            controllerLabel: controllerLabelFor?.call(e),
           ),
         if (hidden > 0) TimelineMoreRow(hiddenCount: hidden, onTap: onMoreTap),
       ],

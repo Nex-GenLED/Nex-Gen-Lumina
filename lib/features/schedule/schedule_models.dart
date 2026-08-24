@@ -72,13 +72,29 @@ class ScheduleItem {
   /// (`DeviceChannel.id`, derived from `hw.led.ins`). `null` = every channel,
   /// which is what every writer produces today.
   ///
-  /// ⚠️ NOTHING CONSUMES THIS YET (Scheduling V3 A1). `schedule_sync.dart` is
-  /// untouched by that work and still builds full-strip presets, and the
-  /// self-healer actively REPAIRS a channel-excluded ON preset back to all-on
-  /// (audit/SCHEDULING_V3_AUDIT.md §5.5, blockers F2-2/F2-3). Writing a value
-  /// here would therefore change nothing and, once the healer ran, would read
-  /// back as a lie. Kept null until the firing layer can honour it.
+  /// CONSUMED BY THE FIRING LAYER as of Phase D. `syncAll`'s pattern-preset
+  /// path routes the design through `ScheduleSyncService.scopePatternPayload`,
+  /// so the addressed channels get the design and every other live segment is
+  /// written `on:false`.
+  ///
+  /// ⚠️ A SCOPED SCHEDULE DARKENS THE CHANNELS IT EXCLUDES. "Leave the others
+  /// as they were" is not available to a timer-fired preset: `psave` snapshots
+  /// every segment (audit/U7_ABSENT_SEGMENT_PROBE.md), so an omitted channel is
+  /// captured at whatever it happened to be showing rather than left alone. The
+  /// editor states this.
+  ///
+  /// DURABILITY: also persisted to the `schedule_scope` sidecar (D1), because
+  /// an old build rewrites the whole array through `toJson()` and would
+  /// otherwise strip this field from every schedule in the account.
   final List<int>? channels;
+
+  /// Which controller [channels] indexes into (D1 / P5 decision).
+  ///
+  /// A bus index is only meaningful against ONE controller's `hw.led.ins` —
+  /// channel 1 on the garage controller is not channel 1 on the back-yard one.
+  /// So a scoped item names its controller, and the sync path applies it only
+  /// there. Null whenever [channels] is null.
+  final String? controllerId;
 
   const ScheduleItem({
     required this.id,
@@ -94,7 +110,11 @@ class ScheduleItem {
     this.sourcePromptId,
     this.sortKey = 0,
     this.channels,
+    this.controllerId,
   });
+
+  /// True when this item targets a subset of channels rather than the strip.
+  bool get isChannelScoped => channels != null;
 
   /// UI-safe action label. Routes the pattern-name portion of a
   /// `"Pattern: <name>"` [actionLabel] through the centralized slug
@@ -144,6 +164,10 @@ class ScheduleItem {
     String? sourcePromptId,
     int? sortKey,
     List<int>? channels,
+    String? controllerId,
+    /// Clears BOTH scope fields. Needed because `channels: null` cannot mean
+    /// "remove the scope" through the usual `?? this.x` idiom.
+    bool clearScope = false,
   }) =>
       ScheduleItem(
         id: id ?? this.id,
@@ -159,7 +183,9 @@ class ScheduleItem {
             clearDisabledUntil ? null : (disabledUntil ?? this.disabledUntil),
         sourcePromptId: sourcePromptId ?? this.sourcePromptId,
         sortKey: sortKey ?? this.sortKey,
-        channels: channels ?? this.channels,
+        channels: clearScope ? null : (channels ?? this.channels),
+        controllerId:
+            clearScope ? null : (controllerId ?? this.controllerId),
       );
 
   Map<String, dynamic> toJson() => {
@@ -180,6 +206,7 @@ class ScheduleItem {
         // Omitted when null so a schedule that scopes to every channel (all of
         // them, today) writes the same document it always did.
         if (channels != null) 'channels': channels,
+        if (controllerId != null) 'controllerId': controllerId,
       };
 
   factory ScheduleItem.fromJson(Map<String, dynamic> json) => ScheduleItem(
@@ -201,6 +228,7 @@ class ScheduleItem {
         // Absent on pre-migration docs → 0 (back-compat). Tolerate num.
         sortKey: (json['sortKey'] as num?)?.toInt() ?? 0,
         channels: _tryParseChannels(json['channels']),
+        controllerId: json['controllerId'] as String?,
       );
 
   /// Absent, wrong type, or non-numeric members all collapse rather than

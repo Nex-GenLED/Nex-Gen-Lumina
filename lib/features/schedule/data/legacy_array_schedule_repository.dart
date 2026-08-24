@@ -26,6 +26,7 @@ import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_store_sync.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 class LegacyArrayScheduleRepository implements ScheduleRepository {
@@ -115,6 +116,10 @@ class LegacyArrayScheduleRepository implements ScheduleRepository {
       await _firestore.collection('users').doc(userId).update(
         UserService.sanitizeForFirestore({
           'schedules': schedules.map((e) => e.toJson()).toList(),
+          // D1 — the durable channel-scope sidecar. Written alongside the array
+          // because an old build rewrites the array wholesale and would
+          // otherwise silently un-scope every schedule in the account.
+          kScheduleScopeField: scheduleScopeSidecar(schedules),
           'updated_at': FieldValue.serverTimestamp(),
         }),
       );

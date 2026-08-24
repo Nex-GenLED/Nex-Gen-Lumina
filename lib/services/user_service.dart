@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_storage.dart';
+import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 import 'package:nexgen_command/features/schedule/data/legacy_array_schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -846,13 +847,18 @@ class UserService {
   Future<bool> saveCalendarEntries(String userId, CalendarEntrySet set) async {
     try {
       await _writeWithRetry(() async {
-        final encoded = encodeCalendarEntries(set);
+        final encoded = encodeCalendarEntriesWithScope(set);
         final map = <String, dynamic>{
-          for (final e in encoded.entries) e.key: sanitizeForFirestore(e.value),
+          for (final e in encoded.entries.entries)
+            e.key: sanitizeForFirestore(e.value),
         };
         await _firestore.collection('users').doc(userId).update(
           sanitizeForFirestore({
             'calendar_entries': map,
+            // D1 — the durable scope sidecar, written in the SAME update so an
+            // entry and its scope can never be half-persisted. Rebuilt in full
+            // every time, so a cleared scope disappears rather than lingering.
+            kCalendarEntryScopeField: encoded.scope,
             'updated_at': FieldValue.serverTimestamp(),
           }),
         );
@@ -878,6 +884,7 @@ class UserService {
     final raw = data['calendar_entries'] as Map<String, dynamic>? ?? {};
     return decodeCalendarEntries(
       raw,
+      scopeSidecar: data[kCalendarEntryScopeField],
       // Same skip-and-log behaviour as the pre-V3 loader: one corrupt row must
       // never cost the user their whole calendar.
       onCorrupt: (key, error) =>

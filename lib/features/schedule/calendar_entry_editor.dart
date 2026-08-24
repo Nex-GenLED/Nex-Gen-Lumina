@@ -11,6 +11,7 @@ import '../../theme.dart';
 import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
 import 'calendar_entry.dart';
+import 'widgets/channel_scope_picker.dart';
 import 'calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/dated_overwrite_dialog.dart';
 
@@ -55,12 +56,18 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
   late int _brightness;
   bool _saving = false;
 
+  // D4 — channel scope, same picker and same semantics as the recurring editor.
+  List<int>? _channels;
+  String? _controllerId;
+
   @override
   void initState() {
     super.initState();
     _onTime = widget.entry.onTime ?? '18:00';
     _offTime = widget.entry.offTime ?? '23:00';
     _brightness = widget.entry.brightness;
+    _channels = widget.entry.channels;
+    _controllerId = widget.entry.controllerId;
   }
 
   @override
@@ -158,6 +165,16 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
               color: NexGenPalette.violet,
               onTap: () => _pickTime(isOn: false),
             ),
+          const SizedBox(height: 16),
+
+          // D4 — channel scope. Self-hides on a single-channel controller.
+          ChannelScopePicker(
+            channels: _channels,
+            onChanged: (sel) => setState(() {
+              _channels = sel.channels;
+              _controllerId = sel.controllerId;
+            }),
+          ),
           const SizedBox(height: 16),
 
           // Brightness slider
@@ -363,13 +380,18 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
   Future<void> _onSave() async {
     // An open-ended entry keeps its endMode and gets NO offTime written back —
     // the picker for it was never shown, so `_offTime` holds only its default.
-    final edited = widget.entry.isOpenEnded
+    final base = widget.entry.isOpenEnded
         ? widget.entry.copyWith(onTime: _onTime, brightness: _brightness)
         : widget.entry.copyWith(
             onTime: _onTime,
             offTime: _offTime,
             brightness: _brightness,
           );
+    final edited = base.copyWith(
+      channels: _channels,
+      controllerId: _controllerId,
+      clearScope: _channels == null,
+    );
 
     // If this is a user or holiday entry, save directly — no scope choice.
     if (widget.entry.type != CalendarEntryType.autopilot) {

@@ -103,12 +103,20 @@ class CalendarEntry {
   /// (`DeviceChannel.id`, derived from `hw.led.ins`; audit §5.2).
   /// `null` = every channel, which is what every writer produces today.
   ///
-  /// ⚠️ NOTHING CONSUMES THIS YET. It is written `null` everywhere and read by
-  /// no payload builder, no timer, no preset. It exists so the field survives
-  /// the #108 Parent Segment redesign without a second migration — that spec
-  /// keeps the channel identity a bus index (audit §5.6). Per-channel FIRING is
-  /// blocked in the firing layer, not here (audit §8, F2-2/F2-3).
+  /// CONSUMED BY THE FIRING LAYER as of Phase D — see
+  /// `ScheduleItem.channels` for the full contract. In short: a scoped entry
+  /// DARKENS the channels it excludes, because `psave` cannot express "leave
+  /// them alone" (audit/U7_ABSENT_SEGMENT_PROBE.md).
+  ///
+  /// DURABILITY: also persisted to the `calendar_entry_scope` sidecar (D1),
+  /// keyed by the entry's storage key, because an old build rewrites the whole
+  /// `calendar_entries` field and would otherwise strip it.
   final List<int>? channels;
+
+  /// Which controller [channels] indexes into (D1 / P5 decision). A bus index
+  /// is only meaningful against one controller's `hw.led.ins`. Null whenever
+  /// [channels] is null.
+  final String? controllerId;
 
   /// How this entry ends. Legacy documents infer it — see [fromJson].
   final CalendarEntryEndMode endMode;
@@ -146,10 +154,14 @@ class CalendarEntry {
     this.note,
     this.sourceTag,
     this.channels,
+    this.controllerId,
     this.endMode = CalendarEntryEndMode.fixedTime,
     this.estimatedEnd,
     this.hardCapAt,
   });
+
+  /// True when this entry targets a subset of channels rather than the strip.
+  bool get isChannelScoped => channels != null;
 
   /// True when this entry has no stated clock end — the display must not
   /// render [offTime] as a real boundary for these.
@@ -169,6 +181,10 @@ class CalendarEntry {
     String? note,
     String? sourceTag,
     List<int>? channels,
+    String? controllerId,
+    /// Clears BOTH scope fields — `channels: null` cannot express removal
+    /// through the `?? this.x` idiom.
+    bool clearScope = false,
     CalendarEntryEndMode? endMode,
     DateTime? estimatedEnd,
     DateTime? hardCapAt,
@@ -185,7 +201,9 @@ class CalendarEntry {
         autopilot: autopilot ?? this.autopilot,
         note: note ?? this.note,
         sourceTag: sourceTag ?? this.sourceTag,
-        channels: channels ?? this.channels,
+        channels: clearScope ? null : (channels ?? this.channels),
+        controllerId:
+            clearScope ? null : (controllerId ?? this.controllerId),
         endMode: endMode ?? this.endMode,
         estimatedEnd: estimatedEnd ?? this.estimatedEnd,
         hardCapAt: hardCapAt ?? this.hardCapAt,
@@ -285,6 +303,7 @@ class CalendarEntry {
         'note': note,
         'sourceTag': sourceTag,
         if (channels != null) 'channels': channels,
+        if (controllerId != null) 'controllerId': controllerId,
         'endMode': endMode.name,
         if (estimatedEnd != null) 'estimatedEnd': estimatedEnd!.toIso8601String(),
         if (hardCapAt != null) 'hardCapAt': hardCapAt!.toIso8601String(),
@@ -353,6 +372,7 @@ class CalendarEntry {
       note: json['note'] as String?,
       sourceTag: sourceTag,
       channels: _tryParseChannels(json['channels']),
+      controllerId: json['controllerId'] as String?,
       endMode: endMode,
       estimatedEnd: estimatedEnd,
       hardCapAt: _tryParseIso(json['hardCapAt']),

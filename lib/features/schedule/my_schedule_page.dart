@@ -17,6 +17,8 @@ import 'package:nexgen_command/features/schedule/calendar_entry_editor.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/day_timeline.dart';
 import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
+import 'package:nexgen_command/features/schedule/widgets/channel_scope_picker.dart';
+import 'package:nexgen_command/features/schedule/widgets/timer_slot_meter.dart';
 import 'package:nexgen_command/features/schedule/widgets/timeline_row.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/dated_overwrite_dialog.dart';
@@ -1561,7 +1563,15 @@ class _DayHeroCard extends ConsumerWidget {
                         ],
                       ),
                       const SizedBox(height: 2),
-                      DayTimelineList(timeline: day, timeFormat: timeFormat),
+                      Builder(builder: (_) {
+                        final lab = ref.watch(timelineScopeLabellerProvider);
+                        return DayTimelineList(
+                          timeline: day,
+                          timeFormat: timeFormat,
+                          scopeLabelFor: lab.scopeFor,
+                          controllerLabelFor: lab.controllerFor,
+                        );
+                      }),
                     ],
                   ],
                 ),
@@ -1800,6 +1810,12 @@ void showDayDetailSheet(
                         TimelineRowTile(
                           entry: e,
                           timeFormat: timeFormat,
+                          scopeLabel: ref
+                              .watch(timelineScopeLabellerProvider)
+                              .scopeFor(e),
+                          controllerLabel: ref
+                              .watch(timelineScopeLabellerProvider)
+                              .controllerFor(e),
                           onTap: () {
                             Navigator.of(sheetCtx).pop();
                             showTimelineEntryDetail(context, ref, e, dateKey);
@@ -4250,6 +4266,11 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
   PatternSelection? _selectedPattern;
   bool _useAudioReactive = false;
 
+  // D4 — channel scope. Both null = all channels, which is what every existing
+  // schedule is and what a new one defaults to.
+  List<int>? _channels;
+  String? _controllerId;
+
   // Day selection represented as indices 0..6 => S M T W T F S
   final List<String> _dayLabelsShort = const ['S','M','T','W','T','F','S'];
   final List<String> _dayAbbr = const ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -4276,6 +4297,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     final editing = widget.editing;
     if (editing != null) {
       _enabled = editing.enabled;
+      _channels = editing.channels;
+      _controllerId = editing.controllerId;
       // Days
       final daysLower = editing.repeatDays.map((e) => e.toLowerCase()).toList(growable: false);
       if (daysLower.any((d) => d.contains('daily'))) {
@@ -4532,6 +4555,23 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       }),
                     ),
                 ]),
+
+                // D4 — channel scope. Self-hides on a single-channel
+                // controller, so the common install sees no new chrome.
+                const SizedBox(height: 16),
+                ChannelScopePicker(
+                  channels: _channels,
+                  onChanged: (sel) => setState(() {
+                    _channels = sel.channels;
+                    _controllerId = sel.controllerId;
+                  }),
+                ),
+
+                const SizedBox(height: 16),
+                // D4 — slot accounting, visible BEFORE the save rather than as
+                // a failure after it.
+                TimerSlotMeter(editingId: widget.editing?.id),
+
                 const SizedBox(height: 16),
                 Text('Action', style: Theme.of(context).textTheme.labelLarge),
                 const SizedBox(height: 8),
@@ -4780,7 +4820,23 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       isRunPattern: _action == _ActionType.runPattern,
                       useAudioReactive: _useAudioReactive,
                       pickedPayload: _selectedPattern?.wledPayload,
+                    ).copyWith(
+                      // D4/D1 — scope rides the model AND the sidecar (the
+                      // repository writes the sidecar from these fields).
+                      channels: _channels,
+                      controllerId: _controllerId,
+                      clearScope: _channels == null,
                     );
+
+                    // D4 — refuse BEFORE the write when the pool is full,
+                    // naming what is holding the slots. The old behaviour saved
+                    // to Firestore and only then reported "8/8, delete an old
+                    // schedule", after the fact and naming nothing.
+                    if (!await confirmSlotCapacity(context, ref,
+                        candidate: item, editingId: widget.editing?.id)) {
+                      return;
+                    }
+                    if (!context.mounted) return;
 
                     try {
                       if (widget.editing == null) {

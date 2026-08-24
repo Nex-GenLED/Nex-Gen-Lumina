@@ -9,7 +9,6 @@
 //
 // These tests pin the wiring, not the editors' internals.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/day_timeline.dart';

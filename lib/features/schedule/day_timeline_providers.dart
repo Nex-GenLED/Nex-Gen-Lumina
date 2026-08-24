@@ -12,7 +12,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/day_timeline.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
+import 'package:nexgen_command/features/schedule/widgets/channel_scope_picker.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/device_channel.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 
 /// The timeline for one `'YYYY-MM-DD'`.
@@ -67,3 +72,53 @@ String? _hhmm(DateTime? dt) => dt == null
     ? null
     : '${dt.hour.toString().padLeft(2, '0')}:'
         '${dt.minute.toString().padLeft(2, '0')}';
+
+/// D4 — resolves a timeline row's channel-scope label and (only in a
+/// multi-controller home) its controller name.
+///
+/// Bundled into one provider so every surface asks the same question once and
+/// gets the same answer, instead of each deciding when a controller name is
+/// worth showing.
+final timelineScopeLabellerProvider = Provider<TimelineScopeLabeller>((ref) {
+  final channels = ref.watch(deviceChannelsProvider);
+  final controllers = ref.watch(controllersStreamProvider).maybeWhen(
+        data: (list) => list,
+        orElse: () => const <ControllerInfo>[],
+      );
+  return TimelineScopeLabeller(
+    channels: channels,
+    controllerNames: {
+      for (final c in controllers) c.id: c.name ?? 'Controller',
+    },
+    multiController: controllers.length > 1,
+  );
+});
+
+/// Pure label resolver — see [timelineScopeLabellerProvider].
+class TimelineScopeLabeller {
+  final List<DeviceChannel> channels;
+  final Map<String, String> controllerNames;
+
+  /// P5: the controller name is shown ONLY when there is more than one. With a
+  /// single controller it is noise on every scoped row.
+  final bool multiController;
+
+  const TimelineScopeLabeller({
+    required this.channels,
+    required this.controllerNames,
+    required this.multiController,
+  });
+
+  String? scopeFor(TimelineEntry e) =>
+      channelScopeLabel(_channelsOf(e), channels);
+
+  String? controllerFor(TimelineEntry e) {
+    if (!multiController) return null;
+    if (_channelsOf(e) == null) return null;
+    final id = e.recurring?.controllerId ?? e.dated?.controllerId;
+    return id == null ? null : controllerNames[id];
+  }
+
+  static List<int>? _channelsOf(TimelineEntry e) =>
+      e.recurring?.channels ?? e.dated?.channels;
+}

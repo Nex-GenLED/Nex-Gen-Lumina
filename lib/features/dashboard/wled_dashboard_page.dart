@@ -1357,6 +1357,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     return Consumer(builder: (context, ref, _) {
       final timeline = ref.watch(todayTimelineProvider);
       final timeFormat = ref.watch(timeFormatPreferenceProvider);
+      final scopeLabeller = ref.watch(timelineScopeLabellerProvider);
       final today = DateTime.now();
 
       if (timeline.isEmpty) {
@@ -1413,6 +1414,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             compact: true,
             onRowTap: openDay,
             onMoreTap: openDay,
+            scopeLabelFor: scopeLabeller.scopeFor,
+            controllerLabelFor: scopeLabeller.controllerFor,
           ),
         ],
       );

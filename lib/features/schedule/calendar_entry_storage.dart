@@ -52,6 +52,7 @@
 
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
+import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 
 /// Separates the date from the entry id in a composite storage key.
 ///
@@ -65,8 +66,19 @@ const String kCalendarStorageKeySeparator = '#';
 /// The primary (last-written) entry on each date takes the plain date key; the
 /// rest are suffixed with their `entryId`. Callers strip holidays first —
 /// those are local defaults and have never been persisted.
-Map<String, Map<String, dynamic>> encodeCalendarEntries(CalendarEntrySet set) {
+Map<String, Map<String, dynamic>> encodeCalendarEntries(CalendarEntrySet set) =>
+    encodeCalendarEntriesWithScope(set).entries;
+
+/// Encode BOTH the entries field and its D1 scope sidecar.
+///
+/// The sidecar is keyed by the SAME storage key as the entry, so a composite
+/// key and its scope stay addressable from each other. It is rebuilt in full on
+/// every write, so clearing an entry's scope deletes its sidecar row rather
+/// than leaving a stale one behind.
+({Map<String, Map<String, dynamic>> entries, Map<String, dynamic> scope})
+    encodeCalendarEntriesWithScope(CalendarEntrySet set) {
   final out = <String, Map<String, dynamic>>{};
+  final scopes = <String, ItemScope>{};
   for (final dateKey in set.sortedDateKeys) {
     final list = set.forDate(dateKey);
     if (list.isEmpty) continue;
@@ -77,9 +89,11 @@ Map<String, Map<String, dynamic>> encodeCalendarEntries(CalendarEntrySet set) {
           ? dateKey
           : '$dateKey$kCalendarStorageKeySeparator${entry.entryId}';
       out[key] = entry.toJson();
+      scopes[key] = ItemScope(
+          channels: entry.channels, controllerId: entry.controllerId);
     }
   }
-  return out;
+  return (entries: out, scope: encodeScopeSidecar(scopes));
 }
 
 /// Decode the `calendar_entries` field.
@@ -99,6 +113,10 @@ Map<String, Map<String, dynamic>> encodeCalendarEntries(CalendarEntrySet set) {
 /// rather than throwing, matching the pre-V3 loader's behaviour.
 CalendarEntrySet decodeCalendarEntries(
   Map<String, dynamic> raw, {
+  /// The D1 sidecar (`users/{uid}.calendar_entry_scope`). An entry whose model
+  /// `channels` was stripped by an old-build rewrite recovers its scope from
+  /// here — that is the entire reason the sidecar exists.
+  dynamic scopeSidecar,
   void Function(String key, Object error)? onCorrupt,
 }) {
   // dateKey -> (composite entries by storage key, primary)
@@ -126,12 +144,25 @@ CalendarEntrySet decodeCalendarEntries(
       json['entryId'] = keyEntryId;
     }
 
-    final CalendarEntry entry;
+    CalendarEntry entry;
     try {
       entry = CalendarEntry.fromJson(json);
     } catch (e) {
       onCorrupt?.call(key, e);
       continue;
+    }
+
+    // D1 — recover scope stripped by an old-build rewrite. Keyed by the STORAGE
+    // key, which is what the writer used.
+    final scope = resolveScope(
+      modelChannels: entry.channels,
+      modelControllerId: entry.controllerId,
+      sidecar: scopeSidecar,
+      key: key,
+    );
+    if (scope.isScoped && entry.channels == null) {
+      entry = entry.copyWith(
+          channels: scope.channels, controllerId: scope.controllerId);
     }
 
     if (keyEntryId == null) {
