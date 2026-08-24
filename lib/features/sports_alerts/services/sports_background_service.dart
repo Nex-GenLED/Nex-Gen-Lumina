@@ -173,11 +173,21 @@ void _onStart(ServiceInstance service) async {
     // sports-alert opt-in polled nothing and could never celebrate. Monitoring
     // now derives from Game Day + Live Scoring, with legacy configs honoured
     // only until migration adopts them.
+    //
+    // ORPHAN SAFETY GATE. A legacy prefs config no longer arms monitoring on
+    // its own: Game Day's delete path writes only to Firestore, so a deleted
+    // team left a prefs entry behind that kept celebrating
+    // (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.4). The profile-array mirror is
+    // the Firestore corroboration this isolate can reach — it has no Firestore
+    // access of its own, so it reads what the UI layer persisted via
+    // `saveUserTeamPriority` (game_day_autopilot_providers.dart:297).
     final legacyConfigs = await _loadConfigs();
     final gameDayConfigs = await loadGameDayConfigsForBackground();
+    final profileTeamNames = await loadUserTeamPriority();
     final plan = resolveMonitoring(
       gameDayConfigs: gameDayConfigs,
       legacyAlertConfigs: legacyConfigs,
+      profileTeamNames: profileTeamNames,
     );
     final active = plan.monitored;
 

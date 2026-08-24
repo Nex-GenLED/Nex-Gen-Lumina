@@ -60,6 +60,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd()],
         legacyAlertConfigs: const [],
+        profileTeamNames: const [],
       );
       expect(plan.monitored.map((c) => c.teamSlug), ['mlb_royals']);
     });
@@ -68,6 +69,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd(liveScoring: false)],
         legacyAlertConfigs: const [],
+        profileTeamNames: const [],
       );
       expect(plan.monitored, isEmpty);
     });
@@ -78,6 +80,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd(enabled: false, liveScoring: true)],
         legacyAlertConfigs: const [],
+        profileTeamNames: const [],
       );
       expect(plan.monitored.map((c) => c.teamSlug), ['mlb_royals']);
     });
@@ -86,6 +89,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd(sensitivity: 'clutchOnly')],
         legacyAlertConfigs: const [],
+        profileTeamNames: const [],
       );
       expect(plan.monitored.single.sensitivity, AlertSensitivity.clutchOnly);
     });
@@ -94,15 +98,16 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd(sensitivity: 'nonsense')],
         legacyAlertConfigs: const [],
+        profileTeamNames: const [],
       );
       expect(plan.monitored.single.sensitivity, AlertSensitivity.majorOnly);
     });
 
     test('derived id is the team slug, so it is stable across runs', () {
       final a = resolveMonitoring(
-          gameDayConfigs: [_gd()], legacyAlertConfigs: const []);
+          gameDayConfigs: [_gd()], legacyAlertConfigs: const [], profileTeamNames: const []);
       final b = resolveMonitoring(
-          gameDayConfigs: [_gd()], legacyAlertConfigs: const []);
+          gameDayConfigs: [_gd()], legacyAlertConfigs: const [], profileTeamNames: const []);
       expect(a.monitored.single.id, b.monitored.single.id);
       expect(a.monitored.single.id, 'mlb_royals');
     });
@@ -110,13 +115,109 @@ void main() {
 
   group('resolveMonitoring — legacy configs are a safety net, not an authority',
       () {
-    test('a legacy config with no Game Day team is still monitored', () {
+    test(
+        'a legacy config with no Game Day team is still monitored while the '
+        'profile arrays corroborate it', () {
       final plan = resolveMonitoring(
         gameDayConfigs: const [],
         legacyAlertConfigs: [_legacy()],
+        profileTeamNames: const ['Kansas City Chiefs'],
       );
       expect(plan.monitored.map((c) => c.teamSlug), ['nfl_chiefs']);
       expect(plan.orphanedLegacy.map((c) => c.teamSlug), ['nfl_chiefs']);
+    });
+
+    // ── ORPHAN SAFETY GATE (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.4) ────────
+    //
+    // The bug this closes: Game Day's delete writes ONLY to Firestore
+    // (team_registration_service.dart:118-122 deletes the doc, :214-235 strips
+    // the arrays) and never to the prefs store, so a deleted team's prefs
+    // config survived and kept arming monitoring. Deleting the Game Day doc
+    // removed the one record that would have suppressed it.
+    group('orphan safety gate', () {
+      test(
+          'an orphan with NO Game Day doc and NO profile entry is excluded '
+          'from monitored', () {
+        final plan = resolveMonitoring(
+          gameDayConfigs: const [],
+          legacyAlertConfigs: [_legacy(slug: 'nfl_chiefs')],
+          profileTeamNames: const [],
+        );
+        expect(plan.monitored, isEmpty);
+      });
+
+      test('...but is still REPORTED as orphaned, so migration can adopt it',
+          () {
+        final plan = resolveMonitoring(
+          gameDayConfigs: const [],
+          legacyAlertConfigs: [_legacy(slug: 'nfl_chiefs')],
+          profileTeamNames: const [],
+        );
+        expect(plan.orphanedLegacy.map((c) => c.teamSlug), ['nfl_chiefs']);
+      });
+
+      // The exact reported scenario: three teams deleted from Game Day, whose
+      // prefs configs were left behind and kept celebrating.
+      test('the three deleted teams all disarm together', () {
+        final plan = resolveMonitoring(
+          gameDayConfigs: const [],
+          legacyAlertConfigs: [
+            _legacy(slug: 'nfl_chiefs'),
+            _legacy(slug: 'mlb_royals'),
+            _legacy(slug: 'mlb_dodgers'),
+          ],
+          profileTeamNames: const [],
+        );
+        expect(plan.monitored, isEmpty);
+        expect(plan.orphanedLegacy, hasLength(3));
+      });
+
+      // DON'T BREAK ACCOUNTS THAT ARE FINE — a legacy entry whose team is
+      // still on the profile arrays keeps working exactly as before.
+      test('an orphan still on the profile arrays is NOT disarmed', () {
+        final plan = resolveMonitoring(
+          gameDayConfigs: const [],
+          legacyAlertConfigs: [
+            _legacy(slug: 'nfl_chiefs'),
+            _legacy(slug: 'mlb_royals'),
+          ],
+          profileTeamNames: const ['Kansas City Royals'],
+        );
+        expect(plan.monitored.map((c) => c.teamSlug), ['mlb_royals']);
+      });
+
+      // A legacy entry backed by a Game Day doc never reaches the gate:
+      // Game Day wins outright, profile arrays are irrelevant.
+      test('a legacy entry with a matching Game Day doc is unaffected', () {
+        final plan = resolveMonitoring(
+          gameDayConfigs: [_gd(slug: 'nfl_chiefs', liveScoring: true)],
+          legacyAlertConfigs: [_legacy(slug: 'nfl_chiefs')],
+          profileTeamNames: const [],
+        );
+        expect(plan.monitored.map((c) => c.teamSlug), ['nfl_chiefs']);
+      });
+
+      // Matches TeamRegistrationService._stripTeamFromProfile's normalisation,
+      // so "carried on the profile" means the same thing on both sides.
+      test('profile matching is case- and whitespace-insensitive', () {
+        final plan = resolveMonitoring(
+          gameDayConfigs: const [],
+          legacyAlertConfigs: [_legacy(slug: 'nfl_chiefs')],
+          profileTeamNames: const ['  kansas city CHIEFS '],
+        );
+        expect(plan.monitored.map((c) => c.teamSlug), ['nfl_chiefs']);
+      });
+
+      // Both writers of the prefs store pick from kTeamColors, so a slug that
+      // is not in it cannot be mapped to a profile name and must not arm.
+      test('a slug absent from kTeamColors never arms', () {
+        final plan = resolveMonitoring(
+          gameDayConfigs: const [],
+          legacyAlertConfigs: [_legacy(slug: 'not_a_real_team')],
+          profileTeamNames: const ['Kansas City Chiefs'],
+        );
+        expect(plan.monitored, isEmpty);
+      });
     });
 
     // THE REDUNDANCY FIX. A stale legacy config must not resurrect monitoring
@@ -125,6 +226,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd(slug: 'nfl_chiefs', liveScoring: false)],
         legacyAlertConfigs: [_legacy(slug: 'nfl_chiefs', enabled: true)],
+        profileTeamNames: const [],
       );
       expect(plan.monitored, isEmpty);
       expect(plan.orphanedLegacy, isEmpty); // covered, not orphaned
@@ -134,6 +236,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: const [],
         legacyAlertConfigs: [_legacy(enabled: false)],
+        profileTeamNames: const [],
       );
       expect(plan.monitored, isEmpty);
       expect(plan.orphanedLegacy, hasLength(1));
@@ -143,6 +246,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd(slug: 'nfl_chiefs')],
         legacyAlertConfigs: [_legacy(slug: 'nfl_chiefs')],
+        profileTeamNames: const [],
       );
       expect(plan.monitored, hasLength(1));
     });
@@ -151,7 +255,7 @@ void main() {
   group('shouldPollScores — the gate that was wrong', () {
     test('polls when a team is monitored', () {
       final plan = resolveMonitoring(
-          gameDayConfigs: [_gd()], legacyAlertConfigs: const []);
+          gameDayConfigs: [_gd()], legacyAlertConfigs: const [], profileTeamNames: const []);
       expect(
         shouldPollScores(plan: plan, hasActiveGameDaySession: false),
         isTrue,
@@ -181,6 +285,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd()],
         legacyAlertConfigs: const [], // the old gate would have been empty here
+        profileTeamNames: const [],
       );
       expect(
         shouldPollScores(plan: plan, hasActiveGameDaySession: false),
@@ -236,6 +341,7 @@ void main() {
       final plan = resolveMonitoring(
         gameDayConfigs: [_gd(slug: 'mlb_royals')],
         legacyAlertConfigs: [_legacy(slug: 'nfl_chiefs')],
+        profileTeamNames: const [],
       );
       final out = migrationConfigsFor(plan.orphanedLegacy, now: now);
       // Only the uncovered team is adopted; the Game Day team is left alone.
