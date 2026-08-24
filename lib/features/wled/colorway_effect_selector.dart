@@ -146,11 +146,18 @@ class _ColorwayEffectSelectorPageState
     extends ConsumerState<ColorwayEffectSelectorPage> {
   Timer? _debounceTimer;
 
-  /// SELECTION MODE only. The pre-preview device look, snapshotted on entry
-  /// (see [initState]) so both exits — Save ("Set design") and Cancel (backing
-  /// out / dispose) — can RESTORE it. The live preview writes to the real
-  /// lights on every adjustment ([_sendToWled]); but choosing a pattern for a
-  /// SCHEDULE must not leave it applied now, so we undo the preview on exit.
+  /// SELECTION and DESIGN-EDIT modes. The pre-preview device look, snapshotted
+  /// on entry (see [initState]) so the CANCEL exit can RESTORE it. The live
+  /// preview writes to the real lights on every adjustment ([_sendToWled]),
+  /// and neither mode is an "apply this now" gesture:
+  ///
+  ///   • SELECTION — choosing a pattern for a SCHEDULE must not leave it
+  ///     applied now, so BOTH exits (Save and Cancel) restore.
+  ///   • DESIGN-EDIT — backing out of an edit must not leave a half-tuned
+  ///     look on the house, so CANCEL restores. SAVE does NOT: the user just
+  ///     committed that look, so leaving it lit is the coherent outcome.
+  ///     `_saveToDesign` therefore CONSUMES the snapshot without replaying it,
+  ///     which is what stops `dispose` from undoing a successful save.
   ///
   /// This is [WledStateModel] — the freshest app-side device model (polled
   /// ~1.5s by WledNotifier) — not a byte-exact external device snapshot; the
@@ -167,6 +174,31 @@ class _ColorwayEffectSelectorPageState
   /// next catalog palette the user opens. Restored on cancel and on save.
   SelectorState? _providerSnapshot;
   bool _snapshotRestored = false;
+
+  /// The seven notifiers, captured while `ref` is LIVE.
+  ///
+  /// `_restoreProviderSnapshot` runs from [dispose], where flutter_riverpod
+  /// forbids `ref` — reaching them via `ref.read(p.notifier)` there throws
+  /// `Bad state: Cannot use "ref" after the widget was disposed`. (That is the
+  /// #84 crash class; `LibraryBrowserScreen.dispose` carries the same note for
+  /// the mood filter.) The StateControllers themselves are owned by the
+  /// ProviderContainer and outlive this widget, so holding them is safe —
+  /// it is the `ref` lookup that is not.
+  List<StateController<Object?>>? _selectorNotifiers;
+
+  void _captureSelectorNotifiers() {
+    _selectorNotifiers = <StateController<Object?>>[
+      ref.read(selectorEffectIdProvider.notifier),
+      ref.read(selectorSpeedProvider.notifier),
+      ref.read(selectorIntensityProvider.notifier),
+      ref.read(selectorColorGroupProvider.notifier),
+      ref.read(selectorSpacingProvider.notifier),
+      ref.read(selectorGradientPresetProvider.notifier),
+      ref.read(selectorBreathingProvider.notifier),
+      ref.read(selectorMotionTypeProvider.notifier),
+      ref.read(selectorColorBehaviorProvider.notifier),
+    ];
+  }
 
   // ── Restore cache (selection mode) ──────────────────────────────────────
   // The CANCEL exit runs in [dispose], where flutter_riverpod forbids `ref`.
@@ -190,7 +222,7 @@ class _ColorwayEffectSelectorPageState
     // from the polled wledStateProvider so it reflects the device state the
     // user is leaving — held in a local field, NOT re-read later (the poll
     // would pick up our own preview writes and pollute it).
-    if (widget.onDesignSelected != null) {
+    if (widget.onDesignSelected != null || widget.isDesignEdit) {
       _capturedLook = ref.read(wledStateProvider);
       _refreshRestoreCache();
     }
@@ -213,6 +245,7 @@ class _ColorwayEffectSelectorPageState
     // DESIGN-EDIT: snapshot the shared providers BEFORE anything overwrites
     // them, so cancel can put them back for the next catalog visit.
     if (widget.isDesignEdit) {
+      _captureSelectorNotifiers();
       _providerSnapshot = _readSelectorState();
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -250,18 +283,22 @@ class _ColorwayEffectSelectorPageState
   /// Write a [SelectorState] into the seven providers. Never pushes to the
   /// controller — see the note at the seed call site.
   void _writeSelectorState(SelectorState s) {
-    ref.read(selectorEffectIdProvider.notifier).state = s.effectId;
-    ref.read(selectorSpeedProvider.notifier).state = s.speed;
-    ref.read(selectorIntensityProvider.notifier).state = s.intensity;
-    ref.read(selectorColorGroupProvider.notifier).state = s.grouping;
-    ref.read(selectorSpacingProvider.notifier).state = s.spacing;
+    // Through the CAPTURED notifiers — never `ref` — because this also runs
+    // from dispose. See [_selectorNotifiers].
+    final n = _selectorNotifiers;
+    if (n == null) return;
+    n[0].state = s.effectId;
+    n[1].state = s.speed;
+    n[2].state = s.intensity;
+    n[3].state = s.grouping;
+    n[4].state = s.spacing;
     // Gradient-only inputs: reset rather than derived. A stored design is
     // never a brightness gradient (see `forDesign`), so leaving a previous
     // palette's values in place would be stale state, not preserved state.
-    ref.read(selectorGradientPresetProvider.notifier).state = 0;
-    ref.read(selectorBreathingProvider.notifier).state = false;
-    ref.read(selectorMotionTypeProvider.notifier).state = null;
-    ref.read(selectorColorBehaviorProvider.notifier).state = null;
+    n[5].state = 0;
+    n[6].state = false;
+    n[7].state = null;
+    n[8].state = null;
   }
 
   /// Seed from the design's OWN channel fields rather than from
@@ -285,17 +322,36 @@ class _ColorwayEffectSelectorPageState
 
   /// Restore the shared providers to their pre-entry values. Idempotent.
   ///
-  /// NOTE ON SCOPE: this restores APP state only. It deliberately does not
-  /// re-push the pre-edit look to the controller, unlike selection mode's
-  /// `_restoreCapturedLook`. The house keeps whatever the live preview last
-  /// showed until the user deliberately applies something. That asymmetry is
-  /// intentional and is called out in audit/DESIGN_CARD_P4.md — aligning the
-  /// two is a one-line change if the preview-should-be-undone reading wins.
+  /// SCOPE: app state only. The DEVICE is restored separately by
+  /// [_restoreCapturedLook], which design-edit now shares with selection mode
+  /// — cancelling an edit undoes its live preview on the house, not just in
+  /// the picker. (Phase C shipped these asymmetric; closeout aligned them.)
   void _restoreProviderSnapshot() {
     final snap = _providerSnapshot;
     if (snap == null || _snapshotRestored) return;
     _snapshotRestored = true;
-    _writeSelectorState(snap);
+    // DEFERRED past the current frame. Two separate rules bite here and the
+    // microtask is what satisfies both:
+    //   1. `ref` is dead in dispose — handled by [_selectorNotifiers], which
+    //      the microtask body uses instead (it must NOT touch `ref`).
+    //   2. Riverpod forbids MUTATING a provider from a lifecycle callback at
+    //      all ("Tried to modify a provider while the widget tree was
+    //      building"), because its listeners would rebuild mid-teardown.
+    // Same shape as LibraryBrowserScreen.dispose's mood-filter reset, for the
+    // same two reasons.
+    Future.microtask(() {
+      // Best-effort. If the whole ProviderContainer was torn down between
+      // dispose and this microtask (app shutdown, or a test scope ending),
+      // the StateControllers are disposed and writing throws
+      // `Bad state: Tried to use StateController after dispose was called`.
+      // There is nothing left to restore in that case, so swallow it rather
+      // than surface an unhandled error from a teardown path.
+      try {
+        _writeSelectorState(snap);
+      } catch (e) {
+        debugPrint('Selector snapshot restore skipped (container gone): $e');
+      }
+    });
   }
 
   /// The palette's colours as RGBW `col` entries — the same derivation the
@@ -337,6 +393,11 @@ class _ColorwayEffectSelectorPageState
       updatedAt: DateTime.now(),
     );
     final ok = await ref.read(updateDesignProvider)(updated);
+    // CONSUME the captured look without replaying it: the design now stores
+    // what the lights are showing, so undoing the preview would contradict the
+    // save the user just made. Clearing it is also what stops dispose's cancel
+    // path from firing a restore behind a successful save.
+    if (ok) _capturedLook = null;
     _restoreProviderSnapshot();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -348,8 +409,8 @@ class _ColorwayEffectSelectorPageState
   @override
   void dispose() {
     _debounceTimer?.cancel();
-    // CANCEL exit (selection mode): if a pre-preview look was captured and NOT
-    // yet consumed by a Save, the user is backing out of the effect editor
+    // CANCEL exit (selection AND design-edit): if a pre-preview look was
+    // captured and NOT yet consumed, the user is backing out of the editor
     // (the parent LibraryBrowserScreen owns the back button, so its pop
     // disposes us) — restore the device now. Fire-and-forget and ref-free:
     // [_restoreCapturedLook] uses only the cached repo/payload (dispose cannot
