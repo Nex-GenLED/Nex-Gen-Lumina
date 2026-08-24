@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
@@ -168,7 +169,20 @@ class _DesignDetailBody extends ConsumerWidget {
     };
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      // The glass dock is a Stack OVERLAY, not a bottomNavigationBar:
+      // MainScaffold renders it `Positioned(bottom: 0)` over a
+      // `Positioned.fill` branch host with `extendBody: true`
+      // (main_scaffold.dart:190-215). Content therefore extends UNDER it, and
+      // a scrollable must reserve its height itself.
+      //
+      // This screen shipped with a flat `32` here, so the last ~100px + the
+      // home-indicator inset rendered beneath the dock — putting the
+      // Duplicate/Delete row under it on a short device, where the dock (being
+      // above in z-order) takes the taps. `navBarTotalHeight` is the
+      // established helper for exactly this and already folds in
+      // `MediaQuery.padding.bottom`; the convention is documented at
+      // main_scaffold.dart:235-244 and used by 50+ scrollables.
+      padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
       children: [
         // The ONE preview seam. Its internals (a truthful effect renderer)
         // are replaced later without touching this call site.
