@@ -13,9 +13,12 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
+import 'package:nexgen_command/features/schedule/day_timeline.dart';
+import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
+import 'package:nexgen_command/features/schedule/widgets/timeline_row.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/dated_overwrite_dialog.dart';
-import 'package:nexgen_command/features/schedule/day_resolution.dart';
 import 'package:nexgen_command/features/schedule/eviction_picker_dialog.dart';
 import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
@@ -26,7 +29,6 @@ import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
-import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/clock_health_providers.dart';
 import 'package:nexgen_command/features/wled/clock_health_ui.dart';
@@ -66,24 +68,11 @@ String _fmt(DateTime d) => calendarDateKey(d);
 DateTime _startOfWeek(DateTime d) =>
     DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday % 7));
 
-// Returns the recurring ScheduleItems active on a given weekday (0=Sun..6=Sat).
-List<ScheduleItem> _itemsForWeekday(List<ScheduleItem> all, int wd) {
-  const map = {
-    0: {'sun', 'sunday'},
-    1: {'mon', 'monday'},
-    2: {'tue', 'tues', 'tuesday'},
-    3: {'wed', 'wednesday'},
-    4: {'thu', 'thurs', 'thursday'},
-    5: {'fri', 'friday'},
-    6: {'sat', 'saturday'},
-  };
-  return all.where((s) {
-    if (!s.enabled) return false;
-    final dl = s.repeatDays.map((e) => e.toLowerCase()).toSet();
-    if (dl.contains('daily')) return true;
-    return (map[wd] ?? {}).any(dl.contains);
-  }).toList();
-}
+// Weekday filtering + the enabled/evicted filters now live in
+// `day_timeline.dart` (`scheduleAppliesToWeekday`, applied inside
+// `resolveDayTimeline`) so every surface shares ONE definition. The local
+// `_itemsForWeekday` that used to live here, and the Tonight card's separate
+// inline copy of the same weekday map, are both gone.
 
 // ─── Root Page ────────────────────────────────────────────────────────────────
 
@@ -403,7 +392,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                 // ── Day Hero: selected-day full detail ──
                 _DayHeroCard(
                   dateKey: selectedKey,
-                  calEntry: calEntries[selectedKey],
+                  datedEntries: calEntries.forDate(selectedKey),
                   scheduleItems: schedules,
                   sunAsync: sunAsync,
                 ),
@@ -1182,13 +1171,18 @@ class _PendingEntryTile extends ConsumerWidget {
 
 class _DayHeroCard extends ConsumerWidget {
   final String dateKey;
-  final CalendarEntry? calEntry;
+
+  /// Every dated entry on this date (Scheduling V3 A1) — no longer one.
+  final List<CalendarEntry> datedEntries;
+
+  /// ALL recurring schedules; the timeline filters to this weekday.
   final List<ScheduleItem> scheduleItems;
+
   final AsyncValue<SunTimeStrings?> sunAsync;
 
   const _DayHeroCard({
     required this.dateKey,
-    required this.calEntry,
+    required this.datedEntries,
     required this.scheduleItems,
     required this.sunAsync,
   });
@@ -1201,73 +1195,63 @@ class _DayHeroCard extends ConsumerWidget {
     final isToday = _fmt(today) == dateKey;
     final isPast = selDate.isBefore(DateTime(today.year, today.month, today.day));
 
-    // Resolve the best available entry.
+    // A2/A3 — THE TIMELINE, not a single resolved entry.
     //
-    // B1 (audit/MULTI_ENTRY_DISPLAY.md §2): resolution is no longer open-coded
-    // here — resolveDay owns precedence (dated masks recurring, UNCHANGED) and
-    // newest-wins ordering (B3) for every surface. `newestRecurring` rather
-    // than `recurringPrimary` because the fields below fall through a dated
-    // entry one at a time: onTime/offTime are nullable on CalendarEntry, so a
-    // dated entry with no ON time has always borrowed the recurring item's.
-    final wd = selDate.weekday % 7; // 0=Sun..6=Sat
-    final day = resolveDay(
-      datedEntry: calEntry,
-      recurringForDay: _itemsForWeekday(scheduleItems, wd),
-    );
-    final recurringFirst = day.newestRecurring;
+    // WAS: `resolveDay(...).newestRecurring`, where a dated entry MASKED every
+    // recurring schedule and only one recurring item survived
+    // (audit/SCHEDULING_V3_AUDIT.md §3.3). On a Game Day the card showed the
+    // game and hid the base schedule entirely.
+    //
+    // NOW: the hero chrome describes the day's LEAD row (first by clock) and
+    // every row is listed below it.
+    final day = ref.watch(dayTimelineProvider(dateKey));
+    final lead = day.primary;
+    final leadDated = lead?.dated;
+    final leadRecurring = lead?.recurring;
 
-    final patternName = calEntry?.displayName ??
-        (recurringFirst != null ? _labelFromAction(recurringFirst.actionLabel) : null);
-    final color = calEntry?.color;
-    final onTime = calEntry?.onTime ??
-        (recurringFirst?.hasOffTime == true ? recurringFirst?.timeLabel : recurringFirst?.timeLabel);
-    final offTime = calEntry?.offTime ?? recurringFirst?.offTimeLabel;
-    final brightness = calEntry?.brightness;
+    final patternName = lead?.label;
+    final color = timelineLeadColor(datedEntries);
+    final brightness = leadDated?.brightness;
 
-    final typeLabel = calEntry?.type == CalendarEntryType.holiday
-        ? '🎉 Holiday'
-        : calEntry?.type == CalendarEntryType.user
-            ? '👤 User Set'
-            : calEntry?.type == CalendarEntryType.autopilot
-                ? '⚡ Game Day'
-                : recurringFirst != null
-                    ? '🔁 Recurring'
-                    : isPast
-                        ? '—'
-                        : '⚡ Auto-Pilot';
+    final onTime = lead == null
+        ? null
+        : (lead.startsAt != null
+            ? formatTimelineTime(lead.startsAt, timeFormat: timeFormat)
+            : formatTimeLabel(leadRecurring?.timeLabel ?? leadDated?.onTime,
+                timeFormat: timeFormat));
+    // Open-ended ⇒ no clock end. The stat chip below states the condition.
+    final offTime = (lead == null || lead.isOpenEnded || lead.endsAt == null)
+        ? null
+        : formatTimelineTime(lead.endsAt, timeFormat: timeFormat);
 
-    final typeColor = calEntry?.type == CalendarEntryType.holiday
-        ? NexGenPalette.amber
-        : calEntry?.type == CalendarEntryType.user
-            ? NexGenPalette.cyan
-            : calEntry?.type == CalendarEntryType.autopilot
-                ? NexGenPalette.cyan
-                : recurringFirst != null
-                    ? NexGenPalette.violet
-                    : NexGenPalette.textMedium;
+    final typeLabel = lead == null
+        ? (isPast ? '—' : '⚡ Auto-Pilot')
+        : timelineSourceLabel(lead);
+    final typeColor =
+        lead == null ? NexGenPalette.textMedium : timelineAccent(lead);
 
-    // Extract WLED effect info for the pixel strip
-    final wledPayload = calEntry != null ? null : recurringFirst?.wledPayload;
+    // Extract WLED effect info for the pixel strip, from the LEAD row.
+    final wledPayload = leadDated != null ? null : leadRecurring?.wledPayload;
     final stripColors = _extractStripColors(color, wledPayload);
     final effectId = _extractEffectId(wledPayload);
     final effectType = effectId != null ? effectTypeFromWledId(effectId) : EffectType.solid;
     final speed = _extractNormalized(wledPayload, 'sx');
     final bri = brightness != null ? brightness / 100.0 : 1.0;
 
-    // Source label for detail sheet
-    final sourceLabel = calEntry?.type == CalendarEntryType.holiday
-        ? 'Holiday'
-        : calEntry?.type == CalendarEntryType.user
-            ? calEntry!.autopilot ? 'AI-Generated' : 'Manual'
-            : calEntry?.type == CalendarEntryType.autopilot
-                ? 'Game Day Autopilot'
-                : recurringFirst != null
-                    ? 'Recurring Schedule'
-                    : 'Autopilot';
+    final sourceLabel = leadDated == null
+        ? (leadRecurring != null ? 'Recurring Schedule' : 'Autopilot')
+        : switch (leadDated.type) {
+            CalendarEntryType.holiday => 'Holiday',
+            CalendarEntryType.user =>
+              leadDated.autopilot ? 'AI-Generated' : 'Manual',
+            CalendarEntryType.autopilot => 'Game Day Autopilot',
+            CalendarEntryType.auto => 'Autopilot',
+          };
 
     final effectLabel = effectId != null
         ? _wledEffectName(effectId)
         : patternName ?? 'Solid';
+
 
     return GestureDetector(
       onTap: (patternName != null || color != null)
@@ -1285,8 +1269,8 @@ class _DayHeroCard extends ConsumerWidget {
                 source: sourceLabel,
                 timeFormat: timeFormat,
                 ref: ref,
-                calEntry: calEntry,
-                recurringItem: calEntry == null ? recurringFirst : null,
+                calEntry: leadDated,
+                recurringItem: leadDated == null ? leadRecurring : null,
                 dateKey: dateKey,
               )
           : null,
@@ -1474,10 +1458,10 @@ class _DayHeroCard extends ConsumerWidget {
                                         fontWeight: FontWeight.w700,
                                       ),
                                 ),
-                                if (calEntry?.note != null) ...[
+                                if (leadDated?.note != null) ...[
                                   const SizedBox(height: 2),
                                   Text(
-                                    calEntry!.note!,
+                                    leadDated!.note!,
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall
@@ -1511,9 +1495,18 @@ class _DayHeroCard extends ConsumerWidget {
                         _StatChip(
                           icon: Icons.nightlight_round,
                           label: 'Off',
-                          value: offTime != null
-                              ? formatTimeLabel(offTime, timeFormat: timeFormat)
-                              : '—',
+                          // An open-ended lead states its END CONDITION, not a
+                          // clock time — the fabricated Game Day off-time used
+                          // to render here as if it were real (A1).
+                          value: lead != null && lead.isOpenEnded
+                              ? (leadDated?.endConditionLabel(
+                                      formatTime: (d) => formatTimelineTime(d,
+                                          timeFormat: timeFormat)) ??
+                                  'open-ended')
+                              : (offTime != null
+                                  ? formatTimeLabel(offTime,
+                                      timeFormat: timeFormat)
+                                  : '—'),
                           color: NexGenPalette.violet,
                         ),
                         const SizedBox(width: 8),
@@ -1525,6 +1518,38 @@ class _DayHeroCard extends ConsumerWidget {
                         ),
                       ],
                     ),
+
+                    // ── A3: THE DAY'S FULL TIMELINE ──────────────────────
+                    //
+                    // Every row covering this date, in clock order, with what
+                    // the firing layer does to each. This is the surface that
+                    // makes a Game Day and the base nightly visible together —
+                    // the pair that was structurally unshowable before A1.
+                    if (day.count > 1) ...[
+                      const SizedBox(height: 12),
+                      Divider(color: NexGenPalette.line, height: 1),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text(
+                            'ALL ${day.count} SCHEDULES',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                              color: NexGenPalette.textMedium,
+                            ),
+                          ),
+                          if (day.hasConflict) ...[
+                            const SizedBox(width: 8),
+                            Icon(Icons.warning_amber_rounded,
+                                size: 12, color: NexGenPalette.amber),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      DayTimelineList(timeline: day, timeFormat: timeFormat),
+                    ],
                   ],
                 ),
               ),
@@ -1545,15 +1570,6 @@ class _DayHeroCard extends ConsumerWidget {
     return '${_kMonthNames[d.month]} ${d.day}, ${d.year}';
   }
 
-  String _labelFromAction(String a) {
-    final lower = a.trim().toLowerCase();
-    if (lower.startsWith('pattern')) {
-      final idx = a.indexOf(':');
-      final name = idx != -1 ? a.substring(idx + 1).trim() : a;
-      return displayNameFor(name);
-    }
-    return a.trim();
-  }
 }
 
 class _StatChip extends StatelessWidget {
@@ -1980,7 +1996,7 @@ class _DetailRow extends StatelessWidget {
 class _WeekStripSection extends StatelessWidget {
   final DateTime weekStart;
   final String selectedKey;
-  final Map<String, CalendarEntry> calEntries;
+  final CalendarEntrySet calEntries;
   final List<ScheduleItem> scheduleItems;
   final Map<String, CalendarEntry> pendingEntries;
   final ValueChanged<String> onDayTap;
@@ -2091,17 +2107,20 @@ class _WeekStripSection extends StatelessWidget {
                 child: Row(
                   children: List.generate(7, (i) {
                     final key = days[i];
-                    final d = DateTime.parse(key);
-                    final calEntry = pendingEntries[key] ?? calEntries[key];
-                    final wd = d.weekday % 7;
-                    final recurringItems = _itemsForWeekday(scheduleItems, wd);
+                    // A1/A3: every dated entry for the day, not just one. A
+                    // pending (unsaved) entry still previews as the single
+                    // thing being proposed.
+                    final pending = pendingEntries[key];
+                    final dated = pending != null
+                        ? <CalendarEntry>[pending]
+                        : calEntries.forDate(key);
                     return Expanded(
                       child: Padding(
                         padding: EdgeInsets.only(right: i < 6 ? 5 : 0),
                         child: _WeekDayCell(
                           dateKey: key,
-                          calEntry: calEntry,
-                          recurringItems: recurringItems,
+                          datedEntries: dated,
+                          scheduleItems: scheduleItems,
                           isSelected: key == selectedKey,
                           isPending: pendingEntries.containsKey(key),
                           onTap: () => onDayTap(key),
@@ -2121,16 +2140,20 @@ class _WeekStripSection extends StatelessWidget {
 
 class _WeekDayCell extends ConsumerWidget {
   final String dateKey;
-  final CalendarEntry? calEntry;
-  final List<ScheduleItem> recurringItems;
+
+  /// Every dated entry on this date (A1) — or a single pending preview.
+  final List<CalendarEntry> datedEntries;
+
+  /// ALL recurring schedules; weekday filtering happens inside the timeline.
+  final List<ScheduleItem> scheduleItems;
   final bool isSelected;
   final bool isPending;
   final VoidCallback onTap;
 
   const _WeekDayCell({
     required this.dateKey,
-    required this.calEntry,
-    required this.recurringItems,
+    required this.datedEntries,
+    required this.scheduleItems,
     required this.isSelected,
     required this.isPending,
     required this.onTap,
@@ -2144,37 +2167,35 @@ class _WeekDayCell extends ConsumerWidget {
     final isPast = d.isBefore(DateTime(today.year, today.month, today.day));
     final isWeekend = d.weekday == 6 || d.weekday == 7;
 
-    // B1 (audit/MULTI_ENTRY_DISPLAY.md §2): shared resolution. Precedence
-    // (dated masks recurring) and newest-wins ordering (B3) both live in
-    // resolveDay now — this cell renders the answer, it no longer computes it.
-    final day = resolveDay(
-      datedEntry: calEntry,
-      recurringForDay: recurringItems,
-    );
-    // `newestRecurring`, not `recurringPrimary`: the time fields below fall
-    // through a dated entry individually (onTime/offTime are nullable).
-    final recurringNewest = day.newestRecurring;
-
-    // Resolve color from calEntry first, then recurring
-    final color = calEntry?.color; // Recurring carries no colour
-
-    final patternName = calEntry?.displayName ??
-        (recurringNewest != null
-            ? _labelFromAction(recurringNewest.actionLabel)
-            : null);
-
-    // Mixed formats: CalendarEntry stores 'HH:mm' 24-hour; ScheduleItem stores
-    // 'h:mm AM/PM' (or 'Sunset'/'Sunrise'). formatTimeLabel normalises both
-    // into the user's preferred display format (12-hour by default).
+    // A3: the cell renders the TIMELINE's first row plus a count, instead of
+    // one resolved entry. Built locally rather than from dayTimelineProvider so
+    // a pending (unsaved) preview can be substituted for the stored entries.
     final timeFormat = ref.watch(timeFormatPreferenceProvider);
-    final rawOnTime = calEntry?.onTime ?? recurringNewest?.timeLabel;
-    final rawOffTime = calEntry?.offTime ?? recurringNewest?.offTimeLabel;
-    final onTime = rawOnTime == null
+    final day = resolveDayTimeline(
+      DayTimelineInputs(
+        dateKey: dateKey,
+        recurringSchedules: scheduleItems,
+        datedEntries: datedEntries,
+      ),
+      kActiveSchedulePrecedence,
+    );
+    final lead = day.primary;
+
+    final color = timelineLeadColor(datedEntries);
+    final patternName = lead?.label;
+
+    final onTime = lead == null
         ? null
-        : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
-    final offTime = rawOffTime == null
+        : (lead.startsAt != null
+            ? formatTimelineTime(lead.startsAt, timeFormat: timeFormat)
+            : formatTimeLabel(
+                lead.recurring?.timeLabel ?? lead.dated?.onTime,
+                timeFormat: timeFormat));
+    // An open-ended lead has NO off time to show — showing one would be the
+    // fabricated end all over again.
+    final offTime = (lead == null || lead.isOpenEnded || lead.endsAt == null)
         ? null
-        : formatTimeLabel(rawOffTime, timeFormat: timeFormat);
+        : formatTimelineTime(lead.endsAt, timeFormat: timeFormat);
 
     final borderColor = isSelected
         ? NexGenPalette.cyan
@@ -2226,7 +2247,8 @@ class _WeekDayCell extends ConsumerWidget {
                   const SizedBox(height: 5),
 
                   // Color bar or Off pill
-                  if (calEntry?.brightness == 0)
+                  if (datedEntries.isNotEmpty &&
+                      datedEntries.last.brightness == 0)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                       decoration: BoxDecoration(
@@ -2295,15 +2317,33 @@ class _WeekDayCell extends ConsumerWidget {
             Positioned(
               top: 4,
               right: 4,
-              child: _statusPip(calEntry, recurringItems),
+              child: _statusPip(
+                  datedEntries.isEmpty ? null : datedEntries.last, day),
             ),
+
+            // A3 — MULTI-ENTRY COUNT (bottom left).
+            //
+            // The single most visible consequence of A1: a night holding a
+            // Game Day AND the base schedule used to render as one thing, with
+            // no hint the other existed. `day.count` is every row on the
+            // timeline, so the badge is correct even though the cell is far too
+            // small to list them.
+            if (day.count > 1)
+              Positioned(
+                bottom: 3,
+                left: 3,
+                child: TimelineCountBadge(
+                  count: day.count,
+                  hasConflict: day.hasConflict,
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _statusPip(CalendarEntry? entry, List<ScheduleItem> recurring) {
+  Widget _statusPip(CalendarEntry? entry, DayTimeline day) {
     if (entry?.type == CalendarEntryType.holiday) {
       return const Text('🎉', style: TextStyle(fontSize: 8));
     }
@@ -2332,14 +2372,21 @@ class _WeekDayCell extends ConsumerWidget {
         ),
       );
     }
+    // A recurring-only day had NO pip at all before — indistinguishable from an
+    // empty one at a glance. The timeline knows the difference.
+    if (day.isNotEmpty) {
+      return Container(
+        width: 5,
+        height: 5,
+        decoration: const BoxDecoration(
+          color: NexGenPalette.violet,
+          shape: BoxShape.circle,
+        ),
+      );
+    }
     return const SizedBox.shrink();
   }
 
-  String _labelFromAction(String a) {
-    final idx = a.indexOf(':');
-    final name = idx != -1 ? a.substring(idx + 1).trim() : a.trim();
-    return displayNameFor(name);
-  }
 }
 
 // ─── Zoomed Calendar Section ──────────────────────────────────────────────────
@@ -2348,7 +2395,7 @@ class _ZoomedCalendarSection extends StatelessWidget {
   final String viewMode;
   final DateTime calStart;
   final String selectedKey;
-  final Map<String, CalendarEntry> calEntries;
+  final CalendarEntrySet calEntries;
   final Map<String, CalendarEntry> pendingEntries;
   final ValueChanged<String> onDayTap;
   final VoidCallback onPrev;
@@ -2437,7 +2484,7 @@ enum _CalDaySize { compact, tiny }
 class _CalendarMonthBlock extends StatelessWidget {
   final DateTime firstDay;
   final String selectedKey;
-  final Map<String, CalendarEntry> calEntries;
+  final CalendarEntrySet calEntries;
   final Map<String, CalendarEntry> pendingEntries;
   final _CalDaySize size;
   final ValueChanged<String> onDayTap;
@@ -2507,6 +2554,9 @@ class _CalendarMonthBlock extends StatelessWidget {
             return _CalDayCell(
               dateKey: key,
               calEntry: pendingEntries[key] ?? calEntries[key],
+              entryCount: pendingEntries.containsKey(key)
+                  ? 1
+                  : calEntries.countForDate(key),
               isPending: pendingEntries.containsKey(key),
               isSelected: key == selectedKey,
               size: cellSize,
@@ -2523,6 +2573,16 @@ class _CalendarMonthBlock extends StatelessWidget {
 class _CalDayCell extends StatelessWidget {
   final String dateKey;
   final CalendarEntry? calEntry;
+
+  /// How many dated entries this date holds (A1). The zoomed grid cells are
+  /// ~20px, so they show a count dot rather than a list.
+  ///
+  /// ⚠️ DATED ENTRIES ONLY. This cell has never been passed recurring
+  /// schedules — "defect C" in the original day_resolution.dart header — and
+  /// this prompt does not fix that: `_ZoomedCalendarSection` would need the
+  /// schedule list threaded through two more widgets, and the cell has no room
+  /// to render the result. Recorded as deferred in audit/SCHEDULE_V3_P2.md.
+  final int entryCount;
   final bool isPending;
   final bool isSelected;
   final double size;
@@ -2532,6 +2592,7 @@ class _CalDayCell extends StatelessWidget {
   const _CalDayCell({
     required this.dateKey,
     required this.calEntry,
+    this.entryCount = 0,
     required this.isPending,
     required this.isSelected,
     required this.size,
@@ -2588,14 +2649,32 @@ class _CalDayCell extends StatelessWidget {
                 child: Icon(Icons.nightlight_round, size: 8, color: NexGenPalette.textMedium),
               )
             else if (color != null && size >= 24)
-              Container(
-                width: 4,
-                height: 4,
-                margin: const EdgeInsets.only(top: 3),
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 1.5)],
+              // A3: stacked dots for a multi-entry date, capped at 3 so the
+              // row cannot overflow a 28px cell.
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0;
+                        i < (entryCount < 1 ? 1 : (entryCount > 3 ? 3 : entryCount));
+                        i++)
+                      Container(
+                        width: 4,
+                        height: 4,
+                        margin: EdgeInsets.only(left: i == 0 ? 0 : 2),
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                                color: color.withValues(alpha: 0.6),
+                                blurRadius: 1.5)
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
           ],

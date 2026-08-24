@@ -68,6 +68,18 @@ class ScheduleItem {
   /// docs collapse to a stable 0-tie that the backfill then re-stamps.
   final int sortKey;
 
+  /// WLED bus indices this schedule applies to — 1:1 with the segment id
+  /// (`DeviceChannel.id`, derived from `hw.led.ins`). `null` = every channel,
+  /// which is what every writer produces today.
+  ///
+  /// ⚠️ NOTHING CONSUMES THIS YET (Scheduling V3 A1). `schedule_sync.dart` is
+  /// untouched by that work and still builds full-strip presets, and the
+  /// self-healer actively REPAIRS a channel-excluded ON preset back to all-on
+  /// (audit/SCHEDULING_V3_AUDIT.md §5.5, blockers F2-2/F2-3). Writing a value
+  /// here would therefore change nothing and, once the healer ran, would read
+  /// back as a lie. Kept null until the firing layer can honour it.
+  final List<int>? channels;
+
   const ScheduleItem({
     required this.id,
     required this.timeLabel,
@@ -81,6 +93,7 @@ class ScheduleItem {
     this.disabledUntil,
     this.sourcePromptId,
     this.sortKey = 0,
+    this.channels,
   });
 
   /// UI-safe action label. Routes the pattern-name portion of a
@@ -130,6 +143,7 @@ class ScheduleItem {
     bool clearDisabledUntil = false,
     String? sourcePromptId,
     int? sortKey,
+    List<int>? channels,
   }) =>
       ScheduleItem(
         id: id ?? this.id,
@@ -145,6 +159,7 @@ class ScheduleItem {
             clearDisabledUntil ? null : (disabledUntil ?? this.disabledUntil),
         sourcePromptId: sourcePromptId ?? this.sourcePromptId,
         sortKey: sortKey ?? this.sortKey,
+        channels: channels ?? this.channels,
       );
 
   Map<String, dynamic> toJson() => {
@@ -162,6 +177,9 @@ class ScheduleItem {
         if (sourcePromptId != null) 'sourcePromptId': sourcePromptId,
         // Always emitted — it's a first-class ordering field, not optional.
         'sortKey': sortKey,
+        // Omitted when null so a schedule that scopes to every channel (all of
+        // them, today) writes the same document it always did.
+        if (channels != null) 'channels': channels,
       };
 
   factory ScheduleItem.fromJson(Map<String, dynamic> json) => ScheduleItem(
@@ -182,7 +200,16 @@ class ScheduleItem {
         sourcePromptId: json['sourcePromptId'] as String?,
         // Absent on pre-migration docs → 0 (back-compat). Tolerate num.
         sortKey: (json['sortKey'] as num?)?.toInt() ?? 0,
+        channels: _tryParseChannels(json['channels']),
       );
+
+  /// Absent, wrong type, or non-numeric members all collapse rather than
+  /// throw. An empty list survives as empty — "explicitly none" is a different
+  /// statement from null ("all"), even though nothing reads either yet.
+  static List<int>? _tryParseChannels(dynamic raw) {
+    if (raw is! List) return null;
+    return raw.whereType<num>().map((n) => n.toInt()).toList(growable: false);
+  }
 
   static DateTime? _tryParseDisabledUntil(dynamic raw) {
     if (raw is! String || raw.isEmpty) return null;

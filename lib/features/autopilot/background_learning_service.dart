@@ -139,7 +139,10 @@ class BackgroundLearningService {
       sportingEvents: const [],
       holidays: const [],
       weekGeneration: DateTime.now().millisecondsSinceEpoch ~/ (7 * 86400000),
-      calendarEntries: calEntries,
+      // A1: habit learning reasons one-entry-per-date. `.primaries` is that
+      // view, unchanged from pre-V3. Learning from every entry on a night is
+      // a behaviour change, not a display change — out of scope here.
+      calendarEntries: calEntries.primaries,
     );
 
     debugPrint(

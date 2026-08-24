@@ -32,14 +32,11 @@ import 'package:nexgen_command/features/design/smart_presets/smart_presets_secti
 import 'package:nexgen_command/features/installer/media_access_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
-import 'package:nexgen_command/features/schedule/day_resolution.dart';
-import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
-import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
-    show showScheduleEditor;
 import 'package:nexgen_command/features/dashboard/tonight_label.dart';
+import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
+import 'package:nexgen_command/features/schedule/widgets/timeline_row.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
-import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
@@ -1345,143 +1342,166 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     );
   }
 
+  /// The upcoming-schedule card (Scheduling V3 A3).
+  ///
+  /// WAS: one line, showing one entry. It reduced twice — `calEntries[todayKey]`
+  /// collapsed the date to a single dated entry, then `day.newestRecurring`
+  /// picked one recurring item and a dated entry MASKED it entirely
+  /// (audit/SCHEDULING_V3_AUDIT.md §3.2). On a Game Day night the card showed
+  /// the game and silently hid the base schedule that would take the house back
+  /// at 8:00 PM.
+  ///
+  /// NOW: up to two rows from the day timeline plus "+N more", and each row
+  /// carries what the firing layer will actually do to it.
   Widget _buildTonightCard(BuildContext context, WidgetRef ref) {
     return Consumer(builder: (context, ref, _) {
-      final schedules = ref.watch(schedulesProvider);
-      final calEntries = ref.watch(calendarScheduleProvider);
-      final today = DateTime.now();
-      final todayKey = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-      final calEntry = calEntries[todayKey];
-      final wd = today.weekday % 7;
-      final recurring = schedules.where((s) {
-        final dl = s.repeatDays.map((e) => e.toLowerCase()).toSet();
-        if (dl.contains('daily')) return true;
-        const map = {
-          0: {'sun', 'sunday'},
-          1: {'mon', 'monday'},
-          2: {'tue', 'tues', 'tuesday'},
-          3: {'wed', 'wednesday'},
-          4: {'thu', 'thurs', 'thursday'},
-          5: {'fri', 'friday'},
-          6: {'sat', 'saturday'},
-        };
-        return (map[wd] ?? {}).any(dl.contains);
-      }).toList();
-      // B1 (audit/MULTI_ENTRY_DISPLAY.md §2): this card used to open-code the
-      // same resolution as the two schedule-screen surfaces, independently.
-      // resolveDay owns it now — precedence (a dated entry masks recurring,
-      // UNCHANGED) and newest-wins ordering (B3). The enabled filter moved into
-      // resolveDay with it, which is why the predicate above no longer checks it.
-      final day = resolveDay(datedEntry: calEntry, recurringForDay: recurring);
-      // `newestRecurring`, not `recurringPrimary`: `first` is used below both
-      // for time fall-through past a dated entry (onTime/offTime are nullable)
-      // and as the tap target, which has always opened the recurring
-      // ScheduleItem — a CalendarEntry is not editable in that editor.
-      final first = day.newestRecurring;
-
-      // Route through the slug resolver so snake_case pattern slugs
-      // (e.g. KC_Royals_Game_Day) render as display names, matching every
-      // other surface. calEntry.displayName already calls displayNameFor;
-      // the actionLabel-extracted fallback is wrapped explicitly.
-      final patternName = calEntry?.displayName ??
-          (first != null
-              ? displayNameFor(first.actionLabel.contains(':')
-                  ? first.actionLabel.split(':').last.trim()
-                  : first.actionLabel)
-              : null);
-      // CalendarEntry stores onTime/offTime as 24-hour 'HH:mm' wall-clock
-      // strings; ScheduleItem.timeLabel is already 12-hour 'h:mm AM/PM' or a
-      // 'Sunset'/'Sunrise' token. formatTimeLabel normalises both into the
-      // user's preferred display format (defaults to 12-hour AM/PM) so the
-      // Tonight card no longer surfaces raw "23:10" strings.
+      final timeline = ref.watch(todayTimelineProvider);
       final timeFormat = ref.watch(timeFormatPreferenceProvider);
-      final rawOnTime = calEntry?.onTime ?? first?.timeLabel;
-      final rawOffTime = calEntry?.offTime ?? first?.offTimeLabel;
-      final onTime = rawOnTime == null
-          ? null
-          : formatTimeLabel(rawOnTime, timeFormat: timeFormat);
-      final offTime = rawOffTime == null
-          ? null
-          : formatTimeLabel(rawOffTime, timeFormat: timeFormat);
-      final accentColor = calEntry?.color ?? NexGenPalette.cyan;
+      final today = DateTime.now();
 
-      final bool hasSchedule = patternName != null || onTime != null;
+      if (timeline.isEmpty) {
+        return _tonightShell(
+          context: context,
+          accent: NexGenPalette.cyan,
+          hasSchedule: false,
+          onTap: () => context.go(AppRoutes.schedule),
+          header: upcomingScheduleHeaderLabel(null, today),
+          children: [
+            Text(
+              'No schedule — tap to add one',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: NexGenPalette.textMedium,
+              ),
+            ),
+          ],
+        );
+      }
 
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: GestureDetector(
-          // Tap → edit the recurring schedule shown here, pre-filled in the
-          // same editor as My Schedules (one write path). When there's no
-          // recurring schedule to edit (empty, or only a one-shot calendar /
-          // Game Day entry, which isn't a ScheduleItem), fall back to the
-          // schedule page to add one.
-          onTap: () => first != null
-              ? showScheduleEditor(context, ref, editing: first)
-              : context.go(AppRoutes.schedule),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: hasSchedule ? accentColor.withValues(alpha: 0.35) : NexGenPalette.line),
-              boxShadow: hasSchedule ? [BoxShadow(color: accentColor.withValues(alpha: 0.12), blurRadius: 12)] : null,
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: hasSchedule ? accentColor.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.06),
-                    border: Border.all(color: hasSchedule ? accentColor.withValues(alpha: 0.4) : NexGenPalette.line),
-                  ),
-                  child: Icon(
-                    hasSchedule ? Icons.schedule_rounded : Icons.add_alarm_rounded,
-                    size: 18,
-                    color: hasSchedule ? accentColor : NexGenPalette.textMedium,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        // Time-aware: morning/afternoon event → TODAY,
-                        // evening/night → TONIGHT (BUG-SCHED-UX-3). Follows the
-                        // shown event's ON time, falling back to now when none.
-                        upcomingScheduleHeaderLabel(rawOnTime, today),
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white.withValues(alpha: 0.4),
-                          letterSpacing: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        hasSchedule
-                            ? '${patternName ?? 'Scheduled'}${onTime != null ? ' · $onTime' : ''}${offTime != null ? ' → off at $offTime' : ''}'
-                            : 'No schedule — tap to add one',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: hasSchedule ? NexGenPalette.textHigh : NexGenPalette.textMedium,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right_rounded, size: 18, color: NexGenPalette.textMedium),
-              ],
-            ),
+      // Two rows is the budget: enough to show "Game Day, then the base takes
+      // over", which is the case that was previously invisible.
+      const maxRows = 2;
+      final shown = timeline.entries.take(maxRows).toList();
+
+      // The header word follows the FIRST row's start, as it did before.
+      final firstStart = shown.first.startsAt;
+      final headerSource = firstStart == null
+          ? (shown.first.recurring?.timeLabel ?? shown.first.dated?.onTime)
+          : '${firstStart.hour.toString().padLeft(2, '0')}:'
+              '${firstStart.minute.toString().padLeft(2, '0')}';
+
+      void openDay() {
+        // Select the date first so the schedule screen lands on today, then
+        // navigate. Both surfaces read the same selection provider.
+        ref.read(selectedCalendarDateProvider.notifier).state =
+            calendarDateKey(today);
+        context.go(AppRoutes.schedule);
+      }
+
+      return _tonightShell(
+        context: context,
+        accent: timelineAccent(shown.first),
+        hasSchedule: true,
+        onTap: openDay,
+        header: upcomingScheduleHeaderLabel(headerSource, today),
+        children: [
+          DayTimelineList(
+            timeline: timeline,
+            maxRows: maxRows,
+            timeFormat: timeFormat,
+            compact: true,
+            onRowTap: openDay,
+            onMoreTap: openDay,
           ),
-        ),
+        ],
       );
     });
+  }
+
+  /// Chrome for the upcoming-schedule card. Extracted so the empty and
+  /// populated states cannot drift apart.
+  Widget _tonightShell({
+    required BuildContext context,
+    required Color accent,
+    required bool hasSchedule,
+    required VoidCallback onTap,
+    required String header,
+    required List<Widget> children,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: NexGenPalette.gunmetal90.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: hasSchedule
+                    ? accent.withValues(alpha: 0.35)
+                    : NexGenPalette.line),
+            boxShadow: hasSchedule
+                ? [
+                    BoxShadow(
+                        color: accent.withValues(alpha: 0.12), blurRadius: 12)
+                  ]
+                : null,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: hasSchedule
+                      ? accent.withValues(alpha: 0.15)
+                      : Colors.white.withValues(alpha: 0.06),
+                  border: Border.all(
+                      color: hasSchedule
+                          ? accent.withValues(alpha: 0.4)
+                          : NexGenPalette.line),
+                ),
+                child: Icon(
+                  hasSchedule
+                      ? Icons.schedule_rounded
+                      : Icons.add_alarm_rounded,
+                  size: 18,
+                  color: hasSchedule ? accent : NexGenPalette.textMedium,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      header,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white.withValues(alpha: 0.4),
+                        letterSpacing: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ...children,
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: Icon(Icons.chevron_right_rounded,
+                    size: 18, color: NexGenPalette.textMedium),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   static _SkyTheme _getSkyTheme(DateTime now) {

@@ -447,9 +447,9 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       ),
       conflictingEntryKeys: ScheduleConflictDetector.findEntryConflictsForItem(
         item: item,
-        calendarEntries: calEntries,
+        calendarEntries: calEntries.primaries,
       ),
-      calendarEntries: calEntries,
+      calendarEntries: calEntries.primaries,
     );
   }
 
@@ -491,7 +491,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       mergedEntryKeys.addAll(
         ScheduleConflictDetector.findEntryConflictsForItem(
           item: item,
-          calendarEntries: calEntries,
+          calendarEntries: calEntries.primaries,
         ),
       );
     }
@@ -524,7 +524,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     return ScheduleConflictInfo(
       conflictingItems: mergedItemConflicts.values.toList(),
       conflictingEntryKeys: mergedEntryKeys.toList(),
-      calendarEntries: calEntries,
+      calendarEntries: calEntries.primaries,
     );
   }
 
@@ -1246,6 +1246,11 @@ final currentScheduledActionProvider = Provider<ScheduleItem?>((ref) {
     now,
     latitude: user?.latitude,
     longitude: user?.longitude,
-    calendarEntries: calEntries,
+    // A1: `findCurrentSchedule` returns a single ScheduleItem? and drives
+    // ScheduleEnforcementService, which RE-APPLIES state to the device.
+    // Widening it to every entry on a date would change what the enforcement
+    // timer writes — a firing-layer change this prompt excludes. `.primaries`
+    // preserves today's behaviour exactly.
+    calendarEntries: calEntries.primaries,
   );
 });
