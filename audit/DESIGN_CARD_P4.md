@@ -217,6 +217,39 @@ Decision and evidence in §3.
 
 Decision and evidence in §4.
 
+### Closeout — cancel restores the device
+
+Shipped after the Phase C commit as **`d5ed3e6`**
+(`lib/features/wled/colorway_effect_selector.dart`,
+`test/features/design/design_edit_cancel_restore_test.dart`).
+
+Phase C left design-edit and selection mode asymmetric, flagged in this report
+as your call. The call was to align them: design-edit now captures the pre-edit
+look on entry and replays it on cancel, reusing selection mode's existing
+`_restoreCapturedLook` machinery unchanged. **Save deliberately does not
+restore** — it consumes the snapshot, because the design now stores what the
+lights are showing.
+
+**Writing that test found two crashes Phase C had shipped**, both on the cancel
+path, both invisible to `flutter analyze`:
+
+1. `_restoreProviderSnapshot` ran from `dispose` and reached its notifiers
+   through `ref` → `Bad state: Cannot use "ref" after the widget was disposed`.
+   This is the #84 class that `LibraryBrowserScreen.dispose` already carries a
+   note about, and the Phase C comment claiming the write was "safe from
+   dispose" was simply wrong. The notifiers are now captured while `ref` is
+   live.
+2. Even holding the notifiers, mutating a provider from a lifecycle callback
+   throws `Tried to modify a provider while the widget tree was building`. The
+   write is now deferred by a `Future.microtask` — the same shape
+   `LibraryBrowserScreen.dispose` uses — and guarded, because that microtask can
+   outlive the ProviderContainer during teardown.
+
+Both would have fired on **every** design-edit cancel on device. Four tests
+cover the rule: cancel restores exactly once; two open/cancel cycles restore
+once each (no double-restore); Save does not restore; catalog mode captures
+nothing and so writes nothing on exit.
+
 ### C4 — gate
 
 | Requirement | Status |
@@ -224,7 +257,7 @@ Decision and evidence in §4.
 | All Phase A and B tests still green | ✅ |
 | `flutter analyze` zero errors | ✅ |
 | No new warnings | ✅ (12 warnings, all pre-existing in untouched files; the one my test introduced was removed) |
-| Full suite | ✅ **2500 tests pass** (2485 before Phase C, +15) |
+| Full suite | ✅ **2504 tests pass** (2485 before Phase C, +15 Phase C, +4 closeout) |
 | Explicit pathspecs | ✅ |
 
 ---
@@ -306,19 +339,111 @@ The field is **not read back** in this phase, as instructed.
 
 ---
 
-## 5. Deferred
+## 5. Handed to the colour-fidelity stream
+
+Three places where what is STORED and what the LIGHTS DO are allowed to
+disagree. None is a bug in this branch's work — each is a pre-existing
+translation-layer gap that Phase C bumped into and left intact. Listed here so
+the colour-fidelity stream inherits them with evidence rather than rediscovering
+them.
+
+### 7.1 `toWledPayload` renders `fx 0` as `fx 83`
+
+[design_models.dart:261-266](../lib/features/design/design_models.dart#L261-L266)
+
+```dart
+// When effect 0 (Solid) is used with multiple colors, substitute effect 83
+// (Solid Pattern) which distributes colors in repeating blocks. Solid only
+// shows the first color, losing the rest of the palette.
+final fx = (channel.effectId == 0 && channel.colorGroups.length > 1)
+    ? 83
+    : channel.effectId;
+```
+
+The stored design says `fx: 0`; the device is told `fx: 83`. The substitution is
+correct behaviour — Solid shows only the first colour — but it means **the
+design's own record of itself and the payload that renders it disagree**, with
+no marker saying so.
+
+Phase C hit this directly: seeding the tuner from `design.toWledPayload()` would
+have displayed 83 and then **written 83 back over the stored 0** on save,
+silently rewriting the design. `_seedFromDesign` reads the channel instead, and
+`design_edit_tuner_test.dart` pins that the two values differ (83 vs 0) and why
+the channel wins.
+
+**For the stream:** any surface that round-trips a design through its payload
+inherits this rewrite. The detail screen's "Effect" row reads the channel
+(`fx 0`), while the lights run 83 — a user comparing them sees a mismatch that
+is real and currently unexplained in the UI.
+
+### 7.2 Neighborhood Sync transmits nine primitives, not a design
+
+[neighborhood_models.dart:1314-1324](../lib/features/neighborhood/neighborhood_models.dart#L1314-L1324)
+(`toJson`) and [:1286-1308](../lib/features/neighborhood/neighborhood_models.dart#L1286-L1308)
+(`fromLibraryNode`).
+
+`toJson` serialises `name, effectId, colors, speed, intensity, brightness, pal,
+grp, spc` — **nine flat primitives with no payload field**. The model does carry
+a `wledPayload` field ([:1213](../lib/features/neighborhood/neighborhood_models.dart#L1213)),
+but `toJson` ignores it, so even an attached payload is dropped at the wire
+boundary.
+
+`fromLibraryNode` builds an assignment from a node's `themeColors` plus a
+user-chosen effect. For a saved design that means the **≤3 preview swatches**
+the My Designs adapter produced — the design's own effect, channel scope,
+per-pixel layout and brightness all discarded.
+
+This is why C2 excluded saved designs from the Sync picker (§3). **For the
+stream:** every neighbourhood look is a reconstruction at the receiving house,
+never a transmitted design. Colour fidelity across houses is bounded by those
+nine fields regardless of what the initiating house is actually showing.
+
+### 7.3 `grp`/`spc` are design fields by decision, but have no model field
+
+[design_spacing_defaults.dart](../lib/features/wled/design_spacing_defaults.dart)
+records the decision: *"`grp`/`spc` are DESIGN fields. Tyler's decision of
+record, 2026-08-17."*
+
+But:
+
+- `ChannelDesign` has **no `grouping` or `spacing` field** — its complete set is
+  `channelId, channelName, included, colorGroups, effectId, speed, intensity,
+  reverse, ledCount` ([design_models.dart:296-346](../lib/features/design/design_models.dart#L296-L346)).
+- `toWledPayload` spreads the **constants**, not per-design values:
+  `...kDesignSpacingDefaults` at
+  [design_models.dart:272](../lib/features/design/design_models.dart#L272) — always
+  `grp: 1, spc: 0`.
+
+So a design cannot express non-default banding, and #88's decision is unfulfilled
+at the model layer. A candy-cane design that "legitimately owns its spacing"
+(the decision's own example) still cannot store it.
+
+Phase C's consequence: the grouping control is **hidden in design-edit mode**
+([colorway_effect_selector.dart:955](../lib/features/wled/colorway_effect_selector.dart#L955)) —
+offering a control whose value is silently discarded is worse than not offering
+it. The tuner shows a one-line note saying colours and pixel layout are not
+editable there.
+
+**For the stream:** closing this is `ChannelDesign.grouping/spacing` +
+serialisation + a `toWledPayload` change, after which the hidden control can be
+restored. Until then, two designs that differ only in banding are
+indistinguishable once stored.
+
+---
+
+## 6. Deferred
 
 | Deferred | Why |
 |---|---|
 | **AI-composed edit** | Unchanged from Phase A: `AIDesignStudioScreen` has no existing-design parameter, and C3 confirms nothing reads `composedPattern` back. Edit stays disabled for that kind with an on-screen note. |
 | **`grp`/`spc` on a design** | Needs `ChannelDesign` fields + serialisation + a `toWledPayload` change. #88's decision of record is unfulfilled at the model layer; §2 records it. The control is hidden rather than half-wired. |
 | **Colour editing in the tuner** | The tuner has never had a colour editor; adding one is a feature, not a wiring gap. |
-| **Re-pushing the pre-edit look on cancel** | Followed the brief (do not). Flagged as asymmetric with selection mode; one-line change if you want them aligned. |
+| ~~Re-pushing the pre-edit look on cancel~~ | **RESOLVED in closeout `d5ed3e6`** — see §2. Aligned with selection mode; the two crashes that fix uncovered are recorded there. |
 | **Lifting the Sync exclusion** | Four concrete steps in §3; needs a policy decision on per-pixel across houses. |
 
 ---
 
-## 6. What I would have had to fabricate, and didn't
+## 7. What I would have had to fabricate, and didn't
 
 1. **A sample `composedPattern` doc and its byte size.** Still no client
    credential; still not invented. P2 §5's code-derived shape stands, and P4
