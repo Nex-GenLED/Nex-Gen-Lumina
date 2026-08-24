@@ -55,6 +55,32 @@ class CustomDesign {
   /// Persisted jsonEncoded (see `toFirestore`/`fromFirestoreData`) because it
   /// embeds arrays-of-arrays (`col:[[r,g,b,w]]`) that the native iOS Firestore
   /// codec aborts on (#84). In-memory it is a decoded `Map`.
+  ///
+  /// ## WRITE-ONLY TODAY — and every writer MUST preserve it
+  ///
+  /// Audited 2026-08-24 (audit/DESIGN_CARD_P4.md §4): this field has **no
+  /// reader anywhere in the app**. `grep composedPattern` outside this file
+  /// finds writers, provenance null-checks, doc comments and tests — nothing
+  /// that decodes the contents. In particular `composedPatternProvider`
+  /// (design_studio_providers.dart:162) is a DIFFERENT thing: an in-memory
+  /// `StateProvider<ComposedPattern?>` for the live studio session, never
+  /// hydrated from a stored design.
+  ///
+  /// It is persisted for a FUTURE AI re-edit consumer — the layered
+  /// `sourceIntent` is what would let a saved Studio design be reopened and
+  /// re-composed rather than re-prompted from scratch. Until that consumer
+  /// exists the field is dead weight that must not be dropped, because
+  /// re-deriving it is impossible: the intent cannot be recovered from the
+  /// rendered channels.
+  ///
+  /// **Every writer must preserve it.** In practice: edit via `copyWith` on the
+  /// LOADED model (which carries the field forward) and write through
+  /// `DesignService.updateDesign`, whose `.update()` merges by key so an
+  /// omitted `composed_pattern` is left alone rather than deleted. The rename
+  /// path, the manual editor's edit-save, and the colourway tuner's
+  /// save-to-design all do this, and all are covered by tests asserting the
+  /// field survives. A writer that constructs a FRESH `CustomDesign` instead of
+  /// copying the loaded one WILL silently destroy it.
   final Map<String, dynamic>? composedPattern;
 
   const CustomDesign({

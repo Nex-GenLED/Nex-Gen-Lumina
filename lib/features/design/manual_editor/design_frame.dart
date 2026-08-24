@@ -65,3 +65,43 @@ Color _toColor(List<int> rgbw) {
   }
   return Colors.black;
 }
+
+/// A stored [CustomDesign]'s per-channel color groups → a preview frame.
+///
+/// Third producer alongside [frameFromDocument] (manual authoring) and
+/// [frameFromGlobalGroups] (AI authoring): this one reads a design back OFF
+/// Firestore for the read-only detail preview. Groups on a saved design are
+/// already channel-local — reconciled at save time, the same invariant
+/// `customDesignToSpans` relies on (design_apply.dart:85-93) — so they map
+/// straight to channel-local indices with no re-projection.
+///
+/// [channelLengths] comes from the connected device (`deviceChannelsProvider`).
+/// When it is empty (no device / off-LAN) each channel falls back to its own
+/// stored `ChannelDesign.ledCount`, so the detail screen still previews a
+/// design while disconnected. Excluded channels are omitted entirely — an
+/// absent key is how the frame expresses "this channel is not in scope",
+/// matching [DesignPreview]'s `frame[ch] == null → no LEDs` handling.
+///
+/// NO new pixel logic: base fill + last-group-wins is exactly
+/// [frameFromGlobalGroups]'s rule, and [_toColor] is shared verbatim.
+DesignFrame frameFromCustomDesign(
+  CustomDesign design, {
+  Map<int, int> channelLengths = const {},
+  Color base = Colors.black,
+}) {
+  final frame = <int, List<Color>>{};
+  for (final ch in design.channels) {
+    if (!ch.included) continue;
+    final len = channelLengths[ch.channelId] ?? ch.ledCount;
+    if (len <= 0) continue;
+    Color colorAtLocal(int i) {
+      for (final grp in ch.colorGroups) {
+        if (i >= grp.startLed && i <= grp.endLed) return _toColor(grp.color);
+      }
+      return base;
+    }
+
+    frame[ch.channelId] = [for (int i = 0; i < len; i++) colorAtLocal(i)];
+  }
+  return frame;
+}

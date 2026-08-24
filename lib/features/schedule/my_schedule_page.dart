@@ -4289,7 +4289,22 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                     onPick: () async {
                       // Open the CURRENT Explore Designs library (top-level
                       // catalog + My Designs) in SELECTION mode, replacing the
-                      // retired _PatternPickerSheet. Pushed on the root navigator
+                      // retired _PatternPickerSheet.
+                      //
+                      // "+ My Designs" is TRUE as of the tree change: this
+                      // opens nodeId: null, whose children are the node tree's
+                      // roots, and My Designs is now one of them. It was NOT
+                      // true before — My Designs was synthesised only into the
+                      // PatternCategory list, which this screen never reads, so
+                      // the picker could not reach a saved design at all and
+                      // LibraryBrowserScreen._returnSavedDesignSelection was
+                      // unreachable from here (audit/MY_DESIGNS_AUDIT.md §2b.5
+                      // item 3). The comment was aspirational; the code caught
+                      // up to it rather than the reverse. Nothing on this
+                      // screen changed — the selection callback already handled
+                      // saved designs.
+                      //
+                      // Pushed on the root navigator
                       // (above this editor sheet, self-contained drill-down —
                       // same mechanism Game Day uses). onDesignSelected returns
                       // the chosen design; we dismiss the whole picker stack and

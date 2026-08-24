@@ -309,10 +309,18 @@ final deleteSceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
     if (user == null) return false;
 
     try {
-      // For custom designs, delete from designs collection
+      // For custom designs, delete from designs collection. A custom scene IS
+      // a saved design (allScenesProvider merges designsStreamProvider via
+      // Scene.fromDesign, scene_providers.dart:88-91), so this must reach the
+      // SAME delete entry point My Designs uses — not a parallel one.
+      // deleteDesignProvider delegates to deleteDesignEntryPointProvider,
+      // which is the app's only caller of DesignService.deleteDesign.
+      // NOTE: this provider currently has no UI caller; when one is built it
+      // should prefer confirmAndDeleteDesign(..., origin:
+      // DesignDeleteOrigin.scene) so the user is told the design leaves My
+      // Designs too (design_deletion.dart).
       if (scene.type == SceneType.custom && scene.customDesign != null) {
-        await ref.read(deleteDesignProvider)(scene.customDesign!.id);
-        return true;
+        return await ref.read(deleteDesignProvider)(scene.customDesign!.id);
       }
 
       // For library/snapshot scenes, delete from scenes collection

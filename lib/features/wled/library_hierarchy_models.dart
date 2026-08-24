@@ -171,6 +171,12 @@ class LibraryCategoryIds {
   static const String security = 'cat_security';
   static const String movies = 'cat_movies';
   static const String nature = 'cat_nature';
+
+  /// The user's saved designs. Lives here with the catalog roots because it
+  /// is a REAL tree root, not a synthesis (audit/DESIGN_CARD_P3.md).
+  /// `kMyDesignsCategoryId` in pattern_providers.dart aliases this so the
+  /// existing call sites keep compiling.
+  static const String myDesigns = 'my_designs';
 }
 
 /// Special folder IDs for personalized content

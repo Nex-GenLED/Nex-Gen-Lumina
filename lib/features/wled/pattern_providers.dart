@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
@@ -49,17 +50,7 @@ final patternRepositoryProvider = Provider<PatternRepository>((ref) {
 /// [myDesignsCategoryNode] + [_customDesignToLibraryNode]. The category
 /// itself lives at this id; individual designs surface as palette nodes
 /// with id `design_{firestoreId}` under this parent.
-const String kMyDesignsCategoryId = 'my_designs';
-
-/// Synthetic LibraryNode used when LibraryBrowserScreen / breadcrumbs look
-/// up the My Designs category by id. Title matches the home + Explore
-/// surface label so breadcrumbs read correctly.
-const LibraryNode myDesignsCategoryNode = LibraryNode(
-  id: kMyDesignsCategoryId,
-  name: 'My Designs',
-  nodeType: LibraryNodeType.category,
-  sortOrder: -1,
-);
+const String kMyDesignsCategoryId = LibraryCategoryIds.myDesigns;
 
 /// Adapter: a Firestore-backed [CustomDesign] becomes a palette-shaped
 /// [LibraryNode] so the Explore catalog rendering + apply machinery can
@@ -89,31 +80,26 @@ LibraryNode _customDesignToLibraryNode(CustomDesign design) {
   );
 }
 
-/// Loads all pattern categories (folders).
+/// Loads all pattern categories (folders) for the Explore root grid.
 ///
-/// Prepends the synthetic "My Designs" category when the user is signed in
-/// and has at least one saved design — keeping the surface empty for
-/// guests / brand-new accounts.
+/// The list comes STRAIGHT from `PatternRepository.getCategories()`, which is
+/// now derived from the node tree's roots. The old runtime prepend of a
+/// hand-built `my_designs` PatternCategory is gone — it was the reason the
+/// grid and the node tree disagreed about whether My Designs existed
+/// (audit/MY_DESIGNS_AUDIT.md §2b.3, audit/DESIGN_CARD_P3.md).
+///
+/// The only thing left to do here is the auth gate the repository cannot
+/// apply: `my_designs` is dropped for signed-out users, because
+/// `designsStreamProvider` returns an empty stream with no user and a folder
+/// that can never have contents is worse than no folder.
 final patternCategoriesProvider = FutureProvider<List<PatternCategory>>((ref) async {
   final repo = ref.watch(patternRepositoryProvider);
-  final baseCategories = await repo.getCategories();
-
-  // ALWAYS prepend the synthetic my_designs category — the empty case renders
-  // an empty-state placeholder inside the drill-in view rather than hiding the
-  // category. #85 companion: previously this short-circuited to baseCategories
-  // when designs was empty, which combined with a parallel writer-bug to make
-  // a writer-drift "lost save" present as "the My Designs surface disappeared
-  // entirely," costing a debugging detour. Always rendering the surface means
-  // a future writer-drift can only make the surface look EMPTY (visible bug)
-  // rather than VANISH (silent bug).
-  return <PatternCategory>[
-    const PatternCategory(
-      id: kMyDesignsCategoryId,
-      name: 'My Designs',
-      imageUrl: '',
-    ),
-    ...baseCategories,
-  ];
+  final categories = await repo.getCategories();
+  final signedIn = ref.watch(authStateProvider).valueOrNull != null;
+  if (signedIn) return categories;
+  return categories
+      .where((c) => c.id != kMyDesignsCategoryId)
+      .toList(growable: false);
 });
 
 /// Loads items for a given category id
@@ -566,8 +552,13 @@ String _formatUsageTime(DateTime time) {
 /// Provider to get child nodes of a parent node in the library hierarchy.
 /// Pass null for parentId to get root categories.
 ///
-/// Branches on the synthetic [kMyDesignsCategoryId] id space so saved
-/// designs appear as palette children without modifying [PatternRepository].
+/// Two things the repository cannot do for itself, because it is a static
+/// in-memory catalog with no auth and no Firestore:
+///   • ROOT: drop the dynamic `my_designs` node for signed-out users.
+///   • CHILDREN of `my_designs`: they are per-user Firestore docs, so they
+///     come from [designsStreamProvider] and are adapted here. This is the
+///     dynamic node's data source — not, as before, a workaround for the
+///     folder being absent from the tree.
 final libraryChildNodesProvider = FutureProvider.family<List<LibraryNode>, String?>((ref, parentId) async {
   if (parentId == kMyDesignsCategoryId) {
     final designs = ref.watch(designsStreamProvider).valueOrNull
@@ -575,19 +566,21 @@ final libraryChildNodesProvider = FutureProvider.family<List<LibraryNode>, Strin
     return designs.map(_customDesignToLibraryNode).toList(growable: false);
   }
   final repo = ref.watch(patternRepositoryProvider);
-  return repo.getChildNodes(parentId);
+  final children = await repo.getChildNodes(parentId);
+  if (parentId != null) return children;
+  final signedIn = ref.watch(authStateProvider).valueOrNull != null;
+  if (signedIn) return children;
+  return children
+      .where((n) => n.id != kMyDesignsCategoryId)
+      .toList(growable: false);
 });
 
 /// Provider to get a single node by its ID.
 ///
-/// Branches on the synthetic id space:
-///   - `my_designs` → returns the synthetic category node.
-///   - `design_*`   → resolves the saved design from designsStreamProvider
-///                    and adapts it via [_customDesignToLibraryNode].
+/// `my_designs` now resolves from the tree like any other root. Only the
+/// `design_*` children still branch, because they are per-user Firestore docs
+/// the repository has no access to.
 final libraryNodeByIdProvider = FutureProvider.family<LibraryNode?, String>((ref, nodeId) async {
-  if (nodeId == kMyDesignsCategoryId) {
-    return myDesignsCategoryNode;
-  }
   if (nodeId.startsWith('design_')) {
     final designId = nodeId.substring('design_'.length);
     final designs = ref.watch(designsStreamProvider).valueOrNull
@@ -608,12 +601,15 @@ final libraryNodeByIdProvider = FutureProvider.family<LibraryNode?, String>((ref
 /// Provider to get the ancestor chain for breadcrumb navigation.
 /// Returns list from root to parent (does not include current node).
 final libraryAncestorsProvider = FutureProvider.family<List<LibraryNode>, String>((ref, nodeId) async {
-  if (nodeId == kMyDesignsCategoryId) return const <LibraryNode>[];
-  if (nodeId.startsWith('design_')) {
-    // Saved-design palettes sit one level under the My Designs category.
-    return const <LibraryNode>[myDesignsCategoryNode];
-  }
   final repo = ref.watch(patternRepositoryProvider);
+  if (nodeId.startsWith('design_')) {
+    // Saved-design palettes sit one level under the My Designs root. The root
+    // itself is a real node now, so it is LOOKED UP rather than fabricated —
+    // its name and description reach breadcrumbs from the same source the
+    // grid uses.
+    final root = await repo.getNodeById(kMyDesignsCategoryId);
+    return root == null ? const <LibraryNode>[] : <LibraryNode>[root];
+  }
   return repo.getAncestors(nodeId);
 });
 
@@ -640,9 +636,20 @@ final libraryNodePatternsProvider = FutureProvider.family<List<PatternItem>, Str
 
 /// Search the pattern library for existing patterns.
 /// Returns matching palettes, folders, and pre-built pattern items.
+///
+/// Saved designs participate through the SAME sweep as the catalog: their
+/// adapted nodes are handed to `searchLibrary` as `extraNodes`, so a design is
+/// findable by name without a second search path (audit/DESIGN_CARD_P3.md).
+/// Every search surface must go through this provider rather than calling the
+/// repository directly, or it silently drops the user's own designs.
 final librarySearchProvider = FutureProvider.family<LibrarySearchResults, String>((ref, query) async {
   final repo = ref.watch(patternRepositoryProvider);
-  return repo.searchLibrary(query);
+  final designs =
+      ref.watch(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+  return repo.searchLibrary(
+    query,
+    extraNodes: designs.map(_customDesignToLibraryNode).toList(growable: false),
+  );
 });
 
 // ============================================================================
