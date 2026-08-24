@@ -74,37 +74,65 @@ DesignKind designKindOf(CustomDesign design) {
 /// Apply still runs the SAME `applySavedDesign` the spinner called — this
 /// screen adds affordances, it does not add a second apply path.
 class DesignDetailScreen extends ConsumerWidget {
-  const DesignDetailScreen({super.key, required this.designId});
+  const DesignDetailScreen({
+    super.key,
+    required this.designId,
+    this.embedded = false,
+  });
 
   final String designId;
+
+  /// True when this screen is rendered INSIDE another Scaffold that already
+  /// supplies the chrome — specifically `LibraryBrowserScreen`, which owns the
+  /// route and renders its own `Scaffold` + `AppBar` + breadcrumb before
+  /// handing the body to us (pattern_theme_selection.dart, the
+  /// `isSavedDesign` branch).
+  ///
+  /// In that case our own `Scaffold` + [GlassAppBar] were a SECOND header,
+  /// titled with the same design name as the parent's — two stacked bars plus
+  /// a breadcrumb, ~142px of duplicate chrome that pushed the action buttons
+  /// further toward the dock.
+  ///
+  /// Left false for the STANDALONE push, which has no parent chrome of its own:
+  /// `_duplicate`'s `pushReplacement` onto the new doc (the only such call
+  /// site — verified by grep, not assumed). A standalone instance must keep its
+  /// Scaffold or it would render with no app bar and no way back.
+  final bool embedded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(designByIdProvider(designId));
+    final body = async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => _Message(
+        icon: Icons.error_outline,
+        title: 'Could not load this design',
+        body: '$e',
+      ),
+      data: (design) {
+        if (design == null) {
+          return const _Message(
+            icon: Icons.search_off_rounded,
+            title: 'Design not found',
+            body: 'It may have been deleted from another device. '
+                'Go back to see your current designs.',
+          );
+        }
+        return _DesignDetailBody(design: design);
+      },
+    );
+
+    // Embedded: the parent's Scaffold supplies the background, the app bar and
+    // the back affordance. Returning the bare body is what removes the second
+    // header — nothing about the content changes.
+    if (embedded) return body;
+
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       appBar: GlassAppBar(
         title: Text(async.valueOrNull?.name ?? 'Design'),
       ),
-      body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => _Message(
-          icon: Icons.error_outline,
-          title: 'Could not load this design',
-          body: '$e',
-        ),
-        data: (design) {
-          if (design == null) {
-            return const _Message(
-              icon: Icons.search_off_rounded,
-              title: 'Design not found',
-              body: 'It may have been deleted from another device. '
-                  'Go back to see your current designs.',
-            );
-          }
-          return _DesignDetailBody(design: design);
-        },
-      ),
+      body: body,
     );
   }
 }
