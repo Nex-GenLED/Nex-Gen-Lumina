@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_preview.dart';
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
+import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
@@ -238,9 +239,13 @@ class _DesignDetailBody extends ConsumerWidget {
         Row(children: [
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: kind == DesignKind.perPixel
-                  ? () => _openEditor(context, ref)
-                  : null,
+              // Per-pixel → the paint editor. Effect → the colourway tuner in
+              // design-edit mode (Phase C). AI-composed stays disabled: its
+              // editor has no open-existing path and `composedPattern` has no
+              // reader (audit/DESIGN_CARD_P4.md §4).
+              onPressed: kind == DesignKind.aiComposed
+                  ? null
+                  : () => _openEditor(context, ref, kind),
               icon: const Icon(Icons.brush_outlined, size: 18),
               label: const Text('Edit'),
             ),
@@ -254,15 +259,12 @@ class _DesignDetailBody extends ConsumerWidget {
             ),
           ),
         ]),
-        if (kind != DesignKind.perPixel)
+        if (kind == DesignKind.aiComposed)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              kind == DesignKind.aiComposed
-                  ? 'Editing an AI-composed design reopens it in the Design '
-                      'Studio — not wired yet.'
-                  : 'Editing an effect design needs a payload-seeded tuner — '
-                      'not wired yet.',
+              'Editing an AI-composed design reopens it in the Design '
+              'Studio — not wired yet.',
               style: TextStyle(
                   color: NexGenPalette.textMedium, fontSize: 12),
             ),
@@ -296,12 +298,15 @@ class _DesignDetailBody extends ConsumerWidget {
       '${t.hour.toString().padLeft(2, '0')}:'
       '${t.minute.toString().padLeft(2, '0')}';
 
-  Future<void> _openEditor(BuildContext context, WidgetRef ref) async {
+  Future<void> _openEditor(
+      BuildContext context, WidgetRef ref, DesignKind kind) async {
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => Scaffold(
         backgroundColor: NexGenPalette.matteBlack,
         appBar: GlassAppBar(title: Text('Edit ${design.name}')),
-        body: ManualDesignEditor(initialDesign: design),
+        body: kind == DesignKind.perPixel
+            ? ManualDesignEditor(initialDesign: design)
+            : ColorwayEffectSelectorPage.forDesign(design: design),
       ),
     ));
     ref.invalidate(designByIdProvider(design.id));

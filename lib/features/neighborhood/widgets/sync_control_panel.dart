@@ -1797,6 +1797,29 @@ class _PatternPickerSheet extends ConsumerStatefulWidget {
   ConsumerState<_PatternPickerSheet> createState() => _PatternPickerSheetState();
 }
 
+/// Nodes the Neighborhood Sync picker can actually transmit.
+///
+/// EXCLUDES the user's saved designs (`my_designs` and its `design_*`
+/// children). This is a Sync-side limitation, not a repository one, so the
+/// filter lives here: `SyncPatternAssignment.toJson` — the wire format every
+/// member receives — serialises nine flat primitives (name, effectId, colors,
+/// speed, intensity, brightness, pal, grp, spc) and has NO field for a payload
+/// (neighborhood_models.dart:1314-1324). `fromLibraryNode` builds an
+/// assignment from a node's `themeColors` plus a chosen effect, so a saved
+/// design would arrive at the neighbours as at most three preview swatches
+/// with the design's own effect, channel scope and per-pixel layout discarded
+/// — a lossy reconstruction wearing the design's name.
+///
+/// The filter is by node ID, so design KIND never has to be inspected: a
+/// per-pixel design and an effect design are both excluded by the same rule.
+///
+/// See audit/DESIGN_CARD_P4.md §3 for what lifting this would take.
+List<LibraryNode> syncableLibraryNodes(List<LibraryNode> nodes) {
+  return nodes
+      .where((n) => n.id != kMyDesignsCategoryId && !n.id.startsWith('design_'))
+      .toList(growable: false);
+}
+
 class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
   /// Navigation stack: list of (parentId, title) pairs. null = root.
   final List<_NavEntry> _navStack = [_NavEntry(null, 'Design Library')];
@@ -1917,7 +1940,9 @@ class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
     final childrenAsync = ref.watch(libraryChildNodesProvider(parentId));
 
     return childrenAsync.when(
-      data: (children) {
+      data: (allChildren) {
+        final children = syncableLibraryNodes(allChildren);
+        final excluded = allChildren.length - children.length;
         if (children.isEmpty) {
           return Center(
             child: Text(
@@ -1929,21 +1954,42 @@ class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
 
         final allPalettes = children.every((n) => n.isPalette);
 
+        // One-line, visible reason — silently dropping a folder the user can
+        // see everywhere else in the app reads as a bug.
+        final notice = excluded > 0
+            ? Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Text(
+                  'My Designs cannot be shared to a neighbourhood — sync '
+                  'sends a colour-and-effect recipe, not a saved design.',
+                  style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
+                ),
+              )
+            : const SizedBox.shrink();
+
         if (allPalettes) {
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: children.length,
-            itemBuilder: (context, index) {
-              final node = children[index];
-              return _PalettePickerCard(
-                node: node,
-                onTap: () => setState(() => _selectedPalette = node),
-              );
-            },
-          );
+          return Column(children: [
+            notice,
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: children.length,
+                itemBuilder: (context, index) {
+                  final node = children[index];
+                  return _PalettePickerCard(
+                    node: node,
+                    onTap: () => setState(() => _selectedPalette = node),
+                  );
+                },
+              ),
+            ),
+          ]);
         }
 
-        return GridView.builder(
+        return Column(children: [
+          notice,
+          Expanded(
+            child: GridView.builder(
           padding: const EdgeInsets.all(16),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
@@ -1967,7 +2013,9 @@ class _PatternPickerSheetState extends ConsumerState<_PatternPickerSheet> {
               },
             );
           },
-        );
+            ),
+          ),
+        ]);
       },
       loading: () => const Center(child: CircularProgressIndicator(color: Colors.cyan)),
       error: (e, _) => Center(

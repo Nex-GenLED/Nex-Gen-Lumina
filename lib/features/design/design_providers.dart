@@ -520,6 +520,36 @@ final renameDesignProvider =
   };
 });
 
+/// Persist an edited design IN PLACE.
+///
+/// The design MUST carry its original id — that is what routes
+/// `DesignService.saveDesign` to `updateDesign` rather than `createDesign`
+/// (design_service.dart:43-49). Passing an id-less design here would silently
+/// fork a second doc, so it is rejected instead.
+///
+/// Field preservation works the same way rename's does: `toFirestore()` is a
+/// full-fidelity round trip of the loaded model, and Firestore `.update()`
+/// merges by key, so `composed_pattern` survives an edit by a writer that
+/// knows nothing about it. Asserted by test.
+final updateDesignProvider =
+    Provider<Future<bool> Function(CustomDesign design)>((ref) {
+  return (design) async {
+    final user = ref.read(authStateProvider).valueOrNull;
+    if (user == null) return false;
+    if (design.id.isEmpty) {
+      debugPrint('updateDesign: refusing an id-less design (would create)');
+      return false;
+    }
+    try {
+      await ref.read(designServiceProvider).updateDesign(user.uid, design);
+      return true;
+    } catch (e) {
+      debugPrint('updateDesign: failed — $e');
+      return false;
+    }
+  };
+});
+
 /// Default name for a brand-new design: "Custom Design N", N = one more than
 /// the count of existing designs already matching that pattern.
 ///

@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/wled/selector_payload.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
@@ -83,12 +86,56 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   /// default) preserves the normal apply-on-tap behavior byte-for-byte.
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
+  /// DESIGN-EDIT mode. When non-null this tuner is editing a STORED design
+  /// rather than browsing a catalog palette: the seven selector providers are
+  /// seeded from the design, the three catalog exits are hidden, and the only
+  /// commit is "Save to design" → `updateDesign` with the original id.
+  ///
+  /// [paletteNode] is still required and still drives every existing build
+  /// path — `forDesign` synthesises one from the design so catalog mode's code
+  /// is byte-identical rather than threaded with null checks.
+  final CustomDesign? editingDesign;
+
+  bool get isDesignEdit => editingDesign != null;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
     this.teamSlug,
     this.onDesignSelected,
+    this.editingDesign,
   });
+
+  /// Opens the tuner on a stored effect design.
+  ///
+  /// The synthesised node carries the design's name and its colours, which is
+  /// all the existing build code reads off `paletteNode` (`_paletteColors`,
+  /// the header, the preview). No metadata is copied, so `_isBrightnessGradient`
+  /// is false and the gradient branch is unreachable in design-edit mode — a
+  /// stored design is never a brightness-gradient catalog node.
+  factory ColorwayEffectSelectorPage.forDesign({
+    Key? key,
+    required CustomDesign design,
+  }) {
+    final colors = <Color>[];
+    for (final ch in design.channels.where((c) => c.included)) {
+      for (final g in ch.colorGroups) {
+        colors.add(g.flutterColor);
+        if (colors.length >= 3) break;
+      }
+      if (colors.length >= 3) break;
+    }
+    return ColorwayEffectSelectorPage(
+      key: key,
+      paletteNode: LibraryNode(
+        id: 'design_${design.id}',
+        name: design.name,
+        nodeType: LibraryNodeType.palette,
+        themeColors: colors.isEmpty ? const <Color>[Colors.white] : colors,
+      ),
+      editingDesign: design,
+    );
+  }
 
   @override
   ConsumerState<ColorwayEffectSelectorPage> createState() =>
@@ -112,6 +159,14 @@ class _ColorwayEffectSelectorPageState
   /// preview uses (no config/preset write). Null once restored/consumed so we
   /// never restore twice.
   WledStateModel? _capturedLook;
+
+  /// DESIGN-EDIT only. The seven selector providers as they were on entry.
+  ///
+  /// They are GLOBAL StateProviders shared with catalog browsing, so seeding
+  /// them from a design would otherwise leak that design's settings into the
+  /// next catalog palette the user opens. Restored on cancel and on save.
+  SelectorState? _providerSnapshot;
+  bool _snapshotRestored = false;
 
   // ── Restore cache (selection mode) ──────────────────────────────────────
   // The CANCEL exit runs in [dispose], where flutter_riverpod forbids `ref`.
@@ -155,7 +210,20 @@ class _ColorwayEffectSelectorPageState
         if (presets[pi].id == suffix) { initPreset = pi; break; }
       }
     }
+    // DESIGN-EDIT: snapshot the shared providers BEFORE anything overwrites
+    // them, so cancel can put them back for the next catalog visit.
+    if (widget.isDesignEdit) {
+      _providerSnapshot = _readSelectorState();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (widget.isDesignEdit) {
+        // Seeding only SETS providers — it deliberately does not call
+        // _sendToWled(), so opening the editor does not touch the house. The
+        // house changes when the user moves a control (live preview) or
+        // commits, exactly as in catalog mode.
+        _seedFromDesign(widget.editingDesign!);
+        return;
+      }
       ref.read(selectorEffectIdProvider.notifier).state = 0;
       ref.read(selectorSpeedProvider.notifier).state = getSpeedProfile(0).rawDefault;
       ref.read(selectorIntensityProvider.notifier).state = 128;
@@ -166,6 +234,115 @@ class _ColorwayEffectSelectorPageState
       ref.read(selectorMotionTypeProvider.notifier).state = null;
       ref.read(selectorColorBehaviorProvider.notifier).state = null;
     });
+  }
+
+  /// The seven selector providers, read into one value.
+  SelectorState _readSelectorState() => SelectorState(
+        effectId: ref.read(selectorEffectIdProvider),
+        speed: ref.read(selectorSpeedProvider),
+        intensity: ref.read(selectorIntensityProvider),
+        grouping: ref.read(selectorColorGroupProvider),
+        spacing: ref.read(selectorSpacingProvider),
+        colors: _paletteColsRgbw(),
+        brightness: widget.editingDesign?.brightness ?? 255,
+      );
+
+  /// Write a [SelectorState] into the seven providers. Never pushes to the
+  /// controller — see the note at the seed call site.
+  void _writeSelectorState(SelectorState s) {
+    ref.read(selectorEffectIdProvider.notifier).state = s.effectId;
+    ref.read(selectorSpeedProvider.notifier).state = s.speed;
+    ref.read(selectorIntensityProvider.notifier).state = s.intensity;
+    ref.read(selectorColorGroupProvider.notifier).state = s.grouping;
+    ref.read(selectorSpacingProvider.notifier).state = s.spacing;
+    // Gradient-only inputs: reset rather than derived. A stored design is
+    // never a brightness gradient (see `forDesign`), so leaving a previous
+    // palette's values in place would be stale state, not preserved state.
+    ref.read(selectorGradientPresetProvider.notifier).state = 0;
+    ref.read(selectorBreathingProvider.notifier).state = false;
+    ref.read(selectorMotionTypeProvider.notifier).state = null;
+    ref.read(selectorColorBehaviorProvider.notifier).state = null;
+  }
+
+  /// Seed from the design's OWN channel fields rather than from
+  /// `design.toWledPayload()`.
+  ///
+  /// Both describe the same design, but `toWledPayload` substitutes fx 83 for
+  /// a multi-colour Solid (design_models.dart:246-249). Seeding through it
+  /// would show fx 83 in the picker and then WRITE 83 back on save, silently
+  /// rewriting a stored `fx: 0`. The channel is the stored truth; the payload
+  /// is a rendering of it.
+  void _seedFromDesign(CustomDesign design) {
+    final ch = design.channels.where((c) => c.included).firstOrNull;
+    _writeSelectorState(SelectorState(
+      effectId: ch?.effectId ?? 0,
+      speed: ch?.speed ?? 128,
+      intensity: ch?.intensity ?? 128,
+      colors: _paletteColsRgbw(),
+      brightness: design.brightness,
+    ));
+  }
+
+  /// Restore the shared providers to their pre-entry values. Idempotent.
+  ///
+  /// NOTE ON SCOPE: this restores APP state only. It deliberately does not
+  /// re-push the pre-edit look to the controller, unlike selection mode's
+  /// `_restoreCapturedLook`. The house keeps whatever the live preview last
+  /// showed until the user deliberately applies something. That asymmetry is
+  /// intentional and is called out in audit/DESIGN_CARD_P4.md — aligning the
+  /// two is a one-line change if the preview-should-be-undone reading wins.
+  void _restoreProviderSnapshot() {
+    final snap = _providerSnapshot;
+    if (snap == null || _snapshotRestored) return;
+    _snapshotRestored = true;
+    _writeSelectorState(snap);
+  }
+
+  /// The palette's colours as RGBW `col` entries — the same derivation the
+  /// preview and commit paths use.
+  List<List<int>> _paletteColsRgbw() {
+    final cols = _paletteColors
+        .take(3)
+        .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(),
+            (c.b * 255).round(), forceZeroWhite: true))
+        .toList();
+    if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
+    return cols;
+  }
+
+  /// FOURTH EXIT — design-edit only. Writes the tuner's current state back to
+  /// the design it was opened on, through the same `updateDesign` every other
+  /// design writer uses, carrying the ORIGINAL id so `saveDesign` routes to
+  /// update and never to create.
+  ///
+  /// Only fx / speed / intensity / brightness are written. Colours are not:
+  /// the tuner has no colour editor, it renders whatever the node supplies.
+  /// `grp` / `spc` are not written either — see the report; `ChannelDesign`
+  /// has no field for them.
+  Future<void> _saveToDesign() async {
+    final design = widget.editingDesign;
+    if (design == null) return;
+    final state = _readSelectorState();
+    final updated = design.copyWith(
+      channels: [
+        for (final ch in design.channels)
+          ch.included
+              ? ch.copyWith(
+                  effectId: state.effectId,
+                  speed: state.speed,
+                  intensity: state.intensity,
+                )
+              : ch,
+      ],
+      updatedAt: DateTime.now(),
+    );
+    final ok = await ref.read(updateDesignProvider)(updated);
+    _restoreProviderSnapshot();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok ? 'Saved "${design.name}"' : 'Save failed'),
+    ));
+    if (ok) Navigator.of(context).maybePop(true);
   }
 
   @override
@@ -180,6 +357,11 @@ class _ColorwayEffectSelectorPageState
     if (_capturedLook != null) {
       _restoreCapturedLook();
     }
+    // DESIGN-EDIT cancel: put the shared selector providers back. Safe from
+    // dispose because it only writes to Riverpod-owned notifiers, which
+    // outlive this widget — the same reasoning LibraryBrowserScreen.dispose
+    // uses for the mood filter.
+    _restoreProviderSnapshot();
     super.dispose();
   }
 
@@ -340,27 +522,18 @@ class _ColorwayEffectSelectorPageState
         speed = ref.read(selectorSpeedProvider);
       }
 
-      var payload = <String, dynamic>{
-        'on': true,
-        'bri': 255,
-        'seg': [
-          {
-            'fx': fxId,
-            'sx': speed,
-            'ix': ref.read(selectorIntensityProvider),
-            // Palette by effect color-behavior, NOT a blanket pal:5 — palette-
-            // driven effects (Rainbow, Colorwaves, Aurora, Plasma…) sweep a
-            // gradient of the USER's colors (pal:4); col-based effects keep
-            // discrete user colors ("Colors Only", pal:5). Single source of
-            // truth in WledEffectsCatalog; also enforced at the apply chokepoint
-            // (normalizeWledPayload) for stored/legacy payloads.
-            'pal': WledEffectsCatalog.paletteForEffect(fxId),
-            'grp': colorGroup,
-            'spc': spacing,
-            'col': cols,
-          }
-        ]
-      };
+      // ONE builder for every exit (selector_payload.dart). `pal` is derived
+      // from the effect's colour behaviour there, not hardcoded — palette-
+      // driven effects sweep a gradient of the USER's colours (pal 4);
+      // col-based effects keep them discrete (pal 5).
+      var payload = buildSelectorPayload(SelectorState(
+        effectId: fxId,
+        speed: speed,
+        intensity: ref.read(selectorIntensityProvider),
+        grouping: colorGroup,
+        spacing: spacing,
+        colors: cols,
+      ));
 
       // Apply channel filter so all targeted segments receive the change
       final channels = ref.read(effectiveChannelIdsProvider);
@@ -417,23 +590,16 @@ class _ColorwayEffectSelectorPageState
         cols = raw;
       }
 
-      var payload = <String, dynamic>{
-        'on': true,
-        'bri': 255,
-        'seg': [
-          {
-            'fx': fxId,
-            'sx': speed,
-            'ix': intensity,
-            // Palette by effect color-behavior (see _sendToWled). Keeps the
-            // payload persisted to Game Day saveDesign correct at rest.
-            'pal': WledEffectsCatalog.paletteForEffect(fxId),
-            'grp': colorGroup,
-            'spc': spacing,
-            'col': cols,
-          }
-        ]
-      };
+      // Same builder as the preview path and save-to-design, so the payload
+      // persisted to Game Day cannot drift from the one previewed.
+      var payload = buildSelectorPayload(SelectorState(
+        effectId: fxId,
+        speed: speed,
+        intensity: intensity,
+        grouping: colorGroup,
+        spacing: spacing,
+        colors: cols,
+      ));
 
       // SELECTION MODE (e.g. the schedule picker) — the SAVE exit. The live
       // preview HAS been applying to the lights on each adjustment; committing
@@ -669,14 +835,26 @@ class _ColorwayEffectSelectorPageState
                       ),
                     ),
                   ),
-                // Apply button — in SELECTION mode this commits the choice back
-                // to the caller (the schedule) and restores the pre-preview
-                // look rather than applying now, so it reads "Set design".
+                // Commit button. Three modes, one control:
+                //   • DESIGN-EDIT → the FOURTH exit, _saveToDesign, writing
+                //     back to the design this tuner was opened on. The three
+                //     catalog exits are unreachable here because _applyPattern
+                //     is not wired in this mode.
+                //   • SELECTION → commits the choice back to the caller (the
+                //     schedule) and restores the pre-preview look rather than
+                //     applying now, so it reads "Set design".
+                //   • CATALOG → applies to the lights.
                 ElevatedButton.icon(
-                  onPressed: _applyPattern,
-                  icon: const Icon(Icons.check, size: 18),
-                  label: Text(
-                      widget.onDesignSelected != null ? 'Set design' : 'Apply'),
+                  onPressed:
+                      widget.isDesignEdit ? _saveToDesign : _applyPattern,
+                  icon: Icon(
+                      widget.isDesignEdit ? Icons.save_outlined : Icons.check,
+                      size: 18),
+                  label: Text(widget.isDesignEdit
+                      ? 'Save to design'
+                      : widget.onDesignSelected != null
+                          ? 'Set design'
+                          : 'Apply'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: NexGenPalette.cyan,
                     foregroundColor: NexGenPalette.matteBlack,
@@ -708,7 +886,25 @@ class _ColorwayEffectSelectorPageState
         // ---- Standard effect controls ----
         if (!_isBrightnessGradient) ...[
           // Color layout selector (conditional)
-          if (showColorLayout) SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
+          // Hidden in DESIGN-EDIT: `grp`/`spc` have no field on ChannelDesign,
+          // so a change here could not be saved and `toWledPayload` would
+          // re-assert the #88 defaults on the next apply. Offering a control
+          // whose value is silently discarded is worse than not offering it.
+          // See audit/DESIGN_CARD_P4.md for the model gap this reflects.
+          if (showColorLayout && !widget.isDesignEdit)
+            SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
+          if (widget.isDesignEdit)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Text(
+                  'Editing a saved design: effect, speed and intensity are '
+                  'saved back. Colours and pixel layout are not editable here.',
+                  style: TextStyle(
+                      color: NexGenPalette.textMedium, fontSize: 11),
+                ),
+              ),
+            ),
 
           // Speed slider
           SliverToBoxAdapter(
