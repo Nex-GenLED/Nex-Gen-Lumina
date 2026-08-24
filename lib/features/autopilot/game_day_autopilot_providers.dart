@@ -28,6 +28,7 @@ import '../schedule/calendar_providers.dart';
 import '../schedule/schedule_priority_resolver.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
+import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
 import '../sports_alerts/services/sports_alerts_lazy_migrator.dart';
@@ -752,6 +753,40 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         .update({
       'score_celebration_enabled': enabled,
       'live_scoring_enabled': enabled,
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
+  /// Set how sensitive score alerts are for a team.
+  ///
+  /// `alert_sensitivity` is real, consumed behavior —
+  /// `ScoreMonitorService._filterBySensitivity` gates which events fire a
+  /// celebration. It used to be configurable only from the retired Sports
+  /// Alerts screen; this is its replacement writer, so folding that screen into
+  /// the team card loses no configurability.
+  ///
+  /// `update` (not `set(merge)`), matching [setLiveScoring]: this is a control
+  /// on an existing card, so a missing doc should fail loudly rather than mint
+  /// a partial config.
+  Future<void> setAlertSensitivity({
+    required String teamSlug,
+    required AlertSensitivity sensitivity,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to change alert sensitivity.');
+    }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug)
+        .update({
+      'alert_sensitivity': sensitivity.toJson(),
       'updated_at': Timestamp.fromDate(DateTime.now()),
     });
   }

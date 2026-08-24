@@ -381,12 +381,12 @@ Future<List<ScoreAlertConfig>> _loadConfigs() async {
   }
 }
 
-/// Save configs to SharedPreferences (called from UI layer).
-Future<void> saveAlertConfigs(List<ScoreAlertConfig> configs) async {
-  final prefs = await SharedPreferences.getInstance();
-  final encoded = configs.map((c) => jsonEncode(c.toJson())).toList();
-  await prefs.setStringList(_kConfigsKey, encoded);
-}
+// NOTE: there is deliberately no `saveAlertConfigs` any more. The retired
+// prefs store is now READ-ONLY, and read by exactly two callers: the migrator,
+// which drains it into Game Day, and the poll loop below, whose remaining
+// legacy entries are gated by resolveMonitoring's orphan safety check. Nothing
+// writes it — every add now goes to the `game_day_autopilot` doc, which is what
+// keeps the two surfaces from drifting apart again.
 
 /// Determine the optimal polling interval based on current game states.
 Future<_PollingInterval> _resolvePollingInterval(

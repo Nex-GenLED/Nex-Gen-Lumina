@@ -21,7 +21,6 @@ import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
-import 'package:nexgen_command/features/sports_alerts/providers/sports_alert_providers.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -81,7 +80,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const SizedBox(height: 16),
           const _VoiceAssistantsCard(),
           const SizedBox(height: 16),
-          const _SportsAlertsCard(),
           const SizedBox(height: 16),
           const _SunriseOffCard(),
           const SizedBox(height: 16),
@@ -899,47 +897,6 @@ class _VoiceAssistantsCard extends StatelessWidget {
         ),
       ),
       onTap: () => context.push(AppRoutes.voiceAssistants),
-    );
-  }
-}
-
-class _SportsAlertsCard extends ConsumerWidget {
-  const _SportsAlertsCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isActive = ref.watch(sportsAlertActiveProvider);
-
-    return PremiumIconCard(
-      icon: Icons.sports_football,
-      title: 'Sports Alerts',
-      subtitle: 'Light shows when your team scores',
-      accentColor: const Color(0xFFFF6B00),
-      iconBackgroundGradient: const LinearGradient(
-        colors: [Color(0xFFFF6B00), Color(0xFFFF9800)],
-      ),
-      trailing: isActive
-          ? Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFF4CAF50),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF4CAF50).withValues(alpha: 0.5),
-                    blurRadius: 6,
-                  ),
-                ],
-              ),
-            )
-          : null,
-      // Use the system-shell child route so the back stack lives inside
-      // the System branch's navigator. Raw Navigator.push left the screen
-      // unreachable-to-back-out-of when the user switched bottom-nav
-      // tabs and returned. context.push() with a proper route also pairs
-      // with the BackButton added to SportsAlertsScreen's GlassAppBar.
-      onTap: () => context.push(AppRoutes.sportsAlerts),
     );
   }
 }
