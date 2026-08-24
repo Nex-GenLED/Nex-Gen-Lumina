@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_service.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
@@ -442,21 +443,94 @@ String _colorToName(List<int> color) {
   return 'custom';
 }
 
-/// Delete a design from Firestore
+/// Delete a design from Firestore, BY ID.
+///
+/// Delegates to [deleteDesignEntryPointProvider] — the single call site of
+/// `DesignService.deleteDesign` — so this by-id convenience and the
+/// UI confirm-flow cannot drift apart (audit/DESIGN_CARD_P2.md §2, A2).
+/// Resolves the id against the live designs stream because the entry point
+/// needs the whole doc to offer undo; an id that is not in the stream is
+/// already gone, which is reported as success.
 final deleteDesignProvider = Provider<Future<bool> Function(String designId)>((ref) {
   return (designId) async {
+    final designs =
+        ref.read(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+    CustomDesign? match;
+    for (final d in designs) {
+      if (d.id == designId) {
+        match = d;
+        break;
+      }
+    }
+    if (match == null) return true; // nothing to delete
+    return await ref.read(deleteDesignEntryPointProvider)(match) != null;
+  };
+});
+
+/// One-shot fetch of a single design, for surfaces that open by id rather than
+/// by list position (the `design_{id}` detail route). Falls back to the live
+/// stream when the server read returns nothing, so a design created moments
+/// ago on this device resolves before the server round-trip lands.
+///
+/// Wraps `DesignService.getDesign`, which had zero callers before this change
+/// (audit/MY_DESIGNS_AUDIT.md §3.3).
+final designByIdProvider =
+    FutureProvider.family<CustomDesign?, String>((ref, designId) async {
+  final user = ref.watch(authStateProvider).valueOrNull;
+  if (user == null) return null;
+  final fromServer =
+      await ref.read(designServiceProvider).getDesign(user.uid, designId);
+  if (fromServer != null) return fromServer;
+  final designs =
+      ref.watch(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+  for (final d in designs) {
+    if (d.id == designId) return d;
+  }
+  return null;
+});
+
+/// Rename a saved design.
+///
+/// Writes through the existing `DesignService.updateDesign`, passing the
+/// design EXACTLY as loaded with only `name` swapped. Two independent reasons
+/// nothing else is lost:
+///   1. `CustomDesign.fromFirestoreData` → `toFirestore()` is a full-fidelity
+///      round trip, so every stored key (including the jsonEncoded
+///      `composed_pattern`) is re-emitted with its original value.
+///   2. Firestore `.update()` merges BY KEY — a key `toFirestore()` omits
+///      (e.g. `composed_pattern` on a design that never had one) is left
+///      untouched rather than deleted.
+/// See audit/DESIGN_CARD_P2.md §2 (A3).
+final renameDesignProvider =
+    Provider<Future<bool> Function(CustomDesign design, String newName)>((ref) {
+  return (design, newName) async {
     final user = ref.read(authStateProvider).valueOrNull;
     if (user == null) return false;
-
-    final service = ref.read(designServiceProvider);
+    final trimmed = newName.trim();
+    if (trimmed.isEmpty || trimmed == design.name) return false;
     try {
-      await service.deleteDesign(user.uid, designId);
+      await ref
+          .read(designServiceProvider)
+          .updateDesign(user.uid, design.copyWith(name: trimmed));
       return true;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('renameDesign: failed — $e');
       return false;
     }
   };
 });
+
+/// Default name for a brand-new design: "Custom Design N", N = one more than
+/// the count of existing designs already matching that pattern.
+///
+/// Replaces the hardcoded `name: 'Custom Design'` every manual-editor save
+/// used to write, which made every per-pixel design in the list identical
+/// (audit/MY_DESIGNS_AUDIT.md §6.1).
+String nextCustomDesignName(List<CustomDesign> existing) {
+  final re = RegExp(r'^Custom Design(?:\s+\d+)?$');
+  final count = existing.where((d) => re.hasMatch(d.name.trim())).length;
+  return 'Custom Design ${count + 1}';
+}
 
 /// Save the current WLED state as a new CustomDesign.
 /// Used by the Now Playing bar's tap-to-save flow for unsaved custom configs.

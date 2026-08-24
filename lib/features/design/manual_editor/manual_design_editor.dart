@@ -234,9 +234,58 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
     }
   }
 
+  /// Prompts for a name on a NEW design. Defaults to "Custom Design N"
+  /// (N = one more than the count already matching that pattern) instead of
+  /// the old hardcoded 'Custom Design', which made every per-pixel design in
+  /// My Designs share one name (audit/MY_DESIGNS_AUDIT.md §6.1).
+  Future<String?> _promptForName() async {
+    final existing =
+        ref.read(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+    final controller =
+        TextEditingController(text: nextCustomDesignName(existing));
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Name This Design'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(controller.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _save() async {
     final uid = ref.read(effectiveUserUidProvider);
     if (uid == null) return;
+
+    // EDIT vs NEW. When the editor was opened on a stored design, save must
+    // UPDATE THAT DOC — carrying its id forward is what routes
+    // `DesignService.saveDesign` to `updateDesign` rather than `createDesign`
+    // (design_service.dart:43-49), so editing never forks a second copy.
+    final existing = widget.initialDesign;
+    final String name;
+    if (existing != null) {
+      name = existing.name; // an edit keeps the name; Rename owns changing it
+    } else {
+      final chosen = await _promptForName();
+      if (chosen == null) return; // cancelled — do not write
+      final trimmed = chosen.trim();
+      if (trimmed.isEmpty) return;
+      name = trimmed;
+    }
+    if (!mounted) return;
+
     setState(() => _busy = true);
     try {
       final groups = _doc.toLedColorGroups(); // full coverage → self-contained
@@ -249,18 +298,30 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
             ledCount: _doc.channelLength(e.key),
           ),
       ];
-      final design = CustomDesign(
-        id: '',
-        name: 'Custom Design',
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-        ownerId: uid,
-        channels: channels,
-      );
+      // copyWith on the loaded doc for an edit: every field the editor does
+      // not own (tags, description, composedPattern, roofline/segment
+      // metadata) round-trips untouched.
+      final design = existing != null
+          ? existing.copyWith(
+              name: name,
+              channels: channels,
+              updatedAt: DateTime.now(),
+            )
+          : CustomDesign(
+              id: '',
+              name: name,
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+              ownerId: uid,
+              channels: channels,
+            );
       await ref.read(designServiceProvider).saveDesign(uid, design);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Saved to My Designs'), backgroundColor: NexGenPalette.cyan));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(existing != null
+                ? 'Updated "$name"'
+                : 'Saved "$name" to My Designs'),
+            backgroundColor: NexGenPalette.cyan));
       }
     } finally {
       if (mounted) setState(() => _busy = false);

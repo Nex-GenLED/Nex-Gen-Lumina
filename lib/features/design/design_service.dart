@@ -60,6 +60,25 @@ class DesignService {
     }
   }
 
+  /// Re-creates a design AT ITS ORIGINAL ID.
+  ///
+  /// Undo-after-delete uses this instead of [createDesign] so the restored doc
+  /// keeps the id every by-id reference already points at — notably the
+  /// `design_{id}` detail route. `.doc(id).set()` (not `.add()`) is what makes
+  /// the id stable; rules permit it as a plain owner create
+  /// (firestore.rules:963-968).
+  Future<void> restoreDesign(String userId, CustomDesign design) async {
+    try {
+      await _designsRef(userId)
+          .doc(design.id)
+          .set(UserService.sanitizeForFirestore(design.toFirestore()));
+      debugPrint('Restored design: ${design.id}');
+    } catch (e) {
+      debugPrint('Error restoring design: $e');
+      rethrow;
+    }
+  }
+
   /// Gets a single design by ID
   Future<CustomDesign?> getDesign(String userId, String designId) async {
     try {
