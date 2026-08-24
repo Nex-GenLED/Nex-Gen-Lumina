@@ -118,9 +118,18 @@ final calendarLeaseScheduleSlotDemandProvider = Provider<int>((ref) {
 
 /// All CalendarEntries the sweep should consider for newly-imminent
 /// promotion. Indirected for testability.
+///
+/// ⚠️ **STILL ONE ENTRY PER DATE, DELIBERATELY** (Scheduling V3 A1).
+/// `.primaries` is not an oversight here — the lease registry is KEYED BY
+/// dateKey (`_activeLeases[entry.dateKey]`), so handing it two entries for one
+/// night would make them fight over a single slot: each sweep would arm one,
+/// overwrite it with the other, and report success both times. Leasing every
+/// entry on a date is a FIRING-LAYER change (a lease per (dateKey, entryId),
+/// and more WLED slots than the 8-slot pool has — audit §7.4). This prompt
+/// changes the display only, so the firing behaviour is preserved exactly.
 final calendarLeaseEntriesProvider = Provider<List<CalendarEntry>>((ref) {
-  final map = ref.watch(calendarScheduleProvider);
-  return map.values.toList(growable: false);
+  final set = ref.watch(calendarScheduleProvider);
+  return set.primaries.values.toList(growable: false);
 });
 
 /// All current ScheduleItems — used by the sweep to detect items

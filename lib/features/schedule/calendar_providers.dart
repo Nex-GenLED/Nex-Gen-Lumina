@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
@@ -57,8 +58,7 @@ class DatedOverwrite {
   });
 }
 
-class CalendarScheduleNotifier
-    extends StateNotifier<Map<String, CalendarEntry>> {
+class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
   final Ref _ref;
   final String? _userId;
 
@@ -68,7 +68,7 @@ class CalendarScheduleNotifier
   }
 
   // Seed with well-known holiday presets so the calendar is never empty.
-  static Map<String, CalendarEntry> _buildHolidayDefaults() {
+  static CalendarEntrySet _buildHolidayDefaults() {
     final m = <String, CalendarEntry>{};
     void add(
       String dateKey,
@@ -79,6 +79,7 @@ class CalendarScheduleNotifier
       String offTime = '23:30',
     }) {
       m[dateKey] = CalendarEntry(
+        entryId: CalendarEntryId.holiday,
         dateKey: dateKey,
         patternName: pattern,
         color: color,
@@ -105,7 +106,7 @@ class CalendarScheduleNotifier
     add('2026-12-31', "New Year's Eve",       const Color(0xFF9B6DFF), onTime: '18:00', offTime: '02:00');
     add('2027-01-01', "New Year's Day",       const Color(0xFF9B6DFF));
 
-    return m;
+    return CalendarEntrySet.fromLegacyMap(m);
   }
 
   /// Load user-saved entries from Firestore and merge on top of holiday
@@ -117,9 +118,12 @@ class CalendarScheduleNotifier
       final userService = _ref.read(userServiceProvider);
       final saved = await userService.loadCalendarEntries(uid);
       if (saved.isNotEmpty) {
-        final merged = Map<String, CalendarEntry>.from(state);
-        merged.addAll(saved);
-        state = merged;
+        // Saved entries merge ON TOP of the holiday defaults by
+        // (dateKey, entryId). A saved entry that shares a holiday's date now
+        // COEXISTS with it instead of replacing it — that is the A1 change. A
+        // saved row carrying `entryId: 'holiday'` still overwrites the default,
+        // which is what an edited holiday should do.
+        state = state.upsertAll(saved.allEntries);
       }
     } catch (e) {
       debugPrint('❌ Failed to load calendar entries: $e');
@@ -298,11 +302,13 @@ class CalendarScheduleNotifier
       }
     }
 
-    // Optimistic local update
-    final next = Map<String, CalendarEntry>.from(state);
-    for (final e in entries) {
-      next[e.dateKey] = e;
-    }
+    // Optimistic local update.
+    //
+    // A1: upsert by (dateKey, entryId) instead of `next[e.dateKey] = e`. Two
+    // entries on one night now coexist; re-writing the SAME entryId still
+    // replaces in place, which is what keeps the weekly Game Day refresh
+    // idempotent rather than appending a duplicate every run.
+    final next = state.upsertAll(entries);
     state = next;
 
     // Persist user entries to Firestore
@@ -310,9 +316,8 @@ class CalendarScheduleNotifier
     if (uid == null) return false;
     try {
       final userService = _ref.read(userServiceProvider);
-      final toSave = Map<String, CalendarEntry>.fromEntries(
-        next.entries.where((e) => e.value.type != CalendarEntryType.holiday),
-      );
+      final toSave =
+          next.where((e) => e.type != CalendarEntryType.holiday);
       final ok = await userService.saveCalendarEntries(uid, toSave);
       if (!ok) {
         debugPrint('❌ applyEntries: Firestore write failed');
@@ -522,8 +527,10 @@ class CalendarScheduleNotifier
 
   /// Remove a specific date override, reverting it to the autopilot/recurring
   /// fallback.  Persists to Firestore.
+  /// Remove EVERY entry on [dateKey] — the "Delete This Day" affordance.
+  /// [removeEntryById] removes a single row.
   Future<bool> removeEntry(String dateKey) async {
-    final next = Map<String, CalendarEntry>.from(state)..remove(dateKey);
+    final next = state.removeDate(dateKey);
     state = next;
 
     // Item #61 Workstream B — release any active lease for this date.
@@ -542,9 +549,8 @@ class CalendarScheduleNotifier
     if (uid == null) return false;
     try {
       final userService = _ref.read(userServiceProvider);
-      final toSave = Map<String, CalendarEntry>.fromEntries(
-        next.entries.where((e) => e.value.type != CalendarEntryType.holiday),
-      );
+      final toSave =
+          next.where((e) => e.type != CalendarEntryType.holiday);
       final ok = await userService.saveCalendarEntries(uid, toSave);
       if (!ok) {
         debugPrint('❌ removeEntry: Firestore write failed');
@@ -556,11 +562,53 @@ class CalendarScheduleNotifier
     }
   }
 
+  /// The PRIMARY entry for a date — the pre-V3 single-entry view.
   CalendarEntry? entryFor(String dateKey) => state[dateKey];
+
+  /// Every entry on a date, in write order (A1). This is what the timeline and
+  /// the day surfaces read.
+  List<CalendarEntry> entriesFor(String dateKey) => state.forDate(dateKey);
+
+  /// Remove exactly one row, leaving the rest of the date intact.
+  ///
+  /// A date whose last non-holiday row is removed still releases its lease:
+  /// the lease manager is keyed by dateKey, so the release runs only when
+  /// nothing armable remains for that date.
+  Future<bool> removeEntryById(String dateKey, String entryId) async {
+    final next = state.removeEntryById(dateKey, entryId);
+    if (identical(next, state)) return true; // nothing matched
+    state = next;
+
+    final stillArmable = next
+        .forDate(dateKey)
+        .any((e) => e.type != CalendarEntryType.holiday);
+    if (!stillArmable) {
+      try {
+        await _ref
+            .read(calendarEntryLeaseManagerProvider)
+            .handleEntryDeleted(dateKey);
+      } catch (e) {
+        debugPrint('CalendarLease: handleEntryDeleted failed: $e');
+      }
+    }
+
+    final uid = _userId;
+    if (uid == null) return false;
+    try {
+      final userService = _ref.read(userServiceProvider);
+      final toSave = next.where((e) => e.type != CalendarEntryType.holiday);
+      final ok = await userService.saveCalendarEntries(uid, toSave);
+      if (!ok) debugPrint('❌ removeEntryById: Firestore write failed');
+      return ok;
+    } catch (e) {
+      debugPrint('❌ removeEntryById: $e');
+      return false;
+    }
+  }
 }
 
 final calendarScheduleProvider =
-    StateNotifierProvider<CalendarScheduleNotifier, Map<String, CalendarEntry>>(
+    StateNotifierProvider<CalendarScheduleNotifier, CalendarEntrySet>(
   (ref) {
     final userId = ref.watch(authStateProvider).maybeWhen(
           data: (u) => u?.uid,

@@ -100,9 +100,13 @@ final gameDayAutopilotServiceProvider =
       // strictly lower-priority overwrites are kept. See
       // SchedulePriorityResolver for the 5-tier hierarchy and the
       // Phase 2 segment-composition handoff.
+      // A1: the resolver's 5-tier hierarchy is defined over one entry per
+      // date (schedule_priority_resolver.dart). `.primaries` preserves that
+      // exactly. Letting a Game Day coexist with a lower-priority entry on
+      // the same night is a precedence change, and precedence is Prompt 4.
       final filtered = SchedulePriorityResolver.filterIncoming(
         incoming: entries,
-        existing: existing,
+        existing: existing.primaries,
       );
       if (filtered.dropped.isNotEmpty) {
         debugPrint('[GameDayAutopilot] Priority resolver dropped '
@@ -936,23 +940,29 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day);
 
-      final keysToRemove = <String>[];
-      entries.forEach((dateKey, entry) {
+      // A1: remove the Game Day ROWS, not the whole night.
+      //
+      // Pre-V3 a date held one entry, so `removeEntry(dateKey)` and "remove
+      // the Game Day entry" were the same operation. They no longer are: a
+      // user's own entry can now share the night, and wiping the date would
+      // destroy it on every regeneration. Targeted by (dateKey, entryId).
+      final toRemove = <({String dateKey, String entryId})>[];
+      for (final entry in entries.allEntries) {
         if (shouldClearGameDayEntry(
-          dateKey: dateKey,
+          dateKey: entry.dateKey,
           entry: entry,
           todayStart: todayStart,
         )) {
-          keysToRemove.add(dateKey);
+          toRemove.add((dateKey: entry.dateKey, entryId: entry.entryId));
         }
-      });
-
-      for (final key in keysToRemove) {
-        await notifier.removeEntry(key);
       }
 
-      if (keysToRemove.isNotEmpty) {
-        debugPrint('[GameDayAutopilot] Cleared ${keysToRemove.length} '
+      for (final r in toRemove) {
+        await notifier.removeEntryById(r.dateKey, r.entryId);
+      }
+
+      if (toRemove.isNotEmpty) {
+        debugPrint('[GameDayAutopilot] Cleared ${toRemove.length} '
             'future autopilot calendar entries before regeneration');
       }
     } catch (e) {

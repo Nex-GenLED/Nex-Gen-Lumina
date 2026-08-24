@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -419,12 +420,14 @@ void main() {
 class _StubCalendarScheduleNotifier extends CalendarScheduleNotifier {
   _StubCalendarScheduleNotifier(Ref ref, Map<String, CalendarEntry> seed)
       : super(ref, null) {
-    state = seed;
+    // V3 A1: state is a CalendarEntrySet. The seed stays a plain map so the
+    // test's own fixtures are unchanged.
+    state = CalendarEntrySet.fromLegacyMap(seed);
   }
 
   @override
   Future<bool> removeEntry(String dateKey) async {
-    state = {...state}..remove(dateKey);
+    state = state.removeDate(dateKey);
     return true;
   }
 }

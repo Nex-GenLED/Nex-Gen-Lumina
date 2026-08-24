@@ -22,6 +22,7 @@ import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_store_sync.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 class SubcollectionScheduleRepository implements ScheduleRepository {
@@ -45,17 +46,63 @@ class SubcollectionScheduleRepository implements ScheduleRepository {
   CollectionReference<Map<String, dynamic>> _col(String userId) =>
       _firestore.collection('users').doc(userId).collection('schedules');
 
+  /// D1 — the durable channel scope for THIS backend lives on the USER doc,
+  /// not on the per-schedule doc.
+  ///
+  /// ⚠️ THE OBVIOUS PLACE DOES NOT WORK. A sidecar field on the schedule's own
+  /// document would be wiped by the very thing it defends against: an old build
+  /// writes a schedule with `.set(item.toJson())`, and `set` without merge
+  /// REPLACES the whole document, taking any sibling field with it. That is the
+  /// opposite of the array store, where the sidecar survives because
+  /// `update({'schedules': …})` names one field and leaves the rest alone.
+  ///
+  /// So both backends share ONE durable location: `users/{uid}.schedule_scope`.
+  /// It costs a user-doc read per fetch, which is why it is a single read here
+  /// rather than a per-document join.
+  Future<Map<String, dynamic>?> _scopeSidecar(String userId) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      final raw = doc.data()?[kScheduleScopeField];
+      return raw is Map ? Map<String, dynamic>.from(raw) : null;
+    } catch (e) {
+      // A sidecar read failure must never cost the user their schedules; the
+      // items still load, just without recovered scope.
+      debugPrint('⚠️ schedule scope sidecar read failed: $e');
+      return null;
+    }
+  }
+
+  static List<ScheduleItem> _applyScope(
+      List<ScheduleItem> items, Map<String, dynamic>? sidecar) {
+    if (sidecar == null || sidecar.isEmpty) return items;
+    return [
+      for (final i in items)
+        if (i.channels != null)
+          i
+        else
+          () {
+            final sc = decodeScopeEntry(sidecar, i.id);
+            return sc.isScoped
+                ? i.copyWith(channels: sc.channels, controllerId: sc.controllerId)
+                : i;
+          }(),
+    ];
+  }
+
+
   @override
   Stream<List<ScheduleItem>> streamSchedules(String userId) {
     // A-5-prime: ordered by the monotonic `sortKey` so this backend's read
     // order reproduces the legacy array's insertion order (documentId order
     // — the prior key — diverged from insertion order and changed which WLED
     // timers armed / which schedule won findCurrentSchedule ties).
-    return _col(userId)
-        .orderBy('sortKey')
-        .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => ScheduleItem.fromJson(d.data())).toList());
+    return _col(userId).orderBy('sortKey').snapshots().asyncMap((snap) async {
+      final items =
+          snap.docs.map((d) => ScheduleItem.fromJson(d.data())).toList();
+      // Only pay for the sidecar read when something actually lost its scope.
+      if (items.every((i) => i.channels != null)) return items;
+      return _applyScope(items, await _scopeSidecar(userId));
+    });
   }
 
   @override
@@ -63,7 +110,10 @@ class SubcollectionScheduleRepository implements ScheduleRepository {
     final snap = await _col(userId)
         .orderBy('sortKey')
         .get(const GetOptions(source: Source.server));
-    return snap.docs.map((d) => ScheduleItem.fromJson(d.data())).toList();
+    final items =
+        snap.docs.map((d) => ScheduleItem.fromJson(d.data())).toList();
+    if (items.every((i) => i.channels != null)) return items;
+    return _applyScope(items, await _scopeSidecar(userId));
   }
 
   @override
