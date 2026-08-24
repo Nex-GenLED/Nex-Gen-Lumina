@@ -30,6 +30,7 @@ import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
+import '../sports_alerts/services/sports_alerts_lazy_migrator.dart';
 import '../sports_alerts/services/team_registration_service.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
@@ -211,15 +212,33 @@ final gameDayAutopilotServiceProvider =
 // ---------------------------------------------------------------------------
 
 /// Stream of all GameDayAutopilotConfig documents for the current user.
+///
+/// Before the first read we run the one-time Sports Alerts adoption, so a user
+/// whose teams still live only in the retired `sports_alert_configs` prefs
+/// store sees them as Game Day teams rather than losing them when that surface
+/// goes away (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.2). Same shape as
+/// `userSchedulesStreamProvider` (schedule_providers.dart:57-73): migrate, then
+/// read. A migration failure is logged, never surfaced — we fall through and
+/// read the subcollection as-is, and the unstamped marker retries next launch.
 final gameDayAutopilotConfigsProvider =
-    StreamProvider<List<GameDayAutopilotConfig>>((ref) {
+    StreamProvider<List<GameDayAutopilotConfig>>((ref) async* {
   final user = ref.watch(authStateProvider).maybeWhen(
         data: (u) => u,
         orElse: () => null,
       );
-  if (user == null) return Stream.value(const []);
+  if (user == null) {
+    yield const [];
+    return;
+  }
 
-  return FirebaseFirestore.instance
+  try {
+    await ref.read(sportsAlertsLazyMigratorProvider).ensureMigrated(user.uid);
+  } catch (e) {
+    debugPrint('gameDayAutopilotConfigs: sports-alerts adoption failed — $e '
+        '(reading Game Day as-is)');
+  }
+
+  yield* FirebaseFirestore.instance
       .collection('users')
       .doc(user.uid)
       .collection('game_day_autopilot')
@@ -735,6 +754,41 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       'live_scoring_enabled': enabled,
       'updated_at': Timestamp.fromDate(DateTime.now()),
     });
+  }
+
+  /// Arm live scoring for a team that may not be on the user's Game Day list
+  /// yet, creating the team first if needed.
+  ///
+  /// [setLiveScoring] is a toggle on an EXISTING card and uses `update`, so it
+  /// throws for a team with no doc. This is the other entry point: "start
+  /// watching this team", used where the team is discovered rather than picked
+  /// — the post-apply Live Scoring prompt, and the Sports Alerts adoption.
+  ///
+  /// Autopilot stays OFF (`addTeam` writes `enabled:false`): arming alerts must
+  /// never hand the server planner a team the user never asked to have lit.
+  /// That is the same `enabled:false, liveScoringEnabled:true` shape
+  /// `migrationConfigsFor` produces (unified_monitoring.dart:141).
+  ///
+  /// Replaces the retired path that minted a SharedPreferences ScoreAlertConfig
+  /// — a store no Game Day read ever saw
+  /// (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.2, bridge 3).
+  Future<void> enableLiveScoringForTeam({required String teamSlug}) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to enable live scoring.');
+    }
+
+    // Idempotent: no-op for the subcollection when the doc already exists, and
+    // still ensures the profile arrays carry the team.
+    await ref.read(teamRegistrationServiceProvider).addTeam(
+          uid: user.uid,
+          teamSlug: teamSlug,
+        );
+
+    await setLiveScoring(teamSlug: teamSlug, enabled: true);
   }
 
   /// Persist the motion-style slider value (0.0 = static, 1.0 = fast).

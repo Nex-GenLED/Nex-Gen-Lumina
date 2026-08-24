@@ -352,6 +352,20 @@ FutureOr<bool> _onIosBackground(ServiceInstance service) async {
 // ---------------------------------------------------------------------------
 
 /// Load persisted [ScoreAlertConfig] list from SharedPreferences.
+///
+/// PUBLIC FOR MIGRATION ONLY. The retired Sports Alerts store is read exactly
+/// once more, by [SportsAlertsLazyMigrator], to adopt its contents into Game
+/// Day; nothing else should read it (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.2).
+Future<List<ScoreAlertConfig>> loadAlertConfigs() => _loadConfigs();
+
+/// Empty the retired store. Called by the migrator once its contents are safely
+/// in Firestore, so a later launch cannot resurrect an already-adopted team.
+Future<void> clearAlertConfigs() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove(_kConfigsKey);
+}
+
+/// Load persisted [ScoreAlertConfig] list from SharedPreferences.
 Future<List<ScoreAlertConfig>> _loadConfigs() async {
   try {
     final prefs = await SharedPreferences.getInstance();
