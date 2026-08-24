@@ -437,7 +437,13 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                                 style: TextStyle(color: Colors.white70)),
                           );
                         }
-                        return DesignDetailScreen(designId: designId);
+                        // embedded: this Scaffold already provides the app
+                        // bar (titled with the design name) and the
+                        // breadcrumb above. Without the flag the detail screen
+                        // rendered its OWN Scaffold + GlassAppBar underneath
+                        // ours — a second header carrying the same title.
+                        return DesignDetailScreen(
+                            designId: designId, embedded: true);
                       }
                       if (node != null && node.isPalette) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
