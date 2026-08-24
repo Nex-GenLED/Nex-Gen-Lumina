@@ -13,6 +13,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_editor.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/day_timeline.dart';
 import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
@@ -405,8 +406,13 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   calEntries: calEntries,
                   scheduleItems: schedules,
                   pendingEntries: {for (final c in pending?.changes ?? <CalendarEntry>[]) c.dateKey: c},
-                  onDayTap: (k) =>
-                      ref.read(selectedCalendarDateProvider.notifier).state = k,
+                  // B2: selection AND inspection on the SAME tap. The week
+                  // strip is a browsing control, so selection is kept (the day
+                  // hero below follows it); the sheet is additive.
+                  onDayTap: (k) {
+                    ref.read(selectedCalendarDateProvider.notifier).state = k;
+                    showDayDetailSheet(context, ref, k);
+                  },
                   onPrevWeek: () => _shiftWeek(-1),
                   onNextWeek: () => _shiftWeek(1),
                   onToday: _goToday,
@@ -422,8 +428,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                     selectedKey: selectedKey,
                     calEntries: calEntries,
                     pendingEntries: {for (final c in pending?.changes ?? <CalendarEntry>[]) c.dateKey: c},
-                    onDayTap: (k) =>
-                        ref.read(selectedCalendarDateProvider.notifier).state = k,
+                    onDayTap: (k) {
+                      ref.read(selectedCalendarDateProvider.notifier).state = k;
+                      showDayDetailSheet(context, ref, k);
+                    },
                     onPrev: () => _shiftCal(-1),
                     onNext: () => _shiftCal(1),
                     rangeLabel: _calLabel,
@@ -1254,8 +1262,13 @@ class _DayHeroCard extends ConsumerWidget {
 
 
     return GestureDetector(
-      onTap: (patternName != null || color != null)
-          ? () => _showScheduleDetailSheet(
+      // A multi-entry day opens the DAY sheet; a single-entry day goes straight
+      // to that entry's detail. Tapping a Game Day night must never land on a
+      // sheet that shows only the game.
+      onTap: day.count > 1
+          ? () => showDayDetailSheet(context, ref, dateKey)
+          : (patternName != null || color != null)
+          ? () => showScheduleDetailSheetForEntry(
                 context,
                 colors: stripColors,
                 effectType: effectType,
@@ -1689,7 +1702,171 @@ String _wledEffectName(int id) {
 }
 
 /// Bottom sheet showing full schedule detail for a card.
-void _showScheduleDetailSheet(
+/// Phase B2 — the DAY sheet: every schedule on a date, each one openable.
+///
+/// WHY NOT POINT A DAY TAP AT `showScheduleDetailSheetForEntry`. That sheet
+/// describes ONE entry — one pattern name, one colour strip, one on/off pair.
+/// Using it for a day would show the lead row and silently hide the rest, which
+/// is exactly the single-entry collapse A1 exists to remove. So a day tap opens
+/// the day's TIMELINE, and a row opens that row's detail (which now carries
+/// Edit and Delete).
+///
+/// The week strip keeps tap-to-select: this opens from the SAME tap, so
+/// selecting a day and seeing what is on it does not cost two gestures.
+void showDayDetailSheet(
+  BuildContext context,
+  WidgetRef ref,
+  String dateKey,
+) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (sheetCtx) => Consumer(builder: (ctx, ref, _) {
+      final timeline = ref.watch(dayTimelineProvider(dateKey));
+      final timeFormat = ref.watch(timeFormatPreferenceProvider);
+      final date = DateTime.tryParse(dateKey);
+
+      return Container(
+        padding:
+            const EdgeInsets.fromLTRB(20, 12, 20, 24 + kBottomNavBarPadding),
+        decoration: BoxDecoration(
+          color: NexGenPalette.matteBlack,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border.all(color: NexGenPalette.line),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Text(
+              date == null
+                  ? dateKey
+                  : '${_kDayFull[date.weekday % 7]}, '
+                      '${_kMonthShort[date.month]} ${date.day}',
+              style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                    color: NexGenPalette.textHigh,
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              timeline.isEmpty
+                  ? 'Nothing scheduled'
+                  : '${timeline.count} '
+                      '${timeline.count == 1 ? "schedule" : "schedules"}'
+                      '${timeline.hasConflict ? " - overlap detected" : ""}',
+              style: TextStyle(
+                fontSize: 12,
+                color: timeline.hasConflict
+                    ? NexGenPalette.amber
+                    : NexGenPalette.textMedium,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (timeline.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: TextButton.icon(
+                  style:
+                      TextButton.styleFrom(foregroundColor: NexGenPalette.cyan),
+                  icon: const Icon(Icons.add_alarm_rounded, size: 18),
+                  label: const Text('Add a schedule'),
+                  onPressed: () {
+                    Navigator.of(sheetCtx).pop();
+                    showScheduleEditor(context, ref);
+                  },
+                ),
+              )
+            else
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final e in timeline.entries)
+                        TimelineRowTile(
+                          entry: e,
+                          timeFormat: timeFormat,
+                          onTap: () {
+                            Navigator.of(sheetCtx).pop();
+                            showTimelineEntryDetail(context, ref, e, dateKey);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }),
+  );
+}
+
+/// Adapter: open the single-entry detail sheet for one timeline row.
+///
+/// Keeps the sheet's argument assembly in ONE place rather than letting each
+/// new caller re-derive strip colours and effect ids.
+void showTimelineEntryDetail(
+  BuildContext context,
+  WidgetRef ref,
+  TimelineEntry entry,
+  String dateKey,
+) {
+  final timeFormat = ref.read(timeFormatPreferenceProvider);
+  final dated = entry.dated;
+  final recurring = entry.recurring;
+
+  final payload = dated != null ? null : recurring?.wledPayload;
+  final colors = _extractStripColors(dated?.color, payload);
+  final effectId = _extractEffectId(payload);
+
+  showScheduleDetailSheetForEntry(
+    context,
+    colors: colors,
+    effectType:
+        effectId != null ? effectTypeFromWledId(effectId) : EffectType.solid,
+    speed: _extractNormalized(payload, 'sx'),
+    brightness: dated != null ? dated.brightness / 100.0 : 1.0,
+    patternName: entry.label,
+    effectName: effectId != null ? _wledEffectName(effectId) : entry.label,
+    onTime: entry.startsAt != null
+        ? formatTimelineTime(entry.startsAt, timeFormat: timeFormat)
+        : (recurring?.timeLabel ?? dated?.onTime),
+    // An open-ended row states its CONDITION here too — the detail sheet must
+    // not be the one surface still showing a fabricated clock end.
+    offTime: entry.isOpenEnded
+        ? (dated?.endConditionLabel(
+                formatTime: (d) =>
+                    formatTimelineTime(d, timeFormat: timeFormat)) ??
+            'open-ended')
+        : (entry.endsAt != null
+            ? formatTimelineTime(entry.endsAt, timeFormat: timeFormat)
+            : null),
+    brightnessPercent: dated?.brightness,
+    source: timelineSourceLabel(entry),
+    timeFormat: timeFormat,
+    ref: ref,
+    calEntry: dated,
+    recurringItem: recurring,
+    dateKey: dateKey,
+  );
+}
+
+void showScheduleDetailSheetForEntry(
   BuildContext context, {
   required List<Color> colors,
   required EffectType effectType,
@@ -1814,6 +1991,21 @@ void _showScheduleDetailSheet(
             const SizedBox(height: 16),
             Divider(color: NexGenPalette.line, height: 1),
             const SizedBox(height: 8),
+            // Phase B1 — THE EDIT AFFORDANCE.
+            //
+            // This sheet was read-only: four detail rows and a delete, with no
+            // route to any editor (audit/SCHEDULING_V3_AUDIT.md §6.2, F3-2).
+            // A dated entry had no reachable editor AT ALL — the only caller
+            // of showCalendarEntryEditor was a detail sheet that itself had
+            // zero call sites (F3-3), and which is deleted in this change.
+            // Both entry kinds now edit.
+            _EditEntryButton(
+              ref: ref,
+              calEntry: calEntry,
+              recurringItem: recurringItem,
+              sheetContext: ctx,
+            ),
+            const SizedBox(height: 4),
             _DeleteEntryButton(
               ref: ref,
               calEntry: calEntry,
@@ -1826,6 +2018,60 @@ void _showScheduleDetailSheet(
       ),
     ),
   );
+}
+
+/// Opens the right editor for whichever kind of entry this sheet is showing.
+///
+/// TWO MODELS, TWO EDITORS — deliberately not unified here. `showScheduleEditor`
+/// takes a `ScheduleItem` (recurrence, action type, pattern, audio-reactive);
+/// `showCalendarEntryEditor` takes a `CalendarEntry` (one date, times,
+/// brightness, and a this-game/all-games scope). They are not variants of one
+/// form, and merging them is a model change (audit blocker F3-3), not a button.
+class _EditEntryButton extends StatelessWidget {
+  final WidgetRef ref;
+  final CalendarEntry? calEntry;
+  final ScheduleItem? recurringItem;
+  final BuildContext sheetContext;
+
+  const _EditEntryButton({
+    required this.ref,
+    required this.calEntry,
+    required this.recurringItem,
+    required this.sheetContext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // calEntry takes precedence, matching _DeleteEntryButton: when a date has a
+    // dated entry, that is what this sheet is showing.
+    final isCalEntry = calEntry != null;
+    final label = isCalEntry ? 'Edit This Day' : 'Edit Recurring Schedule';
+
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: NexGenPalette.cyan,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+        icon: const Icon(Icons.edit_outlined, size: 18),
+        label: Text(label,
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        onPressed: () {
+          // Close the detail sheet first so the editor is not stacked behind
+          // it — both are modal bottom sheets.
+          Navigator.of(sheetContext).pop();
+          final entry = calEntry;
+          final item = recurringItem;
+          if (entry != null) {
+            showCalendarEntryEditor(context, ref, entry: entry);
+          } else if (item != null) {
+            showScheduleEditor(context, ref, editing: item);
+          }
+        },
+      ),
+    );
+  }
 }
 
 class _DeleteEntryButton extends StatelessWidget {

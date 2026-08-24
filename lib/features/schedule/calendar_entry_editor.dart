@@ -141,14 +141,23 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
           ),
           const SizedBox(height: 12),
 
-          // Off-time picker
-          _buildTimePicker(
-            icon: Icons.nightlight_round,
-            label: 'Off time',
-            value: _offTime,
-            color: NexGenPalette.violet,
-            onTap: () => _pickTime(isOn: false),
-          ),
+          // Off time — OR the end CONDITION, for an open-ended entry.
+          //
+          // Scheduling V3 B1. A Game Day entry has no clock end: the real end
+          // is an ESPN final, server-side. Offering an editable "Off time" for
+          // it would let the user set a value nothing reads — which is how the
+          // fabricated off-time came to be trusted in the first place. So an
+          // open-ended entry shows its condition read-only instead.
+          if (widget.entry.isOpenEnded)
+            _buildEndConditionRow()
+          else
+            _buildTimePicker(
+              icon: Icons.nightlight_round,
+              label: 'Off time',
+              value: _offTime,
+              color: NexGenPalette.violet,
+              onTap: () => _pickTime(isOn: false),
+            ),
           const SizedBox(height: 16),
 
           // Brightness slider
@@ -288,12 +297,79 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
     });
   }
 
-  Future<void> _onSave() async {
-    final edited = widget.entry.copyWith(
-      onTime: _onTime,
-      offTime: _offTime,
-      brightness: _brightness,
+  /// Read-only end display for an open-ended entry (V3 B1).
+  ///
+  /// Shows what actually ends the show, the display estimate, and — when one is
+  /// stored — the fail-safe cap. **`hardCapAt` is deliberately NOT editable.**
+  /// It is a client-side display value; under Policy B the authoritative cap
+  /// will be a server-side fire job written by the planner, so an editable
+  /// field here would be a control that changes nothing on the controller.
+  Widget _buildEndConditionRow() {
+    final entry = widget.entry;
+    final cap = entry.hardCapAt;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: NexGenPalette.violet.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: NexGenPalette.violet.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.nightlight_round, size: 18, color: NexGenPalette.violet),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Ends',
+                  style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  entry.endConditionLabel(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: NexGenPalette.textHigh,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  cap == null
+                      ? 'The game decides. The estimate is a guess, not a '
+                          'setting.'
+                      : 'The game decides. If it never reports final, the '
+                          'show stops by '
+                          '${cap.hour.toString().padLeft(2, '0')}:'
+                          '${cap.minute.toString().padLeft(2, '0')}.',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: NexGenPalette.textMedium,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
+  }
+
+  Future<void> _onSave() async {
+    // An open-ended entry keeps its endMode and gets NO offTime written back —
+    // the picker for it was never shown, so `_offTime` holds only its default.
+    final edited = widget.entry.isOpenEnded
+        ? widget.entry.copyWith(onTime: _onTime, brightness: _brightness)
+        : widget.entry.copyWith(
+            onTime: _onTime,
+            offTime: _offTime,
+            brightness: _brightness,
+          );
 
     // If this is a user or holiday entry, save directly — no scope choice.
     if (widget.entry.type != CalendarEntryType.autopilot) {
@@ -398,8 +474,12 @@ class _CalendarEntryEditorState extends ConsumerState<_CalendarEntryEditor> {
         autopilot: false,
       );
       final notifier = ref.read(calendarScheduleProvider.notifier);
-      // A3 — ask BEFORE destroying a user-authored dated entry. Storage holds
-      // one entry per date, so saving here replaces whatever is there.
+      // A3 — ask BEFORE destroying a user-authored dated entry.
+      //
+      // NOTE (V3 A1): storage no longer holds one entry per date. This save
+      // upserts by (dateKey, entryId), so it replaces THIS entry and leaves the
+      // rest of the night alone. The prompt is still right, because the entry
+      // being replaced can itself be user-authored.
       final overwrites = notifier.findDatedOverwrites([userEntry]);
       var acknowledged = false;
       if (overwrites.isNotEmpty) {
