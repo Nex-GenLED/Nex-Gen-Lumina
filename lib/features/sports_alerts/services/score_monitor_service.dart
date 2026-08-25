@@ -39,6 +39,16 @@ class ScoreMonitorService implements ScoreMonitor {
   /// De-duplication keys: "gameId|homeScore|awayScore|eventType".
   final Set<String> _emittedKeys = {};
 
+  /// Game ids a win has already been emitted for.
+  ///
+  /// SEPARATE FROM [_emittedKeys] ON PURPOSE. The final-status cleanup below
+  /// WIPES `_emittedKeys` for the game — so a win routed through the normal
+  /// dedup would lose its guard on the very tick it fired, and re-fire on the
+  /// next poll while ESPN still reports the game final. This set is never
+  /// cleared by that cleanup, and is the durable half of the double-fire
+  /// guard; the status-transition check is the other half.
+  final Set<String> _winEmitted = {};
+
   /// Last celebration timestamp keyed by "teamSlug|gameId". Used to enforce
   /// per-sport cooldowns for high-frequency scoring leagues (basketball).
   final Map<String, DateTime> _lastCelebrationAt = {};
@@ -86,6 +96,7 @@ class ScoreMonitorService implements ScoreMonitor {
   void reset() {
     _gameStateCache.clear();
     _emittedKeys.clear();
+    _winEmitted.clear();
     _lastCelebrationAt.clear();
   }
 
@@ -144,6 +155,38 @@ class ScoreMonitorService implements ScoreMonitor {
           _emittedKeys.add(dedupKey);
           _markEmitted(event, game);
           _alertController.add(event);
+        }
+      }
+
+      // ── WIN ────────────────────────────────────────────────────────────
+      // Fired on the TRANSITION into final with the monitored team ahead.
+      //
+      // Requiring `previous != null` and a non-final previous status means a
+      // win only fires for a game we actually watched end. Opening the app
+      // hours after the final whistle must not light the house for a game
+      // already over, and re-polling a still-final scoreboard must not fire
+      // twice — `_winEmitted` guards that even if the transition check is ever
+      // satisfied again.
+      //
+      // Deliberately OUTSIDE the sensitivity filter and the cooldown: a win is
+      // the moment the feature exists for, and a `clutchOnly` user who has
+      // asked for fewer alerts has not asked to miss their team winning.
+      if (previous != null &&
+          previous.status != GameStatus.final_ &&
+          game.status == GameStatus.final_ &&
+          !_winEmitted.contains(game.gameId)) {
+        final teamScore = isUserHome ? game.homeScore : game.awayScore;
+        final opponentScore = isUserHome ? game.awayScore : game.homeScore;
+        if (teamScore > opponentScore) {
+          _winEmitted.add(game.gameId);
+          _alertController.add(ScoreAlertEvent(
+            teamSlug: config.teamSlug,
+            sport: config.sport,
+            eventType: AlertEventType.win,
+            pointsScored: 0,
+            gameId: game.gameId,
+            timestamp: DateTime.now(),
+          ));
         }
       }
 

@@ -192,6 +192,9 @@ class AlertTriggerService {
       AlertEventType.run => const Duration(seconds: 6),
       AlertEventType.quarterEndWinning => const Duration(seconds: 10),
       AlertEventType.clutchBasket => const Duration(seconds: 5),
+      // The longest in the table, deliberately: a win is the moment the whole
+      // feature exists for.
+      AlertEventType.win => const Duration(seconds: 30),
       AlertEventType.turnover => Duration.zero,
     };
   }
@@ -477,6 +480,31 @@ class AlertTriggerService {
           }, const Duration(seconds: 4)),
         ];
 
+      // WIN — the longest sequence in the table (30s), staged so it builds
+      // rather than simply running one effect for half a minute. As with every
+      // other entry, a chosen celebration replaces the `fx` at each stage and
+      // leaves this staging intact.
+      case AlertEventType.win:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 255,
+            'seg': [
+              {'fx': 2, 'sx': 255, 'ix': 255, 'col': colors},
+            ],
+          }, const Duration(seconds: 5)),
+          AlertAnimationStep({
+            'seg': [
+              {'fx': 9, 'sx': 200, 'ix': 220, 'col': colors},
+            ],
+          }, const Duration(seconds: 10)),
+          AlertAnimationStep({
+            'seg': [
+              {'fx': 63, 'sx': 150, 'ix': 200, 'col': colors},
+            ],
+          }, const Duration(seconds: 15)),
+        ];
+
       case AlertEventType.turnover:
         // Phase 2 — no animation yet.
         return const [];
@@ -539,6 +567,7 @@ class AlertTriggerService {
       AlertEventType.clutchBasket => 'Clutch Basket!',
       AlertEventType.turnover => 'Turnover!',
       AlertEventType.soccerGoal => 'GOOOOOL!',
+      AlertEventType.win => 'WINS!',
     };
     return '${team.teamName} $action $emoji';
   }
