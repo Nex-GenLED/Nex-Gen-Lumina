@@ -75,15 +75,13 @@ class ScoreAlertConfig {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'teamSlug': teamSlug,
-        'sport': sport.toJson(),
-        'isEnabled': isEnabled,
-        'assignedZoneIds': assignedZoneIds,
-        'sensitivity': sensitivity.toJson(),
-        'createdAt': createdAt?.toIso8601String(),
-      };
+  // NOTE: no `toJson`. This type is no longer PERSISTED anywhere — it is an
+  // in-memory value passed to AlertTriggerService.handleAlertEvent, and is what
+  // resolveMonitoring/monitoringConfigFor return. Its only remaining serialized
+  // form is INBOUND: [fromJson] drains the retired `sports_alert_configs` prefs
+  // store during migration. Adding a writer back would recreate the disjoint
+  // store this consolidation removed
+  // (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.1-4.3).
 
   @override
   bool operator ==(Object other) =>

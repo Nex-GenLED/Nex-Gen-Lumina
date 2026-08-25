@@ -18,6 +18,7 @@ import '../../widgets/section_header.dart';
 import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
+import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
 import '../wled/sports_library_builder.dart';
@@ -388,6 +389,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                       ? null
                       : (val) => _toggleLiveScoring(ref, config, val),
                 ),
+
                 const Divider(
                     height: 24, color: NexGenPalette.line),
 
@@ -605,6 +607,80 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     }
   }
 
+  // ── Alert sensitivity (folded in from the retired Sports Alerts screen) ──
+
+  static String _sensitivityLabel(AlertSensitivity s) => switch (s) {
+        AlertSensitivity.allEvents => 'All Events',
+        AlertSensitivity.majorOnly => 'Major Only',
+        AlertSensitivity.clutchOnly => 'Clutch Only',
+      };
+
+  static String _sensitivityDescription(AlertSensitivity s) => switch (s) {
+        AlertSensitivity.allEvents => 'Celebrate every scoring play',
+        AlertSensitivity.majorOnly =>
+          'Only touchdowns, home runs, goals and the like',
+        AlertSensitivity.clutchOnly =>
+          'Only late-game and go-ahead moments',
+      };
+
+  Future<void> _openSensitivityPicker(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) async {
+    final picked = await showModalBottomSheet<AlertSensitivity>(
+      context: context,
+      backgroundColor: NexGenPalette.gunmetal,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
+              child: Text(
+                'Alert Sensitivity',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: NexGenPalette.textHigh,
+                ),
+              ),
+            ),
+            for (final s in AlertSensitivity.values)
+              ListTile(
+                title: Text(
+                  _sensitivityLabel(s),
+                  style: const TextStyle(color: NexGenPalette.textHigh),
+                ),
+                subtitle: Text(
+                  _sensitivityDescription(s),
+                  style: TextStyle(color: NexGenPalette.textMedium),
+                ),
+                trailing: s == config.alertSensitivity
+                    ? const Icon(Icons.check, color: NexGenPalette.cyan)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(s),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (picked == null || picked == config.alertSensitivity) return;
+    try {
+      await ref
+          .read(gameDayAutopilotNotifierProvider.notifier)
+          .setAlertSensitivity(teamSlug: config.teamSlug, sensitivity: picked);
+    } catch (e, st) {
+      debugPrint('[GameDay] setAlertSensitivity failed: $e\n$st');
+    }
+  }
+
   void _toggleLiveScoring(
       WidgetRef ref, GameDayAutopilotConfig config, bool value) {
     ref
@@ -677,7 +753,26 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Skip day games toggle
+          // 1. Alerts (folded in from the retired Sports Alerts screen).
+          //
+          // Lives in the Autopilot group, alongside Skip Day Games, so it
+          // inherits that group's conditional visibility — greyed-not-hidden
+          // via the parent's AnimatedOpacity(0.4) + IgnorePointer keyed on
+          // config.enabled — rather than carrying its own gate off
+          // scoreCelebrationEnabled.
+          //
+          // Live Scoring remains the alerts ON/OFF above; this is the
+          // SENSITIVITY the retired screen owned and the card did not, which is
+          // an autopilot-run-configuration concern like the rest of this group.
+          _ConfigRow(
+            icon: Icons.notifications_active_outlined,
+            label: 'Alerts',
+            value: _sensitivityLabel(config.alertSensitivity),
+            onTap: () => _openSensitivityPicker(context, ref, config),
+          ),
+          const SizedBox(height: 4),
+
+          // 2. Skip day games toggle
           _ToggleRow(
             icon: Icons.wb_sunny_outlined,
             label: 'Skip day games',
@@ -703,7 +798,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           ),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 2. Design variety
+          // 3. Design variety
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -737,11 +832,11 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
               'Same pattern each game'),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 3. Motion style slider (storage-only for now; see config TODO)
+          // 4. Motion style slider (storage-only for now; see config TODO)
           _buildMotionStyleSlider(ref, config),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 4. Lead time
+          // 5. Lead time
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -2113,7 +2208,7 @@ class _SmallActionButton extends StatelessWidget {
 }
 
 // ===========================================================================
-// Glass app bar delegate (same pattern as SportsAlertsScreen)
+// Glass app bar delegate (pinned header that keeps its blur under scroll)
 // ===========================================================================
 
 class _GlassAppBarDelegate extends SliverPersistentHeaderDelegate {
