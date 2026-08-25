@@ -390,30 +390,6 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                       : (val) => _toggleLiveScoring(ref, config, val),
                 ),
 
-                // ── Alerts (folded in from the retired Sports Alerts screen) ─
-                // Live Scoring is the alerts ON/OFF — a second arming switch is
-                // exactly the redundancy this consolidation removes. What the
-                // retired screen owned that the card did not is SENSITIVITY,
-                // so that is what moves here. Greyed-not-hidden when Live
-                // Scoring is off, the same treatment Skip Day Games gets under
-                // Autopilot, so the user can see what Live Scoring configures.
-                if (!entry.isCrewMember) ...[
-                  const SizedBox(height: 4),
-                  AnimatedOpacity(
-                    opacity: config.scoreCelebrationEnabled ? 1.0 : 0.4,
-                    duration: const Duration(milliseconds: 200),
-                    child: IgnorePointer(
-                      ignoring: !config.scoreCelebrationEnabled,
-                      child: _ConfigRow(
-                        icon: Icons.notifications_active_outlined,
-                        label: 'Alerts',
-                        value: _sensitivityLabel(config.alertSensitivity),
-                        onTap: () =>
-                            _openSensitivityPicker(context, ref, config),
-                      ),
-                    ),
-                  ),
-                ],
                 const Divider(
                     height: 24, color: NexGenPalette.line),
 
@@ -777,7 +753,26 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Skip day games toggle
+          // 1. Alerts (folded in from the retired Sports Alerts screen).
+          //
+          // Lives in the Autopilot group, alongside Skip Day Games, so it
+          // inherits that group's conditional visibility — greyed-not-hidden
+          // via the parent's AnimatedOpacity(0.4) + IgnorePointer keyed on
+          // config.enabled — rather than carrying its own gate off
+          // scoreCelebrationEnabled.
+          //
+          // Live Scoring remains the alerts ON/OFF above; this is the
+          // SENSITIVITY the retired screen owned and the card did not, which is
+          // an autopilot-run-configuration concern like the rest of this group.
+          _ConfigRow(
+            icon: Icons.notifications_active_outlined,
+            label: 'Alerts',
+            value: _sensitivityLabel(config.alertSensitivity),
+            onTap: () => _openSensitivityPicker(context, ref, config),
+          ),
+          const SizedBox(height: 4),
+
+          // 2. Skip day games toggle
           _ToggleRow(
             icon: Icons.wb_sunny_outlined,
             label: 'Skip day games',
@@ -803,7 +798,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           ),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 2. Design variety
+          // 3. Design variety
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -837,11 +832,11 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
               'Same pattern each game'),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 3. Motion style slider (storage-only for now; see config TODO)
+          // 4. Motion style slider (storage-only for now; see config TODO)
           _buildMotionStyleSlider(ref, config),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 4. Lead time
+          // 5. Lead time
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
