@@ -597,6 +597,19 @@ class GameDayAutopilotBackgroundWorker {
   }
 
   /// Build a celebration flash payload in team colors.
+  ///
+  /// THE SECOND RENDERER. This path is independent of
+  /// `AlertTriggerService.buildAnimationSteps` and fires for a team with a
+  /// registered session — including a manual join, where it is the ONLY
+  /// renderer, because such a team has no entry in the monitored list and so
+  /// never reaches the trigger service. It therefore has to honour the user's
+  /// celebration choice too; otherwise the choice would be respected on one
+  /// path and silently ignored on the other.
+  ///
+  /// No contrast check here: this dispatches through the server fanout and has
+  /// no device read to compare against. Same fail-open posture as
+  /// [resolveCelebration] takes on an unreadable state — the user's choice
+  /// fires as picked.
   @visibleForTesting
   static Map<String, dynamic> buildCelebrationPayloadForTest(
     BackgroundGameDayAutopilotConfig config,
@@ -611,9 +624,16 @@ class GameDayAutopilotBackgroundWorker {
         'bri': 255,
         'seg': [
           {
-            'fx': 11, // Sparkle
-            'sx': 240,
-            'ix': 240,
+            // The user's chosen celebration, falling back to Sparkle (11) when
+            // they have not picked one — the legacy default, so every existing
+            // config keeps its current behavior.
+            'fx': config.celebrationEffectId ?? 11,
+            'sx': config.celebrationEffectId != null
+                ? config.celebrationSpeed
+                : 240,
+            'ix': config.celebrationEffectId != null
+                ? config.celebrationIntensity
+                : 240,
             'pal': 0,
             'col': [
               [

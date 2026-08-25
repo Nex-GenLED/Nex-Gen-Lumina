@@ -70,6 +70,13 @@ ScoreAlertConfig monitoringConfigFor(BackgroundGameDayAutopilotConfig c) {
       (s) => s.name == c.alertSensitivity,
       orElse: () => AlertSensitivity.majorOnly,
     ),
+    // Carried for the same reason sensitivity is: the trigger service receives
+    // ONLY this object, so a celebration choice that stops here would never
+    // reach the animation. Null stays null — an unchosen effect must keep the
+    // legacy hardcoded sequences.
+    celebrationEffectId: c.celebrationEffectId,
+    celebrationSpeed: c.celebrationSpeed,
+    celebrationIntensity: c.celebrationIntensity,
   );
 }
 
