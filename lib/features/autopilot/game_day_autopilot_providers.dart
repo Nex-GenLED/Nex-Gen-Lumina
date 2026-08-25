@@ -757,6 +757,45 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     });
   }
 
+  /// Persist this team's chosen celebration effect — the motion that fires on
+  /// a score or a win.
+  ///
+  /// Writes ONLY the three celebration fields. The base-design fields
+  /// (`saved_design_payload`, `effect_id`, `speed`, `intensity`) are untouched:
+  /// the base design is what the house runs during the game, the celebration is
+  /// what interrupts it, and conflating them is what the second slot exists to
+  /// prevent (audit/GAME_DAY_SPEC_AUDIT.md §4).
+  ///
+  /// `update` (not `set(merge)`), matching [setLiveScoring] and
+  /// [setAlertSensitivity]: a control on an existing card should fail loudly
+  /// rather than mint a partial config.
+  Future<void> setCelebrationEffect({
+    required String teamSlug,
+    required int effectId,
+    required int speed,
+    required int intensity,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to set a celebration effect.');
+    }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug)
+        .update({
+      'celebration_effect_id': effectId,
+      'celebration_speed': speed.clamp(0, 255),
+      'celebration_intensity': intensity.clamp(0, 255),
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
   /// Set how sensitive score alerts are for a team.
   ///
   /// `alert_sensitivity` is real, consumed behavior —

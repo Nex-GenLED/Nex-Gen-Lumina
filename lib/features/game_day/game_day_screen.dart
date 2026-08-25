@@ -21,6 +21,9 @@ import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
+import '../wled/colorway_effect_selector.dart';
+import '../wled/library_hierarchy_models.dart';
+import '../wled/wled_effects_catalog.dart';
 import '../wled/sports_library_builder.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
@@ -404,12 +407,28 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                     duration: const Duration(milliseconds: 200),
                     child: IgnorePointer(
                       ignoring: !config.scoreCelebrationEnabled,
-                      child: _ConfigRow(
-                        icon: Icons.notifications_active_outlined,
-                        label: 'Alerts',
-                        value: _sensitivityLabel(config.alertSensitivity),
-                        onTap: () =>
-                            _openSensitivityPicker(context, ref, config),
+                      child: Column(
+                        children: [
+                          _ConfigRow(
+                            icon: Icons.notifications_active_outlined,
+                            label: 'Alerts',
+                            value: _sensitivityLabel(config.alertSensitivity),
+                            onTap: () =>
+                                _openSensitivityPicker(context, ref, config),
+                          ),
+                          // The celebration effect itself — the motion that
+                          // fires on a score or a win. Sits with Alerts because
+                          // it is the same concern: Alerts says WHEN, this says
+                          // WHAT. Distinct from the Design row above, which is
+                          // the base look the house runs during the game.
+                          _ConfigRow(
+                            icon: Icons.auto_awesome_outlined,
+                            label: 'Celebration',
+                            value: _celebrationLabel(config),
+                            onTap: () =>
+                                _openCelebrationPicker(context, ref, config),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -629,6 +648,88 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
         ),
       );
     }
+  }
+
+  // ── Celebration effect ───────────────────────────────────────────────────
+
+  static String _celebrationLabel(GameDayAutopilotConfig config) {
+    final id = config.celebrationEffectId;
+    if (id == null) return 'Default';
+    return WledEffectsCatalog.getById(id)?.name ?? 'Effect $id';
+  }
+
+  /// Open the celebration picker: [ColorwayEffectSelectorPage] in celebration
+  /// mode, so it shows only the attention-grabbing subset and hands the choice
+  /// back instead of persisting a base design.
+  ///
+  /// The palette node is SYNTHESIZED from the team's own colours rather than
+  /// resolved from the sports library. A celebration should preview in team
+  /// colours no matter which library colorway the base design came from, and
+  /// this avoids depending on `resolveTeamNodeId` finding a leaf — which it
+  /// cannot for every team.
+  Future<void> _openCelebrationPicker(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) async {
+    final node = LibraryNode(
+      id: 'celebration_${config.teamSlug}',
+      name: '${config.teamName} Celebration',
+      nodeType: LibraryNodeType.palette,
+      themeColors: [
+        Color(config.primaryColorValue),
+        Color(config.secondaryColorValue),
+      ],
+    );
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final messenger = ScaffoldMessenger.of(context);
+
+    await navigator.push<void>(MaterialPageRoute(
+      builder: (_) => ColorwayEffectSelectorPage(
+        paletteNode: node,
+        celebrationMode: true,
+        onDesignSelected: (selection) async {
+          final picked = _celebrationFromPayload(selection.wledPayload);
+          navigator.pop();
+          if (picked == null) return;
+          try {
+            await ref
+                .read(gameDayAutopilotNotifierProvider.notifier)
+                .setCelebrationEffect(
+                  teamSlug: config.teamSlug,
+                  effectId: picked.fx,
+                  speed: picked.sx,
+                  intensity: picked.ix,
+                );
+          } catch (e, st) {
+            debugPrint('[GameDay] setCelebrationEffect failed: $e\n$st');
+            messenger.showSnackBar(const SnackBar(
+              content: Text("Couldn't save that celebration effect."),
+            ));
+          }
+        },
+      ),
+    ));
+  }
+
+  /// Pull `fx` / `sx` / `ix` out of the selector's returned WLED payload.
+  /// Returns null when the payload has no segment to read — better to keep the
+  /// existing choice than to write a fabricated effect id.
+  static ({int fx, int sx, int ix})? _celebrationFromPayload(
+    Map<String, dynamic> payload,
+  ) {
+    final seg = payload['seg'];
+    if (seg is! List || seg.isEmpty) return null;
+    final first = seg.first;
+    if (first is! Map) return null;
+    final fx = (first['fx'] as num?)?.toInt();
+    if (fx == null) return null;
+    return (
+      fx: fx,
+      sx: (first['sx'] as num?)?.toInt() ?? 240,
+      ix: (first['ix'] as num?)?.toInt() ?? 240,
+    );
   }
 
   // ── Alert sensitivity (folded in from the retired Sports Alerts screen) ──
