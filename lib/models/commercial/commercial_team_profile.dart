@@ -76,6 +76,23 @@ class CommercialTeamProfile {
   final bool gameDayAutoModeEnabled;
   final int gameDayLeadTimeMinutes;
 
+  // ── Celebration effect ────────────────────────────────────────────────
+  //
+  // COMMERCIAL PARITY. This is a genuinely separate model from
+  // GameDayAutopilotConfig — different key names, hex colour strings rather
+  // than ARGB ints, AlertIntensity rather than AlertSensitivity — so the
+  // celebration slot has to be added here too rather than inherited. The
+  // FIRING path is shared: game_day_service copies these onto the
+  // ScoreAlertConfig it hands to AlertTriggerService, which is the same
+  // object and the same code path a residential celebration takes.
+  //
+  // `null` = nothing chosen; the legacy hardcoded per-event sequences fire.
+
+  /// WLED effect id for this venue's celebration on this team.
+  final int? celebrationEffectId;
+  final int celebrationSpeed;
+  final int celebrationIntensity;
+
   const CommercialTeamProfile({
     required this.priorityRank,
     required this.teamId,
@@ -88,6 +105,9 @@ class CommercialTeamProfile {
     this.selectedChannelIds = const [],
     this.gameDayAutoModeEnabled = true,
     this.gameDayLeadTimeMinutes = 120,
+    this.celebrationEffectId,
+    this.celebrationSpeed = 240,
+    this.celebrationIntensity = 240,
   });
 
   factory CommercialTeamProfile.fromJson(Map<String, dynamic> json) {
@@ -110,6 +130,12 @@ class CommercialTeamProfile {
           (json['game_day_auto_mode_enabled'] as bool?) ?? true,
       gameDayLeadTimeMinutes:
           (json['game_day_lead_time_minutes'] as num?)?.toInt() ?? 120,
+      // Absent means "not chosen" — never defaulted to a real effect id, or
+      // every existing venue profile would silently acquire one.
+      celebrationEffectId: (json['celebration_effect_id'] as num?)?.toInt(),
+      celebrationSpeed: (json['celebration_speed'] as num?)?.toInt() ?? 240,
+      celebrationIntensity:
+          (json['celebration_intensity'] as num?)?.toInt() ?? 240,
     );
   }
 
@@ -125,6 +151,13 @@ class CommercialTeamProfile {
         'selected_channel_ids': selectedChannelIds,
         'game_day_auto_mode_enabled': gameDayAutoModeEnabled,
         'game_day_lead_time_minutes': gameDayLeadTimeMinutes,
+        // Written only when chosen, so an untouched profile round-trips
+        // byte-identically.
+        if (celebrationEffectId != null) ...{
+          'celebration_effect_id': celebrationEffectId,
+          'celebration_speed': celebrationSpeed,
+          'celebration_intensity': celebrationIntensity,
+        },
       };
 
   CommercialTeamProfile copyWith({
@@ -139,6 +172,10 @@ class CommercialTeamProfile {
     List<String>? selectedChannelIds,
     bool? gameDayAutoModeEnabled,
     int? gameDayLeadTimeMinutes,
+    int? celebrationEffectId,
+    bool clearCelebrationEffect = false,
+    int? celebrationSpeed,
+    int? celebrationIntensity,
   }) {
     return CommercialTeamProfile(
       priorityRank: priorityRank ?? this.priorityRank,
@@ -154,6 +191,11 @@ class CommercialTeamProfile {
           gameDayAutoModeEnabled ?? this.gameDayAutoModeEnabled,
       gameDayLeadTimeMinutes:
           gameDayLeadTimeMinutes ?? this.gameDayLeadTimeMinutes,
+      celebrationEffectId: clearCelebrationEffect
+          ? null
+          : (celebrationEffectId ?? this.celebrationEffectId),
+      celebrationSpeed: celebrationSpeed ?? this.celebrationSpeed,
+      celebrationIntensity: celebrationIntensity ?? this.celebrationIntensity,
     );
   }
 

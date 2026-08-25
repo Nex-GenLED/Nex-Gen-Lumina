@@ -173,6 +173,12 @@ class GameDayService {
     final sensitivity = _mapIntensity(team.alertIntensity);
 
     // Build a ScoreAlertConfig that carries the channel scope.
+    // COMMERCIAL PARITY. Carrying the venue's chosen celebration onto the same
+    // ScoreAlertConfig means a commercial celebration goes through EXACTLY the
+    // residential code path — handleAlertEvent reads these three fields, runs
+    // the same contrast check against live house state, and substitutes the
+    // effect into the same per-event-type timing table. No parallel
+    // implementation to drift.
     final alertConfig = ScoreAlertConfig(
       id: 'commercial_${team.teamId}',
       teamSlug: event.teamSlug,
@@ -180,6 +186,9 @@ class GameDayService {
       isEnabled: true,
       assignedZoneIds: _resolveZoneIds(team),
       sensitivity: sensitivity,
+      celebrationEffectId: team.celebrationEffectId,
+      celebrationSpeed: team.celebrationSpeed,
+      celebrationIntensity: team.celebrationIntensity,
     );
 
     triggerService.handleAlertEvent(event, alertConfig);
