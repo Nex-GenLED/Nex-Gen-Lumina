@@ -21,6 +21,13 @@ import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
+import '../autopilot/game_day_background_persistence.dart';
+import '../sports_alerts/providers/sports_alert_providers.dart';
+import 'ephemeral_session/ephemeral_game_session_providers.dart';
+import '../sports_alerts/services/sports_background_service.dart';
+import '../wled/colorway_effect_selector.dart';
+import '../wled/library_hierarchy_models.dart';
+import '../wled/wled_effects_catalog.dart';
 import '../wled/sports_library_builder.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
@@ -500,9 +507,25 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       return;
     }
 
-    // Capture messenger up-front because the toggleAutopilot await below
-    // can unmount this widget before we get to show the result snackbar.
+    // Capture messenger up-front because the awaits below can unmount this
+    // widget before we get to show the result snackbar.
     final messenger = ScaffoldMessenger.of(context);
+
+    // Snapshot what the house is showing BEFORE we overwrite it — this is what
+    // the ephemeral session puts back when the game ends. Captured here rather
+    // than inside the session because by the time the session exists the team
+    // design has already been applied, and capturing then would "revert" to
+    // the Game Day look forever.
+    Map<String, dynamic> revertPayload = const {};
+    try {
+      revertPayload =
+          await ref.read(wledRepositoryProvider)?.getState() ?? const {};
+    } catch (e) {
+      debugPrint('[GameDay] Light Up Now: revert capture failed: $e');
+    }
+    // Null when nothing named is showing — the session needs a concrete label
+    // to restore the Now Playing chip to, so fall back to the neutral one.
+    final revertLabel = ref.read(activePresetLabelProvider) ?? 'Custom';
 
     // Convergence-Phase-2b: the payload build + apply routes through
     // the shared [applyGameDayConfigToDevice] helper. The Path 2
@@ -519,21 +542,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     if (!context.mounted) return;
 
     if (ok) {
-      // Ensure autopilot is enabled so the background worker creates a session
-      // for this team. This is what lets score celebrations fire after a manual
-      // "Light Up Now" — without it, _sessions[teamSlug] stays null in the
-      // background worker and ScoreAlertEvents are silently dropped.
-      if (!config.enabled) {
-        try {
-          await ref
-              .read(gameDayAutopilotNotifierProvider.notifier)
-              .toggleAutopilot(teamSlug: config.teamSlug, enabled: true);
-        } catch (e, st) {
-          debugPrint(
-              '[GameDay] Light Up Now: enable autopilot failed: $e\n$st');
-          // Non-fatal — lights are already lit. Live scoring just won't fire.
-        }
-      }
+      await _startManualSession(ref, config, revertPayload, revertLabel);
     }
 
     messenger.showSnackBar(
@@ -605,6 +614,163 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
         ),
       );
     }
+  }
+
+  /// Arm a manual mid-game join WITHOUT touching `config.enabled`.
+  ///
+  /// "Light Up Now" used to flip `enabled:true`, because the background
+  /// worker's session map is what `onScoreAlertEvent` looks in and only the
+  /// scheduled path ever wrote it. But `enabled` is the field the SERVER
+  /// planner queries (`planGameDayFires.ts`), so joining ONE live game silently
+  /// opted the team into every future scheduled show
+  /// (audit/GAME_DAY_SPEC_AUDIT.md §3.5).
+  ///
+  /// Two writes replace that flip, neither touching `enabled`:
+  ///   1. [registerManualGameDaySession] — the isolate crossing that arms
+  ///      celebrations for this team from this second. Purpose-built for
+  ///      exactly this, and previously called from one unrelated screen only.
+  ///   2. an ephemeral session — the phase machine that detects the real final
+  ///      whistle, reverts, and disarms, so the join SELF-EXPIRES rather than
+  ///      running until the user notices.
+  ///
+  /// Ordering is deliberate. Arming comes first and is not conditional on the
+  /// session: ESPN lookups fail, and a celebration that fires without an
+  /// auto-revert is a far better outcome than a silent house. The session is
+  /// best-effort on top.
+  static Future<void> _startManualSession(
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+    Map<String, dynamic> revertPayload,
+    String revertLabel,
+  ) async {
+    // Bind the game id when we can — it lets the worker's phase machine track
+    // THIS game rather than guessing from a timer.
+    String? gameId;
+    try {
+      gameId = (await ref.read(activeGameProvider(config.teamSlug).future))
+          ?.gameId;
+    } catch (e) {
+      debugPrint('[GameDay] Light Up Now: game lookup failed: $e');
+    }
+
+    try {
+      await registerManualGameDaySession(
+        teamSlug: config.teamSlug,
+        activeGameId: gameId,
+      );
+      // Nothing else guarantees the poller is up for a manual join. The
+      // scheduled path starts it when a game is within 60 minutes
+      // (autopilot_scheduler.dart), which is precisely the path a mid-game
+      // join is NOT on. Idempotent when already running.
+      await startSportsService();
+    } catch (e, st) {
+      debugPrint('[GameDay] Light Up Now: arming failed: $e\n$st');
+      // Non-fatal — the lights are already on, celebrations just won't fire.
+    }
+
+    if (gameId == null) {
+      debugPrint('[GameDay] Light Up Now: no live game for ${config.teamSlug} '
+          '— armed without an auto-expiring session');
+      return;
+    }
+
+    try {
+      final svc = ref.read(ephemeralGameSessionServiceProvider);
+      if (svc == null) return; // signed out
+      final session = await svc.createSession(
+        teamSlug: config.teamSlug,
+        gameId: gameId,
+        revertWledPayload: revertPayload,
+        revertLabel: revertLabel,
+      );
+      await svc.startTracking(session.sessionId);
+    } catch (e, st) {
+      // createSession throws when the game is not in the fetched season
+      // schedule. The house stays lit and armed; it just will not self-revert.
+      debugPrint('[GameDay] Light Up Now: session create failed: $e\n$st');
+    }
+  }
+
+  // ── Celebration effect ───────────────────────────────────────────────────
+
+  static String _celebrationLabel(GameDayAutopilotConfig config) {
+    final id = config.celebrationEffectId;
+    if (id == null) return 'Default';
+    return WledEffectsCatalog.getById(id)?.name ?? 'Effect $id';
+  }
+
+  /// Open the celebration picker: [ColorwayEffectSelectorPage] in celebration
+  /// mode, so it shows only the attention-grabbing subset and hands the choice
+  /// back instead of persisting a base design.
+  ///
+  /// The palette node is SYNTHESIZED from the team's own colours rather than
+  /// resolved from the sports library. A celebration should preview in team
+  /// colours no matter which library colorway the base design came from, and
+  /// this avoids depending on `resolveTeamNodeId` finding a leaf — which it
+  /// cannot for every team.
+  Future<void> _openCelebrationPicker(
+    BuildContext context,
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+  ) async {
+    final node = LibraryNode(
+      id: 'celebration_${config.teamSlug}',
+      name: '${config.teamName} Celebration',
+      nodeType: LibraryNodeType.palette,
+      themeColors: [
+        Color(config.primaryColorValue),
+        Color(config.secondaryColorValue),
+      ],
+    );
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final messenger = ScaffoldMessenger.of(context);
+
+    await navigator.push<void>(MaterialPageRoute(
+      builder: (_) => ColorwayEffectSelectorPage(
+        paletteNode: node,
+        celebrationMode: true,
+        onDesignSelected: (selection) async {
+          final picked = _celebrationFromPayload(selection.wledPayload);
+          navigator.pop();
+          if (picked == null) return;
+          try {
+            await ref
+                .read(gameDayAutopilotNotifierProvider.notifier)
+                .setCelebrationEffect(
+                  teamSlug: config.teamSlug,
+                  effectId: picked.fx,
+                  speed: picked.sx,
+                  intensity: picked.ix,
+                );
+          } catch (e, st) {
+            debugPrint('[GameDay] setCelebrationEffect failed: $e\n$st');
+            messenger.showSnackBar(const SnackBar(
+              content: Text("Couldn't save that celebration effect."),
+            ));
+          }
+        },
+      ),
+    ));
+  }
+
+  /// Pull `fx` / `sx` / `ix` out of the selector's returned WLED payload.
+  /// Returns null when the payload has no segment to read — better to keep the
+  /// existing choice than to write a fabricated effect id.
+  static ({int fx, int sx, int ix})? _celebrationFromPayload(
+    Map<String, dynamic> payload,
+  ) {
+    final seg = payload['seg'];
+    if (seg is! List || seg.isEmpty) return null;
+    final first = seg.first;
+    if (first is! Map) return null;
+    final fx = (first['fx'] as num?)?.toInt();
+    if (fx == null) return null;
+    return (
+      fx: fx,
+      sx: (first['sx'] as num?)?.toInt() ?? 240,
+      ix: (first['ix'] as num?)?.toInt() ?? 240,
+    );
   }
 
   // ── Alert sensitivity (folded in from the retired Sports Alerts screen) ──
@@ -772,7 +938,28 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           ),
           const SizedBox(height: 4),
 
-          // 2. Skip day games toggle
+          // 2. Celebration effect — the motion that fires on a score or a win.
+          //
+          // Adjacent to Alerts because they are one concern: Alerts says WHEN a
+          // celebration fires, this says WHAT fires. Distinct from the Design
+          // row above the divider, which is the base look the house runs
+          // DURING the game — the two are separate slots on the config for
+          // exactly that reason (audit/GAME_DAY_CELEBRATIONS_P1.md §2).
+          //
+          // Shares the Autopilot group's SINGLE gate with Alerts. It was
+          // authored under Live Scoring with its own
+          // scoreCelebrationEnabled-keyed AnimatedOpacity, before the
+          // reposition existed; reinstating that here would put two
+          // independent gates on one row group.
+          _ConfigRow(
+            icon: Icons.auto_awesome_outlined,
+            label: 'Celebration',
+            value: _celebrationLabel(config),
+            onTap: () => _openCelebrationPicker(context, ref, config),
+          ),
+          const SizedBox(height: 4),
+
+          // 3. Skip day games toggle
           _ToggleRow(
             icon: Icons.wb_sunny_outlined,
             label: 'Skip day games',
@@ -798,7 +985,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           ),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 3. Design variety
+          // 4. Design variety
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -832,11 +1019,11 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
               'Same pattern each game'),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 4. Motion style slider (storage-only for now; see config TODO)
+          // 5. Motion style slider (storage-only for now; see config TODO)
           _buildMotionStyleSlider(ref, config),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 5. Lead time
+          // 6. Lead time
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -859,7 +1046,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           ),
           const Divider(height: 16, color: NexGenPalette.line),
 
-          // 5. Refresh schedule button
+          // 7. Refresh schedule button
           Center(
             child: TextButton.icon(
               onPressed: () async {

@@ -200,6 +200,36 @@ class GameDayAutopilotConfig {
   /// verbatim.
   final List<int>? participatingChannelIndices;
 
+  // ── Celebration effect (the score/win flash) ──────────────────────────
+  //
+  // ONE effect per team, chosen once, used for EVERY event type. The
+  // per-event-type timing table in AlertTriggerService.buildAnimationSteps
+  // still supplies duration and staging — only the hardcoded `fx` in each
+  // stage is replaced by this choice
+  // (audit/GAME_DAY_SPEC_AUDIT.md §6, gap row 3).
+  //
+  // These are DELIBERATELY distinct from the base-design fields above
+  // ([effectId] / [speed] / [intensity] / [savedDesignPayload]): the base
+  // design is what the house runs during the game, this is what interrupts it.
+  // Before this existed there was only one design slot, so there was nothing
+  // to collide with (audit §4).
+
+  /// WLED effect id for this team's celebration. `null` means the user has
+  /// not chosen one — the legacy hardcoded per-event sequences are used
+  /// verbatim, so every existing config keeps its current behavior.
+  final int? celebrationEffectId;
+
+  /// Celebration speed (`sx`, 0-255). Only meaningful when
+  /// [celebrationEffectId] is set.
+  final int celebrationSpeed;
+
+  /// Celebration intensity (`ix`, 0-255). Only meaningful when
+  /// [celebrationEffectId] is set.
+  final int celebrationIntensity;
+
+  /// True when the user has picked a celebration effect for this team.
+  bool get hasCelebrationEffect => celebrationEffectId != null;
+
   const GameDayAutopilotConfig({
     required this.teamSlug,
     required this.teamName,
@@ -228,6 +258,9 @@ class GameDayAutopilotConfig {
     required this.createdAt,
     required this.updatedAt,
     this.participatingChannelIndices,
+    this.celebrationEffectId,
+    this.celebrationSpeed = 240,
+    this.celebrationIntensity = 240,
   });
 
   Color get primaryColor => Color(primaryColorValue);
@@ -350,6 +383,13 @@ class GameDayAutopilotConfig {
         'updated_at': Timestamp.fromDate(updatedAt),
         if (participatingChannelIndices != null)
           'participating_channel_indices': participatingChannelIndices,
+        // Written only when chosen, so an untouched config stays byte-identical
+        // and keeps the legacy hardcoded celebration.
+        if (celebrationEffectId != null) ...{
+          'celebration_effect_id': celebrationEffectId,
+          'celebration_speed': celebrationSpeed,
+          'celebration_intensity': celebrationIntensity,
+        },
       };
 
   factory GameDayAutopilotConfig.fromFirestore(Map<String, dynamic> data) {
@@ -405,6 +445,13 @@ class GameDayAutopilotConfig {
       participatingChannelIndices: rawParticipating is List
           ? rawParticipating.map((e) => (e as num).toInt()).toList()
           : null,
+      // Absent means "no celebration effect chosen" — the legacy hardcoded
+      // per-event sequences apply. Never defaulted to a real effect id, or
+      // every pre-existing config would silently acquire one.
+      celebrationEffectId: (data['celebration_effect_id'] as num?)?.toInt(),
+      celebrationSpeed: (data['celebration_speed'] as num?)?.toInt() ?? 240,
+      celebrationIntensity:
+          (data['celebration_intensity'] as num?)?.toInt() ?? 240,
     );
   }
 
@@ -431,6 +478,10 @@ class GameDayAutopilotConfig {
     DateTime? updatedAt,
     List<int>? participatingChannelIndices,
     bool clearParticipatingChannelIndices = false,
+    int? celebrationEffectId,
+    bool clearCelebrationEffect = false,
+    int? celebrationSpeed,
+    int? celebrationIntensity,
   }) {
     return GameDayAutopilotConfig(
       teamSlug: teamSlug,
@@ -464,6 +515,11 @@ class GameDayAutopilotConfig {
       participatingChannelIndices: clearParticipatingChannelIndices
           ? null
           : (participatingChannelIndices ?? this.participatingChannelIndices),
+      celebrationEffectId: clearCelebrationEffect
+          ? null
+          : (celebrationEffectId ?? this.celebrationEffectId),
+      celebrationSpeed: celebrationSpeed ?? this.celebrationSpeed,
+      celebrationIntensity: celebrationIntensity ?? this.celebrationIntensity,
     );
   }
 

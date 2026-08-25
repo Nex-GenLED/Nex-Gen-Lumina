@@ -29,7 +29,11 @@ import '../../sports_alerts/data/team_colors.dart';
 import '../../sports_alerts/models/game_state.dart';
 import '../../sports_alerts/services/espn_api_service.dart';
 import '../../sports_alerts/services/game_schedule_service.dart';
+import '../../autopilot/game_day_autopilot_providers.dart';
+import '../../autopilot/game_day_background_persistence.dart';
 import '../../wled/wled_providers.dart';
+import '../../wled/zone_providers.dart';
+import '../game_day_apply.dart';
 import 'ephemeral_game_session.dart';
 
 class EphemeralGameSessionService {
@@ -166,6 +170,14 @@ class EphemeralGameSessionService {
     } catch (e) {
       debugPrint('[EphemeralSession] cancel: delete failed for $sessionId: $e');
     }
+    // Same disarm as the natural end: cancelling must not leave the team armed
+    // for celebrations after the user has explicitly stopped the session.
+    try {
+      await clearGameDaySession(session.teamSlug);
+    } catch (e) {
+      debugPrint('[EphemeralSession] cancel: disarm failed for $sessionId: $e');
+    }
+
     debugPrint('[EphemeralSession] Cancelled $sessionId (reason=${reason.name})');
     if (_sessions.isEmpty) {
       _evaluationTimer?.cancel();
@@ -308,7 +320,7 @@ class EphemeralGameSessionService {
           if (gameState != null &&
               (gameState.status == GameStatus.inProgress ||
                   gameState.status == GameStatus.halftime)) {
-            await _updatePhase(session, EphemeralSessionPhase.liveGame);
+            await _goLive(session);
             return;
           }
         }
@@ -322,7 +334,7 @@ class EphemeralGameSessionService {
         if (gameState != null &&
             (gameState.status == GameStatus.inProgress ||
                 gameState.status == GameStatus.halftime)) {
-          await _updatePhase(session, EphemeralSessionPhase.liveGame);
+          await _goLive(session);
         }
 
       case EphemeralSessionPhase.liveGame:
@@ -361,6 +373,47 @@ class EphemeralGameSessionService {
 
       case EphemeralSessionPhase.completed:
         break;
+    }
+  }
+
+  /// Enter [EphemeralSessionPhase.liveGame] AND light the house.
+  ///
+  /// The phase machine used to only record phases: the ONLY payload it ever
+  /// applied was the revert in [_handleGameEnd], so a session that reached
+  /// liveGame on its own — a game that started while the session waited —
+  /// changed nothing (audit/GAME_DAY_SPEC_AUDIT.md §3.1-3.2). A session created
+  /// mid-game by "Light Up Now" was lit by its caller and only looked correct
+  /// because of that.
+  ///
+  /// The apply is best-effort and is NOT allowed to block the transition: a
+  /// session stuck in preGame because the controller was briefly unreachable
+  /// would never reach postGame, and so would never revert.
+  Future<void> _goLive(EphemeralGameSession session) async {
+    await _updatePhase(session, EphemeralSessionPhase.liveGame);
+    await _applyTeamDesign(session.teamSlug);
+  }
+
+  /// Apply the team's BASE design — the look the house runs during the game.
+  /// Same helper "Light Up Now" uses, so both paths produce identical payloads.
+  Future<void> _applyTeamDesign(String teamSlug) async {
+    try {
+      final configs = _ref.read(gameDayAutopilotConfigsProvider).valueOrNull;
+      final config =
+          configs?.where((c) => c.teamSlug == teamSlug).firstOrNull;
+      if (config == null) {
+        debugPrint('[EphemeralSession] No Game Day config for $teamSlug — '
+            'nothing to apply');
+        return;
+      }
+      await applyGameDayConfigToDevice(
+        applyPayloadWithLabel:
+            _ref.read(wledStateProvider.notifier).applyPayloadWithLabel,
+        config: config,
+        participatingChannels: _ref.read(effectiveChannelIdsProvider),
+        deviceChannels: _ref.read(deviceChannelsProvider),
+      );
+    } catch (e) {
+      debugPrint('[EphemeralSession] Design apply failed for $teamSlug: $e');
     }
   }
 
@@ -417,6 +470,19 @@ class EphemeralGameSessionService {
     } catch (e) {
       debugPrint(
           '[EphemeralSession] Label set failed for $sessionId: $e');
+    }
+
+    // END THE CELEBRATION ARMING WITH THE SESSION. The background worker arms
+    // off its own prefs-backed session map, which "Light Up Now" writes via
+    // registerManualGameDaySession — a different store in a different isolate.
+    // Reverting the lights without clearing it would leave the team armed, so
+    // a score in a LATER game would celebrate over whatever the house had gone
+    // back to.
+    try {
+      await clearGameDaySession(session.teamSlug);
+    } catch (e) {
+      debugPrint(
+          '[EphemeralSession] Failed to disarm ${session.teamSlug}: $e');
     }
 
     // Remove from in-memory cache and delete from Firestore. If delete

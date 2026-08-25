@@ -98,12 +98,24 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
 
   bool get isDesignEdit => editingDesign != null;
 
+  /// CELEBRATION MODE. When true the effect list is replaced by
+  /// [WledEffectsCatalog.celebrationPicks] — the attention-grabbing subset —
+  /// and the motion/colour filter chips are hidden, because the whole list is
+  /// already one deliberate filter. Everything else (live on-device preview,
+  /// speed/intensity, the tile grid) is the SAME widget: the celebration
+  /// picker is this page in a narrower mode, not a second grid.
+  ///
+  /// Pair with [onDesignSelected] — celebration mode always returns the choice
+  /// rather than persisting a base design.
+  final bool celebrationMode;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
     this.teamSlug,
     this.onDesignSelected,
     this.editingDesign,
+    this.celebrationMode = false,
   });
 
   /// Opens the tuner on a stored effect design.
@@ -827,13 +839,17 @@ class _ColorwayEffectSelectorPageState
         ((effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors));
 
     // Build filtered effect list (only used for non-gradient patterns)
-    final bool showingTopPicks = motionFilter == null && colorFilter == null;
-    final List<WledEffect> displayEffects = showingTopPicks
-        ? WledEffectsCatalog.topPicks
-        : WledEffectsCatalog.filterEffects(
-            motionType: motionFilter,
-            colorBehavior: colorFilter,
-          );
+    final bool showingTopPicks = !widget.celebrationMode &&
+        motionFilter == null &&
+        colorFilter == null;
+    final List<WledEffect> displayEffects = widget.celebrationMode
+        ? WledEffectsCatalog.celebrationPicks
+        : (showingTopPicks
+            ? WledEffectsCatalog.topPicks
+            : WledEffectsCatalog.filterEffects(
+                motionType: motionFilter,
+                colorBehavior: colorFilter,
+              ));
 
     return CustomScrollView(
       slivers: [
@@ -906,6 +922,12 @@ class _ColorwayEffectSelectorPageState
                 //     applying now, so it reads "Set design".
                 //   • CATALOG → applies to the lights.
                 ElevatedButton.icon(
+                  // Precedence: DESIGN-EDIT first because it is the only
+                  // mode that changes the ACTION (a fourth exit,
+                  // _saveToDesign) rather than just the wording. CELEBRATION
+                  // must be tested before the selection branch — it always
+                  // pairs with onDesignSelected, so the later branch would
+                  // otherwise swallow its label.
                   onPressed:
                       widget.isDesignEdit ? _saveToDesign : _applyPattern,
                   icon: Icon(
@@ -913,9 +935,11 @@ class _ColorwayEffectSelectorPageState
                       size: 18),
                   label: Text(widget.isDesignEdit
                       ? 'Save to design'
-                      : widget.onDesignSelected != null
-                          ? 'Set design'
-                          : 'Apply'),
+                      : widget.celebrationMode
+                          ? 'Set celebration'
+                          : widget.onDesignSelected != null
+                              ? 'Set design'
+                              : 'Apply'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: NexGenPalette.cyan,
                     foregroundColor: NexGenPalette.matteBlack,
@@ -993,15 +1017,16 @@ class _ColorwayEffectSelectorPageState
 
           const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-          // Motion type filter chips
-          SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
-
-          const SliverToBoxAdapter(child: SizedBox(height: 6)),
-
-          // Color behavior filter chips
-          SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
-
-          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          // Motion / colour filter chips. Hidden in celebration mode: the
+          // list is already the one filter that matters there, and offering
+          // "Ambient" or "Rainbow" chips would only let the user filter their
+          // way out of the attention-grabbing set.
+          if (!widget.celebrationMode) ...[
+            SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
+            const SliverToBoxAdapter(child: SizedBox(height: 6)),
+            SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          ],
 
           // Section header
           SliverToBoxAdapter(

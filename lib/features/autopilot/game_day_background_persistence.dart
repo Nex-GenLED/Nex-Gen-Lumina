@@ -79,6 +79,15 @@ class BackgroundGameDayAutopilotConfig {
   /// Day is genuinely the one source.
   final String alertSensitivity;
 
+  /// The team's chosen celebration effect, mirrored for the background
+  /// isolate. `null` = no choice; the legacy hardcoded celebration applies.
+  /// Carried here for the same reason [alertSensitivity] is: the worker path
+  /// renders celebrations too, so a choice invisible to this isolate would be
+  /// honoured on one path and ignored on the other.
+  final int? celebrationEffectId;
+  final int celebrationSpeed;
+  final int celebrationIntensity;
+
   /// Resolved participating channel (bus) ids for this config, computed at
   /// schedule time in a Riverpod context (roofline + device channels) and read
   /// by the background isolate to target the right channels (#29).
@@ -111,6 +120,9 @@ class BackgroundGameDayAutopilotConfig {
     required this.scoreCelebrationEnabled,
     this.liveScoringEnabled = true,
     this.alertSensitivity = 'majorOnly',
+    this.celebrationEffectId,
+    this.celebrationSpeed = 240,
+    this.celebrationIntensity = 240,
     this.participatingChannelIds,
   });
 
@@ -137,6 +149,9 @@ class BackgroundGameDayAutopilotConfig {
         'scoreCelebrationEnabled': scoreCelebrationEnabled,
         'liveScoringEnabled': liveScoringEnabled,
         'alertSensitivity': alertSensitivity,
+        'celebrationEffectId': celebrationEffectId,
+        'celebrationSpeed': celebrationSpeed,
+        'celebrationIntensity': celebrationIntensity,
         'participatingChannelIds': participatingChannelIds,
       };
 
@@ -188,6 +203,10 @@ class BackgroundGameDayAutopilotConfig {
       liveScoringEnabled:
           json['liveScoringEnabled'] ?? json['scoreCelebrationEnabled'] ?? true,
       alertSensitivity: json['alertSensitivity'] as String? ?? 'majorOnly',
+      celebrationEffectId: (json['celebrationEffectId'] as num?)?.toInt(),
+      celebrationSpeed: (json['celebrationSpeed'] as num?)?.toInt() ?? 240,
+      celebrationIntensity:
+          (json['celebrationIntensity'] as num?)?.toInt() ?? 240,
       participatingChannelIds: (json['participatingChannelIds'] as List?)
           ?.whereType<num>()
           .map((n) => n.toInt())
@@ -228,6 +247,9 @@ class BackgroundGameDayAutopilotConfig {
       scoreCelebrationEnabled: config.scoreCelebrationEnabled,
       liveScoringEnabled: config.liveScoringEnabled,
       alertSensitivity: config.alertSensitivity.name,
+      celebrationEffectId: config.celebrationEffectId,
+      celebrationSpeed: config.celebrationSpeed,
+      celebrationIntensity: config.celebrationIntensity,
       participatingChannelIds: participatingChannelIds,
     );
   }

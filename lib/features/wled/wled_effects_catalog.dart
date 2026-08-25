@@ -924,4 +924,48 @@ class WledEffectsCatalog {
         .whereType<WledEffect>()
         .toList();
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Celebration picks — the attention-grabbing subset
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Is [effect] one that reads as an interruption rather than an ambience?
+  ///
+  /// The union of two groups, and they really are two: `getMotionType` maps
+  /// the `Strobe` CATEGORY to [MotionType.sweep] (alongside Wipe and Scanner),
+  /// while [MotionType.pulse] comes from Ambient / Fireworks / Ripple / Noise.
+  /// Filtering on either one alone would miss half the set, so this tests both.
+  static bool isCelebrationEffect(WledEffect effect) =>
+      effect.category == 'Strobe' ||
+      getMotionType(effect.category) == MotionType.pulse;
+
+  /// The celebration-effect picker's list: effects designed to stand out
+  /// against whatever the base design is doing. Excludes 2D and audio-reactive
+  /// effects, which [standardEffects] already filters out — a celebration must
+  /// fire on any install, with no matrix and no microphone.
+  static List<WledEffect> get celebrationPicks {
+    final effects = standardEffects.where(isCelebrationEffect).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    return effects;
+  }
+
+  /// True when two effects would read as the same thing on the roofline.
+  ///
+  /// Used by the runtime contrast check (Phase B): a celebration that matches
+  /// what the house is ALREADY showing is invisible, which defeats the whole
+  /// point of a celebration. Three ways to clash:
+  ///   • the same effect id;
+  ///   • both in the `Strobe` category — two different strobes still read as
+  ///     one strobe;
+  ///   • both [MotionType.pulse] — same reason.
+  /// Anything else is treated as sufficiently distinct.
+  static bool effectsTooSimilar(int a, int b) {
+    if (a == b) return true;
+    final ea = _effectsById[a];
+    final eb = _effectsById[b];
+    if (ea == null || eb == null) return false;
+    if (ea.category == 'Strobe' && eb.category == 'Strobe') return true;
+    return getMotionType(ea.category) == MotionType.pulse &&
+        getMotionType(eb.category) == MotionType.pulse;
+  }
 }

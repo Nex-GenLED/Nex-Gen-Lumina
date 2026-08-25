@@ -12,6 +12,7 @@ import '../../wled/zone_providers.dart'
 import '../data/team_colors.dart';
 import '../models/score_alert_config.dart';
 import '../models/score_alert_event.dart';
+import 'celebration_contrast.dart';
 import '../models/sport_type.dart';
 
 /// One step of a score-celebration animation: a WLED payload whose `seg` is a
@@ -135,7 +136,27 @@ class AlertTriggerService {
           final previousState =
               (token == null) ? await _captureZoneState(svc) : <String, dynamic>{};
 
-          await _applyAlertAnimation(event.eventType, teamColors, svc, channels);
+          // AUTOMATIC CONTRAST CHECK (Phase B). The captured state used to go
+          // only to _restoreZoneState; it now also decides whether the user's
+          // chosen celebration would be invisible against what this controller
+          // is showing RIGHT NOW. When autopilot manages capture/restore we
+          // never capture ourselves, so the scheduler's own snapshot is the
+          // source — otherwise the check would be dead in exactly the case
+          // that matters most, a celebration during a scheduled show.
+          final baseState = token?.capturedState ?? previousState;
+          final resolution = resolveCelebration(
+            chosenEffectId: config.celebrationEffectId,
+            chosenSpeed: config.celebrationSpeed,
+            chosenIntensity: config.celebrationIntensity,
+            capturedState: baseState,
+          );
+          if (resolution?.usedFallback ?? false) {
+            debugPrint('[AlertTrigger] $ip: chosen celebration clashes with '
+                'the current look — using the safe fallback');
+          }
+
+          await _applyAlertAnimation(
+              event.eventType, teamColors, svc, channels, resolution);
 
           if (token == null) {
             await _restoreZoneState(svc, previousState);
@@ -171,6 +192,9 @@ class AlertTriggerService {
       AlertEventType.run => const Duration(seconds: 6),
       AlertEventType.quarterEndWinning => const Duration(seconds: 10),
       AlertEventType.clutchBasket => const Duration(seconds: 5),
+      // The longest in the table, deliberately: a win is the moment the whole
+      // feature exists for.
+      AlertEventType.win => const Duration(seconds: 30),
       AlertEventType.turnover => Duration.zero,
     };
   }
@@ -249,12 +273,60 @@ class AlertTriggerService {
     TeamColors team,
     WledService svc,
     List<DeviceChannel> channels,
+    CelebrationResolution? celebration,
   ) async {
     final ids = channels.map((c) => c.id).toList();
-    for (final step in buildAnimationSteps(eventType, team)) {
+    for (final step in buildAnimationSteps(eventType, team, celebration)) {
       await svc.applyJson(applyChannelFilter(step.payload, ids, channels));
       await Future<void>.delayed(step.hold);
     }
+  }
+
+  /// Rewrite one legacy stage to use the user's (contrast-resolved) effect.
+  ///
+  /// The TIMING TABLE IS PRESERVED WHOLE: stage count, hold durations, and the
+  /// first stage's `on`/`bri` assertion all come through untouched. Only the
+  /// motion is replaced — which is exactly the split Tyler specified, the
+  /// switch owning duration and staging while the user owns the effect.
+  ///
+  /// `sx`/`ix` are taken from the choice too. The user picked their effect in a
+  /// live preview at a particular speed and intensity; that is the look they
+  /// approved, so honouring it is what makes the picker truthful. The cost is
+  /// that the legacy per-stage speed ramp is no longer expressed — a chosen
+  /// celebration is one look held for the staged duration rather than three
+  /// escalating ones.
+  ///
+  /// A fallback celebration also overrides `col` to white: it was substituted
+  /// precisely because the motion clashed, and team colours are the one axis
+  /// left to distinguish it (see [kFallbackCelebrationColor]).
+  static Map<String, dynamic> _applyCelebrationToStage(
+    Map<String, dynamic> payload,
+    CelebrationResolution celebration,
+  ) {
+    final segs = payload['seg'];
+    if (segs is! List) return payload;
+
+    return {
+      ...payload,
+      'seg': [
+        for (final seg in segs)
+          if (seg is Map<String, dynamic>)
+            {
+              ...seg,
+              'fx': celebration.effectId,
+              'sx': celebration.speed,
+              'ix': celebration.intensity,
+              if (celebration.usedFallback)
+                'col': [
+                  List<int>.from(kFallbackCelebrationColor),
+                  [0, 0, 0, 0],
+                  [0, 0, 0, 0],
+                ],
+            }
+          else
+            seg,
+      ],
+    };
   }
 
   /// Pure builder for a celebration's ordered animation steps. Each step's `seg`
@@ -271,6 +343,26 @@ class AlertTriggerService {
   ///   - soccerGoal            20s: Chase fx28 (6s) → Strobe fx23 (4s) → Running fx63 (6s) → Breathe fx2 (4s)
   ///   - turnover                  : no animation (Phase 2)
   static List<AlertAnimationStep> buildAnimationSteps(
+    AlertEventType eventType,
+    TeamColors team, [
+    CelebrationResolution? celebration,
+  ]) {
+    final steps = _legacyAnimationSteps(eventType, team);
+    if (celebration == null) return steps; // no user choice → legacy verbatim
+    return [
+      for (final step in steps)
+        AlertAnimationStep(
+          _applyCelebrationToStage(step.payload, celebration),
+          step.hold,
+        ),
+    ];
+  }
+
+  /// THE TIMING TABLE. Per-event-type duration and staging, unchanged — this is
+  /// the part a user's celebration choice does NOT replace. Its literal `fx`
+  /// ids are the DEFAULT motion, used verbatim when no celebration has been
+  /// chosen, and substituted by [_applyCelebrationToStage] when one has.
+  static List<AlertAnimationStep> _legacyAnimationSteps(
     AlertEventType eventType,
     TeamColors team,
   ) {
@@ -388,6 +480,31 @@ class AlertTriggerService {
           }, const Duration(seconds: 4)),
         ];
 
+      // WIN — the longest sequence in the table (30s), staged so it builds
+      // rather than simply running one effect for half a minute. As with every
+      // other entry, a chosen celebration replaces the `fx` at each stage and
+      // leaves this staging intact.
+      case AlertEventType.win:
+        return [
+          AlertAnimationStep({
+            'on': true,
+            'bri': 255,
+            'seg': [
+              {'fx': 2, 'sx': 255, 'ix': 255, 'col': colors},
+            ],
+          }, const Duration(seconds: 5)),
+          AlertAnimationStep({
+            'seg': [
+              {'fx': 9, 'sx': 200, 'ix': 220, 'col': colors},
+            ],
+          }, const Duration(seconds: 10)),
+          AlertAnimationStep({
+            'seg': [
+              {'fx': 63, 'sx': 150, 'ix': 200, 'col': colors},
+            ],
+          }, const Duration(seconds: 15)),
+        ];
+
       case AlertEventType.turnover:
         // Phase 2 — no animation yet.
         return const [];
@@ -450,6 +567,7 @@ class AlertTriggerService {
       AlertEventType.clutchBasket => 'Clutch Basket!',
       AlertEventType.turnover => 'Turnover!',
       AlertEventType.soccerGoal => 'GOOOOOL!',
+      AlertEventType.win => 'WINS!',
     };
     return '${team.teamName} $action $emoji';
   }

@@ -86,6 +86,26 @@ class GameDayAutopilotBackgroundWorker {
   Future<void> evaluate() async {
     if (_disposed) return;
 
+    // ADOPT SESSIONS REGISTERED WHILE WE WERE ALREADY RUNNING.
+    //
+    // `_sessions` was loaded once, at startMonitoring(). The UI cannot reach
+    // this isolate's memory, so a manual "Light Up Now" join writes through
+    // SharedPreferences via registerManualGameDaySession — and nothing re-read
+    // that store, so a join made while the service was already up armed
+    // nothing until the service happened to restart.
+    //
+    // Worker-owned sessions WIN: only a team absent from `_sessions` is
+    // adopted. Without that, this reload would resurrect sessions the phase
+    // machine has since completed and left in the store.
+    final persisted = await loadGameDaySessions();
+    for (final entry in persisted.entries) {
+      if (_sessions.containsKey(entry.key)) continue;
+      if (!entry.value.isActive) continue;
+      _sessions[entry.key] = entry.value;
+      debugPrint('[GameDayBg] adopted externally-registered session '
+          'for ${entry.key}');
+    }
+
     final configs = await loadGameDayConfigsForBackground();
     final enabled = configs.where((c) => c.enabled).toList();
 
@@ -597,6 +617,19 @@ class GameDayAutopilotBackgroundWorker {
   }
 
   /// Build a celebration flash payload in team colors.
+  ///
+  /// THE SECOND RENDERER. This path is independent of
+  /// `AlertTriggerService.buildAnimationSteps` and fires for a team with a
+  /// registered session — including a manual join, where it is the ONLY
+  /// renderer, because such a team has no entry in the monitored list and so
+  /// never reaches the trigger service. It therefore has to honour the user's
+  /// celebration choice too; otherwise the choice would be respected on one
+  /// path and silently ignored on the other.
+  ///
+  /// No contrast check here: this dispatches through the server fanout and has
+  /// no device read to compare against. Same fail-open posture as
+  /// [resolveCelebration] takes on an unreadable state — the user's choice
+  /// fires as picked.
   @visibleForTesting
   static Map<String, dynamic> buildCelebrationPayloadForTest(
     BackgroundGameDayAutopilotConfig config,
@@ -611,9 +644,16 @@ class GameDayAutopilotBackgroundWorker {
         'bri': 255,
         'seg': [
           {
-            'fx': 11, // Sparkle
-            'sx': 240,
-            'ix': 240,
+            // The user's chosen celebration, falling back to Sparkle (11) when
+            // they have not picked one — the legacy default, so every existing
+            // config keeps its current behavior.
+            'fx': config.celebrationEffectId ?? 11,
+            'sx': config.celebrationEffectId != null
+                ? config.celebrationSpeed
+                : 240,
+            'ix': config.celebrationEffectId != null
+                ? config.celebrationIntensity
+                : 240,
             'pal': 0,
             'col': [
               [
