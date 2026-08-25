@@ -21,6 +21,10 @@ import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
+import '../autopilot/game_day_background_persistence.dart';
+import '../sports_alerts/providers/sports_alert_providers.dart';
+import 'ephemeral_session/ephemeral_game_session_providers.dart';
+import '../sports_alerts/services/sports_background_service.dart';
 import '../wled/colorway_effect_selector.dart';
 import '../wled/library_hierarchy_models.dart';
 import '../wled/wled_effects_catalog.dart';
@@ -543,9 +547,25 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       return;
     }
 
-    // Capture messenger up-front because the toggleAutopilot await below
-    // can unmount this widget before we get to show the result snackbar.
+    // Capture messenger up-front because the awaits below can unmount this
+    // widget before we get to show the result snackbar.
     final messenger = ScaffoldMessenger.of(context);
+
+    // Snapshot what the house is showing BEFORE we overwrite it — this is what
+    // the ephemeral session puts back when the game ends. Captured here rather
+    // than inside the session because by the time the session exists the team
+    // design has already been applied, and capturing then would "revert" to
+    // the Game Day look forever.
+    Map<String, dynamic> revertPayload = const {};
+    try {
+      revertPayload =
+          await ref.read(wledRepositoryProvider)?.getState() ?? const {};
+    } catch (e) {
+      debugPrint('[GameDay] Light Up Now: revert capture failed: $e');
+    }
+    // Null when nothing named is showing — the session needs a concrete label
+    // to restore the Now Playing chip to, so fall back to the neutral one.
+    final revertLabel = ref.read(activePresetLabelProvider) ?? 'Custom';
 
     // Convergence-Phase-2b: the payload build + apply routes through
     // the shared [applyGameDayConfigToDevice] helper. The Path 2
@@ -562,21 +582,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     if (!context.mounted) return;
 
     if (ok) {
-      // Ensure autopilot is enabled so the background worker creates a session
-      // for this team. This is what lets score celebrations fire after a manual
-      // "Light Up Now" — without it, _sessions[teamSlug] stays null in the
-      // background worker and ScoreAlertEvents are silently dropped.
-      if (!config.enabled) {
-        try {
-          await ref
-              .read(gameDayAutopilotNotifierProvider.notifier)
-              .toggleAutopilot(teamSlug: config.teamSlug, enabled: true);
-        } catch (e, st) {
-          debugPrint(
-              '[GameDay] Light Up Now: enable autopilot failed: $e\n$st');
-          // Non-fatal — lights are already lit. Live scoring just won't fire.
-        }
-      }
+      await _startManualSession(ref, config, revertPayload, revertLabel);
     }
 
     messenger.showSnackBar(
@@ -647,6 +653,81 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           duration: const Duration(seconds: 4),
         ),
       );
+    }
+  }
+
+  /// Arm a manual mid-game join WITHOUT touching `config.enabled`.
+  ///
+  /// "Light Up Now" used to flip `enabled:true`, because the background
+  /// worker's session map is what `onScoreAlertEvent` looks in and only the
+  /// scheduled path ever wrote it. But `enabled` is the field the SERVER
+  /// planner queries (`planGameDayFires.ts`), so joining ONE live game silently
+  /// opted the team into every future scheduled show
+  /// (audit/GAME_DAY_SPEC_AUDIT.md §3.5).
+  ///
+  /// Two writes replace that flip, neither touching `enabled`:
+  ///   1. [registerManualGameDaySession] — the isolate crossing that arms
+  ///      celebrations for this team from this second. Purpose-built for
+  ///      exactly this, and previously called from one unrelated screen only.
+  ///   2. an ephemeral session — the phase machine that detects the real final
+  ///      whistle, reverts, and disarms, so the join SELF-EXPIRES rather than
+  ///      running until the user notices.
+  ///
+  /// Ordering is deliberate. Arming comes first and is not conditional on the
+  /// session: ESPN lookups fail, and a celebration that fires without an
+  /// auto-revert is a far better outcome than a silent house. The session is
+  /// best-effort on top.
+  static Future<void> _startManualSession(
+    WidgetRef ref,
+    GameDayAutopilotConfig config,
+    Map<String, dynamic> revertPayload,
+    String revertLabel,
+  ) async {
+    // Bind the game id when we can — it lets the worker's phase machine track
+    // THIS game rather than guessing from a timer.
+    String? gameId;
+    try {
+      gameId = (await ref.read(activeGameProvider(config.teamSlug).future))
+          ?.gameId;
+    } catch (e) {
+      debugPrint('[GameDay] Light Up Now: game lookup failed: $e');
+    }
+
+    try {
+      await registerManualGameDaySession(
+        teamSlug: config.teamSlug,
+        activeGameId: gameId,
+      );
+      // Nothing else guarantees the poller is up for a manual join. The
+      // scheduled path starts it when a game is within 60 minutes
+      // (autopilot_scheduler.dart), which is precisely the path a mid-game
+      // join is NOT on. Idempotent when already running.
+      await startSportsService();
+    } catch (e, st) {
+      debugPrint('[GameDay] Light Up Now: arming failed: $e\n$st');
+      // Non-fatal — the lights are already on, celebrations just won't fire.
+    }
+
+    if (gameId == null) {
+      debugPrint('[GameDay] Light Up Now: no live game for ${config.teamSlug} '
+          '— armed without an auto-expiring session');
+      return;
+    }
+
+    try {
+      final svc = ref.read(ephemeralGameSessionServiceProvider);
+      if (svc == null) return; // signed out
+      final session = await svc.createSession(
+        teamSlug: config.teamSlug,
+        gameId: gameId,
+        revertWledPayload: revertPayload,
+        revertLabel: revertLabel,
+      );
+      await svc.startTracking(session.sessionId);
+    } catch (e, st) {
+      // createSession throws when the game is not in the fetched season
+      // schedule. The house stays lit and armed; it just will not self-revert.
+      debugPrint('[GameDay] Light Up Now: session create failed: $e\n$st');
     }
   }
 

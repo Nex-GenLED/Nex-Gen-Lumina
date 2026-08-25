@@ -86,6 +86,26 @@ class GameDayAutopilotBackgroundWorker {
   Future<void> evaluate() async {
     if (_disposed) return;
 
+    // ADOPT SESSIONS REGISTERED WHILE WE WERE ALREADY RUNNING.
+    //
+    // `_sessions` was loaded once, at startMonitoring(). The UI cannot reach
+    // this isolate's memory, so a manual "Light Up Now" join writes through
+    // SharedPreferences via registerManualGameDaySession — and nothing re-read
+    // that store, so a join made while the service was already up armed
+    // nothing until the service happened to restart.
+    //
+    // Worker-owned sessions WIN: only a team absent from `_sessions` is
+    // adopted. Without that, this reload would resurrect sessions the phase
+    // machine has since completed and left in the store.
+    final persisted = await loadGameDaySessions();
+    for (final entry in persisted.entries) {
+      if (_sessions.containsKey(entry.key)) continue;
+      if (!entry.value.isActive) continue;
+      _sessions[entry.key] = entry.value;
+      debugPrint('[GameDayBg] adopted externally-registered session '
+          'for ${entry.key}');
+    }
+
     final configs = await loadGameDayConfigsForBackground();
     final enabled = configs.where((c) => c.enabled).toList();
 
