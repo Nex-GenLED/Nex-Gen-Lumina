@@ -301,8 +301,26 @@ Future<CfgPushOutcome> pushCfgWithVerify({
 /// 1. Save each schedule's WLED payload as a preset on the device
 /// 2. Create WLED timers that reference those preset IDs
 /// 3. Push the timer configuration to the device
+/// Floor gap between consecutive controller writes within one sync.
+///
+/// 300ms sits inside the 250-500ms band the pacing fix specified. It is a gap
+/// BETWEEN writes, not a per-iteration tax: a call the idempotence gate skips
+/// issues no request and therefore costs nothing, which is what keeps a
+/// steady-state sync (few or zero real psaves) exactly as fast as before.
+const Duration kControllerWritePace = Duration(milliseconds: 300);
+
 class ScheduleSyncService {
-  const ScheduleSyncService();
+  const ScheduleSyncService({this.paceDelay = kControllerWritePace});
+
+  /// Floor delay BETWEEN consecutive controller WRITES inside one [syncAll]
+  /// (audit/SYNC_PACING_FIX_STATUS.md §1(a) — previously absent entirely).
+  ///
+  /// Every `psave` is a flash commit on a single-core HTTP server. Issuing
+  /// them back-to-back with no gap is the burst shape that precedes the
+  /// observed wedge, so successive writes are spaced.
+  ///
+  /// Injectable so tests can pass [Duration.zero] and not sleep.
+  final Duration paceDelay;
 
   /// First / last available preset ID for user schedules. Aliases of the
   /// canonical range in `wled_preset_ranges.dart`, which is where the whole
@@ -764,7 +782,30 @@ class ScheduleSyncService {
   /// Accepts a [Ref] (provider-side) rather than [WidgetRef] so the
   /// notifier-driven auto-sync can call this directly. Both ref types
   /// expose the same `.read()` surface used inside this method.
-  Future<ScheduleSyncResult> syncAll(Ref ref, List<ScheduleItem> schedules) async {
+  /// Public entry point. Suspends background polling for the WHOLE sync, then
+  /// delegates to [_syncAllInner].
+  ///
+  /// WHY A WRAPPER: [_syncAllInner] has a dozen `return finish(...)` exits.
+  /// A try/finally around its body would have to be threaded past every one of
+  /// them; wrapping guarantees the resume runs on every exit, including a
+  /// throw, without touching the existing control flow at all.
+  ///
+  /// The poller otherwise interleaves `getState` between a psave and the cfg
+  /// commit — the concurrent-request half of the burst
+  /// (audit/SYNC_PACING_FIX_STATUS.md §1(c)).
+  Future<ScheduleSyncResult> syncAll(
+      Ref ref, List<ScheduleItem> schedules) async {
+    final poller = ref.read(wledStateProvider.notifier);
+    poller.pausePolling();
+    try {
+      return await _syncAllInner(ref, schedules);
+    } finally {
+      poller.resumePolling();
+    }
+  }
+
+  Future<ScheduleSyncResult> _syncAllInner(
+      Ref ref, List<ScheduleItem> schedules) async {
     // Records the result so the schedule screen can show a status row.
     ScheduleSyncResult finish(ScheduleSyncResult result) {
       ref.read(lastScheduleSyncResultProvider.notifier).state = result;
@@ -839,6 +880,13 @@ class ScheduleSyncService {
     // Step 1: Assign preset IDs and save presets to device
     final List<ScheduleItem> updatedSchedules = [];
     final List<String> presetErrors = [];
+
+    // PACING STATE (audit/SYNC_PACING_FIX_STATUS.md §1(a)). Flipped by the
+    // first REAL write this sync; every later real write waits [paceDelay]
+    // first. Gating on "a write already happened" is what makes this a gap
+    // BETWEEN writes rather than a fixed tax — a fully-converged sync skips
+    // every psave, never sets this, and never sleeps.
+    var didPaceAnyWrite = false;
 
     // Tracks which preset IDs were actually psaved this sync. Used below to
     // refuse arming a runPattern timer macro that points at a preset that was
@@ -1016,6 +1064,13 @@ class ScheduleSyncService {
         return;
       }
       await repairAttempts.recordAttempt(id);
+
+      // PACE. Only reached once every skip/refuse branch above has returned,
+      // so this delay is charged strictly to writes that actually go out.
+      if (didPaceAnyWrite && paceDelay > Duration.zero) {
+        await Future<void>.delayed(paceDelay);
+      }
+      didPaceAnyWrite = true;
 
       final ok = await activeRepo.savePreset(
         presetId: id,

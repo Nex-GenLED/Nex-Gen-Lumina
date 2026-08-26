@@ -161,9 +161,59 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// /json/cfg push. Sync failures are logged but never rethrown —
   /// a controller-side problem must never block the Firestore write.
   void _triggerWledSync() {
+    // BATCHED: a bulk operation is in progress (Game Day calendar populate).
+    // Record that a sync is owed and let [endSyncBatch] fire exactly one.
+    if (_syncBatchDepth > 0) {
+      _syncPendingAfterBatch = true;
+      return;
+    }
     _syncDebounceTimer?.cancel();
     _syncDebounceTimer = Timer(const Duration(milliseconds: 800), _runWledSync);
   }
+
+  /// Nesting depth of [beginSyncBatch].
+  int _syncBatchDepth = 0;
+
+  /// A mutation asked for a sync while batched; owed once the batch closes.
+  bool _syncPendingAfterBatch = false;
+
+  /// Coalesce every sync request raised during a bulk mutation into ONE.
+  ///
+  /// WHY (audit/SYNC_PACING_FIX_STATUS.md §2a): the Game Day calendar populate
+  /// writes entries in a loop, and each write arms the 800ms debounce. The
+  /// debounce already collapses them WHEN the loop runs faster than 800ms per
+  /// entry — but each entry awaits a Firestore round-trip, so under slow
+  /// network conditions the timer fires MID-LOOP and starts a sync that the
+  /// remaining writes then race. Worse, a second sync arriving while the first
+  /// is verifying is DROPPED by `_syncInFlight`, not queued — so the tail of
+  /// the loop could go unpushed entirely.
+  ///
+  /// Batching makes the outcome deterministic — exactly one sync, after the
+  /// last write — instead of latency-dependent.
+  ///
+  /// ALWAYS pair with [endSyncBatch] in a `finally`.
+  void beginSyncBatch() {
+    _syncBatchDepth++;
+    _syncDebounceTimer?.cancel();
+  }
+
+  /// Close one batch level. The owed sync fires only when the last level
+  /// closes, and only if some mutation actually asked for one.
+  void endSyncBatch() {
+    if (_syncBatchDepth == 0) return;
+    _syncBatchDepth--;
+    if (_syncBatchDepth > 0) return;
+    if (!_syncPendingAfterBatch) return;
+    _syncPendingAfterBatch = false;
+    _syncDebounceTimer?.cancel();
+    _syncDebounceTimer = Timer(const Duration(milliseconds: 800), _runWledSync);
+  }
+
+  @visibleForTesting
+  bool get debugSyncPendingAfterBatch => _syncPendingAfterBatch;
+
+  @visibleForTesting
+  int get debugSyncBatchDepth => _syncBatchDepth;
 
   /// Immediate sync — bypasses the debounce. Used by the manual
   /// Sync button in My Schedule (the user's escape hatch when they
