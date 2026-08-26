@@ -76,7 +76,7 @@ class _ScheduleOverloadBannerState
     // empty cleanup sheet is a silent failure state — never reach it.
     final conflicts = ScheduleConflictDetector.computeAllConflicts(
       schedules: schedules,
-      calendarEntries: calEntries,
+      calendarEntries: calEntries.primaries,
     );
     if (conflicts.isEmpty) {
       return const SizedBox.shrink();
@@ -111,7 +111,7 @@ class _ScheduleOverloadBannerState
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             ),
             onPressed: () => _showCleanupSheet(
-                context, ref, schedules, calEntries, conflicts),
+                context, ref, schedules, calEntries.primaries, conflicts),
             child: const Text('Clean Up',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
           ),

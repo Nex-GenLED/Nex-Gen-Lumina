@@ -22,6 +22,12 @@ enum AlertEventType {
   // NBA
   clutchBasket,
 
+  /// The monitored team WON. Fired once, on the transition to
+  /// GameStatus.final_ with the team ahead. The moment that matters most, so
+  /// it carries the longest duration in the timing table and is exempt from
+  /// both the sensitivity filter and the celebration cooldown.
+  win,
+
   // Phase 2
   turnover;
 

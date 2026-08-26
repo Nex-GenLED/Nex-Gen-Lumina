@@ -173,11 +173,21 @@ void _onStart(ServiceInstance service) async {
     // sports-alert opt-in polled nothing and could never celebrate. Monitoring
     // now derives from Game Day + Live Scoring, with legacy configs honoured
     // only until migration adopts them.
+    //
+    // ORPHAN SAFETY GATE. A legacy prefs config no longer arms monitoring on
+    // its own: Game Day's delete path writes only to Firestore, so a deleted
+    // team left a prefs entry behind that kept celebrating
+    // (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.4). The profile-array mirror is
+    // the Firestore corroboration this isolate can reach — it has no Firestore
+    // access of its own, so it reads what the UI layer persisted via
+    // `saveUserTeamPriority` (game_day_autopilot_providers.dart:297).
     final legacyConfigs = await _loadConfigs();
     final gameDayConfigs = await loadGameDayConfigsForBackground();
+    final profileTeamNames = await loadUserTeamPriority();
     final plan = resolveMonitoring(
       gameDayConfigs: gameDayConfigs,
       legacyAlertConfigs: legacyConfigs,
+      profileTeamNames: profileTeamNames,
     );
     final active = plan.monitored;
 
@@ -342,6 +352,20 @@ FutureOr<bool> _onIosBackground(ServiceInstance service) async {
 // ---------------------------------------------------------------------------
 
 /// Load persisted [ScoreAlertConfig] list from SharedPreferences.
+///
+/// PUBLIC FOR MIGRATION ONLY. The retired Sports Alerts store is read exactly
+/// once more, by [SportsAlertsLazyMigrator], to adopt its contents into Game
+/// Day; nothing else should read it (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.2).
+Future<List<ScoreAlertConfig>> loadAlertConfigs() => _loadConfigs();
+
+/// Empty the retired store. Called by the migrator once its contents are safely
+/// in Firestore, so a later launch cannot resurrect an already-adopted team.
+Future<void> clearAlertConfigs() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove(_kConfigsKey);
+}
+
+/// Load persisted [ScoreAlertConfig] list from SharedPreferences.
 Future<List<ScoreAlertConfig>> _loadConfigs() async {
   try {
     final prefs = await SharedPreferences.getInstance();
@@ -357,12 +381,12 @@ Future<List<ScoreAlertConfig>> _loadConfigs() async {
   }
 }
 
-/// Save configs to SharedPreferences (called from UI layer).
-Future<void> saveAlertConfigs(List<ScoreAlertConfig> configs) async {
-  final prefs = await SharedPreferences.getInstance();
-  final encoded = configs.map((c) => jsonEncode(c.toJson())).toList();
-  await prefs.setStringList(_kConfigsKey, encoded);
-}
+// NOTE: there is deliberately no `saveAlertConfigs` any more. The retired
+// prefs store is now READ-ONLY, and read by exactly two callers: the migrator,
+// which drains it into Game Day, and the poll loop below, whose remaining
+// legacy entries are gated by resolveMonitoring's orphan safety check. Nothing
+// writes it — every add now goes to the `game_day_autopilot` doc, which is what
+// keeps the two surfaces from drifting apart again.
 
 /// Determine the optimal polling interval based on current game states.
 Future<_PollingInterval> _resolvePollingInterval(

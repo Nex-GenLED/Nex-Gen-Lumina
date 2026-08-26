@@ -25,6 +25,7 @@
 // required a server change plus a deploy ordering this work is not allowed to
 // take.
 
+import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/models/sport_type.dart';
 import 'game_day_autopilot_config.dart';
@@ -69,8 +70,37 @@ ScoreAlertConfig monitoringConfigFor(BackgroundGameDayAutopilotConfig c) {
       (s) => s.name == c.alertSensitivity,
       orElse: () => AlertSensitivity.majorOnly,
     ),
+    // Carried for the same reason sensitivity is: the trigger service receives
+    // ONLY this object, so a celebration choice that stops here would never
+    // reach the animation. Null stays null — an unchosen effect must keep the
+    // legacy hardcoded sequences.
+    celebrationEffectId: c.celebrationEffectId,
+    celebrationSpeed: c.celebrationSpeed,
+    celebrationIntensity: c.celebrationIntensity,
   );
 }
+
+/// Is [slug]'s team still carried on the user's Firestore profile arrays?
+///
+/// [profileTeamKeys] holds `sports_teams` entries already normalised with
+/// [_profileKey]. The prefs store keys teams by SLUG while the profile arrays
+/// hold display NAMES, so the comparison goes through [kTeamColors].
+///
+/// A slug absent from [kTeamColors] returns false: both writers of the prefs
+/// store (`zone_assignment_screen`, `live_scoring_prompt`) pick exclusively
+/// from [kTeamColors], so an unknown slug is a genuinely dead entry, never a
+/// custom team we would be wrong to disarm.
+bool _isCarriedOnProfile(String slug, Set<String> profileTeamKeys) {
+  final name = kTeamColors[slug]?.teamName;
+  if (name == null) return false;
+  return profileTeamKeys.contains(_profileKey(name));
+}
+
+/// Case/whitespace-insensitive profile-array key. Matches the normalisation
+/// `TeamRegistrationService._stripTeamFromProfile` uses, so a team this
+/// function considers "carried" is exactly one that a Game Day delete would
+/// have stripped.
+String _profileKey(String teamName) => teamName.trim().toLowerCase();
 
 /// THE unified arming resolution.
 ///
@@ -80,9 +110,34 @@ ScoreAlertConfig monitoringConfigFor(BackgroundGameDayAutopilotConfig c) {
 /// Day config exists for the team, Game Day wins outright, so turning Live
 /// Scoring off genuinely stops monitoring even if a stale legacy config is
 /// still sitting in SharedPreferences.
+///
+/// ORPHAN SAFETY GATE (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.4). The safety net
+/// used to arm on the prefs list ALONE. Because Game Day's delete path only
+/// ever touches Firestore — `team_registration_service.dart:118-122` deletes
+/// the subcollection doc, `:214-235` strips the profile arrays — and never the
+/// prefs store, deleting a team left a prefs config behind that still armed
+/// monitoring. Deleting the Game Day doc removed the very record that would
+/// have suppressed the orphan, so the user kept getting celebrations for teams
+/// they had removed.
+///
+/// A legacy config is therefore honoured only when Firestore still corroborates
+/// it: the team has a Game Day doc (in which case Game Day wins above and this
+/// path is not reached) OR its name is still on the profile arrays passed as
+/// [profileTeamNames]. Lacking BOTH, the entry is reported in
+/// [MonitoringPlan.orphanedLegacy] — so migration can still see and adopt it —
+/// but is kept OUT of [MonitoringPlan.monitored].
+///
+/// [profileTeamNames] is the Firestore-derived `sports_teams` /
+/// `sports_team_priority` list. The background isolate has no Firestore access,
+/// so it receives the mirror the UI layer persists via `saveUserTeamPriority`
+/// (`game_day_autopilot_providers.dart:297`). An empty list means "no teams on
+/// the profile", which correctly disarms every orphan; accounts that are fine
+/// are untouched, because their teams are either Game Day docs or present on
+/// the profile arrays.
 MonitoringPlan resolveMonitoring({
   required List<BackgroundGameDayAutopilotConfig> gameDayConfigs,
   required List<ScoreAlertConfig> legacyAlertConfigs,
+  required List<String> profileTeamNames,
 }) {
   final monitored = <ScoreAlertConfig>[];
   final gameDaySlugs = <String>{};
@@ -92,11 +147,17 @@ MonitoringPlan resolveMonitoring({
     if (c.isMonitored) monitored.add(monitoringConfigFor(c));
   }
 
+  final profileTeamKeys = profileTeamNames.map(_profileKey).toSet();
+
   final orphaned = <ScoreAlertConfig>[];
   for (final legacy in legacyAlertConfigs) {
     if (gameDaySlugs.contains(legacy.teamSlug)) continue; // Game Day wins.
     orphaned.add(legacy);
-    if (legacy.isEnabled) monitored.add(legacy);
+    if (!legacy.isEnabled) continue;
+    // No Game Day doc (we are past the `continue` above) AND no profile entry
+    // ⇒ the team was deleted, or never really existed. Do not arm it.
+    if (!_isCarriedOnProfile(legacy.teamSlug, profileTeamKeys)) continue;
+    monitored.add(legacy);
   }
 
   return MonitoringPlan(monitored: monitored, orphanedLegacy: orphaned);

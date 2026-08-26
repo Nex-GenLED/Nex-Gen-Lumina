@@ -289,7 +289,7 @@ class _AutopilotCalendarScreenState
         holidays: const [],
         weekGeneration:
             DateTime.now().millisecondsSinceEpoch ~/ (7 * 86400000),
-        calendarEntries: calEntries,
+        calendarEntries: calEntries.primaries,
       );
 
       // Show conflict dialog if policy is 'ask' and conflicts were found

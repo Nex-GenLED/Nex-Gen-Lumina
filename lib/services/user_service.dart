@@ -4,7 +4,9 @@ import 'dart:ui';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_storage.dart';
+import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 import 'package:nexgen_command/features/schedule/data/legacy_array_schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -847,17 +849,28 @@ class UserService {
   /// Save calendar entries for a user.
   /// Writes to `users/{userId}` field `calendar_entries` (map keyed by date).
   /// Returns true if the write was confirmed on the server.
-  Future<bool> saveCalendarEntries(
-      String userId, Map<String, CalendarEntry> entries) async {
+  /// Persist the whole calendar (Scheduling V3 A1).
+  ///
+  /// The wire shape is [encodeCalendarEntries]: a date's primary keeps the plain
+  /// `'YYYY-MM-DD'` key and additional entries are suffixed `'#<entryId>'`, so a
+  /// pre-V3 build reading this document still finds exactly one entry per date
+  /// and a pre-V3 build WRITING it preserves the extras verbatim. No migration:
+  /// every existing plain-keyed document is already a valid new-shape document.
+  Future<bool> saveCalendarEntries(String userId, CalendarEntrySet set) async {
     try {
       await _writeWithRetry(() async {
-        final map = <String, dynamic>{};
-        for (final e in entries.entries) {
-          map[e.key] = sanitizeForFirestore(e.value.toJson());
-        }
+        final encoded = encodeCalendarEntriesWithScope(set);
+        final map = <String, dynamic>{
+          for (final e in encoded.entries.entries)
+            e.key: sanitizeForFirestore(e.value),
+        };
         await _firestore.collection('users').doc(userId).update(
           sanitizeForFirestore({
             'calendar_entries': map,
+            // D1 — the durable scope sidecar, written in the SAME update so an
+            // entry and its scope can never be half-persisted. Rebuilt in full
+            // every time, so a cleared scope disappears rather than lingering.
+            kCalendarEntryScopeField: encoded.scope,
             'updated_at': FieldValue.serverTimestamp(),
           }),
         );
@@ -866,33 +879,29 @@ class UserService {
       debugPrint('❌ saveCalendarEntries failed after all retries: $e');
       return false;
     }
-    debugPrint('✅ Calendar entries saved: ${entries.length} items');
+    debugPrint('✅ Calendar entries saved: ${set.totalEntries} entries '
+        'across ${set.sortedDateKeys.length} dates');
     return true;
   }
 
   /// Load calendar entries from the Firestore server (bypasses cache).
   /// Reads from `users/{userId}` field `calendar_entries`.
-  Future<Map<String, CalendarEntry>> loadCalendarEntries(
-      String userId) async {
+  Future<CalendarEntrySet> loadCalendarEntries(String userId) async {
     final doc = await _firestore
         .collection('users')
         .doc(userId)
         .get(const GetOptions(source: Source.server));
-    if (!doc.exists) return {};
+    if (!doc.exists) return CalendarEntrySet.empty;
     final data = doc.data()!;
     final raw = data['calendar_entries'] as Map<String, dynamic>? ?? {};
-    final result = <String, CalendarEntry>{};
-    for (final entry in raw.entries) {
-      if (entry.value is Map<String, dynamic>) {
-        try {
-          result[entry.key] =
-              CalendarEntry.fromJson(entry.value as Map<String, dynamic>);
-        } catch (e) {
-          debugPrint('⚠️ Skipping corrupt calendar entry ${entry.key}: $e');
-        }
-      }
-    }
-    return result;
+    return decodeCalendarEntries(
+      raw,
+      scopeSidecar: data[kCalendarEntryScopeField],
+      // Same skip-and-log behaviour as the pre-V3 loader: one corrupt row must
+      // never cost the user their whole calendar.
+      onCorrupt: (key, error) =>
+          debugPrint('⚠️ Skipping corrupt calendar entry $key: $error'),
+    );
   }
 }
 

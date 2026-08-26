@@ -656,9 +656,26 @@ class PatternRepository {
     ..._holidayItems,
   ];
 
+  /// Root categories for the Explore grid, DERIVED from the node tree.
+  ///
+  /// Previously this returned a second static list (`_categories`) that the
+  /// grid read while `getChildNodes(null)` read `_buildRootCategories()` —
+  /// two parallel trees, which is why `my_designs` could be synthesised into
+  /// one and be absent from the other (audit/MY_DESIGNS_AUDIT.md §2b.3).
+  /// `_buildRootCategories()` is now the single source; the grid inherits its
+  /// `sortOrder`, which is why those values were renumbered to preserve the
+  /// grid's existing display order.
+  ///
+  /// The dynamic `my_designs` root is included here; `patternCategoriesProvider`
+  /// drops it for unauthenticated users (the repository has no auth).
   Future<List<PatternCategory>> getCategories() async {
     debugPrint('PatternRepository.getCategories');
-    return _categories;
+    final roots = _buildRootCategories().toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return [
+      for (final n in roots)
+        PatternCategory(id: n.id, name: n.name, imageUrl: n.imageUrl ?? ''),
+    ];
   }
 
   Future<List<PatternItem>> getItemsByCategory(String categoryId) async {
@@ -790,60 +807,83 @@ class PatternRepository {
         id: 'cat_sports',
         name: 'Game Day Fan Zone',
         nodeType: LibraryNodeType.category,
-        sortOrder: 0,
+        sortOrder: 1,
         imageUrl: 'https://images.unsplash.com/photo-1518600506278-4e8ef466b810',
       ),
       LibraryNode(
         id: 'cat_holiday',
         name: 'Holidays',
         nodeType: LibraryNodeType.category,
-        sortOrder: 1,
+        sortOrder: 2,
         imageUrl: 'https://images.unsplash.com/photo-1482517967863-00e15c9b44be',
       ),
       LibraryNode(
         id: 'cat_season',
         name: 'Seasonal Vibes',
         nodeType: LibraryNodeType.category,
-        sortOrder: 2,
+        sortOrder: 6,
         imageUrl: 'https://images.unsplash.com/photo-1477587458883-47145ed94245',
       ),
       LibraryNode(
         id: 'cat_party',
         name: 'Parties & Events',
         nodeType: LibraryNodeType.category,
-        sortOrder: 3,
+        sortOrder: 5,
         imageUrl: 'https://images.unsplash.com/photo-1544491843-0ce2884635f3',
       ),
       LibraryNode(
         id: 'cat_movies',
         name: 'Movies & Superheroes',
         nodeType: LibraryNodeType.category,
-        sortOrder: 4,
+        sortOrder: 3,
         imageUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1',
       ),
       LibraryNode(
         id: 'cat_arch',
         name: 'Architectural Downlighting (White)',
         nodeType: LibraryNodeType.category,
-        sortOrder: 5,
+        sortOrder: 0,
         imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
       ),
       LibraryNode(
         id: 'cat_security',
         name: 'Security & Alerts',
         nodeType: LibraryNodeType.category,
-        sortOrder: 6,
+        sortOrder: 7,
         imageUrl: 'https://images.unsplash.com/photo-1579403124614-197f69d8187b',
       ),
       LibraryNode(
         id: 'cat_nature',
         name: 'Nature & Outdoors',
         nodeType: LibraryNodeType.category,
-        sortOrder: 7,
+        sortOrder: 4,
         imageUrl: 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a',
+      ),
+      // The user's saved designs. A REAL root node rather than a runtime
+      // synthesis (audit/MY_DESIGNS_AUDIT.md §2b.3): being in the tree is what
+      // makes search, pinning, breadcrumbs and every LibraryNode-driven picker
+      // see it without a special case.
+      //
+      // DYNAMIC: this repository is a static in-memory catalog with no auth
+      // and no Firestore, so it can declare the FOLDER but not its CHILDREN.
+      // The `isDynamic` marker tells the provider layer that
+      //   • children come from `designsStreamProvider`, and
+      //   • the node must be filtered out for unauthenticated users.
+      // See `libraryChildNodesProvider` / `patternCategoriesProvider`.
+      LibraryNode(
+        id: LibraryCategoryIds.myDesigns,
+        name: 'My Designs',
+        description: 'Designs you have saved',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 8, // last, after the 8 catalog roots
+        metadata: {'isDynamic': true},
       ),
     ];
   }
+
+  /// True when [node] is a root whose children the repository cannot supply.
+  static bool isDynamicNode(LibraryNode node) =>
+      node.metadata?['isDynamic'] == true;
 
   /// Architectural white style definitions — Kelvin color temperature ramp.
   /// RGB values derived from the Tanner Helland algorithm for each Kelvin step.
@@ -1547,7 +1587,18 @@ class PatternRepository {
   /// Search through all existing patterns in the library.
   /// Returns matching LibraryNodes (palettes, folders) and PatternItems.
   /// Uses fuzzy matching on names, descriptions, and related keywords.
-  Future<LibrarySearchResults> searchLibrary(String query) async {
+  /// Searches the library.
+  ///
+  /// [extraNodes] carries nodes the repository cannot hold — today, the user's
+  /// saved designs, which are per-user Firestore docs surfaced under the
+  /// dynamic `my_designs` root. They are appended to the SAME scored sweep as
+  /// the catalog rather than searched separately, so there is one ranking and
+  /// one relevance rule (audit/DESIGN_CARD_P3.md, B3). `librarySearchProvider`
+  /// supplies them; a direct repository call still searches the catalog alone.
+  Future<LibrarySearchResults> searchLibrary(
+    String query, {
+    List<LibraryNode> extraNodes = const [],
+  }) async {
     if (query.trim().isEmpty) {
       return const LibrarySearchResults(palettes: [], folders: [], patterns: []);
     }
@@ -1558,7 +1609,7 @@ class PatternRepository {
     final matchingPatterns = <PatternItem>[];
 
     // Search all library nodes
-    for (final node in _allNodes) {
+    for (final node in [..._allNodes, ...extraNodes]) {
       final score = _calculateMatchScore(node, searchTerms);
       if (score > 0) {
         if (node.isPalette) {

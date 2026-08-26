@@ -27,7 +27,9 @@ import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets
@@ -234,39 +236,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
     super.dispose();
   }
 
-  /// Helper invoked from the saved-design intercept's post-frame callback.
-  /// Resolves the saved design from the designs stream, runs the canonical
-  /// apply, and pops back to the My Designs grid. Pops even on resolve
-  /// failure so the user isn't stranded on the spinner screen.
-  Future<void> _applySavedDesignAndPop(String? designId) async {
-    if (!mounted) return;
-    if (designId == null || designId.isEmpty) {
-      if (mounted && context.canPop()) context.pop();
-      return;
-    }
-    final designs = ref.read(designsStreamProvider).valueOrNull
-        ?? const <CustomDesign>[];
-    CustomDesign? match;
-    for (final d in designs) {
-      if (d.id == designId) {
-        match = d;
-        break;
-      }
-    }
-    if (match == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Design not found')),
-        );
-        if (context.canPop()) context.pop();
-      }
-      return;
-    }
-    await applySavedDesign(context, ref, match);
-    if (mounted && context.canPop()) context.pop();
-  }
-
-  /// Selection-mode counterpart of [_applySavedDesignAndPop]: resolve the saved
+  /// Selection-mode handler: resolve the saved
   /// design and hand it back via [LibraryBrowserScreen.onDesignSelected] (its
   /// RAW payload) WITHOUT applying it. The callback owns dismissing the picker.
   void _returnSavedDesignSelection(String? designId) {
@@ -298,6 +268,62 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
       name: match.name,
       wledPayload: match.toWledPayload(),
     ));
+  }
+
+  /// Quick actions for a My Designs row. Returns null for anything else, so
+  /// no catalog card ever grows an overflow button.
+  ///
+  /// Apply lives here so ONE-TAP apply survives the move to a detail screen —
+  /// tapping the row now browses, and this menu is the fast path. Duplicate
+  /// and Rename are deliberately detail-screen-only: they need a name field
+  /// and a place to land.
+  List<LibraryNodeAction>? _savedDesignActions(LibraryNode node) {
+    if (widget.onDesignSelected != null || widget.teamSlug != null) return null;
+    if (node.metadata?['isSavedDesign'] != true) return null;
+    final designId = node.metadata?['sourceDesignId'] as String?;
+    if (designId == null || designId.isEmpty) return null;
+    return [
+      LibraryNodeAction(
+        label: 'Apply',
+        icon: Icons.play_arrow_rounded,
+        onSelected: () => _applyDesignById(designId),
+      ),
+      LibraryNodeAction(
+        label: 'Delete',
+        icon: Icons.delete_outline_rounded,
+        isDestructive: true,
+        onSelected: () => _deleteDesignById(designId),
+      ),
+    ];
+  }
+
+  CustomDesign? _resolveDesign(String designId) {
+    final designs =
+        ref.read(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+    for (final d in designs) {
+      if (d.id == designId) return d;
+    }
+    return null;
+  }
+
+  Future<void> _applyDesignById(String designId) async {
+    final design = _resolveDesign(designId);
+    if (design == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Design not found')),
+        );
+      }
+      return;
+    }
+    // Same canonical routine the detail screen's Apply button calls.
+    await applySavedDesign(context, ref, design);
+  }
+
+  Future<void> _deleteDesignById(String designId) async {
+    final design = _resolveDesign(designId);
+    if (design == null) return;
+    await confirmAndDeleteDesign(context, ref, design);
   }
 
   @override
@@ -375,27 +401,49 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                       // node carries the `isSavedDesign` metadata flag, do
                       // NOT route through ColorwayEffectSelectorPage —
                       // saved designs are already fully-configured payloads
-                      // and don't need a palette/effect tuner. Apply the
-                      // design directly via the canonical 6-step routine,
-                      // then pop back to the My Designs grid.
+                      // and don't need a palette/effect tuner.
+                      //
+                      // BROWSE mode now renders DesignDetailScreen here.
+                      // Previously this returned a bare spinner and ran
+                      // applySavedDesign + pop from a post-frame callback,
+                      // which consumed the only route that could host a
+                      // detail card and made the surface apply-only with no
+                      // edit / rename / delete (audit/MY_DESIGNS_AUDIT.md
+                      // §3.1, §8). Apply is now a button on that screen and
+                      // still calls the SAME applySavedDesign routine —
+                      // there is no second apply path.
+                      //
+                      // SELECTION mode is unchanged: the schedule / Game Day
+                      // pickers still want the design HANDED BACK, not
+                      // browsed, so they keep the post-frame return.
                       if (node != null &&
                           node.metadata?['isSavedDesign'] == true) {
-                        if (!_savedDesignApplyKicked) {
-                          _savedDesignApplyKicked = true;
-                          final designId =
-                              node.metadata?['sourceDesignId'] as String?;
-                          WidgetsBinding.instance.addPostFrameCallback((_) async {
-                            // Selection mode: RETURN the saved design instead of
-                            // applying it. Same raw-payload contract as catalog.
-                            if (widget.onDesignSelected != null) {
+                        final designId =
+                            node.metadata?['sourceDesignId'] as String?;
+                        if (widget.onDesignSelected != null) {
+                          if (!_savedDesignApplyKicked) {
+                            _savedDesignApplyKicked = true;
+                            WidgetsBinding.instance
+                                .addPostFrameCallback((_) async {
                               _returnSavedDesignSelection(designId);
-                            } else {
-                              await _applySavedDesignAndPop(designId);
-                            }
-                          });
+                            });
+                          }
+                          return const Center(
+                              child: CircularProgressIndicator());
                         }
-                        return const Center(
-                            child: CircularProgressIndicator());
+                        if (designId == null || designId.isEmpty) {
+                          return const Center(
+                            child: Text('Design not found',
+                                style: TextStyle(color: Colors.white70)),
+                          );
+                        }
+                        // embedded: this Scaffold already provides the app
+                        // bar (titled with the design name) and the
+                        // breadcrumb above. Without the flag the detail screen
+                        // rendered its OWN Scaffold + GlassAppBar underneath
+                        // ours — a second header carrying the same title.
+                        return DesignDetailScreen(
+                            designId: designId, embedded: true);
                       }
                       if (node != null && node.isPalette) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -423,6 +471,12 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         parentGradient: widget.parentGradient,
                         teamSlug: widget.teamSlug,
                         onDesignSelected: widget.onDesignSelected,
+                        // Opt-in row actions, My Designs BROWSE mode only.
+                        // Catalog folders and every picker pass null and
+                        // render exactly as before — the three card builders
+                        // are shared across all of Explore, so this must not
+                        // become unconditional (audit §2b.4).
+                        actionsBuilder: _savedDesignActions,
                         // #85 companion: meaningful empty-state when the My
                         // Designs surface is reached but no designs exist yet.
                         // The surface is always rendered (no longer gated on

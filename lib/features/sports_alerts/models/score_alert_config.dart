@@ -27,6 +27,20 @@ class ScoreAlertConfig {
   final AlertSensitivity sensitivity;
   final DateTime? createdAt;
 
+  /// The team's chosen celebration effect, carried from the Game Day config.
+  ///
+  /// IN-MEMORY ONLY — deliberately absent from [fromJson]. That factory exists
+  /// solely to drain the retired prefs store during migration, and the retired
+  /// store predates celebrations, so there is nothing there to read.
+  /// [monitoringConfigFor] is what populates these, exactly as it already does
+  /// for [sensitivity].
+  ///
+  /// `null` = the user has chosen nothing; the legacy hardcoded per-event
+  /// sequences fire verbatim.
+  final int? celebrationEffectId;
+  final int celebrationSpeed;
+  final int celebrationIntensity;
+
   const ScoreAlertConfig({
     required this.id,
     required this.teamSlug,
@@ -35,6 +49,9 @@ class ScoreAlertConfig {
     this.assignedZoneIds = const [],
     this.sensitivity = AlertSensitivity.allEvents,
     this.createdAt,
+    this.celebrationEffectId,
+    this.celebrationSpeed = 240,
+    this.celebrationIntensity = 240,
   });
 
   ScoreAlertConfig copyWith({
@@ -45,6 +62,9 @@ class ScoreAlertConfig {
     List<String>? assignedZoneIds,
     AlertSensitivity? sensitivity,
     DateTime? createdAt,
+    int? celebrationEffectId,
+    int? celebrationSpeed,
+    int? celebrationIntensity,
   }) {
     return ScoreAlertConfig(
       id: id ?? this.id,
@@ -54,6 +74,9 @@ class ScoreAlertConfig {
       assignedZoneIds: assignedZoneIds ?? this.assignedZoneIds,
       sensitivity: sensitivity ?? this.sensitivity,
       createdAt: createdAt ?? this.createdAt,
+      celebrationEffectId: celebrationEffectId ?? this.celebrationEffectId,
+      celebrationSpeed: celebrationSpeed ?? this.celebrationSpeed,
+      celebrationIntensity: celebrationIntensity ?? this.celebrationIntensity,
     );
   }
 
@@ -75,15 +98,13 @@ class ScoreAlertConfig {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'teamSlug': teamSlug,
-        'sport': sport.toJson(),
-        'isEnabled': isEnabled,
-        'assignedZoneIds': assignedZoneIds,
-        'sensitivity': sensitivity.toJson(),
-        'createdAt': createdAt?.toIso8601String(),
-      };
+  // NOTE: no `toJson`. This type is no longer PERSISTED anywhere — it is an
+  // in-memory value passed to AlertTriggerService.handleAlertEvent, and is what
+  // resolveMonitoring/monitoringConfigFor return. Its only remaining serialized
+  // form is INBOUND: [fromJson] drains the retired `sports_alert_configs` prefs
+  // store during migration. Adding a writer back would recreate the disjoint
+  // store this consolidation removed
+  // (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.1-4.3).
 
   @override
   bool operator ==(Object other) =>

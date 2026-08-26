@@ -23,6 +23,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/utils/async_lock.dart';
 
@@ -46,12 +47,39 @@ String scheduleSubDocId(String id) {
 /// Decodes the `schedules` array field into typed items. Non-map elements are
 /// skipped (matches every prior read path).
 List<ScheduleItem> decodeScheduleArray(Map<String, dynamic>? data) {
+  final sidecar = data?[kScheduleScopeField];
   return (data?['schedules'] as List?)
           ?.whereType<Map<String, dynamic>>()
-          .map((e) => ScheduleItem.fromJson(e))
+          .map((e) => _withScope(ScheduleItem.fromJson(e), sidecar))
           .toList() ??
       <ScheduleItem>[];
 }
+
+/// D1 — restore a schedule's channel scope from the sidecar when the item
+/// itself has none.
+///
+/// An OLD build rewrites the WHOLE `schedules` array through `toJson()` on any
+/// `remove` / `update` / `saveAll` (this file's own `applyArrayTxn` and
+/// `overwriteArray` do exactly that), so one edit on an old build strips
+/// `channels` from EVERY schedule in the account. The sidecar is a sibling
+/// field that old builds never name, so it survives — and this is where it is
+/// put back.
+ScheduleItem _withScope(ScheduleItem item, dynamic sidecar) {
+  if (item.channels != null) return item;
+  final scope = decodeScopeEntry(sidecar, item.id);
+  if (!scope.isScoped) return item;
+  return item.copyWith(
+      channels: scope.channels, controllerId: scope.controllerId);
+}
+
+/// Build the sidecar payload for a whole schedule set.
+///
+/// Rebuilt in full on every write so a cleared scope deletes its row.
+Map<String, dynamic> scheduleScopeSidecar(List<ScheduleItem> items) =>
+    encodeScopeSidecar({
+      for (final i in items)
+        i.id: ItemScope(channels: i.channels, controllerId: i.controllerId),
+    });
 
 /// Pure upsert: replace the item with a matching id, else append.
 List<ScheduleItem> upsertInto(List<ScheduleItem> current, ScheduleItem item) {
@@ -104,6 +132,9 @@ Future<void> applyArrayTxn(
         ref,
         UserService.sanitizeForFirestore({
           'schedules': next.map((e) => e.toJson()).toList(),
+          // D1 — same transaction, so the array and its scope can never
+          // disagree about what a schedule targets.
+          kScheduleScopeField: scheduleScopeSidecar(next),
           'updated_at': FieldValue.serverTimestamp(),
         }),
       );
@@ -118,6 +149,7 @@ Future<void> overwriteArray(
   return firestore.collection('users').doc(uid).update(
         UserService.sanitizeForFirestore({
           'schedules': items.map((e) => e.toJson()).toList(),
+          kScheduleScopeField: scheduleScopeSidecar(items), // D1
           'updated_at': FieldValue.serverTimestamp(),
         }),
       );

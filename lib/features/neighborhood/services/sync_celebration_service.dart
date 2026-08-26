@@ -317,6 +317,10 @@ class SyncCelebrationService {
         return Duration(seconds: (baseDuration * 0.4).round());
       case AlertEventType.quarterEndWinning:
         return Duration(seconds: baseDuration);
+      // A win is the biggest moment of the game — the longest of the scaled
+      // durations, matching its place at the top of the local timing table.
+      case AlertEventType.win:
+        return Duration(seconds: (baseDuration * 1.5).round());
       case AlertEventType.turnover:
         return Duration.zero;
     }

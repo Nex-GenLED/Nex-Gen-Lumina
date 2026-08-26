@@ -301,8 +301,26 @@ Future<CfgPushOutcome> pushCfgWithVerify({
 /// 1. Save each schedule's WLED payload as a preset on the device
 /// 2. Create WLED timers that reference those preset IDs
 /// 3. Push the timer configuration to the device
+/// Floor gap between consecutive controller writes within one sync.
+///
+/// 300ms sits inside the 250-500ms band the pacing fix specified. It is a gap
+/// BETWEEN writes, not a per-iteration tax: a call the idempotence gate skips
+/// issues no request and therefore costs nothing, which is what keeps a
+/// steady-state sync (few or zero real psaves) exactly as fast as before.
+const Duration kControllerWritePace = Duration(milliseconds: 300);
+
 class ScheduleSyncService {
-  const ScheduleSyncService();
+  const ScheduleSyncService({this.paceDelay = kControllerWritePace});
+
+  /// Floor delay BETWEEN consecutive controller WRITES inside one [syncAll]
+  /// (audit/SYNC_PACING_FIX_STATUS.md §1(a) — previously absent entirely).
+  ///
+  /// Every `psave` is a flash commit on a single-core HTTP server. Issuing
+  /// them back-to-back with no gap is the burst shape that precedes the
+  /// observed wedge, so successive writes are spaced.
+  ///
+  /// Injectable so tests can pass [Duration.zero] and not sleep.
+  final Duration paceDelay;
 
   /// First / last available preset ID for user schedules. Aliases of the
   /// canonical range in `wled_preset_ranges.dart`, which is where the whole
@@ -367,13 +385,26 @@ class ScheduleSyncService {
   /// kills master power regardless of what pattern is running. The per-segment
   /// off list covers the full strip because a preset load only touches segments
   /// present in the preset (bench-proven: a seg[0]-only OFF left seg1 lit).
+  /// [channels] non-null scopes the OFF to those bus indices. A scoped OFF
+  /// deliberately does NOT assert root `on:false` — see [_fullStripOffSegments].
   static Map<String, dynamic> buildNglOffPresetState(
-          Map<String, dynamic>? liveState) =>
-      <String, dynamic>{
-        'on': false,
-        'ib': true,
-        'seg': _fullStripOffSegments(liveState),
-      };
+    Map<String, dynamic>? liveState, {
+    List<int>? channels,
+  }) {
+    final scoped = channels != null;
+    return <String, dynamic>{
+      // ⚠️ ROOT POWER IS GLOBAL. An all-channel OFF asserts `on:false` so the
+      // preset kills master regardless of what is running. A SCOPED off must
+      // NOT: master power darkens every channel, which would make "turn off
+      // the porch" turn off the whole house. It asserts `on:false` per
+      // addressed segment instead, and leaves the master alone.
+      if (!scoped) 'on': false,
+      // `ib` only means anything alongside a root master state. Omitting it on
+      // the scoped path keeps the preset from persisting a root `on` at all.
+      if (!scoped) 'ib': true,
+      'seg': _fullStripOffSegments(liveState, channels: channels),
+    };
+  }
 
   /// Whether a stored preset def already IS a usable NGL Off. Requires the def
   /// to actually assert root `on:false` — a legacy segments-only preset 2 is
@@ -419,13 +450,123 @@ class ScheduleSyncService {
   /// bench rig was healthy (`s0:on s1:on`) while all four ON ladder slots were
   /// damaged.
   static Map<String, dynamic> buildNglOnPresetState(
-          int bri, Map<String, dynamic>? liveState) =>
+          int bri, Map<String, dynamic>? liveState,
+          {List<int>? channels}) =>
       <String, dynamic>{
         'on': true,
         'bri': bri,
         'ib': true,
-        'seg': _fullStripOnSegments(liveState),
+        'seg': _fullStripOnSegments(liveState, channels: channels),
       };
+
+  /// ── D3: THE ONE SATISFACTION PREDICATE ───────────────────────────────────
+  ///
+  /// True when everything [expected] asserts is present and equal on [stored].
+  /// [expected] is the BUILDER'S OWN OUTPUT, so the bar for a preset is by
+  /// construction whatever that preset is supposed to be — there is no second
+  /// description of "correct" to drift from the first.
+  ///
+  /// THIS REPLACES FOUR HAND-WRITTEN PREDICATES, and the drift between a
+  /// predicate and its builder is not hypothetical here: the `ib:true` fix was
+  /// INERT ON THE ENTIRE INSTALLED FLEET because the builder started writing
+  /// root `on` while the predicate still only checked the name, so every
+  /// already-damaged preset reported satisfied and was skipped forever. Same
+  /// file, same function, and the codebase notes it was available to make
+  /// twice. Deriving the bar from the builder makes that class impossible.
+  ///
+  /// It also resolves, rather than violates, the standing warning that preset 2
+  /// must NOT be judged by the ON ladder's bar: preset 2's expected output IS
+  /// all-segments-off plus root `on:false`, so comparing against its own
+  /// builder gives it its own bar automatically.
+  ///
+  /// ── TWO FIELDS ARE DELIBERATELY NOT ASSERTED ──────────────────────────────
+  ///
+  /// • **`ib`** — a psave REQUEST flag, never stored. WLED does not write it
+  ///   back, so it is absent on healthy presets too; asserting it would mark
+  ///   every preset on every controller as broken.
+  /// • **`bri`** — a `psave` APPLIES its inline state live on this firmware, so
+  ///   every needless re-save is a VISIBLE flash on the customer's house.
+  ///   Brightness drift (a nudged slider, a rounding difference) is cosmetic
+  ///   and must not trigger one on every connect. This preserves the existing
+  ///   rule verbatim; root `on` remains the only master-state field asserted,
+  ///   because its absence is what actually breaks scheduled firing.
+  ///
+  /// [compareSegments] false skips segment comparison entirely — the
+  /// `baseLadderRepairEnabledSyncProvider` kill switch, preserved from
+  /// `isNglOnPresetSatisfied(repairSegments:)`. It exists because a repair can
+  /// relight a channel a customer deliberately turned off outside the app.
+  static const Set<String> _kNeverAsserted = {'ib', 'bri', 'seg', 'n'};
+
+  @visibleForTesting
+  static bool presetSatisfies(
+    Map<String, dynamic> stored,
+    Map<String, dynamic> expected, {
+    String? expectedName,
+    bool compareSegments = true,
+    bool requireAllExpectedSegments = false,
+  }) {
+    if (expectedName != null && !_presetNamed(stored, expectedName)) {
+      return false;
+    }
+
+    for (final e in expected.entries) {
+      if (_kNeverAsserted.contains(e.key)) continue;
+      if (stored[e.key] != e.value) return false;
+    }
+
+    if (!compareSegments) return true;
+
+    final expectedSeg = expected['seg'];
+    if (expectedSeg is! List || expectedSeg.isEmpty) return true;
+
+    final storedSeg = stored['seg'];
+    if (storedSeg is! List) return false;
+
+    // Index the stored segments by id, falling back to position for the
+    // id-less shape a degraded builder emits.
+    final byId = <int, Map>{};
+    for (var i = 0; i < storedSeg.length; i++) {
+      final sg = storedSeg[i];
+      if (sg is! Map) continue;
+      byId[sg['id'] is int ? sg['id'] as int : i] = sg;
+    }
+
+    for (var i = 0; i < expectedSeg.length; i++) {
+      final want = expectedSeg[i];
+      if (want is! Map) continue;
+      final id = want['id'] is int ? want['id'] as int : i;
+      final got = byId[id];
+      if (got == null) {
+        // ── SILENCE IS NOT CONTRADICTION (all-channel), BUT IT IS (scoped) ──
+        //
+        // A stored preset that simply lacks a segment says nothing about it.
+        // For an ALL-CHANNEL expectation that has always been tolerated — the
+        // old `_presetAllSegmentsOn` never counted segments, only checked that
+        // the ones present were on — and tightening it here would silently
+        // re-save the ladder on every controller whose presets predate
+        // `_fullStripOnSegments`. That is a real fleet-wide repair pass with a
+        // visible flash per controller (psave applies live), and it is not this
+        // change's job to start it. Behaviour preserved exactly.
+        //
+        // For a SCOPED expectation the opposite holds: an excluded channel MUST
+        // be named `on:false`, because `psave` otherwise captures whatever the
+        // controller happened to be showing (U-7). A missing segment there means
+        // the scope was never really written, so it is unsatisfied and gets
+        // repaired.
+        if (requireAllExpectedSegments) return false;
+        continue;
+      }
+      for (final f in want.entries) {
+        if (f.key == 'id') continue;
+        // Bounds are provisioning's and are never asserted (#76 / the Item-#82
+        // wrong-range stomp) — the builders do not emit them, but a stored
+        // preset saved with `sb:true` carries them and must not fail on that.
+        if (f.key == 'start' || f.key == 'stop') continue;
+        if (got[f.key] != f.value) return false;
+      }
+    }
+    return true;
+  }
 
   /// An ON system preset (1/3/4/5) is satisfied only when it carries the right
   /// name AND asserts ROOT master power (`on: true`).
@@ -461,26 +602,77 @@ class ScheduleSyncService {
   /// the ib:true work before 9158c00 (see the paragraph above). Same file, same
   /// function, same mistake available twice.
   ///
-  /// WHY ALL-SEGMENTS-ON IS THE RIGHT BAR: the app cannot record a deliberate
-  /// channel exclusion — per-channel power writes live `/json/state` only and is
-  /// documented as schedule-overridable, `DeviceChannel` has no enabled field,
-  /// and participation is show-scoped (§4d). So within the app's model an
-  /// all-segments-off ON preset is DAMAGE, never intent. The residual case — a
-  /// channel excluded outside the app — is what
-  /// [baseLadderRepairEnabledSyncProvider] exists to switch off.
+  /// WHY ALL-SEGMENTS-ON IS THE RIGHT BAR **FOR AN ALL-CHANNEL PRESET**: with
+  /// `channels == null` the builder asserts every segment on, so that is what
+  /// the predicate requires, and an all-segments-off ON preset is damage.
+  ///
+  /// ⚠️ THE OLD REASON — "the app cannot record a deliberate channel exclusion"
+  /// — IS NO LONGER TRUE and has been removed (D3). `ScheduleItem.channels` /
+  /// `CalendarEntry.channels` record exactly that, durably (D1), and the
+  /// builders honour it (D2). A scoped preset's expectation names its excluded
+  /// segments `on:false`, so the predicate now agrees with it instead of
+  /// calling it damage. [baseLadderRepairEnabledSyncProvider] remains the kill
+  /// switch for the residual case: a channel excluded OUTSIDE the app, which
+  /// the app still cannot see.
   ///
   /// A preset with NO `seg` list is treated as unsatisfied: that is the legacy
   /// segments-absent shape, and re-saving it is the repair.
-  static bool isNglOnPresetSatisfied(Map<String, dynamic> def, String expectedName,
-          {bool repairSegments = true}) =>
-      _presetNamed(def, expectedName) &&
-      def['on'] == true &&
-      (!repairSegments || _presetAllSegmentsOn(def));
+  /// ADAPTER over [presetSatisfies], retained for the three callers OUTSIDE
+  /// this file: the on-connect healer (`controller_defaults_healer.dart`), and
+  /// the hardware tests that assert against it. It carries NO logic of its own
+  /// — the bar is the builder's output, exactly as `psaveIfChanged` derives it.
+  ///
+  /// Those call sites were left on the adapter deliberately: collapsing them in
+  /// the same change that replaced the predicate would have altered when the
+  /// healer repairs presets on every customer's controller, in a commit whose
+  /// subject is something else.
+  static bool isNglOnPresetSatisfied(
+          Map<String, dynamic> def, String expectedName,
+          {bool repairSegments = true, Map<String, dynamic>? liveState}) =>
+      presetSatisfies(
+        def,
+        buildNglOnPresetState(
+            (kOnPresetSpecs.values
+                    .where((v) => v.name == expectedName)
+                    .firstOrNull
+                    ?.bri) ??
+                200,
+            liveState ?? _liveStateFromStoredPreset(def)),
+        expectedName: expectedName,
+        compareSegments: repairSegments,
+      );
 
-  static bool isNglOffPresetSatisfied(Map<String, dynamic> def) =>
-      _presetNamed(def, kNglOffPresetName) &&
-      def['on'] == false &&
-      _presetIsOff(def);
+  /// Reconstruct a minimal "live state" from a STORED preset so the adapter can
+  /// build an expectation covering the same segment ids the controller holds.
+  ///
+  /// Only the adapter needs this. The real paths pass the controller's actual
+  /// live state, which is what makes a legacy segments-absent preset fail:
+  /// live has 2 segments, the stored preset names 1, so the expectation names
+  /// both and the missing one is caught. Reconstructing from the preset alone
+  /// cannot see that, which is the adapter's one behavioural limit — and why
+  /// `liveState` is a parameter the healer can supply.
+  static Map<String, dynamic>? _liveStateFromStoredPreset(
+      Map<String, dynamic> def) {
+    final seg = def['seg'];
+    if (seg is! List || seg.isEmpty) return null;
+    return {
+      'seg': [
+        for (var i = 0; i < seg.length; i++)
+          {'id': (seg[i] is Map && seg[i]['id'] is int) ? seg[i]['id'] : i}
+      ]
+    };
+  }
+
+  /// ADAPTER over [presetSatisfies] — see [isNglOnPresetSatisfied]. Retained
+  /// for `sunrise_off_service.dart`, which asks the same question before
+  /// deciding whether to skip its own psave.
+  static bool isNglOffPresetSatisfied(Map<String, dynamic> def,
+          {Map<String, dynamic>? liveState}) =>
+      presetSatisfies(
+        def,
+        buildNglOffPresetState(liveState ?? _liveStateFromStoredPreset(def)),
+        expectedName: kNglOffPresetName,
+      );
 
   /// A fresh copy of the disabled-timer stub. Public so the sunrise-off writer
   /// (sunrise_off_service.dart) reclaims a vacated slot with the SAME stub the
@@ -764,7 +956,30 @@ class ScheduleSyncService {
   /// Accepts a [Ref] (provider-side) rather than [WidgetRef] so the
   /// notifier-driven auto-sync can call this directly. Both ref types
   /// expose the same `.read()` surface used inside this method.
-  Future<ScheduleSyncResult> syncAll(Ref ref, List<ScheduleItem> schedules) async {
+  /// Public entry point. Suspends background polling for the WHOLE sync, then
+  /// delegates to [_syncAllInner].
+  ///
+  /// WHY A WRAPPER: [_syncAllInner] has a dozen `return finish(...)` exits.
+  /// A try/finally around its body would have to be threaded past every one of
+  /// them; wrapping guarantees the resume runs on every exit, including a
+  /// throw, without touching the existing control flow at all.
+  ///
+  /// The poller otherwise interleaves `getState` between a psave and the cfg
+  /// commit — the concurrent-request half of the burst
+  /// (audit/SYNC_PACING_FIX_STATUS.md §1(c)).
+  Future<ScheduleSyncResult> syncAll(
+      Ref ref, List<ScheduleItem> schedules) async {
+    final poller = ref.read(wledStateProvider.notifier);
+    poller.pausePolling();
+    try {
+      return await _syncAllInner(ref, schedules);
+    } finally {
+      poller.resumePolling();
+    }
+  }
+
+  Future<ScheduleSyncResult> _syncAllInner(
+      Ref ref, List<ScheduleItem> schedules) async {
     // Records the result so the schedule screen can show a status row.
     ScheduleSyncResult finish(ScheduleSyncResult result) {
       ref.read(lastScheduleSyncResultProvider.notifier).state = result;
@@ -839,6 +1054,13 @@ class ScheduleSyncService {
     // Step 1: Assign preset IDs and save presets to device
     final List<ScheduleItem> updatedSchedules = [];
     final List<String> presetErrors = [];
+
+    // PACING STATE (audit/SYNC_PACING_FIX_STATUS.md §1(a)). Flipped by the
+    // first REAL write this sync; every later real write waits [paceDelay]
+    // first. Gating on "a write already happened" is what makes this a gap
+    // BETWEEN writes rather than a fixed tax — a fully-converged sync skips
+    // every psave, never sets this, and never sleeps.
+    var didPaceAnyWrite = false;
 
     // Tracks which preset IDs were actually psaved this sync. Used below to
     // refuse arming a runPattern timer macro that points at a preset that was
@@ -961,12 +1183,31 @@ class ScheduleSyncService {
       }
     }
 
+    /// D3 — satisfaction is DERIVED from [state], the builder's own output.
+    /// There is no `isSatisfied` parameter any more: a caller cannot supply a
+    /// bar that disagrees with what it is about to write.
+    ///
+    /// [alwaysWrite] is the one deliberate exception, for the pattern-preset
+    /// path: Option A (2026-07-22) drops the idempotent skip there because the
+    /// old fx+first-colour comparison was structurally under-specified and left
+    /// stale presets un-repaired forever.
     Future<void> psaveIfChanged({
       required int id,
       required Map<String, dynamic> state,
       required String name,
-      required bool Function(Map<String, dynamic> existingDef) isSatisfied,
+      bool compareSegments = true,
+      bool alwaysWrite = false,
+      /// True when [state] was built with a channel scope. Makes a segment the
+      /// expectation names but the controller lacks a FAILURE rather than
+      /// silence — see presetSatisfies.
+      bool scoped = false,
     }) async {
+      bool isSatisfied(Map<String, dynamic> existingDef) => alwaysWrite
+          ? false
+          : presetSatisfies(existingDef, state,
+              expectedName: name,
+              compareSegments: compareSegments,
+              requireAllExpectedSegments: scoped);
       // REFUSE on an unreadable read. Counted as armable so a schedule whose
       // preset we deliberately left alone is not also refused downstream — the
       // preset is almost certainly still on the device; we just cannot see it.
@@ -1017,6 +1258,13 @@ class ScheduleSyncService {
       }
       await repairAttempts.recordAttempt(id);
 
+      // PACE. Only reached once every skip/refuse branch above has returned,
+      // so this delay is charged strictly to writes that actually go out.
+      if (didPaceAnyWrite && paceDelay > Duration.zero) {
+        await Future<void>.delayed(paceDelay);
+      }
+      didPaceAnyWrite = true;
+
       final ok = await activeRepo.savePreset(
         presetId: id,
         state: state,
@@ -1059,8 +1307,7 @@ class ScheduleSyncService {
       id: 1,
       state: buildNglOnPresetState(200, capturedLiveState),
       name: 'NGL On',
-      isSatisfied: (d) =>
-          isNglOnPresetSatisfied(d, 'NGL On', repairSegments: repairLadder),
+      compareSegments: repairLadder,
     );
     // Preset 2 = Off. OFF timers fire `macro: 2`. `ib` is required on BOTH
     // directions — ib persists WHATEVER master state is saved: ON presets
@@ -1104,28 +1351,24 @@ class ScheduleSyncService {
       id: kNglOffPresetId,
       state: buildNglOffPresetState(capturedLiveState),
       name: kNglOffPresetName,
-      isSatisfied: isNglOffPresetSatisfied,
     );
     await psaveIfChanged(
       id: 3,
       state: buildNglOnPresetState(51, capturedLiveState),
       name: 'NGL Dim',
-      isSatisfied: (d) =>
-          isNglOnPresetSatisfied(d, 'NGL Dim', repairSegments: repairLadder),
+      compareSegments: repairLadder,
     );
     await psaveIfChanged(
       id: 4,
       state: buildNglOnPresetState(102, capturedLiveState),
       name: 'NGL Low',
-      isSatisfied: (d) =>
-          isNglOnPresetSatisfied(d, 'NGL Low', repairSegments: repairLadder),
+      compareSegments: repairLadder,
     );
     await psaveIfChanged(
       id: 5,
       state: buildNglOnPresetState(153, capturedLiveState),
       name: 'NGL Medium',
-      isSatisfied: (d) =>
-          isNglOnPresetSatisfied(d, 'NGL Medium', repairSegments: repairLadder),
+      compareSegments: repairLadder,
     );
 
     // USER-VISIBLE RELEASE NOTE (audit/BASE_LADDER.md item D). A repair can
@@ -1208,10 +1451,20 @@ class ScheduleSyncService {
         // state (OFF actions are payload-less and arm preset 2, handled above —
         // never reach here — so this never disables an intended-off schedule).
         final rawPayload = effectiveSchedule.wledPayload!;
+        // D2 — the THIRD caller of the one scope rule. This path passes the
+        // schedule's stored design through verbatim, so it is the only preset
+        // body this class does not construct; scoping is applied to the payload
+        // instead of to a builder. Null channels ⇒ returns the payload
+        // unchanged, so the all-channel path is byte-identical.
+        final scopedPayload = scopePatternPayload(
+          rawPayload,
+          capturedLiveState,
+          channels: effectiveSchedule.channels,
+        );
         final presetPayload = <String, dynamic>{
-          ...rawPayload,
+          ...scopedPayload,
           'on': true,
-          'bri': (rawPayload['bri'] as num?)?.toInt() ?? 255,
+          'bri': (scopedPayload['bri'] as num?)?.toInt() ?? 255,
           // ib:true → WLED persists the root master on/bri (not just segments),
           // so firing this ON-preset from a master-off state powers the strip on.
           // Bench-proven (see the system-preset block above). normalizeWledPayload
@@ -1222,7 +1475,7 @@ class ScheduleSyncService {
           id: presetId,
           state: presetPayload,
           name: effectiveSchedule.actionLabel,
-          isSatisfied: (_) => false, // always write — see Option A above
+          alwaysWrite: true, // Option A — see psaveIfChanged's doc comment
         );
 
         updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
@@ -1836,17 +2089,54 @@ class ScheduleSyncService {
   /// stores off-segs only for segments that exist at save time, so this must
   /// track the live layout, not a fixed guess.) Falls back to a single off
   /// segment when live state is unavailable (cloud/mock/getState failure).
+  /// ── D2: CHANNEL SCOPE ─────────────────────────────────────────────────────
+  ///
+  /// [channels] null ⇒ byte-identical to the pre-D2 behaviour: every live
+  /// segment `on:false`. A snapshot test pins that on the bench rig's layout.
+  ///
+  /// [channels] non-null ⇒ ONLY the addressed segments are named, and they are
+  /// named `on:false`. **Every other segment is deliberately ABSENT.**
+  ///
+  /// WHY ABSENT HERE, WHEN THE ON BUILDER WRITES `on:false` FOR EXCLUDED
+  /// CHANNELS — the asymmetry is the point:
+  ///
+  ///   • A scoped ON must state what the excluded channels do, because the
+  ///     event is taking the house over. U-7 proved `psave` re-adds every
+  ///     segment from live state anyway, so stating it explicitly is the only
+  ///     way to control it.
+  ///   • A scoped OFF must state only what IT turns off. The other channels
+  ///     are whatever they were; `psave` snapshots them, and that is correct —
+  ///     turning off channel 1 must not decide anything about channel 2.
+  ///
+  /// ⚠️ **A SCOPED OFF MUST NEVER USE ROOT `on:false`.** Master power is
+  /// global: it darkens the whole strip regardless of which segments the preset
+  /// names. `buildNglOffPresetState` asserts root `on:false` and is correct for
+  /// an all-channel OFF; a scoped OFF has to leave the master alone and assert
+  /// `on:false` per addressed segment instead. Bench-confirmed (U-7 Test 3):
+  /// the shipped `NGL Off` darkens via root power and leaves seg[1] `on:true`,
+  /// which is exactly the behaviour a scoped OFF must not inherit.
   static List<Map<String, dynamic>> _fullStripOffSegments(
-      Map<String, dynamic>? liveState) {
+      Map<String, dynamic>? liveState, {
+    List<int>? channels,
+  }) {
     final seg = liveState?['seg'];
     if (seg is List && seg.isNotEmpty) {
       final out = <Map<String, dynamic>>[];
       for (var i = 0; i < seg.length; i++) {
         final s = seg[i];
         final id = (s is Map && s['id'] is int) ? s['id'] as int : i;
+        if (channels != null && !channels.contains(id)) {
+          continue; // not ours to turn off — see the doc comment
+        }
         out.add({'id': id, 'on': false});
       }
       return out;
+    }
+    // Degraded (cloud relay / mock / unreadable state). With a scope we cannot
+    // know which segment ids exist, so name the requested ones directly rather
+    // than guessing a single unscoped seg.
+    if (channels != null) {
+      return [for (final id in channels) {'id': id, 'on': false}];
     }
     return [
       {'on': false}
@@ -1868,49 +2158,117 @@ class ScheduleSyncService {
   /// Falls back to a single `{'on': true}` when live state is unavailable
   /// (cloud relay / mock / getState failure) — same degraded path the OFF
   /// builder takes.
+  /// ── D2: CHANNEL SCOPE ─────────────────────────────────────────────────────
+  ///
+  /// [channels] null ⇒ byte-identical to the pre-D2 behaviour: every live
+  /// segment `on:true`.
+  ///
+  /// [channels] non-null ⇒ addressed segments `on:true`, **every other live
+  /// segment `on:false`.** Not absent — absent is unreachable through `psave`
+  /// (U-7: the snapshot re-adds every segment), so "leave the others alone" is
+  /// not an option a timer-fired preset can express. v1 semantics, stated
+  /// plainly in the editor: a channel-scoped event DARKENS the channels it
+  /// excludes.
   static List<Map<String, dynamic>> _fullStripOnSegments(
-      Map<String, dynamic>? liveState) {
+      Map<String, dynamic>? liveState, {
+    List<int>? channels,
+  }) {
     final seg = liveState?['seg'];
     if (seg is List && seg.isNotEmpty) {
       final out = <Map<String, dynamic>>[];
       for (var i = 0; i < seg.length; i++) {
         final s = seg[i];
         final id = (s is Map && s['id'] is int) ? s['id'] as int : i;
-        out.add({'id': id, 'on': true});
+        out.add({'id': id, 'on': channels == null || channels.contains(id)});
       }
       return out;
+    }
+    if (channels != null) {
+      return [for (final id in channels) {'id': id, 'on': true}];
     }
     return [
       {'on': true}
     ];
   }
 
-  /// True when every stored segment is explicitly `on:true` — the health bar
-  /// for an ON ladder preset. A preset with no `seg` list, an empty list, or
-  /// any segment not `on:true` is damaged (or legacy) and gets re-saved.
-  static bool _presetAllSegmentsOn(Map<String, dynamic> def) {
-    final seg = def['seg'];
-    if (seg is! List || seg.isEmpty) return false;
-    for (final s in seg) {
-      if (s is! Map || s['on'] != true) return false;
+  /// Apply a channel scope to a caller-built `seg` array — the third caller of
+  /// the same rule, for the pattern-preset path (`syncAll`, the 10–25 range).
+  ///
+  /// That path passes the schedule's stored `wledPayload` straight through, so
+  /// it is the one preset body this class does not construct. Rather than a
+  /// second scoping implementation, the payload's own segments are re-keyed
+  /// against the live layout: addressed ids keep their design, every other live
+  /// segment is appended `on:false`.
+  ///
+  /// Returns [payload] unchanged when [channels] is null — the all-channel path
+  /// is untouched, which is what keeps every existing fixture byte-identical.
+  @visibleForTesting
+  static Map<String, dynamic> scopePatternPayload(
+    Map<String, dynamic> payload,
+    Map<String, dynamic>? liveState, {
+    List<int>? channels,
+  }) {
+    if (channels == null) return payload;
+
+    final live = liveState?['seg'];
+    final liveIds = <int>[];
+    if (live is List) {
+      for (var i = 0; i < live.length; i++) {
+        final s = live[i];
+        liveIds.add((s is Map && s['id'] is int) ? s['id'] as int : i);
+      }
     }
-    return true;
+    // Union so a targeted channel is represented even when live state is cold
+    // or partial — same reasoning as applyChannelFilter's census (#89).
+    final census = <int>{...liveIds, ...channels}.toList()..sort();
+
+    final segRaw = payload['seg'];
+    // A payload with no seg array is a top-level-only design (bri, on). There
+    // is nothing per-segment to scope, so emit the on/off partition alone.
+    final template = <String, dynamic>{};
+    if (segRaw is List && segRaw.isNotEmpty) {
+      // The DESIGN seg, not seg[0]. A payload may already carry an exclusion
+      // partition (applyChannelFilter's shape), in which case seg[0] is
+      // `{id:0, on:false}` and templating off it would blank the design —
+      // the same trap `firstDesignSeg` exists for on the interactive path.
+      // Written as an explicit scan rather than firstWhere/orElse: the
+      // list's inferred element type makes orElse's signature unassignable.
+      Object? design;
+      for (final e in segRaw) {
+        if (e is Map && (e.containsKey('fx') || e.containsKey('col'))) {
+          design = e;
+          break;
+        }
+      }
+      design ??= segRaw.first;
+      if (design is Map) {
+        template.addAll(Map<String, dynamic>.from(design));
+        // Identity and geometry are never copied from a template: ids are
+        // assigned per census entry below, and bounds belong to provisioning
+        // (#76 / the Item-#82 wrong-range stomp).
+        template.remove('id');
+        template.remove('start');
+        template.remove('stop');
+        template.remove('on');
+      }
+    }
+
+    final out = Map<String, dynamic>.from(payload);
+    out['seg'] = [
+      for (final id in census)
+        if (channels.contains(id))
+          <String, dynamic>{'id': id, ...template, 'on': true}
+        else
+          <String, dynamic>{'id': id, 'on': false},
+    ];
+    return out;
   }
 
-  /// True when the preset represents an OFF state. This firmware stores
-  /// on-state per-segment (no top-level `on` key on saved presets), so a
-  /// preset is "off" only when no segment is left on. Falls back to a
-  /// top-level `on:false` for builds that do store it.
-  static bool _presetIsOff(Map<String, dynamic> def) {
-    final seg = def['seg'];
-    if (seg is List) {
-      for (final s in seg) {
-        if (s is Map && s['on'] == true) return false;
-      }
-      return true;
-    }
-    return def['on'] == false;
-  }
+  // _presetAllSegmentsOn and _presetIsOff are GONE (D3). Both were
+  // hand-written descriptions of "correct" that sat beside a builder producing
+  // the same thing — the exact split that made the ib:true fix inert on the
+  // whole fleet. `presetSatisfies` derives the bar from the builder's output,
+  // so there is one description and it cannot drift.
 }
 
 // _ParsedTime moved to cfg_payload_builder.dart (pure Dart, as ParsedTime).

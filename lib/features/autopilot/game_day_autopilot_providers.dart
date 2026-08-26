@@ -24,12 +24,15 @@ import '../neighborhood/services/channel_participation_resolver.dart';
 import '../neighborhood/services/path1_game_day_snapshot.dart';
 import '../neighborhood/services/sync_event_background_persistence.dart';
 import '../schedule/calendar_entry.dart';
+import '../schedule/schedule_providers.dart';
 import '../schedule/calendar_providers.dart';
 import '../schedule/schedule_priority_resolver.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
+import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
+import '../sports_alerts/services/sports_alerts_lazy_migrator.dart';
 import '../sports_alerts/services/team_registration_service.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
@@ -100,9 +103,13 @@ final gameDayAutopilotServiceProvider =
       // strictly lower-priority overwrites are kept. See
       // SchedulePriorityResolver for the 5-tier hierarchy and the
       // Phase 2 segment-composition handoff.
+      // A1: the resolver's 5-tier hierarchy is defined over one entry per
+      // date (schedule_priority_resolver.dart). `.primaries` preserves that
+      // exactly. Letting a Game Day coexist with a lower-priority entry on
+      // the same night is a precedence change, and precedence is Prompt 4.
       final filtered = SchedulePriorityResolver.filterIncoming(
         incoming: entries,
-        existing: existing,
+        existing: existing.primaries,
       );
       if (filtered.dropped.isNotEmpty) {
         debugPrint('[GameDayAutopilot] Priority resolver dropped '
@@ -211,15 +218,33 @@ final gameDayAutopilotServiceProvider =
 // ---------------------------------------------------------------------------
 
 /// Stream of all GameDayAutopilotConfig documents for the current user.
+///
+/// Before the first read we run the one-time Sports Alerts adoption, so a user
+/// whose teams still live only in the retired `sports_alert_configs` prefs
+/// store sees them as Game Day teams rather than losing them when that surface
+/// goes away (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.2). Same shape as
+/// `userSchedulesStreamProvider` (schedule_providers.dart:57-73): migrate, then
+/// read. A migration failure is logged, never surfaced — we fall through and
+/// read the subcollection as-is, and the unstamped marker retries next launch.
 final gameDayAutopilotConfigsProvider =
-    StreamProvider<List<GameDayAutopilotConfig>>((ref) {
+    StreamProvider<List<GameDayAutopilotConfig>>((ref) async* {
   final user = ref.watch(authStateProvider).maybeWhen(
         data: (u) => u,
         orElse: () => null,
       );
-  if (user == null) return Stream.value(const []);
+  if (user == null) {
+    yield const [];
+    return;
+  }
 
-  return FirebaseFirestore.instance
+  try {
+    await ref.read(sportsAlertsLazyMigratorProvider).ensureMigrated(user.uid);
+  } catch (e) {
+    debugPrint('gameDayAutopilotConfigs: sports-alerts adoption failed — $e '
+        '(reading Game Day as-is)');
+  }
+
+  yield* FirebaseFirestore.instance
       .collection('users')
       .doc(user.uid)
       .collection('game_day_autopilot')
@@ -737,6 +762,114 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     });
   }
 
+  /// Persist this team's chosen celebration effect — the motion that fires on
+  /// a score or a win.
+  ///
+  /// Writes ONLY the three celebration fields. The base-design fields
+  /// (`saved_design_payload`, `effect_id`, `speed`, `intensity`) are untouched:
+  /// the base design is what the house runs during the game, the celebration is
+  /// what interrupts it, and conflating them is what the second slot exists to
+  /// prevent (audit/GAME_DAY_SPEC_AUDIT.md §4).
+  ///
+  /// `update` (not `set(merge)`), matching [setLiveScoring] and
+  /// [setAlertSensitivity]: a control on an existing card should fail loudly
+  /// rather than mint a partial config.
+  Future<void> setCelebrationEffect({
+    required String teamSlug,
+    required int effectId,
+    required int speed,
+    required int intensity,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to set a celebration effect.');
+    }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug)
+        .update({
+      'celebration_effect_id': effectId,
+      'celebration_speed': speed.clamp(0, 255),
+      'celebration_intensity': intensity.clamp(0, 255),
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
+  /// Set how sensitive score alerts are for a team.
+  ///
+  /// `alert_sensitivity` is real, consumed behavior —
+  /// `ScoreMonitorService._filterBySensitivity` gates which events fire a
+  /// celebration. It used to be configurable only from the retired Sports
+  /// Alerts screen; this is its replacement writer, so folding that screen into
+  /// the team card loses no configurability.
+  ///
+  /// `update` (not `set(merge)`), matching [setLiveScoring]: this is a control
+  /// on an existing card, so a missing doc should fail loudly rather than mint
+  /// a partial config.
+  Future<void> setAlertSensitivity({
+    required String teamSlug,
+    required AlertSensitivity sensitivity,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to change alert sensitivity.');
+    }
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug)
+        .update({
+      'alert_sensitivity': sensitivity.toJson(),
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
+  /// Arm live scoring for a team that may not be on the user's Game Day list
+  /// yet, creating the team first if needed.
+  ///
+  /// [setLiveScoring] is a toggle on an EXISTING card and uses `update`, so it
+  /// throws for a team with no doc. This is the other entry point: "start
+  /// watching this team", used where the team is discovered rather than picked
+  /// — the post-apply Live Scoring prompt, and the Sports Alerts adoption.
+  ///
+  /// Autopilot stays OFF (`addTeam` writes `enabled:false`): arming alerts must
+  /// never hand the server planner a team the user never asked to have lit.
+  /// That is the same `enabled:false, liveScoringEnabled:true` shape
+  /// `migrationConfigsFor` produces (unified_monitoring.dart:141).
+  ///
+  /// Replaces the retired path that minted a SharedPreferences ScoreAlertConfig
+  /// — a store no Game Day read ever saw
+  /// (audit/SPORTS_ALERTS_SYNC_AUDIT.md §4.2, bridge 3).
+  Future<void> enableLiveScoringForTeam({required String teamSlug}) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to enable live scoring.');
+    }
+
+    // Idempotent: no-op for the subcollection when the doc already exists, and
+    // still ensures the profile arrays carry the team.
+    await ref.read(teamRegistrationServiceProvider).addTeam(
+          uid: user.uid,
+          teamSlug: teamSlug,
+        );
+
+    await setLiveScoring(teamSlug: teamSlug, enabled: true);
+  }
+
   /// Persist the motion-style slider value (0.0 = static, 1.0 = fast).
   /// Storage-only for now — see GameDayAutopilotConfig.motionStyle TODO.
   Future<void> setMotionStyle({
@@ -853,6 +986,39 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   Future<void> _doPopulateCalendars(
     List<GameDayAutopilotConfig> enabledConfigs,
   ) async {
+    // POLLING PAUSE FOR THE WHOLE POPULATE (audit/SYNC_PACING_FIX_STATUS.md
+    // §2a). This clears entries and writes new ones in a loop; each write can
+    // arm the 800ms debounce that ends in a `syncAll`, so the poller would
+    // otherwise interleave `getState` across the entire burst.
+    //
+    // Held across the WHOLE operation, not per entry: `syncAll` pauses again
+    // inside itself, and the depth counter is what makes that nesting safe —
+    // the inner resume cannot restart polling while this loop is still going.
+    //
+    // resume lives in the finally so an ESPN failure or a Firestore throw
+    // mid-loop cannot leave the dashboard permanently un-polled.
+    final poller = ref.read(wledStateProvider.notifier);
+    final schedules = ref.read(schedulesProvider.notifier);
+    poller.pausePolling();
+    // D1: collapse the loop's per-entry sync requests into ONE, deterministically
+    // rather than relying on the 800ms debounce winning a race against Firestore
+    // latency (audit/SYNC_PACING_FIX_STATUS.md §2a).
+    schedules.beginSyncBatch();
+    try {
+      await _doPopulateCalendarsInner(enabledConfigs);
+    } finally {
+      // Order matters: close the batch FIRST so the single owed sync is armed
+      // while polling is still paused, then release the poller. syncAll pauses
+      // again for itself, so the window is covered either way — but arming
+      // before the resume keeps the quiet period unbroken.
+      schedules.endSyncBatch();
+      poller.resumePolling();
+    }
+  }
+
+  Future<void> _doPopulateCalendarsInner(
+    List<GameDayAutopilotConfig> enabledConfigs,
+  ) async {
     // #63 E5 teardown edge: clear runs UNCONDITIONALLY before the empty-
     // set check so disabling the LAST enabled team still strips its
     // future entries. Pre-fix this early-returned before the clear, so
@@ -936,23 +1102,29 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day);
 
-      final keysToRemove = <String>[];
-      entries.forEach((dateKey, entry) {
+      // A1: remove the Game Day ROWS, not the whole night.
+      //
+      // Pre-V3 a date held one entry, so `removeEntry(dateKey)` and "remove
+      // the Game Day entry" were the same operation. They no longer are: a
+      // user's own entry can now share the night, and wiping the date would
+      // destroy it on every regeneration. Targeted by (dateKey, entryId).
+      final toRemove = <({String dateKey, String entryId})>[];
+      for (final entry in entries.allEntries) {
         if (shouldClearGameDayEntry(
-          dateKey: dateKey,
+          dateKey: entry.dateKey,
           entry: entry,
           todayStart: todayStart,
         )) {
-          keysToRemove.add(dateKey);
+          toRemove.add((dateKey: entry.dateKey, entryId: entry.entryId));
         }
-      });
-
-      for (final key in keysToRemove) {
-        await notifier.removeEntry(key);
       }
 
-      if (keysToRemove.isNotEmpty) {
-        debugPrint('[GameDayAutopilot] Cleared ${keysToRemove.length} '
+      for (final r in toRemove) {
+        await notifier.removeEntryById(r.dateKey, r.entryId);
+      }
+
+      if (toRemove.isNotEmpty) {
+        debugPrint('[GameDayAutopilot] Cleared ${toRemove.length} '
             'future autopilot calendar entries before regeneration');
       }
     } catch (e) {

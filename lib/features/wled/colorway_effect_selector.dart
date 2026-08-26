@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/wled/selector_payload.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
@@ -83,12 +86,68 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   /// default) preserves the normal apply-on-tap behavior byte-for-byte.
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
+  /// DESIGN-EDIT mode. When non-null this tuner is editing a STORED design
+  /// rather than browsing a catalog palette: the seven selector providers are
+  /// seeded from the design, the three catalog exits are hidden, and the only
+  /// commit is "Save to design" → `updateDesign` with the original id.
+  ///
+  /// [paletteNode] is still required and still drives every existing build
+  /// path — `forDesign` synthesises one from the design so catalog mode's code
+  /// is byte-identical rather than threaded with null checks.
+  final CustomDesign? editingDesign;
+
+  bool get isDesignEdit => editingDesign != null;
+
+  /// CELEBRATION MODE. When true the effect list is replaced by
+  /// [WledEffectsCatalog.celebrationPicks] — the attention-grabbing subset —
+  /// and the motion/colour filter chips are hidden, because the whole list is
+  /// already one deliberate filter. Everything else (live on-device preview,
+  /// speed/intensity, the tile grid) is the SAME widget: the celebration
+  /// picker is this page in a narrower mode, not a second grid.
+  ///
+  /// Pair with [onDesignSelected] — celebration mode always returns the choice
+  /// rather than persisting a base design.
+  final bool celebrationMode;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
     this.teamSlug,
     this.onDesignSelected,
+    this.editingDesign,
+    this.celebrationMode = false,
   });
+
+  /// Opens the tuner on a stored effect design.
+  ///
+  /// The synthesised node carries the design's name and its colours, which is
+  /// all the existing build code reads off `paletteNode` (`_paletteColors`,
+  /// the header, the preview). No metadata is copied, so `_isBrightnessGradient`
+  /// is false and the gradient branch is unreachable in design-edit mode — a
+  /// stored design is never a brightness-gradient catalog node.
+  factory ColorwayEffectSelectorPage.forDesign({
+    Key? key,
+    required CustomDesign design,
+  }) {
+    final colors = <Color>[];
+    for (final ch in design.channels.where((c) => c.included)) {
+      for (final g in ch.colorGroups) {
+        colors.add(g.flutterColor);
+        if (colors.length >= 3) break;
+      }
+      if (colors.length >= 3) break;
+    }
+    return ColorwayEffectSelectorPage(
+      key: key,
+      paletteNode: LibraryNode(
+        id: 'design_${design.id}',
+        name: design.name,
+        nodeType: LibraryNodeType.palette,
+        themeColors: colors.isEmpty ? const <Color>[Colors.white] : colors,
+      ),
+      editingDesign: design,
+    );
+  }
 
   @override
   ConsumerState<ColorwayEffectSelectorPage> createState() =>
@@ -99,11 +158,18 @@ class _ColorwayEffectSelectorPageState
     extends ConsumerState<ColorwayEffectSelectorPage> {
   Timer? _debounceTimer;
 
-  /// SELECTION MODE only. The pre-preview device look, snapshotted on entry
-  /// (see [initState]) so both exits — Save ("Set design") and Cancel (backing
-  /// out / dispose) — can RESTORE it. The live preview writes to the real
-  /// lights on every adjustment ([_sendToWled]); but choosing a pattern for a
-  /// SCHEDULE must not leave it applied now, so we undo the preview on exit.
+  /// SELECTION and DESIGN-EDIT modes. The pre-preview device look, snapshotted
+  /// on entry (see [initState]) so the CANCEL exit can RESTORE it. The live
+  /// preview writes to the real lights on every adjustment ([_sendToWled]),
+  /// and neither mode is an "apply this now" gesture:
+  ///
+  ///   • SELECTION — choosing a pattern for a SCHEDULE must not leave it
+  ///     applied now, so BOTH exits (Save and Cancel) restore.
+  ///   • DESIGN-EDIT — backing out of an edit must not leave a half-tuned
+  ///     look on the house, so CANCEL restores. SAVE does NOT: the user just
+  ///     committed that look, so leaving it lit is the coherent outcome.
+  ///     `_saveToDesign` therefore CONSUMES the snapshot without replaying it,
+  ///     which is what stops `dispose` from undoing a successful save.
   ///
   /// This is [WledStateModel] — the freshest app-side device model (polled
   /// ~1.5s by WledNotifier) — not a byte-exact external device snapshot; the
@@ -112,6 +178,39 @@ class _ColorwayEffectSelectorPageState
   /// preview uses (no config/preset write). Null once restored/consumed so we
   /// never restore twice.
   WledStateModel? _capturedLook;
+
+  /// DESIGN-EDIT only. The seven selector providers as they were on entry.
+  ///
+  /// They are GLOBAL StateProviders shared with catalog browsing, so seeding
+  /// them from a design would otherwise leak that design's settings into the
+  /// next catalog palette the user opens. Restored on cancel and on save.
+  SelectorState? _providerSnapshot;
+  bool _snapshotRestored = false;
+
+  /// The seven notifiers, captured while `ref` is LIVE.
+  ///
+  /// `_restoreProviderSnapshot` runs from [dispose], where flutter_riverpod
+  /// forbids `ref` — reaching them via `ref.read(p.notifier)` there throws
+  /// `Bad state: Cannot use "ref" after the widget was disposed`. (That is the
+  /// #84 crash class; `LibraryBrowserScreen.dispose` carries the same note for
+  /// the mood filter.) The StateControllers themselves are owned by the
+  /// ProviderContainer and outlive this widget, so holding them is safe —
+  /// it is the `ref` lookup that is not.
+  List<StateController<Object?>>? _selectorNotifiers;
+
+  void _captureSelectorNotifiers() {
+    _selectorNotifiers = <StateController<Object?>>[
+      ref.read(selectorEffectIdProvider.notifier),
+      ref.read(selectorSpeedProvider.notifier),
+      ref.read(selectorIntensityProvider.notifier),
+      ref.read(selectorColorGroupProvider.notifier),
+      ref.read(selectorSpacingProvider.notifier),
+      ref.read(selectorGradientPresetProvider.notifier),
+      ref.read(selectorBreathingProvider.notifier),
+      ref.read(selectorMotionTypeProvider.notifier),
+      ref.read(selectorColorBehaviorProvider.notifier),
+    ];
+  }
 
   // ── Restore cache (selection mode) ──────────────────────────────────────
   // The CANCEL exit runs in [dispose], where flutter_riverpod forbids `ref`.
@@ -135,7 +234,7 @@ class _ColorwayEffectSelectorPageState
     // from the polled wledStateProvider so it reflects the device state the
     // user is leaving — held in a local field, NOT re-read later (the poll
     // would pick up our own preview writes and pollute it).
-    if (widget.onDesignSelected != null) {
+    if (widget.onDesignSelected != null || widget.isDesignEdit) {
       _capturedLook = ref.read(wledStateProvider);
       _refreshRestoreCache();
     }
@@ -155,7 +254,21 @@ class _ColorwayEffectSelectorPageState
         if (presets[pi].id == suffix) { initPreset = pi; break; }
       }
     }
+    // DESIGN-EDIT: snapshot the shared providers BEFORE anything overwrites
+    // them, so cancel can put them back for the next catalog visit.
+    if (widget.isDesignEdit) {
+      _captureSelectorNotifiers();
+      _providerSnapshot = _readSelectorState();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (widget.isDesignEdit) {
+        // Seeding only SETS providers — it deliberately does not call
+        // _sendToWled(), so opening the editor does not touch the house. The
+        // house changes when the user moves a control (live preview) or
+        // commits, exactly as in catalog mode.
+        _seedFromDesign(widget.editingDesign!);
+        return;
+      }
       ref.read(selectorEffectIdProvider.notifier).state = 0;
       ref.read(selectorSpeedProvider.notifier).state = getSpeedProfile(0).rawDefault;
       ref.read(selectorIntensityProvider.notifier).state = 128;
@@ -168,11 +281,148 @@ class _ColorwayEffectSelectorPageState
     });
   }
 
+  /// The seven selector providers, read into one value.
+  SelectorState _readSelectorState() => SelectorState(
+        effectId: ref.read(selectorEffectIdProvider),
+        speed: ref.read(selectorSpeedProvider),
+        intensity: ref.read(selectorIntensityProvider),
+        grouping: ref.read(selectorColorGroupProvider),
+        spacing: ref.read(selectorSpacingProvider),
+        colors: _paletteColsRgbw(),
+        brightness: widget.editingDesign?.brightness ?? 255,
+      );
+
+  /// Write a [SelectorState] into the seven providers. Never pushes to the
+  /// controller — see the note at the seed call site.
+  void _writeSelectorState(SelectorState s) {
+    // Through the CAPTURED notifiers — never `ref` — because this also runs
+    // from dispose. See [_selectorNotifiers].
+    final n = _selectorNotifiers;
+    if (n == null) return;
+    n[0].state = s.effectId;
+    n[1].state = s.speed;
+    n[2].state = s.intensity;
+    n[3].state = s.grouping;
+    n[4].state = s.spacing;
+    // Gradient-only inputs: reset rather than derived. A stored design is
+    // never a brightness gradient (see `forDesign`), so leaving a previous
+    // palette's values in place would be stale state, not preserved state.
+    n[5].state = 0;
+    n[6].state = false;
+    n[7].state = null;
+    n[8].state = null;
+  }
+
+  /// Seed from the design's OWN channel fields rather than from
+  /// `design.toWledPayload()`.
+  ///
+  /// Both describe the same design, but `toWledPayload` substitutes fx 83 for
+  /// a multi-colour Solid (design_models.dart:246-249). Seeding through it
+  /// would show fx 83 in the picker and then WRITE 83 back on save, silently
+  /// rewriting a stored `fx: 0`. The channel is the stored truth; the payload
+  /// is a rendering of it.
+  void _seedFromDesign(CustomDesign design) {
+    final ch = design.channels.where((c) => c.included).firstOrNull;
+    _writeSelectorState(SelectorState(
+      effectId: ch?.effectId ?? 0,
+      speed: ch?.speed ?? 128,
+      intensity: ch?.intensity ?? 128,
+      colors: _paletteColsRgbw(),
+      brightness: design.brightness,
+    ));
+  }
+
+  /// Restore the shared providers to their pre-entry values. Idempotent.
+  ///
+  /// SCOPE: app state only. The DEVICE is restored separately by
+  /// [_restoreCapturedLook], which design-edit now shares with selection mode
+  /// — cancelling an edit undoes its live preview on the house, not just in
+  /// the picker. (Phase C shipped these asymmetric; closeout aligned them.)
+  void _restoreProviderSnapshot() {
+    final snap = _providerSnapshot;
+    if (snap == null || _snapshotRestored) return;
+    _snapshotRestored = true;
+    // DEFERRED past the current frame. Two separate rules bite here and the
+    // microtask is what satisfies both:
+    //   1. `ref` is dead in dispose — handled by [_selectorNotifiers], which
+    //      the microtask body uses instead (it must NOT touch `ref`).
+    //   2. Riverpod forbids MUTATING a provider from a lifecycle callback at
+    //      all ("Tried to modify a provider while the widget tree was
+    //      building"), because its listeners would rebuild mid-teardown.
+    // Same shape as LibraryBrowserScreen.dispose's mood-filter reset, for the
+    // same two reasons.
+    Future.microtask(() {
+      // Best-effort. If the whole ProviderContainer was torn down between
+      // dispose and this microtask (app shutdown, or a test scope ending),
+      // the StateControllers are disposed and writing throws
+      // `Bad state: Tried to use StateController after dispose was called`.
+      // There is nothing left to restore in that case, so swallow it rather
+      // than surface an unhandled error from a teardown path.
+      try {
+        _writeSelectorState(snap);
+      } catch (e) {
+        debugPrint('Selector snapshot restore skipped (container gone): $e');
+      }
+    });
+  }
+
+  /// The palette's colours as RGBW `col` entries — the same derivation the
+  /// preview and commit paths use.
+  List<List<int>> _paletteColsRgbw() {
+    final cols = _paletteColors
+        .take(3)
+        .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(),
+            (c.b * 255).round(), forceZeroWhite: true))
+        .toList();
+    if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
+    return cols;
+  }
+
+  /// FOURTH EXIT — design-edit only. Writes the tuner's current state back to
+  /// the design it was opened on, through the same `updateDesign` every other
+  /// design writer uses, carrying the ORIGINAL id so `saveDesign` routes to
+  /// update and never to create.
+  ///
+  /// Only fx / speed / intensity / brightness are written. Colours are not:
+  /// the tuner has no colour editor, it renders whatever the node supplies.
+  /// `grp` / `spc` are not written either — see the report; `ChannelDesign`
+  /// has no field for them.
+  Future<void> _saveToDesign() async {
+    final design = widget.editingDesign;
+    if (design == null) return;
+    final state = _readSelectorState();
+    final updated = design.copyWith(
+      channels: [
+        for (final ch in design.channels)
+          ch.included
+              ? ch.copyWith(
+                  effectId: state.effectId,
+                  speed: state.speed,
+                  intensity: state.intensity,
+                )
+              : ch,
+      ],
+      updatedAt: DateTime.now(),
+    );
+    final ok = await ref.read(updateDesignProvider)(updated);
+    // CONSUME the captured look without replaying it: the design now stores
+    // what the lights are showing, so undoing the preview would contradict the
+    // save the user just made. Clearing it is also what stops dispose's cancel
+    // path from firing a restore behind a successful save.
+    if (ok) _capturedLook = null;
+    _restoreProviderSnapshot();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok ? 'Saved "${design.name}"' : 'Save failed'),
+    ));
+    if (ok) Navigator.of(context).maybePop(true);
+  }
+
   @override
   void dispose() {
     _debounceTimer?.cancel();
-    // CANCEL exit (selection mode): if a pre-preview look was captured and NOT
-    // yet consumed by a Save, the user is backing out of the effect editor
+    // CANCEL exit (selection AND design-edit): if a pre-preview look was
+    // captured and NOT yet consumed, the user is backing out of the editor
     // (the parent LibraryBrowserScreen owns the back button, so its pop
     // disposes us) — restore the device now. Fire-and-forget and ref-free:
     // [_restoreCapturedLook] uses only the cached repo/payload (dispose cannot
@@ -180,6 +430,11 @@ class _ColorwayEffectSelectorPageState
     if (_capturedLook != null) {
       _restoreCapturedLook();
     }
+    // DESIGN-EDIT cancel: put the shared selector providers back. Safe from
+    // dispose because it only writes to Riverpod-owned notifiers, which
+    // outlive this widget — the same reasoning LibraryBrowserScreen.dispose
+    // uses for the mood filter.
+    _restoreProviderSnapshot();
     super.dispose();
   }
 
@@ -340,27 +595,18 @@ class _ColorwayEffectSelectorPageState
         speed = ref.read(selectorSpeedProvider);
       }
 
-      var payload = <String, dynamic>{
-        'on': true,
-        'bri': 255,
-        'seg': [
-          {
-            'fx': fxId,
-            'sx': speed,
-            'ix': ref.read(selectorIntensityProvider),
-            // Palette by effect color-behavior, NOT a blanket pal:5 — palette-
-            // driven effects (Rainbow, Colorwaves, Aurora, Plasma…) sweep a
-            // gradient of the USER's colors (pal:4); col-based effects keep
-            // discrete user colors ("Colors Only", pal:5). Single source of
-            // truth in WledEffectsCatalog; also enforced at the apply chokepoint
-            // (normalizeWledPayload) for stored/legacy payloads.
-            'pal': WledEffectsCatalog.paletteForEffect(fxId),
-            'grp': colorGroup,
-            'spc': spacing,
-            'col': cols,
-          }
-        ]
-      };
+      // ONE builder for every exit (selector_payload.dart). `pal` is derived
+      // from the effect's colour behaviour there, not hardcoded — palette-
+      // driven effects sweep a gradient of the USER's colours (pal 4);
+      // col-based effects keep them discrete (pal 5).
+      var payload = buildSelectorPayload(SelectorState(
+        effectId: fxId,
+        speed: speed,
+        intensity: ref.read(selectorIntensityProvider),
+        grouping: colorGroup,
+        spacing: spacing,
+        colors: cols,
+      ));
 
       // Apply channel filter so all targeted segments receive the change
       final channels = ref.read(effectiveChannelIdsProvider);
@@ -417,23 +663,16 @@ class _ColorwayEffectSelectorPageState
         cols = raw;
       }
 
-      var payload = <String, dynamic>{
-        'on': true,
-        'bri': 255,
-        'seg': [
-          {
-            'fx': fxId,
-            'sx': speed,
-            'ix': intensity,
-            // Palette by effect color-behavior (see _sendToWled). Keeps the
-            // payload persisted to Game Day saveDesign correct at rest.
-            'pal': WledEffectsCatalog.paletteForEffect(fxId),
-            'grp': colorGroup,
-            'spc': spacing,
-            'col': cols,
-          }
-        ]
-      };
+      // Same builder as the preview path and save-to-design, so the payload
+      // persisted to Game Day cannot drift from the one previewed.
+      var payload = buildSelectorPayload(SelectorState(
+        effectId: fxId,
+        speed: speed,
+        intensity: intensity,
+        grouping: colorGroup,
+        spacing: spacing,
+        colors: cols,
+      ));
 
       // SELECTION MODE (e.g. the schedule picker) — the SAVE exit. The live
       // preview HAS been applying to the lights on each adjustment; committing
@@ -600,13 +839,17 @@ class _ColorwayEffectSelectorPageState
         ((effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors));
 
     // Build filtered effect list (only used for non-gradient patterns)
-    final bool showingTopPicks = motionFilter == null && colorFilter == null;
-    final List<WledEffect> displayEffects = showingTopPicks
-        ? WledEffectsCatalog.topPicks
-        : WledEffectsCatalog.filterEffects(
-            motionType: motionFilter,
-            colorBehavior: colorFilter,
-          );
+    final bool showingTopPicks = !widget.celebrationMode &&
+        motionFilter == null &&
+        colorFilter == null;
+    final List<WledEffect> displayEffects = widget.celebrationMode
+        ? WledEffectsCatalog.celebrationPicks
+        : (showingTopPicks
+            ? WledEffectsCatalog.topPicks
+            : WledEffectsCatalog.filterEffects(
+                motionType: motionFilter,
+                colorBehavior: colorFilter,
+              ));
 
     return CustomScrollView(
       slivers: [
@@ -669,14 +912,34 @@ class _ColorwayEffectSelectorPageState
                       ),
                     ),
                   ),
-                // Apply button — in SELECTION mode this commits the choice back
-                // to the caller (the schedule) and restores the pre-preview
-                // look rather than applying now, so it reads "Set design".
+                // Commit button. Three modes, one control:
+                //   • DESIGN-EDIT → the FOURTH exit, _saveToDesign, writing
+                //     back to the design this tuner was opened on. The three
+                //     catalog exits are unreachable here because _applyPattern
+                //     is not wired in this mode.
+                //   • SELECTION → commits the choice back to the caller (the
+                //     schedule) and restores the pre-preview look rather than
+                //     applying now, so it reads "Set design".
+                //   • CATALOG → applies to the lights.
                 ElevatedButton.icon(
-                  onPressed: _applyPattern,
-                  icon: const Icon(Icons.check, size: 18),
-                  label: Text(
-                      widget.onDesignSelected != null ? 'Set design' : 'Apply'),
+                  // Precedence: DESIGN-EDIT first because it is the only
+                  // mode that changes the ACTION (a fourth exit,
+                  // _saveToDesign) rather than just the wording. CELEBRATION
+                  // must be tested before the selection branch — it always
+                  // pairs with onDesignSelected, so the later branch would
+                  // otherwise swallow its label.
+                  onPressed:
+                      widget.isDesignEdit ? _saveToDesign : _applyPattern,
+                  icon: Icon(
+                      widget.isDesignEdit ? Icons.save_outlined : Icons.check,
+                      size: 18),
+                  label: Text(widget.isDesignEdit
+                      ? 'Save to design'
+                      : widget.celebrationMode
+                          ? 'Set celebration'
+                          : widget.onDesignSelected != null
+                              ? 'Set design'
+                              : 'Apply'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: NexGenPalette.cyan,
                     foregroundColor: NexGenPalette.matteBlack,
@@ -708,7 +971,25 @@ class _ColorwayEffectSelectorPageState
         // ---- Standard effect controls ----
         if (!_isBrightnessGradient) ...[
           // Color layout selector (conditional)
-          if (showColorLayout) SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
+          // Hidden in DESIGN-EDIT: `grp`/`spc` have no field on ChannelDesign,
+          // so a change here could not be saved and `toWledPayload` would
+          // re-assert the #88 defaults on the next apply. Offering a control
+          // whose value is silently discarded is worse than not offering it.
+          // See audit/DESIGN_CARD_P4.md for the model gap this reflects.
+          if (showColorLayout && !widget.isDesignEdit)
+            SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
+          if (widget.isDesignEdit)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Text(
+                  'Editing a saved design: effect, speed and intensity are '
+                  'saved back. Colours and pixel layout are not editable here.',
+                  style: TextStyle(
+                      color: NexGenPalette.textMedium, fontSize: 11),
+                ),
+              ),
+            ),
 
           // Speed slider
           SliverToBoxAdapter(
@@ -736,15 +1017,16 @@ class _ColorwayEffectSelectorPageState
 
           const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-          // Motion type filter chips
-          SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
-
-          const SliverToBoxAdapter(child: SizedBox(height: 6)),
-
-          // Color behavior filter chips
-          SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
-
-          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          // Motion / colour filter chips. Hidden in celebration mode: the
+          // list is already the one filter that matters there, and offering
+          // "Ambient" or "Rainbow" chips would only let the user filter their
+          // way out of the attention-grabbing set.
+          if (!widget.celebrationMode) ...[
+            SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
+            const SliverToBoxAdapter(child: SizedBox(height: 6)),
+            SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          ],
 
           // Section header
           SliverToBoxAdapter(

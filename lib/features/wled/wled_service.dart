@@ -197,6 +197,65 @@ class PresetsRead {
   bool get isKnown => state != PresetsReadState.unreadable;
 }
 
+/// Process-wide HTTP clients for controller traffic, keyed by
+/// `connectionTimeout`.
+///
+/// REPLACES 15 PER-CALL-SITE `HttpClient()` INSTANTIATIONS
+/// (audit/SYNC_PACING_FIX_STATUS.md §1(d)). Two problems, one cause:
+///
+///  1. NO REUSE. Every request built its own client and force-closed it, so
+///     each was a fresh TCP connect + immediate teardown. On an ESP32 with a
+///     small socket pool, that churn is itself a load source.
+///  2. A LEAK ON EVERY ERROR PATH. 14 of the 15 closes sat on the SUCCESS path
+///     inside `try`, with no `finally` — so any throw before the close
+///     (overwhelmingly a TIMEOUT) leaked the client and its socket. That is
+///     self-amplifying in exactly the scenario that matters: as the controller
+///     degrades, more requests time out, more sockets are held, pressure rises.
+///
+/// Keyed by timeout rather than collapsed to one client because the call sites
+/// legitimately differ (5s / 10s / 15s) and flattening them would change how
+/// long a dead host is waited on. Three long-lived clients replace fifteen
+/// short-lived ones.
+///
+/// WIRE BEHAVIOUR IS DELIBERATELY UNCHANGED: every request still sets
+/// `persistentConnection = false`, so the connection closes after its response
+/// exactly as the old force-close did. Enabling keep-alive is a real further
+/// win, but it is an UNTESTED change against frozen firmware — no history was
+/// found of it ever being tried (P2), so it is left for a bench-verified step
+/// rather than smuggled in here.
+///
+/// Never closed: these are app-lifetime clients, the standard pattern for a
+/// pooled HTTP client. [resetWledHttpClientsForTest] exists for test isolation.
+final Map<int, HttpClient> _wledClients = <int, HttpClient>{};
+
+HttpClient _wledClientFor(Duration connectionTimeout) {
+  return _wledClients.putIfAbsent(
+    connectionTimeout.inMilliseconds,
+    () => HttpClient()..connectionTimeout = connectionTimeout,
+  );
+}
+
+/// Test-only: how many distinct clients the cache currently holds. Pins the
+/// consolidation — fifteen call sites must resolve to a handful of clients.
+@visibleForTesting
+int wledHttpClientCacheSize() => _wledClients.length;
+
+/// Test-only: resolve a client the way the call sites do, so a test can assert
+/// identity (reuse) rather than counting sockets.
+@visibleForTesting
+HttpClient wledClientForTest(Duration connectionTimeout) =>
+    _wledClientFor(connectionTimeout);
+
+/// Test-only: drop the cached clients so one test's client cannot leak into
+/// the next.
+@visibleForTesting
+void resetWledHttpClientsForTest() {
+  for (final c in _wledClients.values) {
+    c.close(force: true);
+  }
+  _wledClients.clear();
+}
+
 class WledService
     implements
         WledRepository,
@@ -287,12 +346,12 @@ class WledService
       };
     }
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.getUrl(_uri('/json/state'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         return jsonDecode(body) as Map<String, dynamic>;
       }
@@ -318,13 +377,12 @@ class WledService
       );
     }
     try {
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.getUrl(_uri('/json/info'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final info = jsonDecode(body) as Map<String, dynamic>;
@@ -371,10 +429,10 @@ class WledService
   /// Raw GET /json/cfg as a map (read-only). Used by [fetchClockInfo] for the
   /// if.ntp block that [getConfig] discards. Returns null on any failure.
   Future<Map<String, dynamic>?> _fetchCfgRaw() async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15);
+    final client = _wledClientFor(const Duration(seconds: 15));
     try {
       final req = await client.getUrl(_uri('/json/cfg'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
@@ -384,7 +442,9 @@ class WledService
       }
       return null;
     } finally {
-      client.close(force: true);
+      // The client is shared and app-lifetime now, so there is nothing to
+      // close here. Left as a marker: this was the ONE site that already had
+      // a finally, and the only one that did not leak on its error path.
     }
   }
 
@@ -638,8 +698,9 @@ class WledService
       final bodyBytes = utf8.encode(body);
       debugPrint('📤 WLED POST /json/state (per-pixel chunk, ${bodyBytes.length}B)');
 
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.postUrl(_uri('/json/state'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
       // Explicit Content-Length → unchunked. See _postConfig/savePreset:
       // WLED 0.15.x drops chunked POSTs. Do NOT swap for http.post.
@@ -647,7 +708,6 @@ class WledService
       req.add(bodyBytes);
       final res = await req.close().timeout(const Duration(seconds: 15));
       final resBody = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         return PerPixelChunkResult.ok;
@@ -686,8 +746,9 @@ class WledService
       debugPrint('📤 WLED POST /json/cfg');
       debugPrint('   Payload: $body');
 
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.postUrl(_uri('/json/cfg'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
       // Explicit Content-Length keeps the request out of Dart HttpClient's
       // chunked transfer-encoding path. WLED 0.15.x on ESP32_Ethernet builds
@@ -705,7 +766,6 @@ class WledService
       // connectionTimeout stays 15s: the TCP handshake isn't the slow part.
       final res = await req.close().timeout(const Duration(seconds: 30));
       final resBody = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       debugPrint('📥 WLED /json/cfg response: ${res.statusCode}');
       if (resBody.isNotEmpty) debugPrint('   Body: $resBody');
@@ -734,12 +794,12 @@ class WledService
     try {
       // Short timeouts (10s) keep verification polling responsive — a stalled
       // controller should fail this fast so the next poll comes around, not hang.
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      final client = _wledClientFor(const Duration(seconds: 10));
       final req = await client.getUrl(_uri('/json/cfg'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 10));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final cfg = jsonDecode(body) as Map<String, dynamic>;
         return timerInstancesFromCfg(cfg);
@@ -757,12 +817,12 @@ class WledService
   Future<bool> ping() async {
     if (_simulate) return true;
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final client = _wledClientFor(const Duration(seconds: 5));
       final req = await client.getUrl(_uri('/json/state'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 5));
       await res.drain<void>();
-      client.close(force: true);
       return res.statusCode >= 200 && res.statusCode < 300;
     } catch (e) {
       debugPrint('WledService.ping: no response ($e)');
@@ -818,12 +878,12 @@ class WledService
       );
     }
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.getUrl(_uri('/json/cfg'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         // Shared with ControllerClockInfo.fromMaps, which parses the cfg the
@@ -847,8 +907,9 @@ class WledService
     }
     try {
       final boundary = '----dart-ar-ledmap-${DateTime.now().millisecondsSinceEpoch}';
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.postUrl(_uri('/edit'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.contentTypeHeader, 'multipart/form-data; boundary=$boundary');
 
       // Build multipart body manually: data (file) + path
@@ -873,7 +934,6 @@ class WledService
 
       req.add(builder.takeBytes());
       final res = await req.close().timeout(const Duration(seconds: 15));
-      client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) return true;
       final body = await res.transform(utf8.decoder).join();
       debugPrint('WLED /edit upload error ${res.statusCode}: $body');
@@ -936,12 +996,12 @@ class WledService
     }
 
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      final client = _wledClientFor(const Duration(seconds: 10));
       final req = await client.getUrl(_uri('/json/presets'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 10));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final decoded = jsonDecode(body);
@@ -1003,12 +1063,12 @@ class WledService
     if (_simulate) return const PresetsRead.deviceEmpty();
 
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      final client = _wledClientFor(const Duration(seconds: 10));
       final req = await client.getUrl(_uri('/presets.json'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 10));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       if (res.statusCode < 200 || res.statusCode >= 300) {
         debugPrint('WLED readPresets: HTTP ${res.statusCode} — UNREADABLE');
@@ -1137,8 +1197,9 @@ class WledService
       debugPrint('📤 WLED savePreset: Saving to preset $presetId');
       debugPrint('   Payload: $body');
 
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.postUrl(_uri('/json/state'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
       // Explicit Content-Length keeps the request out of Dart HttpClient's
       // chunked transfer-encoding path. WLED 0.15.x on ESP32_Ethernet builds
@@ -1153,7 +1214,6 @@ class WledService
 
       final res = await req.close().timeout(const Duration(seconds: 15));
       final resBody = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       debugPrint('📥 WLED savePreset response: ${res.statusCode}');
       if (resBody.isNotEmpty) debugPrint('   Body: $resBody');
@@ -1192,15 +1252,15 @@ class WledService
       final body = jsonEncode(<String, dynamic>{'pdel': presetId});
       final bodyBytes = utf8.encode(body);
 
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.postUrl(_uri('/json/state'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
       req.contentLength = bodyBytes.length;
       req.add(bodyBytes);
 
       final res = await req.close().timeout(const Duration(seconds: 15));
       await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         debugPrint('🗑️ WLED preset $presetId deleted');
@@ -1257,12 +1317,12 @@ class WledService
       return true;
     }
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.getUrl(_uri('/json/info'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final info = jsonDecode(body) as Map<String, dynamic>;
         final leds = info['leds'];
@@ -1370,12 +1430,12 @@ class WledService
     }
 
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final client = _wledClientFor(const Duration(seconds: 15));
       final req = await client.getUrl(_uri('/json/info'));
+      req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final info = jsonDecode(body) as Map<String, dynamic>;

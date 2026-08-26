@@ -27,6 +27,31 @@ import 'package:nexgen_command/features/wled/colorway_effect_selector.dart'
 import 'package:nexgen_command/features/wled/pattern_theme_selection.dart';
 
 /// Grid of library nodes (categories, folders, or palettes)
+/// A per-row action rendered in a [LibraryNodeCard]'s trailing overflow menu.
+///
+/// OPT-IN by design. `LibraryNodeCard`'s three card builders are shared by
+/// every folder in Explore (audit/MY_DESIGNS_AUDIT.md §2b.4), so an
+/// unconditional overflow or long-press here would change catalog browsing
+/// everywhere. A node whose grid supplies no [LibraryNodeActionsBuilder]
+/// renders exactly as before — no menu button, no extra hit target.
+class LibraryNodeAction {
+  final String label;
+  final IconData icon;
+  final VoidCallback onSelected;
+  final bool isDestructive;
+
+  const LibraryNodeAction({
+    required this.label,
+    required this.icon,
+    required this.onSelected,
+    this.isDestructive = false,
+  });
+}
+
+/// Returns the actions for [node], or null/empty for "no menu on this row".
+typedef LibraryNodeActionsBuilder = List<LibraryNodeAction>? Function(
+    LibraryNode node);
+
 class LibraryNodeGrid extends StatelessWidget {
   final List<LibraryNode> children;
   final Color? parentAccent;
@@ -50,7 +75,11 @@ class LibraryNodeGrid extends StatelessWidget {
   /// at any depth RETURNS the design instead of applying/browsing.
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
-  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage, this.onDesignSelected});
+  /// Opt-in per-row actions. Null (every catalog surface) renders cards
+  /// byte-identically to before. See [LibraryNodeAction].
+  final LibraryNodeActionsBuilder? actionsBuilder;
+
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage, this.onDesignSelected, this.actionsBuilder});
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +112,7 @@ class LibraryNodeGrid extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: SizedBox(
               height: 44,
-              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected),
+              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, actions: actionsBuilder?.call(node)),
             ),
           );
         },
@@ -102,7 +131,7 @@ class LibraryNodeGrid extends StatelessWidget {
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected);
+        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, actions: actionsBuilder?.call(node));
       },
     );
   }
@@ -123,7 +152,52 @@ class LibraryNodeCard extends StatelessWidget {
   /// Selection mode (additive, mirrors [teamSlug]): see [LibraryNodeGrid].
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
-  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected});
+  /// Opt-in trailing overflow menu. Null or empty → no menu is built at all,
+  /// which is every catalog node. See [LibraryNodeAction].
+  final List<LibraryNodeAction>? actions;
+
+  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected, this.actions});
+
+  bool get _hasActions => actions != null && actions!.isNotEmpty;
+
+  /// Trailing overflow button, or the plain chevron when no actions were
+  /// supplied. Kept private to the card so no caller can render one by
+  /// accident.
+  Widget _trailing(Color accent) {
+    if (!_hasActions) {
+      return Icon(
+        Icons.arrow_forward_ios,
+        color: accent.withValues(alpha: 0.4),
+        size: 10,
+      );
+    }
+    return PopupMenuButton<LibraryNodeAction>(
+      tooltip: 'Design actions',
+      padding: EdgeInsets.zero,
+      icon: Icon(Icons.more_vert, color: accent.withValues(alpha: 0.7), size: 16),
+      color: NexGenPalette.gunmetal90,
+      onSelected: (a) => a.onSelected(),
+      itemBuilder: (context) {
+        return [
+          for (final a in actions!)
+            PopupMenuItem<LibraryNodeAction>(
+              value: a,
+              child: Row(children: [
+                Icon(a.icon,
+                    size: 16,
+                    color: a.isDestructive ? Colors.redAccent : Colors.white70),
+                const SizedBox(width: 10),
+                Text(a.label,
+                    style: TextStyle(
+                        color: a.isDestructive
+                            ? Colors.redAccent
+                            : Colors.white)),
+              ]),
+            ),
+        ];
+      },
+    );
+  }
 
   /// Per-id icon for a library category/folder/palette node. Public+static so
   /// other surfaces (e.g. the Sync pattern picker's folder cards) reuse the same
@@ -862,11 +936,7 @@ class LibraryNodeCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Icon(
-                  Icons.arrow_forward_ios,
-                  color: primaryColor.withValues(alpha: 0.4),
-                  size: 10,
-                ),
+                _trailing(primaryColor),
               ],
             ),
           ),

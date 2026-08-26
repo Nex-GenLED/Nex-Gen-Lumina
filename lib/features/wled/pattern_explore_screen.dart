@@ -101,10 +101,12 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
       // Brief delay for smoother UX (debounce handles most of the wait)
       await Future.delayed(const Duration(milliseconds: 300));
 
-      // Search existing patterns in the library (NOT generating new ones)
-      final repo = ref.read(patternRepositoryProvider);
+      // Search existing patterns in the library (NOT generating new ones).
+      // Through librarySearchProvider, NOT the repository directly — the
+      // provider is what folds the user's saved designs into the same sweep
+      // (audit/DESIGN_CARD_P3.md, B3).
       debugPrint('ExplorePatternsScreen: Searching library for "$query"');
-      final results = await repo.searchLibrary(query);
+      final results = await ref.read(librarySearchProvider(query).future);
       debugPrint('ExplorePatternsScreen: Found ${results.totalCount} results (${results.palettes.length} palettes, ${results.folders.length} folders, ${results.patterns.length} patterns)');
 
       setState(() {
