@@ -56,7 +56,7 @@ AccountDeletionService _service(
     },
     purgeAccountData: () async {
       journal.add('purge');
-      if (purgeError != null) throw purgeError!;
+      if (purgeError != null) throw purgeError;
     },
   );
 }
