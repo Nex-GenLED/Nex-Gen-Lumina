@@ -125,13 +125,53 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
     }
   }
 
+  /// Everything account deletion now removes.
+  ///
+  /// The old copy — "This will wipe your saved patterns and cannot be undone."
+  /// — was wrong in both directions at once
+  /// ([audit/OVERNIGHT_DATA_LIFECYCLE_AUDIT.md](audit/OVERNIGHT_DATA_LIFECYCLE_AUDIT.md)
+  /// §1.1): it *understated* the intent (the button claims to delete the
+  /// account, not a pattern list) while *overstating* the effect (the flow
+  /// deleted one Firestore document and orphaned ~34 subcollections). Now that
+  /// `purgeUserAccount` genuinely sweeps all of it, the dialog says so.
+  static const List<String> _deletionInventory = [
+    'Your profile, address and contact details',
+    'Every controller, property and geofence you have set up',
+    'All schedules, scenes, designs, favourites and saved patterns',
+    'Your house photo',
+    'Game Day, Autopilot and Neighborhood Sync settings',
+    'Usage history and diagnostic reports',
+  ];
+
   Future<void> _confirmAndDeleteAccount() async {
     if (_deleting) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Are you sure?'),
-        content: const Text('This will wipe your saved patterns and cannot be undone.'),
+        title: const Text('Delete your account?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('This permanently deletes:'),
+            const SizedBox(height: 8),
+            for (final item in _deletionInventory)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('•  $item'),
+              ),
+            const SizedBox(height: 12),
+            const Text(
+              'Your lights will keep running whatever schedule is already '
+              'stored on the controller until it is reset by an installer.',
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'This cannot be undone.',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
           TextButton(
