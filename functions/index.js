@@ -107,6 +107,18 @@ exports.probeControllerHealth = probeControllerHealth;
 exports.collectControllerHealth = collectControllerHealth;
 exports.backfillControllerHealth = backfillControllerHealth;
 
+// ACCOUNT DELETION PURGE — audit/OVERNIGHT_DATA_LIFECYCLE_AUDIT.md F-1 (P0).
+// "Delete Account" used to delete exactly one document; Firestore does not
+// cascade, so all ~34 subcollections under users/{uid} plus the Storage house
+// photo survived forever — and, per audit/OVERNIGHT_PRIVACY_AUDIT.md 2.5, were
+// unreachable by runDataCleanup because a deleted parent doc is not returned by
+// db.collection("users").get(). A beforeUserDeleted blocking function would be
+// the tighter shape, but this project is subtype FIREBASE_AUTH, not
+// IDENTITY_PLATFORM (probed 2026-08-26), so blocking functions are unavailable.
+// The callable is the audit's own stated fallback.
+const { purgeUserAccount } = require("./lib/purgeUserAccount");
+exports.purgeUserAccount = purgeUserAccount;
+
 // S3 — FIRE-JOB DISPATCHER (audit/S3_DISPATCHER.md). The minute cron that makes
 // unattended Game Day and Neighborhood Sync possible at all: both are 100%
 // app-open-only today because kSportsBackgroundServiceEnabled = false and iOS

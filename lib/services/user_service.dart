@@ -261,7 +261,19 @@ class UserService {
     }
   }
 
-  /// Delete user profile
+  /// Delete the user profile document — and ONLY that document.
+  ///
+  /// DO NOT use this for account deletion. Firestore does not cascade, so this
+  /// leaves all ~34 subcollections under `users/{uid}` standing, and
+  /// `runDataCleanup` can never reach them afterwards because a deleted parent
+  /// doc is not returned by `db.collection("users").get()`
+  /// (audit/OVERNIGHT_DATA_LIFECYCLE_AUDIT.md F-1, OVERNIGHT_PRIVACY_AUDIT.md
+  /// §2.5). That is exactly the P0 this method used to cause.
+  ///
+  /// Account deletion goes through `AccountDeletionService`, which
+  /// re-authenticates first and then calls the `purgeUserAccount` callable.
+  @Deprecated('Use AccountDeletionService for account deletion — this does not '
+      'delete subcollections (audit F-1).')
   Future<void> deleteUser(String userId) async {
     try {
       await _firestore.collection('users').doc(userId).delete();

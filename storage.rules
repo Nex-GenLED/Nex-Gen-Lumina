@@ -1,14 +1,74 @@
 rules_version = '2';
+
+// Cloud Storage security rules.
+//
+// F-3 (audit/OVERNIGHT_DATA_LIFECYCLE_AUDIT.md §2.3, P1). The previous version
+// of this file was:
+//
+//   match /users/{userId}/{allPaths=**} {
+//     allow read: if request.auth != null;
+//     allow write: if request.auth != null && request.auth.uid == userId
+//                  && request.resource.size < 10 * 1024 * 1024
+//                  && request.resource.contentType.matches('image/.*');
+//   }
+//
+// Two defects in four lines:
+//
+//  1. `write` covers create, update AND delete — but on a DELETE
+//     `request.resource` is null, so `request.resource.size` fails to evaluate
+//     and the delete is denied. Always. For the owner. That is why
+//     `deleteHousePhoto()` (image_upload_service.dart:88) always returned
+//     false, and it did so silently, because it catches and returns rather
+//     than throwing. The house photo was, by rule, undeletable by the person
+//     in the photograph's driveway.
+//
+//  2. `allow read: if request.auth != null` let ANY authenticated Lumina
+//     account — including an anonymous staff-PIN session — read ANY user's
+//     house photo by guessing nothing more than a uid.
+//
+// Both are fixed below: the resource-shape conditions now sit on
+// `create, update` only, `delete` gets its own owner-only clause, and `read`
+// is owner-scoped.
+//
+// WHY NARROWING `read` DOES NOT BREAK THE MEDIA/INSTALLER DASHBOARD.
+// media_dashboard_screen.dart:409 renders another user's house photo, which
+// looks like a cross-account read. It is not one: every render site in the app
+// goes through `Image.network(user.housePhotoUrl)`, and `housePhotoUrl` is the
+// value `getDownloadURL()` returned at upload time — a tokenised HTTPS URL
+// that is served WITHOUT evaluating these rules. The only method that would
+// have needed a rules-gated cross-account read is
+// `ImageUploadService.getHousePhotoUrl()`, and it has zero callers (verified
+// 2026-08-26). So nothing in the shipped app loses access.
+//
+// Corollary, stated so it is not mistaken for more than it is: because
+// download URLs bypass rules, this change does not revoke a URL that has
+// already leaked. What it closes is path enumeration — any signed-in account
+// walking `users/{uid}/house_photo.jpg` for uids it does not own.
+
 service firebase.storage {
   match /b/{bucket}/o {
-    // Users can read/write their own house photos
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // A user's own folder: house photo today, whatever else lands here later.
     match /users/{userId}/{allPaths=**} {
-      // Anyone can read photos (for sharing/display)
-      allow read: if request.auth != null;
-      // Only the owner can write to their folder
-      allow write: if request.auth != null && request.auth.uid == userId
-                   && request.resource.size < 10 * 1024 * 1024  // Max 10MB
-                   && request.resource.contentType.matches('image/.*');
+
+      // Owner only. See the note above on download URLs.
+      allow read: if isOwner(userId);
+
+      // Uploads and replacements carry a body, so the size/type guards apply.
+      allow create, update: if isOwner(userId)
+                            && request.resource.size < 10 * 1024 * 1024  // 10MB
+                            && request.resource.contentType.matches('image/.*');
+
+      // Deletes carry NO body — `request.resource` is null here, so the two
+      // conditions above must not be repeated or this clause is dead again.
+      // Ownership is the whole test, and it is the right one: account deletion
+      // (AccountDeletionService) calls deleteHousePhoto() before the
+      // purgeUserAccount callable sweeps the prefix server-side.
+      allow delete: if isOwner(userId);
     }
   }
 }
