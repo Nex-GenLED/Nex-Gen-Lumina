@@ -22,13 +22,19 @@
  * protects the FLEET from unproven code, this gate protects a CUSTOMER from
  * unattended wrong lighting. They compose; neither replaces the other.
  *
- * THE THREE CHECKS
+ * THE TWO CHECKS
  *
- *   R1 FLOOR — an everyday schedule exists. Deliberately NOT `base_boundaries`:
- *      those are device timers the healer published, and an account can have
- *      boundaries with no schedule (Ellie does). Read from BOTH
- *      `users/{uid}.schedules` (array) and the `/schedules` subcollection —
- *      the #TD-1 dual state is live, and either counts.
+ *   R1 FLOOR — REMOVED 2026-08-26. It required an everyday schedule to exist
+ *      before Game Day could fire, and that was wrong as product: Game Day must
+ *      work with ZERO recurring schedules configured. Single-day use and
+ *      Game-Day-only accounts (no recurring schedule, ever) are both legitimate
+ *      and common, and this check treated them as broken. It was also the
+ *      single largest source of gating in production — 7 of the surveyed
+ *      accounts were held in log-only on `no_floor` alone, the reviewer account
+ *      among them.
+ *
+ *      The reason string survives in `GateBlockingReason` on purpose; see the
+ *      note there. Nothing produces it any more.
  *
  *   R2 BASE LADDER — the account's presets provably assert per-segment state.
  *      This is the #67 leak condition: an exclusion darkens a channel for the
@@ -54,6 +60,18 @@
 
 /** Blocking reasons — any one of these puts the account in log-only. */
 export type GateBlockingReason =
+  /**
+   * HISTORICAL ONLY — no longer produced (R1 removed 2026-08-26).
+   *
+   * Retained in the union deliberately. ~7 live accounts have
+   * `["gated_no_floor"]` persisted in `users/{uid}.gameday_gate_blocking` from
+   * before the removal, and `graduationEvents` reads that stored array as
+   * `GateBlockingReason[]`. Keeping the literal is what lets those accounts
+   * emit `graduated_gated_no_floor` on their next tick instead of silently
+   * flipping to armed — the un-gating shows up in the plan log, which is the
+   * whole reason graduation events exist. Delete this only once no persisted
+   * verdict contains it.
+   */
   | "gated_no_floor"
   | "gated_no_facts"
   | "gated_ladder_bad";
@@ -62,10 +80,10 @@ export type GateBlockingReason =
 export const GATE_ADVISORY_LADDER_UNKNOWN = "gated_no_ladder_unknown";
 
 export interface ReadinessInputs {
-  /** `users/{uid}.schedules` is a non-empty array. */
-  hasScheduleArray: boolean;
-  /** The `/users/{uid}/schedules` subcollection has at least one doc. */
-  hasScheduleSubcollection: boolean;
+  // `hasScheduleArray` / `hasScheduleSubcollection` were removed with R1. They
+  // are not deprecated-but-accepted: leaving them would have kept
+  // planGameDayFires paying for a per-account subcollection read every tick to
+  // feed a check that no longer exists.
   /** `participating_channels_device_ids` present and non-empty. */
   hasParticipationFacts: boolean;
   /**
@@ -87,9 +105,8 @@ export function evaluateAccountReadiness(i: ReadinessInputs): GateVerdict {
   const blocking: GateBlockingReason[] = [];
   const advisory: string[] = [];
 
-  if (!i.hasScheduleArray && !i.hasScheduleSubcollection) {
-    blocking.push("gated_no_floor");
-  }
+  // R1 (floor) intentionally absent — see the header. An account with no
+  // schedule of any kind is a legitimate Game Day account and arms normally.
   if (!i.hasParticipationFacts) {
     blocking.push("gated_no_facts");
   }
@@ -136,6 +153,8 @@ export function gateSummary(v: GateVerdict): string {
       : "armed";
   }
   const parts: string[] = [];
+  // Historical verdicts only — R1 no longer produces this. Kept so a stored
+  // pre-removal verdict still renders as a sentence rather than as "log-only: ".
   if (v.blocking.includes("gated_no_floor")) {
     parts.push("no everyday schedule");
   }

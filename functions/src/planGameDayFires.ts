@@ -355,25 +355,11 @@ export async function runPlannerTick(
     // still gate nobody. An already-enabled account is evaluated here with
     // no user action, and graduates the tick after it becomes ready.
     const udata = u.data() || {};
-    const hasScheduleArray =
-      Array.isArray(udata.schedules) && udata.schedules.length > 0;
-    // Only pay for the subcollection read when the array is empty — the
-    // #TD-1 dual state means either counts, but most accounts answer on the
-    // cheap side.
-    let hasScheduleSubcollection = false;
-    if (!hasScheduleArray) {
-      try {
-        const sub = await db
-          .collection("users").doc(uid).collection("schedules").limit(1).get();
-        hasScheduleSubcollection = !sub.empty;
-      } catch (_) {
-        /* unreadable → treat as absent; the gate fails safe toward log-only */
-      }
-    }
+    // The R1 floor check and its `/users/{uid}/schedules` probe were removed
+    // 2026-08-26. That read ran per account per tick purely to feed R1, so it
+    // goes with it rather than lingering as an unused cost.
     const cdata = controller?.data() || {};
     const gate = evaluateAccountReadiness({
-      hasScheduleArray,
-      hasScheduleSubcollection,
       hasParticipationFacts:
         Array.isArray(cdata.participating_channels_device_ids) &&
         cdata.participating_channels_device_ids.length > 0,
