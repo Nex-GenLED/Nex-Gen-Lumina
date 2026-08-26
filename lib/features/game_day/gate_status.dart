@@ -19,7 +19,14 @@ import 'package:flutter/foundation.dart';
 
 /// Server reason strings. Mirrors `functions/src/gameDayGate.ts` — these are a
 /// wire contract, not local labels.
-const String kGateNoFloor = 'gated_no_floor';
+/// HISTORICAL — the server stopped producing this on 2026-08-26 when the R1
+/// floor check was removed (Game Day must work with zero recurring schedules).
+/// It is still named here for one reason: ~7 live accounts have it PERSISTED in
+/// `gameday_gate_blocking`, and their doc is not rewritten until the planner's
+/// next tick. [GateStatus.fromUserDoc] drops it so those accounts read as armed
+/// immediately instead of showing a reasonless "not firing yet" for five
+/// minutes. Remove once no persisted verdict contains it.
+const String kGateNoFloorHistorical = 'gated_no_floor';
 const String kGateNoFacts = 'gated_no_facts';
 const String kGateLadderBad = 'gated_ladder_bad';
 
@@ -44,7 +51,14 @@ class GateStatus {
     if (raw is! List) return unknown;
     final out = <String>[];
     for (final r in raw) {
-      if (r is String && r.isNotEmpty) out.add(r);
+      if (r is! String || r.isEmpty) continue;
+      // Drop the retired floor reason. A stored verdict written before R1 was
+      // removed would otherwise leave `blocking` non-empty — so `armed` false,
+      // the headline "not firing yet", and no sentence under it, because the
+      // copy for it is gone. Dropping it here makes the client agree with what
+      // the server will say on its next tick, five minutes early.
+      if (r == kGateNoFloorHistorical) continue;
+      out.add(r);
     }
     return GateStatus(out);
   }
@@ -62,9 +76,6 @@ class GateStatus {
     final out = <String>[];
     for (final r in blocking) {
       switch (r) {
-        case kGateNoFloor:
-          out.add('Fires begin when your everyday schedule is set.');
-          break;
         case kGateNoFacts:
           out.add(
             'Open the app at home, on your Wi-Fi, so your controller can '
@@ -86,9 +97,13 @@ class GateStatus {
     return out;
   }
 
-  /// True when the customer can fix it themselves in the app, right now — the
-  /// only case that earns a one-tap action.
-  bool get hasScheduleFix => blocking.contains(kGateNoFloor);
+  /// Retired with R1. The only self-serve fix the gate ever offered was "set a
+  /// schedule", and a schedule is no longer a precondition for anything — so
+  /// there is no longer a blocking reason the customer can clear with one tap.
+  /// The remaining two are a LAN visit (`no_facts`) and a preset repair
+  /// (`ladder_bad`); neither is a button.
+  @Deprecated('R1 removed 2026-08-26; always false. Remove with its callers.')
+  bool get hasScheduleFix => false;
 
   @override
   bool operator ==(Object other) =>

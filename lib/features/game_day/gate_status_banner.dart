@@ -100,8 +100,10 @@ class _GateStatusBannerState extends ConsumerState<GateStatusBanner> {
       tint: NexGenPalette.cyan,
       title: status.headline,
       lines: status.reasons,
-      actionLabel: status.hasScheduleFix ? 'Set my schedule' : null,
-      onAction: status.hasScheduleFix ? widget.onCreateSchedule : null,
+      // No action button. R1 was the only reason with a one-tap fix; the two
+      // that remain (`no_facts`, `ladder_bad`) are not things a button can do.
+      actionLabel: null,
+      onAction: null,
     );
   }
 }
