@@ -28,7 +28,7 @@
 //
 // Usage:
 //   node scripts/wipe_test_neighborhoods.js \
-//     --key=android/app/icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json
+//     --key=~/.lumina/icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json
 //   (dry run — reports what WOULD be deleted)
 //
 //   node scripts/wipe_test_neighborhoods.js --key=<path> --confirm

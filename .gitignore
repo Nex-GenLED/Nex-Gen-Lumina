@@ -113,9 +113,18 @@ coverage/
 *firebase-adminsdk*.json
 *-adminsdk-*.json
 **/key.properties
-# Explicit: this admin SDK key lives on-disk for local diag scripts only —
-# never commit it (also covered by *firebase-adminsdk*.json above).
+# The Admin SDK key NO LONGER LIVES IN THIS REPO. It was relocated to
+# ~/.lumina/ (%USERPROFILE%\.lumina\ on Windows) because android/app is a
+# Gradle module and a build-input path: one `git add -f`, one packaging change,
+# or one modified asset glob would have turned the highest-value credential in
+# the project into a shipped credential (audit/OVERNIGHT_SECURITY_AUDIT.md
+# §2.2b). Scripts resolve it via scripts/_service_account.js.
+#
+# These patterns stay as a backstop against the key ever being copied back in.
 android/app/*-firebase-adminsdk-*.json
+**/*-firebase-adminsdk-*.json
+secrets/
+.local-secrets/
 
 # Pulled diagnostic data from read-only Firestore scans (may contain device
 # state / IPs). Keep local — never commit.

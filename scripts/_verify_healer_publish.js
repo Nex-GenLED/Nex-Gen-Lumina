@@ -42,12 +42,11 @@
 const admin = require('firebase-admin');
 const path = require('path');
 const fs = require('fs');
+const { resolveServiceAccountPath } = require('./_service_account');
 
 const PROJECT_ID = 'icrt6menwsv2d8all8oijs021b06s5';
 const WEB_API_KEY = 'AIzaSyCWwqffD-ggRh5-IYwR2ldjaztd-Jgz0JY'; // android key, firebase_options.dart
-const DEFAULT_SA = path.resolve(
-  __dirname, '..', 'android', 'app',
-  'icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json');
+const DEFAULT_SA = resolveServiceAccountPath();
 
 const DEFAULT_UID = 'wrQRUUKyXyc0deyuu0ORS6wsovO2';
 const DEFAULT_CONTROLLER = '192_168_1_150';

@@ -17,16 +17,11 @@
 const fs = require('fs');
 const path = require('path');
 const { GoogleAuth } = require('google-auth-library');
+const { resolveServiceAccountPath } = require('./_service_account');
 
 const PROJECT_ID = 'icrt6menwsv2d8all8oijs021b06s5';
 const RULES_PATH = path.resolve(__dirname, '..', 'firestore.rules');
-const SERVICE_ACCOUNT_PATH = path.resolve(
-  __dirname,
-  '..',
-  'android',
-  'app',
-  'icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json',
-);
+const SERVICE_ACCOUNT_PATH = resolveServiceAccountPath();
 
 const UID = 'u_owner';
 const OTHER_UID = 'u_other';
