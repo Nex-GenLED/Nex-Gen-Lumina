@@ -2,7 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/services/account_deletion_service.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -72,6 +72,59 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
     }
   }
 
+  /// Collects the account password so the session can be refreshed before any
+  /// data is touched. Returns null if the user backs out.
+  Future<String?> _promptForPassword() async {
+    final ctrl = TextEditingController();
+    var obscure = true;
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Confirm your password'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Enter your password to confirm. Nothing is deleted until '
+                  'this succeeds.',
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ctrl,
+                  obscureText: obscure,
+                  autofocus: true,
+                  onSubmitted: (v) => Navigator.of(context).pop(v),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () => setDialogState(() => obscure = !obscure),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(ctrl.text),
+                child: const Text('Confirm', style: TextStyle(color: Color(0xFFFF6B6B))),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      ctrl.dispose();
+    }
+  }
+
   Future<void> _confirmAndDeleteAccount() async {
     if (_deleting) return;
     final confirmed = await showDialog<bool>(
@@ -97,22 +150,37 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
       return;
     }
 
+    // ── F-2 (P0): password FIRST, before anything is deleted. ──────────────
+    // The old flow deleted `users/{uid}`, then called `user.delete()`, then
+    // caught `requires-recent-login` and told the user to sign in again — by
+    // which point their profile document was already gone and nothing
+    // recreates it. Collecting the password up front turns that unrecoverable
+    // state into a cancellable dialog.
+    final password = await _promptForPassword();
+    if (password == null || password.isEmpty) return;
+
     setState(() => _deleting = true);
     try {
-      // Delete Firestore doc
-      final svc = ref.read(userServiceProvider);
-      await svc.deleteUser(user.uid);
-      // Delete auth user
-      await user.delete();
+      final result = await ref.read(accountDeletionServiceProvider).deleteAccount(
+            account: FirebaseDeletableAccount(user),
+            password: password,
+          );
       if (!mounted) return;
-      context.go(AppRoutes.login);
-    } on fb.FirebaseAuthException catch (e) {
-      debugPrint('Delete account error: ${e.code} $e');
-      if (!mounted) return;
-      if (e.code == 'requires-recent-login') {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please sign in again to delete your account.')));
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: Colors.red.shade600, content: Text('Delete failed: ${e.message ?? e.code}')));
+      if (result.success) {
+        context.go(AppRoutes.login);
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: Colors.red.shade600,
+        duration: const Duration(seconds: 6),
+        content: Text(result.message ?? 'Delete failed.'),
+      ));
+      // Data gone but Auth alive: the session is now pointing at nothing, so
+      // send them to the login screen rather than back into an empty app.
+      if (result.dataWasDeleted) {
+        await fb.FirebaseAuth.instance.signOut();
+        if (!mounted) return;
+        context.go(AppRoutes.login);
       }
     } catch (e) {
       debugPrint('Delete account error: $e');
