@@ -412,6 +412,35 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ---
 
+- [x] **#74 — `arrayRemove([eventId])` is a nested array; EVERY successful sync session
+  answered HTTP 500. FIXED `8e5d0a3` (2026-08-13) — filed retroactively 2026-08-26.**
+  - Status: **DONE `8e5d0a3`** · Severity: **P0** · Evidence: **verified-by-source**
+    (rig verification under #71 produced the throw)
+  - **Filed late, deliberately recorded as such.** The fix landed on 2026-08-13 carrying
+    the label `#74`, but no `#74` entry ever existed in this file. `#74` was free in the
+    live series, so the number the commit already used is honoured here rather than
+    reassigned. **Do not confuse with `ex-#74`** (Bug B `e556251` formal verify), which
+    was folded into **P1-24** — see the numbering hazard in Conventions.
+  - **The defect.** `initiateSyncSession.ts` called
+    `FieldValue.arrayRemove([eventId])` on `skipNextEventIds`. `arrayRemove` takes the
+    ELEMENT, not a list of them, so this asked Firestore to remove the *nested array*
+    `[eventId]` — which it refuses:
+    `Error: Element at index 0 is not a valid array element. Nested arrays are not
+    supported.` at `WriteBatch.update (initiateSyncSession.js:330)`.
+  - **Why it is worse than a 500.** The throw happens **after** `sessionRef.set()`. The
+    session goes **LIVE**, and the caller still receives a 500 —
+    `sync_event_background_worker` treats non-200 as failure and returns `null`, so the
+    app believes initiation failed while a real session is running. A silent split between
+    server truth and client belief, not a clean error.
+  - **Latent until #71 reached it.** The offending loop runs once per participant; with no
+    participants the batch was empty and never validated. Putting the paused initiator
+    into `participants` (**#69**) executed it for the first time. The line is untouched by
+    #71 — it would have bitten any initiation with at least one participant.
+  - **Class:** the **#84** family (nested arrays reaching Firestore), one call site
+    further on. Cross-check the remaining #84 at-risk path before assuming it is closed.
+  - Files: `functions/src/initiateSyncSession.ts`, `functions/lib/initiateSyncSession.js`.
+    Related: **#71**, **#69**, **#84**, **#70**.
+
 ## P1 — correctness & trust
 
 - [ ] **#79 — SCORE CELEBRATIONS HAVE NEVER FIRED ON HARDWARE FOR ANYONE, and the
@@ -1524,6 +1553,40 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   design prompt exists. No implementation on `main`.
 
 ---
+
+- [ ] **#105 — Neighborhood leave/dissolve has NO server callable; a group whose creator's
+  uid is dead is IMMORTAL**
+  - Status: **OPEN** (filed 2026-08-26) · Severity: **P1** · Evidence:
+    **verified-by-source** (rules + service read on `main`)
+  - **The asymmetry.** Join was moved server-side by **F-3**: `joinNeighborhood`
+    (`functions/src/joinNeighborhood.ts:255`, exported at `functions/index.js:32`) resolves
+    the invite code with the admin SDK, because rules can no longer let a client read a
+    group it does not belong to. **Leave and dissolve were not moved.** They remain pure
+    client Firestore writes — `NeighborhoodService.leaveGroup` and `.dissolveGroup`
+    (`lib/features/neighborhood/neighborhood_service.dart:313`, `:375`) delete the member
+    doc, the commands, the schedules and finally the group doc directly.
+  - **Why that strands documents.** `firestore.rules` gives the group doc
+    `allow delete: if isGroupCreator();` — *only* the creator may delete it. So if the
+    creator's account is deleted, disabled, or otherwise unable to authenticate as that
+    uid, **no principal in the system can remove the group document**: the remaining
+    members can delete their own `members/{uid}` docs and walk away, but the
+    `/neighborhoods/{groupId}` doc — carrying `streetName`, `city`, `latitude`,
+    `longitude` and `inviteCode` — persists with no owner and no deleter. It is immortal.
+  - **The privacy edge is the point.** F-3 scoped the READ so those fields are not
+    fleet-readable; it did not give them a way to STOP EXISTING. An orphaned group is
+    residence-level data with no lifecycle and no responsible party, which is exactly the
+    shape `scheduledDataCleanup` exists to prevent elsewhere.
+  - **Fix shape** (not yet chosen): a `leaveNeighborhood` / `dissolveNeighborhood` callable
+    that mirrors `joinNeighborhood` — admin-SDK writes, so the last member out can dissolve
+    regardless of creatorship — **or** a creator-succession rule so `isGroupCreator()` is
+    not a single point of failure. A rules-only widening of `allow delete` is NOT the fix:
+    it would let any member delete a live group other members are using.
+  - **Do not treat the empty `/neighborhoods/` collection as evidence this is moot.** The
+    2026-08-18 fresh-slate wipe emptied it; the next real joins re-populate it, and the
+    first dead creator re-creates the condition.
+  - Files: `lib/features/neighborhood/neighborhood_service.dart`, `firestore.rules`
+    (`match /neighborhoods/{groupId}`), `functions/src/` (new callable). Related:
+    **F-3**, **#70**, **#69**.
 
 ## P2 — hardening & platform
 
