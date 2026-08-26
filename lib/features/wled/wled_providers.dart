@@ -392,6 +392,24 @@ class _WledPollLifecycleObserver extends WidgetsBindingObserver {
 
 class WledNotifier extends Notifier<WledStateModel> {
   Timer? _poller;
+
+  /// Nesting depth of [pausePolling] calls. While > 0 the poller issues no
+  /// `getState` and does not reschedule itself.
+  ///
+  /// WHY (audit/SYNC_PACING_FIX_STATUS.md §1(c)): the poller runs CONCURRENTLY
+  /// with a sync's flash writes. `_polling` only stops the poller stacking
+  /// against ITSELF — nothing stopped it interleaving `getState` between a
+  /// `psave` and the cfg commit, which is the concurrent-request half of the
+  /// burst that precedes the observed wedge.
+  ///
+  /// A DEPTH, not a bool, because the Game Day path can legitimately nest:
+  /// the calendar populate pauses around its whole loop, and a `syncAll` the
+  /// loop triggers pauses again inside it. A bool would let the inner resume
+  /// restart polling while the outer operation was still writing.
+  int _pollPauseDepth = 0;
+
+  /// True while any caller holds a polling pause.
+  bool get isPollingPaused => _pollPauseDepth > 0;
   GammaWatchdog? _gammaWatchdog;
   bool _posting = false;
   bool _polling = false;
@@ -542,6 +560,34 @@ class WledNotifier extends Notifier<WledStateModel> {
     return s;
   }
 
+  /// Suspend background polling for the duration of a controller-write
+  /// operation (a sync, a Game Day fire/populate).
+  ///
+  /// ALWAYS pair with [resumePolling] in a `finally` — a thrown sync must not
+  /// leave the dashboard permanently un-polled.
+  void pausePolling() {
+    _pollPauseDepth++;
+    if (_pollPauseDepth == 1) {
+      _poller?.cancel();
+      _poller = null;
+      debugPrint('🔕 WledNotifier: polling paused');
+    }
+  }
+
+  /// Release one pause. Polling restarts only when the LAST holder releases.
+  ///
+  /// Tolerates an unbalanced extra call (clamped at zero) rather than throwing:
+  /// this runs in `finally` blocks on error paths, and an exception raised
+  /// while unwinding another exception would mask the original failure.
+  void resumePolling() {
+    if (_pollPauseDepth == 0) return;
+    _pollPauseDepth--;
+    if (_pollPauseDepth == 0 && !_disposed) {
+      debugPrint('🔔 WledNotifier: polling resumed');
+      _scheduleNextPoll();
+    }
+  }
+
   void _startPolling() {
     _poller?.cancel();
     // Cold-start hydration: fire one immediate fetch so the dashboard doesn't
@@ -565,6 +611,9 @@ class WledNotifier extends Notifier<WledStateModel> {
   void _scheduleNextPoll() {
     if (_disposed) return;
     _poller?.cancel();
+    // Paused: do NOT arm a timer. resumePolling() reschedules on release, so
+    // the loop restarts exactly once, from the releasing caller.
+    if (isPollingPaused) return;
     final interval = PollCadencePolicy.intervalFor(
       isRemote: ref.read(isRemoteModeProvider),
       backgrounded: _appBackgrounded,
@@ -582,6 +631,8 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// 3-strike offline downgrade, and the one-shot RGBW query — only the
   /// scheduling moved out into [_scheduleNextPoll].
   Future<void> _runPollTick() async {
+    // A tick already queued when the pause landed must not fire the request.
+    if (isPollingPaused) return;
     final service = ref.read(wledRepositoryProvider);
     if (service == null) return;
     if (_posting) return; // avoid fighting with user updates

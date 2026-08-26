@@ -24,6 +24,7 @@ import '../neighborhood/services/channel_participation_resolver.dart';
 import '../neighborhood/services/path1_game_day_snapshot.dart';
 import '../neighborhood/services/sync_event_background_persistence.dart';
 import '../schedule/calendar_entry.dart';
+import '../schedule/schedule_providers.dart';
 import '../schedule/calendar_providers.dart';
 import '../schedule/schedule_priority_resolver.dart';
 import '../site/user_profile_providers.dart';
@@ -983,6 +984,39 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   /// and [refreshAllCalendars] (post-gate, stream-only). Per-team failures
   /// are isolated — one team's exception does not skip its siblings.
   Future<void> _doPopulateCalendars(
+    List<GameDayAutopilotConfig> enabledConfigs,
+  ) async {
+    // POLLING PAUSE FOR THE WHOLE POPULATE (audit/SYNC_PACING_FIX_STATUS.md
+    // §2a). This clears entries and writes new ones in a loop; each write can
+    // arm the 800ms debounce that ends in a `syncAll`, so the poller would
+    // otherwise interleave `getState` across the entire burst.
+    //
+    // Held across the WHOLE operation, not per entry: `syncAll` pauses again
+    // inside itself, and the depth counter is what makes that nesting safe —
+    // the inner resume cannot restart polling while this loop is still going.
+    //
+    // resume lives in the finally so an ESPN failure or a Firestore throw
+    // mid-loop cannot leave the dashboard permanently un-polled.
+    final poller = ref.read(wledStateProvider.notifier);
+    final schedules = ref.read(schedulesProvider.notifier);
+    poller.pausePolling();
+    // D1: collapse the loop's per-entry sync requests into ONE, deterministically
+    // rather than relying on the 800ms debounce winning a race against Firestore
+    // latency (audit/SYNC_PACING_FIX_STATUS.md §2a).
+    schedules.beginSyncBatch();
+    try {
+      await _doPopulateCalendarsInner(enabledConfigs);
+    } finally {
+      // Order matters: close the batch FIRST so the single owed sync is armed
+      // while polling is still paused, then release the poller. syncAll pauses
+      // again for itself, so the window is covered either way — but arming
+      // before the resume keeps the quiet period unbroken.
+      schedules.endSyncBatch();
+      poller.resumePolling();
+    }
+  }
+
+  Future<void> _doPopulateCalendarsInner(
     List<GameDayAutopilotConfig> enabledConfigs,
   ) async {
     // #63 E5 teardown edge: clear runs UNCONDITIONALLY before the empty-
