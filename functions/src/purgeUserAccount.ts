@@ -35,15 +35,17 @@
  * live session and can retry from the top — degraded, but recoverable, which
  * is the opposite of today's behaviour.
  *
- * SCOPE — PHASE 1 ONLY.
- * This purges `users/{uid}` (doc + every subcollection) and the user's Cloud
- * Storage prefix. It deliberately does NOT yet perform the §2.4 top-level
- * teardowns that the audit also recommends:
- *   - §4.3 neighborhood `leaveGroup` for every group in `memberUids` (D-2)
+ * SCOPE.
+ * Phase 1 purges `users/{uid}` (doc + every subcollection) and the user's
+ * Cloud Storage prefix. Phase 2 adds the `bridge_registry.pairedUid` release
+ * (§4.5 / D-1 / F-5) — see `releasePairedBridges`, and read its firmware
+ * caveat before assuming a powered bridge is freed.
+ *
+ * Still NOT performed, and recorded in `PENDING_PHASE_2` below so the gap is
+ * not silently forgotten:
+ *   - §4.3 neighborhood `leaveGroup` for every group in `memberUids` (D-2) —
+ *     blocked on the server-side leave callable that gap #105 already owes
  *   - §4.4 OAuth refresh-token revocation (D-3)
- *   - §4.5 `bridge_registry.pairedUid` release (D-1, F-5)
- * Those are later phases with their own deploy gates. `PENDING_PHASE_2` below
- * records them in code so the gap is not silently forgotten.
  *
  * NOT DEPLOYED by the session that wrote this. Tyler gates:
  *   cd functions && npm run build
@@ -111,16 +113,40 @@ export const USER_SUBCOLLECTIONS: readonly string[] = [
 ];
 
 /**
- * §2.4 teardowns this phase does NOT perform. Exported so a Phase 2 change has
- * one place to consume, and so a test can assert the list has not been quietly
- * emptied to make a green run.
+ * §2.4 teardowns still NOT performed. Exported so a later phase has one place
+ * to consume, and so a test can assert the list has not been quietly emptied to
+ * make a green run.
+ *
+ * `bridge_registry.pairedUid` (D-1 / F-5) left this list in Phase 2 — see
+ * `releasePairedBridges` below.
  */
 export const PENDING_PHASE_2: readonly string[] = [
   "neighborhoods.memberUids", // D-2 — needs the #105 server-side leave callable
   "oauth_refresh_tokens", // D-3
   "google_oauth_refresh_tokens", // D-3
-  "bridge_registry.pairedUid", // D-1 / F-5 — hardware stays pinned to a dead uid
 ];
+
+/**
+ * Field values written to release a bridge back to the unpaired pool.
+ *
+ * The EMPTY STRING is deliberate and must not be "tidied" into a field delete.
+ * The firmware uses `""` as its own sentinel for both fields and says so at
+ * `esp32-bridge/src/main.cpp:1048` — *"we deliberately avoid Firestore field
+ * deletion in favor of a simple sentinel value"* — and it rewrites both on
+ * every registry publish. A deleted field would read back as `undefined` on a
+ * device that expects a string.
+ *
+ * `status: "unpaired"` is what actually makes the hardware reclaimable: the
+ * `bridge_registry` update rule admits a user's pairing request only when
+ * `resource.data.status == 'unpaired'` (firestore.rules ~:800), and
+ * `bridge_setup_screen.dart:323` refuses to proceed while `status == 'paired'`
+ * with someone else's uid. Clearing `pairedUid` alone would satisfy neither.
+ */
+export const BRIDGE_RELEASE_FIELDS: Readonly<Record<string, string>> = {
+  pairedUid: "",
+  pendingUid: "",
+  status: "unpaired",
+};
 
 /**
  * Cloud Storage prefix owned by a user. `image_upload_service.dart:59` writes
@@ -143,8 +169,20 @@ export interface PurgeResult {
   userDocDeleted: boolean;
   /** Number of Cloud Storage objects removed under the user's prefix. */
   storageObjectsDeleted: number;
+  /** `bridge_registry` device IDs released back to the unpaired pool. */
+  releasedBridgeDeviceIds: string[];
+  /**
+   * Problems releasing bridges. Deliberately SEPARATE from [warnings]: see
+   * `releasePairedBridges` for why a registry-cleanup failure must not block
+   * a user from deleting their own account.
+   */
+  bridgeReleaseWarnings: string[];
   /** Non-fatal problems. A non-empty list means the caller must NOT proceed. */
   warnings: string[];
+}
+
+interface FakeableQuery {
+  get(): Promise<{ docs: Array<{ id: string; ref: { update(data: Record<string, unknown>): Promise<unknown> } }> }>;
 }
 
 /** Minimal surface of the pieces of Firestore/Storage this module touches. */
@@ -155,6 +193,7 @@ export interface PurgeDeps {
     };
     collection(path: string): {
       limit(n: number): { get(): Promise<{ empty: boolean }> };
+      where(field: string, op: string, value: unknown): FakeableQuery;
     };
     recursiveDelete(ref: unknown): Promise<void>;
   };
@@ -165,6 +204,82 @@ export interface PurgeDeps {
 // ───────────────────────────────────────────────────────────────────────────
 // The purge itself
 // ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Releases every `bridge_registry/{deviceId}` still pinned to [uid], so the
+ * hardware can be claimed by a future owner.
+ *
+ * D-1 / F-5 (audit §3.2). Pairing is a uid-equality gate and `bridge_registry`
+ * is `allow delete: if false`, so a bridge whose owner deleted their account
+ * became **permanently unclaimable** — not a crash, a silent lockout needing
+ * admin-SDK intervention. Server-side, `collectControllerHealth.ts:206` also
+ * resolves the dead uid to `undefined` and writes `email: null` into the fleet
+ * health report.
+ *
+ * NO RULES CHANGE IS REQUIRED for this write, and none was made. This runs in
+ * a Cloud Function on the service account, and the Admin SDK bypasses
+ * `firestore.rules` entirely — the same property that makes an admin readback
+ * worthless as a rules test makes this write simply legal. `allow delete: if
+ * false` is also not in play: this is a field update on a doc that stays.
+ *
+ * ── FIRMWARE CAVEAT — read before believing the bridge is freed ─────────────
+ * `updateRegistryHeartbeat()` (esp32-bridge/src/main.cpp:1122) puts `status`
+ * and `pairedUid` in its updateMask on EVERY heartbeat, sourced from the NVS
+ * `pairedUserId`. So a bridge that is powered and on the network will
+ * re-assert `status: "paired"` with the dead uid within one heartbeat cycle
+ * (~30s), overwriting this release.
+ *
+ * What this therefore does and does not achieve:
+ *   • DOES fix the registry for a bridge that is off, unplugged, or already
+ *     removed at purge time — the common case for "customer cancelled" — and
+ *     for any bridge later factory-reset or re-flashed.
+ *   • DOES immediately stop the fleet health report attributing that hardware
+ *     to a nonexistent account.
+ *   • DOES NOT durably free a bridge that is still powered on the old
+ *     customer's LAN. Closing that needs the firmware half: treating a
+ *     server-side `pairedUid` clear as a de-pair signal and wiping NVS. That
+ *     is bridge work, not app work, and is not attempted here.
+ *
+ * Returns the device IDs released; pushes any per-doc failure into [warnings].
+ */
+export async function releasePairedBridges(
+  deps: PurgeDeps,
+  uid: string,
+  warnings: string[]
+): Promise<string[]> {
+  const released: string[] = [];
+  let docs;
+  try {
+    const snap = await deps.db
+      .collection("bridge_registry")
+      .where("pairedUid", "==", uid)
+      .get();
+    docs = snap.docs;
+  } catch (err) {
+    warnings.push(
+      `bridge_registry: query failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    return released;
+  }
+
+  for (const doc of docs) {
+    try {
+      // A field update, NOT a delete: the registry doc is a durable device
+      // identifier and outlives any single owner.
+      await doc.ref.update({ ...BRIDGE_RELEASE_FIELDS });
+      released.push(doc.id);
+    } catch (err) {
+      warnings.push(
+        `bridge_registry/${doc.id}: release failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+  }
+  return released;
+}
 
 /**
  * Recursively deletes `users/{uid}` and everything beneath it, then the user's
@@ -189,7 +304,26 @@ export async function purgeUserData(
   // controllers/{id}/pixelMap are covered without being named.
   await deps.db.recursiveDelete(userRef);
 
-  // ── 2. Cloud Storage. ──────────────────────────────────────────────────
+  // ── 2. Release any bridge hardware pinned to this uid (D-1 / F-5). ─────
+  // Runs only once the recursive delete has succeeded — if that threw, the
+  // account still exists and its bridge should stay paired to it.
+  //
+  // Failures here are collected SEPARATELY from `warnings` on purpose. A
+  // `warnings` entry makes isPurgeComplete() false, which makes the callable
+  // throw, which stops the client deleting the Auth account. That gate is
+  // right for "did the user's data actually get deleted" and wrong for "did a
+  // hardware registry doc get tidied": the user's data IS gone by this point,
+  // and refusing to finish deleting their account because a bridge doc would
+  // not update would hold their deletion hostage to someone else's hardware.
+  // The failures are still returned to the caller and logged as errors.
+  const bridgeReleaseWarnings: string[] = [];
+  const releasedBridgeDeviceIds = await releasePairedBridges(
+    deps,
+    uid,
+    bridgeReleaseWarnings
+  );
+
+  // ── 3. Cloud Storage. ──────────────────────────────────────────────────
   // Runs with admin credentials, so `storage.rules` does not apply — which
   // matters, because F-3 is precisely that the OWNER cannot delete this object
   // under the shipped rules. Part C fixes the rules; this does not depend on
@@ -209,7 +343,7 @@ export async function purgeUserData(
     );
   }
 
-  // ── 3. Verify. ─────────────────────────────────────────────────────────
+  // ── 4. Verify. ─────────────────────────────────────────────────────────
   const residualCollections: string[] = [];
   for (const name of USER_SUBCOLLECTIONS) {
     const path = `users/${uid}/${name}`;
@@ -251,6 +385,8 @@ export async function purgeUserData(
     residualCollections,
     userDocDeleted,
     storageObjectsDeleted,
+    releasedBridgeDeviceIds,
+    bridgeReleaseWarnings,
     warnings,
   };
 }
@@ -326,9 +462,20 @@ export const purgeUserAccount = onCall(
       );
     }
 
+    // Logged as an ERROR even though it does not fail the call: a bridge that
+    // stayed pinned to a deleted uid is unclaimable hardware in someone's
+    // house, and the only way anyone finds out is this line.
+    if (result.bridgeReleaseWarnings.length > 0) {
+      console.error(
+        `purgeUserAccount: bridge release INCOMPLETE for uid=${uid} — ` +
+          `${JSON.stringify(result.bridgeReleaseWarnings)}`
+      );
+    }
+
     console.log(
       `purgeUserAccount: complete for uid=${uid} — ` +
-        `storageObjectsDeleted=${result.storageObjectsDeleted}`
+        `storageObjectsDeleted=${result.storageObjectsDeleted} ` +
+        `bridgesReleased=${JSON.stringify(result.releasedBridgeDeviceIds)}`
     );
     return result;
   }

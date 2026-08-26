@@ -11,8 +11,10 @@
 const {
   USER_SUBCOLLECTIONS,
   PENDING_PHASE_2,
+  BRIDGE_RELEASE_FIELDS,
   storagePrefixForUid,
   purgeUserData,
+  releasePairedBridges,
   isPurgeComplete,
 } = require("../../lib/purgeUserAccount");
 
@@ -31,6 +33,10 @@ function makeFake(options = {}) {
     userDocExists = true,
     recursiveDeleteImpl = null,
     storageImpl = null,
+    // bridge_registry rows as {deviceId: {pairedUid, status, ...}}.
+    bridges = {},
+    bridgeQueryThrows = false,
+    bridgeUpdateThrowsFor = null,
   } = options;
 
   const state = {
@@ -38,6 +44,8 @@ function makeFake(options = {}) {
     userDocExists,
     recursiveDeleteCalls: [],
     storagePrefixes: [],
+    bridges: JSON.parse(JSON.stringify(bridges)),
+    bridgeQueries: [],
   };
 
   const db = {
@@ -56,6 +64,34 @@ function makeFake(options = {}) {
           return {
             async get() {
               return { empty: (state.collections[path] || 0) === 0 };
+            },
+          };
+        },
+        where(field, op, value) {
+          state.bridgeQueries.push({ path, field, op, value });
+          return {
+            async get() {
+              if (bridgeQueryThrows) throw new Error("index missing");
+              if (path !== "bridge_registry" || op !== "==") {
+                return { docs: [] };
+              }
+              const docs = Object.entries(state.bridges)
+                // Equality filter, modelled as Firestore does it: a row only
+                // matches if the FIELD equals the value. A row paired to
+                // someone else must never be returned.
+                .filter(([, row]) => row[field] === value)
+                .map(([id]) => ({
+                  id,
+                  ref: {
+                    async update(data) {
+                      if (bridgeUpdateThrowsFor === id) {
+                        throw new Error("permission denied");
+                      }
+                      Object.assign(state.bridges[id], data);
+                    },
+                  },
+                }));
+              return { docs };
             },
           };
         },
@@ -140,16 +176,21 @@ describe("USER_SUBCOLLECTIONS inventory", () => {
 });
 
 describe("PENDING_PHASE_2", () => {
-  test("still records the §2.4 teardowns this phase does not do", () => {
+  test("still records the §2.4 teardowns that remain undone", () => {
     // Guards against someone emptying the list to make a coverage claim true.
     expect(PENDING_PHASE_2).toEqual(
       expect.arrayContaining([
         "neighborhoods.memberUids",
         "oauth_refresh_tokens",
         "google_oauth_refresh_tokens",
-        "bridge_registry.pairedUid",
       ])
     );
+  });
+
+  test("no longer lists the bridge release — Phase 2 implemented it", () => {
+    // The inverse assertion matters as much as the one above: an entry left
+    // here after the work shipped would understate what the purge does.
+    expect(PENDING_PHASE_2).not.toContain("bridge_registry.pairedUid");
   });
 });
 
@@ -195,7 +236,9 @@ describe("purgeUserData — happy path", () => {
 
     await purgeUserData(deps, UID);
 
-    expect(probed).toEqual(
+    // bridge_registry is reached through the same collection() entry point but
+    // is a release target, not a verification target — filter it out.
+    expect(probed.filter((p) => p !== "bridge_registry")).toEqual(
       USER_SUBCOLLECTIONS.map((n) => `users/${UID}/${n}`)
     );
   });
@@ -318,5 +361,191 @@ describe("isPurgeComplete", () => {
 
   test("zero storage objects is fine — not every user uploaded a house photo", () => {
     expect(isPurgeComplete({ ...clean, storageObjectsDeleted: 0 })).toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 2 — bridge_registry.pairedUid release (D-1 / F-5)
+// ───────────────────────────────────────────────────────────────────────────
+
+const OTHER_UID = "someone_elses_uid";
+
+/** A paired bridge row as the firmware writes it. */
+const pairedTo = (uid) => ({
+  pairedUid: uid,
+  pendingUid: "",
+  status: "paired",
+  ip: "192.168.1.105",
+});
+
+describe("BRIDGE_RELEASE_FIELDS", () => {
+  test("uses the firmware's empty-string sentinel, not a field delete", () => {
+    // esp32-bridge/src/main.cpp:1048 states the convention explicitly. A
+    // deleted field reads back as undefined on a device expecting a string.
+    expect(BRIDGE_RELEASE_FIELDS.pairedUid).toBe("");
+    expect(BRIDGE_RELEASE_FIELDS.pendingUid).toBe("");
+  });
+
+  test("sets status to unpaired — the field the reclaim gate actually reads", () => {
+    // Clearing pairedUid alone would satisfy neither the firestore.rules
+    // update clause (resource.data.status == 'unpaired') nor
+    // bridge_setup_screen.dart's pre-pair check.
+    expect(BRIDGE_RELEASE_FIELDS.status).toBe("unpaired");
+  });
+});
+
+describe("releasePairedBridges", () => {
+  test("queries bridge_registry by pairedUid equality", async () => {
+    const { deps, state } = makeFake({ bridges: { dev1: pairedTo(UID) } });
+
+    await releasePairedBridges(deps, UID, []);
+
+    expect(state.bridgeQueries).toContainEqual({
+      path: "bridge_registry",
+      field: "pairedUid",
+      op: "==",
+      value: UID,
+    });
+  });
+
+  test("releases every bridge paired to the deleting uid", async () => {
+    const { deps, state } = makeFake({
+      bridges: { dev1: pairedTo(UID), dev2: pairedTo(UID) },
+    });
+
+    const released = await releasePairedBridges(deps, UID, []);
+
+    expect(released.sort()).toEqual(["dev1", "dev2"]);
+    for (const id of ["dev1", "dev2"]) {
+      expect(state.bridges[id].pairedUid).toBe("");
+      expect(state.bridges[id].pendingUid).toBe("");
+      expect(state.bridges[id].status).toBe("unpaired");
+    }
+  });
+
+  test("leaves non-identity fields alone — the doc is a durable device record", () => {
+    // bridge_registry is `allow delete: if false` precisely because deviceId /
+    // ip / bridgeEmail outlive any one owner. Release is a field update.
+    const { deps, state } = makeFake({ bridges: { dev1: pairedTo(UID) } });
+    return releasePairedBridges(deps, UID, []).then(() => {
+      expect(state.bridges.dev1.ip).toBe("192.168.1.105");
+    });
+  });
+});
+
+describe("purgeUserData — bridge release", () => {
+  test("a purge with a paired bridge releases it", async () => {
+    const { deps, state } = makeFake({
+      seeded: seedEverySubcollection(),
+      bridges: { dev1: pairedTo(UID) },
+    });
+
+    const result = await purgeUserData(deps, UID);
+
+    expect(result.releasedBridgeDeviceIds).toEqual(["dev1"]);
+    expect(state.bridges.dev1).toEqual({
+      pairedUid: "",
+      pendingUid: "",
+      status: "unpaired",
+      ip: "192.168.1.105",
+    });
+    expect(result.bridgeReleaseWarnings).toEqual([]);
+    expect(isPurgeComplete(result)).toBe(true);
+  });
+
+  test("a purge with no paired bridge is a no-op", async () => {
+    const { deps, state } = makeFake({
+      seeded: seedEverySubcollection(),
+      bridges: {},
+    });
+
+    const result = await purgeUserData(deps, UID);
+
+    expect(result.releasedBridgeDeviceIds).toEqual([]);
+    expect(result.bridgeReleaseWarnings).toEqual([]);
+    expect(state.bridges).toEqual({});
+    expect(isPurgeComplete(result)).toBe(true);
+  });
+
+  test("a purge does NOT touch a bridge paired to a different uid", async () => {
+    // The whole hazard this feature guards against, inverted: unpairing
+    // somebody else's hardware because a neighbour deleted their account.
+    const { deps, state } = makeFake({
+      seeded: seedEverySubcollection(),
+      bridges: { mine: pairedTo(UID), theirs: pairedTo(OTHER_UID) },
+    });
+
+    const result = await purgeUserData(deps, UID);
+
+    expect(result.releasedBridgeDeviceIds).toEqual(["mine"]);
+    expect(state.bridges.theirs).toEqual(pairedTo(OTHER_UID));
+    expect(state.bridges.theirs.status).toBe("paired");
+    expect(state.bridges.theirs.pairedUid).toBe(OTHER_UID);
+  });
+
+  test("runs only after the recursive delete succeeds", async () => {
+    // If the data delete threw, the account still exists and its bridge must
+    // stay paired to it.
+    const { deps, state } = makeFake({
+      bridges: { dev1: pairedTo(UID) },
+      recursiveDeleteImpl: () => {
+        throw new Error("firestore unavailable");
+      },
+    });
+
+    await expect(purgeUserData(deps, UID)).rejects.toThrow(
+      "firestore unavailable"
+    );
+    expect(state.bridges.dev1.status).toBe("paired");
+    expect(state.bridges.dev1.pairedUid).toBe(UID);
+  });
+});
+
+describe("purgeUserData — a bridge failure must not hold the account hostage", () => {
+  test("a failed release is reported but does NOT block completion", async () => {
+    // Deliberate asymmetry with the storage/verify warnings: those answer
+    // "was the user's data actually deleted", which must gate the Auth delete.
+    // A hardware registry doc that would not update does not.
+    const { deps } = makeFake({
+      seeded: seedEverySubcollection(),
+      bridges: { dev1: pairedTo(UID) },
+      bridgeUpdateThrowsFor: "dev1",
+    });
+
+    const result = await purgeUserData(deps, UID);
+
+    expect(result.releasedBridgeDeviceIds).toEqual([]);
+    expect(result.bridgeReleaseWarnings.join(" ")).toContain("permission denied");
+    expect(result.bridgeReleaseWarnings.join(" ")).toContain("dev1");
+    // The user's data is gone, so their deletion proceeds.
+    expect(result.warnings).toEqual([]);
+    expect(isPurgeComplete(result)).toBe(true);
+  });
+
+  test("a failed query is reported but does NOT block completion", async () => {
+    const { deps } = makeFake({
+      seeded: seedEverySubcollection(),
+      bridges: { dev1: pairedTo(UID) },
+      bridgeQueryThrows: true,
+    });
+
+    const result = await purgeUserData(deps, UID);
+
+    expect(result.bridgeReleaseWarnings.join(" ")).toContain("query failed");
+    expect(isPurgeComplete(result)).toBe(true);
+  });
+
+  test("one bridge failing does not stop the others being released", async () => {
+    const { deps, state } = makeFake({
+      seeded: seedEverySubcollection(),
+      bridges: { bad: pairedTo(UID), good: pairedTo(UID) },
+      bridgeUpdateThrowsFor: "bad",
+    });
+
+    const result = await purgeUserData(deps, UID);
+
+    expect(result.releasedBridgeDeviceIds).toEqual(["good"]);
+    expect(state.bridges.good.status).toBe("unpaired");
+    expect(result.bridgeReleaseWarnings).toHaveLength(1);
   });
 });
