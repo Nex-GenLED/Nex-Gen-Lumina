@@ -412,6 +412,35 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ---
 
+- [x] **#74 — `arrayRemove([eventId])` is a nested array; EVERY successful sync session
+  answered HTTP 500. FIXED `8e5d0a3` (2026-08-13) — filed retroactively 2026-08-26.**
+  - Status: **DONE `8e5d0a3`** · Severity: **P0** · Evidence: **verified-by-source**
+    (rig verification under #71 produced the throw)
+  - **Filed late, deliberately recorded as such.** The fix landed on 2026-08-13 carrying
+    the label `#74`, but no `#74` entry ever existed in this file. `#74` was free in the
+    live series, so the number the commit already used is honoured here rather than
+    reassigned. **Do not confuse with `ex-#74`** (Bug B `e556251` formal verify), which
+    was folded into **P1-24** — see the numbering hazard in Conventions.
+  - **The defect.** `initiateSyncSession.ts` called
+    `FieldValue.arrayRemove([eventId])` on `skipNextEventIds`. `arrayRemove` takes the
+    ELEMENT, not a list of them, so this asked Firestore to remove the *nested array*
+    `[eventId]` — which it refuses:
+    `Error: Element at index 0 is not a valid array element. Nested arrays are not
+    supported.` at `WriteBatch.update (initiateSyncSession.js:330)`.
+  - **Why it is worse than a 500.** The throw happens **after** `sessionRef.set()`. The
+    session goes **LIVE**, and the caller still receives a 500 —
+    `sync_event_background_worker` treats non-200 as failure and returns `null`, so the
+    app believes initiation failed while a real session is running. A silent split between
+    server truth and client belief, not a clean error.
+  - **Latent until #71 reached it.** The offending loop runs once per participant; with no
+    participants the batch was empty and never validated. Putting the paused initiator
+    into `participants` (**#69**) executed it for the first time. The line is untouched by
+    #71 — it would have bitten any initiation with at least one participant.
+  - **Class:** the **#84** family (nested arrays reaching Firestore), one call site
+    further on. Cross-check the remaining #84 at-risk path before assuming it is closed.
+  - Files: `functions/src/initiateSyncSession.ts`, `functions/lib/initiateSyncSession.js`.
+    Related: **#71**, **#69**, **#84**, **#70**.
+
 ## P1 — correctness & trust
 
 - [ ] **#79 — SCORE CELEBRATIONS HAVE NEVER FIRED ON HARDWARE FOR ANYONE, and the
@@ -826,10 +855,19 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Files: `lib/features/schedule/schedule_sync.dart` (sync result/warning),
     `lib/features/schedule/schedule_overload_banner.dart`.
 
-- [ ] **P1-8 — Two stale tests mask real failures**
-  - Status: OPEN · Evidence: reported (2 pre-existing suite failures)
+- [x] **P1-8 — Two stale tests mask real failures. CLOSED 2026-08-26 — both were really
+  fixed, months ago, and nobody checked the box.**
+  - Status: **DONE `f8ce483` + `cf6d0a2`** · Evidence: verified-by-test
   - `schedule_sync_time_parse` (asserts flag-disabled solar behavior) and
     `cloud_ai_processor_normalize` ('Sunset'). Fix or delete.
+  - **Both fixed, each by name.** `f8ce483` (2026-07-29, global daily sunrise-off)
+    un-parked `schedule_sync_time_parse` — its commit body says so: *"its solar case
+    asserted hour==24/25"*. `cf6d0a2` (2026-08-10) is titled *"test(ai): close P1-8 —
+    correct the stale 'Sunset' assertion, not the code."* The item stayed `[ ]` anyway.
+  - **NOT a duplicate of #64, and not closed on a hunch.** #64 is a different file
+    (`calendar_entry_lease_manager_integration_test.dart`) failing for a different reason
+    (midnight wrap). These two are separate tests with separate, identifiable fixing
+    commits. Re-verified 2026-08-26 09:15–09:40 CDT (well outside #64's 22:30–00:00 window): **2465 passed · 4 skipped · 0 failed**, `flutter test` exit 0, run on `fix/wave1-housekeeping` off `main` @ `c14368d`.
   - Files: `test/…/schedule_sync_time_parse*`, `test/…/cloud_ai_processor_normalize*`.
 
 - [ ] **P1-9 — Roofline widget tests flaky under full-suite load**
@@ -1009,8 +1047,20 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `lib/features/neighborhood/sync_fanout_feature_flag.dart`, `neighborhood_service.dart:472`,
     `functions/src/applySyncPattern.ts:159-190,312-325`.
 
-- [ ] **P1-46 — MAIN suite is RED (2 pre-existing failures) — masks regressions (green-main gate)**
-  - Status: OPEN · Evidence: reported (verified on main + every build branch, 2026-07-24)
+- [x] **P1-46 — MAIN suite is RED (2 pre-existing failures) — masks regressions
+  (green-main gate). CLOSED 2026-08-26: `main` IS green, and the gate now exists.**
+  - Status: **DONE `f8ce483` + `cf6d0a2`** (the two tests) · gate landed in `codemagic.yaml`
+    · Evidence: verified-by-test
+  - **The outcome this item asked for has arrived.** Re-verified 2026-08-26 09:15–09:40 CDT (well outside #64's 22:30–00:00 window): **2465 passed · 4 skipped · 0 failed**, `flutter test` exit 0, run on `fix/wave1-housekeeping` off `main` @ `c14368d`. Red now means a real
+    regression. And the gate is no longer hypothetical: `codemagic.yaml` runs
+    `flutter test` + `flutter analyze` as a build step placed **before** `Set build number`,
+    so a red suite aborts the workflow before `submit_to_testflight` is reached.
+  - **Not a duplicate of #64** — same two tests as **P1-8**, closed by the same two commits.
+  - ⚠️ **The gate inherits #64.** Because the suite's status is an aggregate, #64 turns the
+    WHOLE run red for ~90 minutes a night regardless of the commit under test. Read #64
+    before concluding a CI failure in that window means anything about the change.
+  - *(Original wording, kept per "never delete an item": "Status: OPEN · Evidence:
+    reported (verified on main + every build branch, 2026-07-24)".)*
   - `main` (and every branch off it) fails exactly 2 tests: `cloud_ai_processor_normalize`
     ('Sunset') and `schedule_sync_time_parse` (solar). Because the suite is ALWAYS red, a NEW
     regression is invisible — you can't tell "2 failing" (known) from "3 failing" (a fresh break)
@@ -1524,6 +1574,40 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   design prompt exists. No implementation on `main`.
 
 ---
+
+- [ ] **#105 — Neighborhood leave/dissolve has NO server callable; a group whose creator's
+  uid is dead is IMMORTAL**
+  - Status: **OPEN** (filed 2026-08-26) · Severity: **P1** · Evidence:
+    **verified-by-source** (rules + service read on `main`)
+  - **The asymmetry.** Join was moved server-side by **F-3**: `joinNeighborhood`
+    (`functions/src/joinNeighborhood.ts:255`, exported at `functions/index.js:32`) resolves
+    the invite code with the admin SDK, because rules can no longer let a client read a
+    group it does not belong to. **Leave and dissolve were not moved.** They remain pure
+    client Firestore writes — `NeighborhoodService.leaveGroup` and `.dissolveGroup`
+    (`lib/features/neighborhood/neighborhood_service.dart:313`, `:375`) delete the member
+    doc, the commands, the schedules and finally the group doc directly.
+  - **Why that strands documents.** `firestore.rules` gives the group doc
+    `allow delete: if isGroupCreator();` — *only* the creator may delete it. So if the
+    creator's account is deleted, disabled, or otherwise unable to authenticate as that
+    uid, **no principal in the system can remove the group document**: the remaining
+    members can delete their own `members/{uid}` docs and walk away, but the
+    `/neighborhoods/{groupId}` doc — carrying `streetName`, `city`, `latitude`,
+    `longitude` and `inviteCode` — persists with no owner and no deleter. It is immortal.
+  - **The privacy edge is the point.** F-3 scoped the READ so those fields are not
+    fleet-readable; it did not give them a way to STOP EXISTING. An orphaned group is
+    residence-level data with no lifecycle and no responsible party, which is exactly the
+    shape `scheduledDataCleanup` exists to prevent elsewhere.
+  - **Fix shape** (not yet chosen): a `leaveNeighborhood` / `dissolveNeighborhood` callable
+    that mirrors `joinNeighborhood` — admin-SDK writes, so the last member out can dissolve
+    regardless of creatorship — **or** a creator-succession rule so `isGroupCreator()` is
+    not a single point of failure. A rules-only widening of `allow delete` is NOT the fix:
+    it would let any member delete a live group other members are using.
+  - **Do not treat the empty `/neighborhoods/` collection as evidence this is moot.** The
+    2026-08-18 fresh-slate wipe emptied it; the next real joins re-populate it, and the
+    first dead creator re-creates the condition.
+  - Files: `lib/features/neighborhood/neighborhood_service.dart`, `firestore.rules`
+    (`match /neighborhoods/{groupId}`), `functions/src/` (new callable). Related:
+    **F-3**, **#70**, **#69**.
 
 ## P2 — hardening & platform
 
@@ -2503,6 +2587,17 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     past — and every assertion returns `LeaseOutcome.alreadyExpired`.
   - **Empirically confirmed**: 5 red at 23:45 local; the SAME five green at 23:59 with
     no code change, once now+90 stopped wrapping past midnight. Deterministic, not flaky.
+  - ⚠️ **IT TAKES THE WHOLE SUITE RED, not just its own tests — and that now blocks
+    builds.** The failures stay confined to this one file, but a test run's status is an
+    aggregate: those failures make `flutter test` exit non-zero, so the ENTIRE suite reports
+    red. Since 2026-08-26 `codemagic.yaml` gates the iOS workflow on `flutter test`, which
+    means **this test fails every build cut between roughly 22:30 and midnight local, on a
+    clock, regardless of what the commit changed.** A CI failure in that window is evidence
+    of the time of day and nothing else — confirm against #64 before investigating the diff.
+    This raises the item's practical priority well above its P-label.
+  - **Confirmed still window-bound, 2026-08-26.** Re-verified 2026-08-26 09:15–09:40 CDT (well outside #64's 22:30–00:00 window): **2465 passed · 4 skipped · 0 failed**, `flutter test` exit 0, run on `fix/wave1-housekeeping` off `main` @ `c14368d`. The lease test passed;
+    nothing in the suite failed. That is consistent with the 23:45-red / 23:59-green
+    observation below and is not evidence the wrap bug is fixed — the code is unchanged.
   - Fix: roll `dateKey` forward with the wrap, or inject a fixed clock. The suite
     should not have a time-of-day-dependent result.
   - Files: `test/features/schedule/calendar_entry_lease_manager_integration_test.dart`.
@@ -2859,8 +2954,16 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Fix: have the four calls consume `kOnPresetSpecs` + `onPresetHealState`. ~0.5h. Add a unit
     test asserting the sync's emitted state equals `onPresetHealState(spec.bri)` for each slot.
 
-- [ ] **P3-57 — `schedule_sync_idempotent_test.dart` fixtures encode the pre-fix preset shape**
-  - Status: OPEN · Evidence: verified-by-test (2026-07-30) — 2 failures after the master-power fix
+- [x] **P3-57 — `schedule_sync_idempotent_test.dart` fixtures encode the pre-fix preset
+  shape. CLOSED 2026-08-26 — resolved by `e1332b6`.**
+  - Status: **DONE `e1332b6`** (2026-08-14, *"non-convergence guard + geometry gate spec;
+    root-on resolved"*) · Evidence: verified-by-test
+  - **The root-`on` question this item hinged on was settled**, and that commit's body names
+    this file directly: *"which broke `schedule_sync_idempotent_test`, where seven tests
+    drive…"*. The fixtures no longer encode the broken shape. Re-verified 2026-08-26 09:15–09:40 CDT (well outside #64's 22:30–00:00 window): **2465 passed · 4 skipped · 0 failed**, `flutter test` exit 0, run on `fix/wave1-housekeeping` off `main` @ `c14368d`.
+  - **Not a duplicate of #64** — different file, different cause, its own fixing commit.
+  - *(Original wording, kept per "never delete an item": "Status: OPEN · Evidence:
+    verified-by-test (2026-07-30) — 2 failures after the master-power fix".)*
   - Presets 1/3/4/5 are fixtured as `{'n': 'NGL On', 'seg': [{'on': true}]}` — name + segment-on,
     **no root `on`** — which is exactly the broken on-device shape. Preset 2's fixture carries
     `'on': false` with the comment *"Already healed…so the OFF-preset self-heal skips it"*, so the
@@ -2877,6 +2980,26 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     that those slots ARE re-saved. ~1h.
 
 ---
+
+- [ ] **P3-63 — analyzer baseline is 381 issues, so the CI gate cannot be
+  `--fatal-warnings` yet**
+  - Status: **OPEN** (filed 2026-08-26) · Severity: **P3** · Evidence: verified-by-test
+  - Measured on `main` @ `c14368d`: `flutter analyze` → **0 errors, 11 warnings, 370
+    infos**, **exit 1**. `flutter analyze` is fatal-on-warnings by default, so the new
+    `codemagic.yaml` gate runs `--no-fatal-warnings --no-fatal-infos` and fails on
+    **errors** only. It prints all three counts every run so growth is visible.
+  - **Two of the 11 warnings are not cosmetic:**
+    `override_on_non_overriding_member` at
+    [cloud_relay_repository.dart:643](../lib/features/wled/cloud_relay_repository.dart#L643)
+    and [wled_service.dart:1072](../lib/features/wled/wled_service.dart#L1072) — a method
+    marked `@override` that overrides nothing, i.e. `WledRepository` interface drift. Read
+    these before suppressing them; a stale `@override` usually means a rename that one
+    implementation did not follow.
+  - The other 9 are mechanical (unused imports, unnecessary casts, `!` on non-nullables,
+    one unused private ctor `PresetsRead._`).
+  - Fix: clear the 11 warnings, then tighten the gate to `--no-fatal-infos` only. The 370
+    infos are a separate, larger cleanup and are NOT part of this item.
+  - Files: `codemagic.yaml`, the 8 source files above. Related: **P1-46** (green-main gate).
 
 ## Features promised (post-cleanup)
 

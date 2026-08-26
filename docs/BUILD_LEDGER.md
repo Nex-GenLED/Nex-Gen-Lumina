@@ -2541,6 +2541,110 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+83 — sync pacing; integration test vehicle
+
+> **Cut from `integration/test-build-2026-08-24`, NOT from `main`.** As of this
+> row `4d614fa` is **not an ancestor of `main`** — `git merge-base --is-ancestor
+> 4d614fa main` is false. A crash report that resolves to this build resolves to
+> a branch commit; do not expect to find it by walking `main`.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-83`** — lightweight, points at `4d614fa`, **the bump commit itself** (standing convention 1). |
+| **Git SHA (app bytes)** | **`4d614fa`** — `chore(release): 2.5.10+83 for the integration test build`. **iOS↔Android join key.** |
+| **Ledger SHA** | This row is committed **AFTER** the tag, outside it — the tag **is** the app-bytes SHA, no exclusion diff to compute. |
+| **Branch at build time** | `integration/test-build-2026-08-24` |
+| **App-bytes ancestry** | `a76e2b9` (+82) **+** `187dd9e` (shared HTTP clients) **+** `f3a2dba` (pace controller writes / suspend polling / batch the populate), merged as `6416105`. `e221b65` is docs-only. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **83** — `kStaffAuthTelemetryAppVersion` moved in the SAME commit; verified in-tree at `4d614fa` (`pubspec.yaml` `2.5.10+83` / `staff_auth_telemetry.dart:57` `'2.5.10+83'`). **Treat versionCode 83 as CONSUMED** — a built AAB spends its code whether or not it is uploaded. |
+| **Android artifact** | `PENDING` — size, `jarsigner -verify` result and merged-manifest `versionCode` not recorded by this session. Read the code from the **merged manifest**, never pubspec. |
+| **Signer** | `PENDING` — must be verified by **IDENTITY** per standing convention 2 (`CN=Tyler Honeycutt, OU=Nex-Gen LED LLC`), never by build exit code. |
+| **Test suite at build time** | `PENDING` — not captured before the build. From this build forward `codemagic.yaml` runs `flutter test` + `flutter analyze` as a gate step ahead of `Set build number`, so the count becomes a build-log artifact rather than a thing to remember. |
+| **iOS** | `PENDING` — Codemagic build number not recorded. Fill it when the build completes, not while queued. |
+| **Distribution** | `PENDING`. |
+
+## 2.5.10+82 — Game Day celebrations + the sports-alerts fold; cut for the Play upload
+
+> **Cut from `integration/test-build-2026-08-24`, NOT from `main`.** `a76e2b9`
+> is **not an ancestor of `main`** as of this row.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-82`** — lightweight, points at `a76e2b9`, **the bump commit itself** (standing convention 1). |
+| **Git SHA (app bytes)** | **`a76e2b9`** — `chore(release): 2.5.10+82 for the Play upload`. **iOS↔Android join key.** |
+| **Ledger SHA** | Committed **AFTER** the tag, outside it. |
+| **Branch at build time** | `integration/test-build-2026-08-24` |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **82** — `kStaffAuthTelemetryAppVersion` moved in the SAME commit; verified in-tree at `a76e2b9`. **versionCode 82 CONSUMED.** |
+| **Android artifact** | `PENDING` — size / `jarsigner` / merged-manifest read not recorded by this session. |
+| **Signer** | `PENDING` — verify by IDENTITY per standing convention 2. |
+| **Test suite at build time** | `PENDING` — not captured. |
+| **iOS** | `PENDING` — build number not recorded. |
+| **Distribution** | Commit subject says **"for the Play upload"**; whether the AAB was actually uploaded is `PENDING` — confirm in Play Console. The subject records intent, not delivery. |
+
+### Content gate — `0842e6e` (+81) `..` `a76e2b9` (+82)
+
+**Written from `git log`, never from a session summary.** 20 commits in the
+range — 4 merges and 16 non-merge — of which **13 touch app bytes**
+(`lib`, `assets`, `pubspec.*`, `android`, `ios`):
+
+| SHA | App-byte files | What |
+|---|---|---|
+| `e7fd58b` | 1 | reserve the glass dock so detail actions are tappable |
+| `71429c6` | 2 | orphaned prefs configs no longer arm monitoring |
+| `0d89d70` | 2 | one header on the routed detail path, not two |
+| `00ade26` | 4 | wire the sports-alerts adoption migration; stop writing the disjoint store |
+| **`900761e`** | **11** | fold alerts onto the Game Day team card, retire the screen |
+| **`66ea94a`** | **6** | second design slot — the celebration effect + its picker |
+| `254cbbf` | 1 | automatic contrast check for celebrations |
+| `cf09040` | 4 | fire the user's chosen celebration, keep the timing table |
+| `3d79576` | 4 | celebrate a win |
+| `2c06411` | 3 | a manual join self-expires instead of arming the schedule |
+| `eabd54e` | 2 | commercial celebration parity through one shared firing path |
+| `001a5d3` | 1 | move the Alerts row under Autopilot |
+| `a76e2b9` | 2 | the bump itself (`pubspec.yaml` + `staff_auth_telemetry.dart`) |
+
+The other 7 carry no app bytes: 4 merges (`ca9e30c`, `fdf1732`, `805bc8c`,
+`4e60b36`) and 3 docs-only commits (`c50d3dd`, `2d40a04`, `d09e622`).
+
+## 2.5.10+81 — PENDING. Ledger entry BLOCKED on an owed re-verify.
+
+> ## ⚠️ STATUS: `PENDING` — this row is deliberately incomplete.
+>
+> **`audit/PARTICIPATION_REENTRY.md` §4, verification item 4, reads: "§7.2d
+> re-verify … **OWED — blocks the +81 ledger entry**."** The healer's
+> participation leg changed — it now awaits the `_explicit` override before
+> publishing. Its dispositions, dedup memo and single-write property are
+> unchanged *by inspection*, but **§7.2d GREEN was measured on +73, without that
+> await**. Until Leg A (dedup) is re-run and
+> `participation_publish_disposition` is confirmed still transitioning
+> `offered` and writing **zero on a second heal**, this build's status is not
+> known.
+>
+> **A status is not guessed here.** `PENDING` is an honest value; a guess is
+> not. Items 2, 3 and 5 in that same table are also `OWED` and additionally
+> **need this build** to be exercised at all — the include-back affordance is
+> committed but absent from the +80 field build, where the chip is still
+> `onTap: null`.
+>
+> **Fill this row only after §7.2d Leg A re-runs green.** Do not promote it on
+> the strength of the build having completed.
+
+| Field | Value |
+|---|---|
+| **Tag** | **NONE.** There is no `build-81` tag — `git tag --list 'build-8*'` returns `build-80`, `build-82`, `build-83` only. Standing convention 1 was not applied to this build, so there is **no tag that is the app-bytes SHA**; the bump commit below is the only identifier. |
+| **Git SHA (app bytes)** | **`0842e6e`** — `chore(release): 2.5.10+81 for the integration test build`. **iOS↔Android join key.** |
+| **Branch at build time** | `integration/test-build-2026-08-24` — **not `main`, and not an ancestor of `main`.** |
+| **App-bytes ancestry** | Base `main` @ **`c14368d`** **+** `feat/design-card` @ **`18479ba`** **+** `feat/schedule-v3-model` @ **`8368255`** (that branch moved during the session — pinned so the build is reproducible), merged as `ec05ae1` / `be3ed43`, then bumped. Source-branch tips per `audit/INTEGRATION_TEST_BUILD.md` @ `5cb8d63`. |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **81** — `kStaffAuthTelemetryAppVersion` moved in the SAME commit; verified in-tree at `0842e6e`. **Treat versionCode 81 as CONSUMED**: the branch inherited +80 from `main` and neither feature branch bumped it, so building at +80 would have burned a code `main` still needed. |
+| **Android artifact** | `PENDING` |
+| **Signer** | `PENDING` — verify by IDENTITY per standing convention 2. |
+| **Test suite at build time** | `PENDING` |
+| **iOS** | `PENDING`. Note there is no `build-81` tag and the workflow triggers on `tag_patterns: build-*`, so **no tag-triggered iOS build exists for +81**. |
+| **Hardware verification** | ❌ **BLOCKING — see the status box above.** `PARTICIPATION_REENTRY.md` §4 items 2, 3, 4, 5 all `OWED`; item 4 is named as the blocker on this row. |
+| **Distribution** | `PENDING`. |
+
 ## 2.5.10+80 — the geometry contract: pinned at the wire, healed on connect
 
 | Field | Value |

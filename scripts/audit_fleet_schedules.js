@@ -62,11 +62,11 @@
 const path = require('path');
 const admin = require('firebase-admin');
 
+const { resolveServiceAccountPath } = require('./_service_account');
 const keyArg = process.argv.find((a) => a.startsWith('--key='));
 const keyPath = keyArg
   ? keyArg.slice('--key='.length)
-  : path.join(__dirname, '..', 'android', 'app',
-      'icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json');
+  : resolveServiceAccountPath();
 const serviceAccount = require(path.resolve(keyPath));
 console.log(`Using service account: ${path.resolve(keyPath)}\n`);
 

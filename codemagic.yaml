@@ -50,6 +50,62 @@ workflows:
         script: keychain add-certificates
       - name: Set up code signing settings
         script: xcode-project use-profiles
+      - name: Test and analyze (build gate)
+        # THE GATE. A red suite or an analyzer error must stop this workflow
+        # before `publishing:` is ever reached — `submit_to_testflight: true`
+        # means anything that gets past here goes to real testers.
+        #
+        # ORDERING IS LOAD-BEARING. This runs BEFORE "Set build number", which
+        # rewrites `version:` in pubspec.yaml with `sed -i`. Placed after it,
+        # the gate would be testing a tree that no longer matches any commit —
+        # green on a rewritten pubspec says nothing about the SHA that shipped.
+        # Here, what is tested IS the checked-out commit.
+        #
+        # HARDWARE TESTS STAY SKIPPED, structurally. The 4 live-bench cases
+        # (1 in test/hardware/base_ladder_repair_live_test.dart, 3 in
+        # test/hardware/preset_heal_live_test.dart) guard on
+        #   const bool kRunHw = bool.fromEnvironment('RUN_HW', defaultValue: false);
+        # `bool.fromEnvironment` reads COMPILE-TIME --dart-define values, not
+        # process env vars. This step passes no --dart-define, so those cases
+        # skip no matter what any environment group defines. A CI runner cannot
+        # reach the bench rig at 192.168.1.150 anyway. Do NOT add
+        # `--dart-define=RUN_HW=true` here.
+        script: |
+          set -euo pipefail
+          echo "=== gate: commit under test ==="
+          git rev-parse HEAD
+          grep '^version:' pubspec.yaml
+          echo "RUN_HW env (informational only; does not reach the tests): ${RUN_HW:-<unset>}"
+
+          flutter pub get
+          flutter test
+
+          # `flutter analyze` is FATAL-ON-WARNINGS BY DEFAULT and this tree does
+          # not have a clean analyzer baseline: measured 2026-08-26 on main @
+          # c14368d, `flutter analyze` reports 381 issues — 0 errors, 11
+          # warnings, 370 infos — and EXITS 1. A bare `flutter analyze` here
+          # would therefore abort every single build, gating nothing and
+          # training everyone to ignore the step.
+          #
+          # So the gate is what it claims to be: ERRORS fail the build. The
+          # warning and info counts are printed every run so the baseline is
+          # visible and any growth is obvious in the log.
+          #
+          # Tightening this to --fatal-warnings is a DELIBERATE later act,
+          # tracked as P3-63 in docs/BUGS_AND_DEBT.md — two of the 11 warnings
+          # are `override_on_non_overriding_member`, which is interface drift and
+          # wants reading, not a blanket suppression.
+          # `|| ANALYZE_EXIT=$?` is required, not stylistic: under `set -e` a
+          # non-zero analyze would abort the step before `$?` could be read.
+          ANALYZE_LOG=$(mktemp)
+          ANALYZE_EXIT=0
+          flutter analyze --no-fatal-warnings --no-fatal-infos             > "$ANALYZE_LOG" 2>&1 || ANALYZE_EXIT=$?
+          cat "$ANALYZE_LOG"
+          echo "=== analyzer baseline (2026-08-26 on main c14368d: 0 / 11 / 370) ==="
+          echo "errors:   $(grep -cE '^ *error -'   "$ANALYZE_LOG" || true)"
+          echo "warnings: $(grep -cE '^ *warning -' "$ANALYZE_LOG" || true)"
+          echo "infos:    $(grep -cE '^ *info -'    "$ANALYZE_LOG" || true)"
+          exit $ANALYZE_EXIT
       - name: Set build number
         script: |
           BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}

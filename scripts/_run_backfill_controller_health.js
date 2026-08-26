@@ -25,6 +25,7 @@
 
 const admin = require('firebase-admin');
 const path = require('path');
+const { resolveServiceAccountPath } = require('./_service_account');
 
 const PROJECT_ID = 'icrt6menwsv2d8all8oijs021b06s5';
 const WEB_API_KEY = 'AIzaSyCWwqffD-ggRh5-IYwR2ldjaztd-Jgz0JY';
@@ -33,13 +34,7 @@ const FN_URL =
   `https://us-central1-${PROJECT_ID}.cloudfunctions.net/backfillControllerHealth`;
 const TOOL_UID = 'tool_backfill_controller_health';
 
-const SERVICE_ACCOUNT = path.resolve(
-  __dirname,
-  '..',
-  'android',
-  'app',
-  'icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json',
-);
+const SERVICE_ACCOUNT = resolveServiceAccountPath();
 
 const args = process.argv.slice(2);
 const DRY = args.includes('--dry');

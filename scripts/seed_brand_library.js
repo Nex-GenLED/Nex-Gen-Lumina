@@ -63,7 +63,7 @@
  * 2. Make the Firebase service account available in one of two ways:
  *
  *      a. CLI flag (recommended, mirrors other scripts in this dir):
- *         --key=android/app/icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json
+ *         --key=~/.lumina/icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json
  *
  *      b. Environment variable:
  *         export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
@@ -87,6 +87,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { resolveServiceAccountPath } = require('./_service_account');
 
 // Optional: load .env if dotenv is installed and scripts/.env exists.
 try {
@@ -108,13 +109,7 @@ const keyArg = args.find((a) => a.startsWith('--key='));
 const KEY_PATH = keyArg
   ? keyArg.slice('--key='.length)
   : process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-    path.join(
-      __dirname,
-      '..',
-      'android',
-      'app',
-      'icrt6menwsv2d8all8oijs021b06s5-firebase-adminsdk-fbsvc-2e0cb54335.json'
-    );
+    resolveServiceAccountPath();
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
