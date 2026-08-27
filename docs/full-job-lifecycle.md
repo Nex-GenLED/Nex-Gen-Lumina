@@ -1,8 +1,10 @@
 # Complete Job Lifecycle — From Prospect to Installed Customer
 
+**Describes Lumina app version 2.5.10+88.**
+
 **Audience:** All roles — the operational overview document for understanding how a Lumina job flows from first prospect visit through installed, live customer.
 
-This is the master reference for the entire job pipeline. Use it to understand who owns each stage, what messages fire automatically, and how to recover from common failure modes. Permanent residential and commercial lighting that works as hard as you do — delivered by a pipeline that communicates with the customer at every milestone so no one ever has to chase for status.
+This is the master reference for the entire job pipeline. Use it to understand who owns each stage, what messages fire automatically, where payment gates block progress, and how to recover from common failure modes. Permanent residential and commercial lighting that works as hard as you do — delivered by a pipeline that communicates with the customer at every milestone so no one ever has to chase for status.
 
 ## What you'll need
 
@@ -22,23 +24,19 @@ This is the master reference for the entire job pipeline. Use it to understand w
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 
-  ┌────────┐    ┌──────────┐    ┌────────┐    ┌──────────┐    ┌──────────┐
-  │ Draft  │───▶│ Estimate │───▶│ Signed │───▶│ Pre-wire │───▶│ Pre-wire │
-  │        │    │   Sent   │    │        │    │Scheduled │    │ Complete │
-  └────────┘    └──────────┘    └────────┘    └──────────┘    └──────────┘
-                                     │                              │
-                                     │                              ▼
-                                     │                       ┌──────────┐
-                                     │                       │  Install │
-                                     │                       │Scheduled │
-                                     │                       └──────────┘
-                                     │                              │
-                                     │                              ▼
-                                     │                       ┌──────────┐
-                                     └──────────────────────▶│  Install │
-                                                             │ Complete │
-                                                             └──────────┘
+  ┌────────┐    ┌──────────┐    ┌────────┐   ╔═════════╗   ┌──────────┐
+  │ Draft  │───▶│ Estimate │───▶│ Signed │──▶║ DEPOSIT ║──▶│ Pre-wire │
+  │        │    │   Sent   │    │        │   ║  GATE   ║   │Scheduled │
+  └────────┘    └──────────┘    └────────┘   ╚═════════╝   └──────────┘
+                                                                 │
+                                                                 ▼
+  ┌──────────┐   ╔═════════╗   ┌──────────┐   ┌──────────┐  ┌──────────┐
+  │ Complete │◀──║  FINAL  ║◀──│  Install │◀──│  Install │◀─│ Pre-wire │
+  │  (paid)  │   ║ PAYMENT ║   │ Complete │   │Scheduled │  │ Complete │
+  └──────────┘   ╚═════════╝   └──────────┘   └──────────┘  └──────────┘
 ```
+
+The two double-ruled boxes are **payment gates**, not statuses. They do not appear in the status list — they are conditions on the job that block the next action until satisfied.
 
 | Status | Owner | Plain English |
 |---|---|---|
@@ -48,11 +46,41 @@ This is the master reference for the entire job pipeline. Use it to understand w
 | **Pre-wire Scheduled** | Day 1 electrician | Day 1 has a date. |
 | **Pre-wire Complete** | Day 2 install team | Wires are run. Ready for Day 2. |
 | **Install Scheduled** | Day 2 install team | Day 2 has a date. |
-| **Install Complete** | Customer | Job is closed. Customer has the lights. |
+| **Install Complete** | Day 2 install team | Lights are up and the customer has an account. Balance still outstanding. |
+| **Complete (paid)** | Nobody | Final payment collected. Job is archived out of the active queues. |
 
 ---
 
-## 2. Stage-by-stage walkthrough
+## 2. The two payment gates
+
+These are the most common reason a job appears to be "stuck" when nothing is actually broken. Read this section before Section 5.
+
+### Gate 1 — the 50% deposit, before Day 1 can be scheduled
+
+A signed job lands in the Day 1 Queue, but until the deposit is marked collected, its card renders a **deposit banner where the Schedule Day 1 button would be**. There is no way to schedule around it.
+
+When the deposit is marked collected, the job records:
+
+- `depositCollected` → true
+- `depositCollectedAt` — the timestamp
+- `depositCollectedBy` — the uid (or installer PIN) of whoever marked it
+- `depositAmount` — a **snapshot** of 50% of the total at that moment, so a later edit to the job's price does not rewrite history
+
+<div>
+
+> **Who is responsible:** the salesperson closes the sale, but nothing in the signature flow collects money. Somebody has to mark the deposit on the job. Make that an explicit handoff in your dealership's process, or you will accumulate signed jobs that no electrician can book.
+
+</div>
+
+### Gate 2 — final payment, after Day 2
+
+After the install is complete, the Day 2 wrap-up's close step offers a **final payment** confirmation: *"Confirm that {customer} has paid the remaining balance? The job will be archived as complete."* Confirming it flips the job to **Complete (paid)** and records `finalPaymentCollected`, its timestamp, and who marked it.
+
+A job left at **Install Complete** is done in the field but still open on the books. That is a legitimate resting state, not an error.
+
+---
+
+## 3. Stage-by-stage walkthrough
 
 For each stage:
 
@@ -117,7 +145,7 @@ The salesperson walks through the 5-step Estimate Wizard:
 
 **What the user does:**
 
-1. Salesperson taps **Sign** from the estimate preview
+1. Salesperson continues from the estimate preview to the signature screen
 2. Hands the device to the customer
 3. Customer reviews the estimate, draws a signature, and taps **Approve & confirm**
 
@@ -128,13 +156,27 @@ The salesperson walks through the 5-step Estimate Wizard:
 - `estimateSignedAt` timestamp set
 - `customerSignatureUrl` populated
 - If a referral code was used, the referral pipeline moves to "confirmed" and the referrer's credit is locked in
-- The job becomes visible in the dealer's Day 1 Queue
+- The job becomes visible in the dealer's Day 1 Queue — **behind the deposit gate**
 
 **Automated messages fired:**
 
-- **Booking Confirmation Email** to the customer (subject: *"You're booked with Nex-Gen LED!"*) — explains the 2-day process, access requirements, and dealer contact. *(Toggleable per dealer.)*
+- **Booking Confirmation Email** to the customer (subject: *"You're booked with Nex-Gen LED! 🎉"*) — explains the 2-day process, access requirements, and dealer contact. *(Toggleable per dealer.)*
 
-**Customer experience:** Signs and immediately sees confirmation. Within seconds, the booking email arrives.
+**Customer experience:** Signs and immediately sees the confirmation *"Estimate approved — install is confirmed."* Within seconds, the booking email arrives.
+
+---
+
+### Stage 3a — the deposit gate
+
+**Owner:** Whoever your dealership assigns — the salesperson, the office, or the electrician on arrival
+
+**What the user does:** marks the 50% deposit collected on the job.
+
+**What gets updated:** `depositCollected`, `depositCollectedAt`, `depositCollectedBy`, `depositAmount`.
+
+**Automated messages:** None. **The customer is not told the deposit gate exists**, so a job sitting here looks — from their side — exactly like a booked job nobody has scheduled.
+
+**Until this is done, Stage 4 is unavailable.**
 
 ---
 
@@ -145,7 +187,7 @@ The salesperson walks through the 5-step Estimate Wizard:
 **What the user does:**
 
 1. Electrician opens the Day 1 Queue
-2. Finds the new signed job
+2. Finds the new signed job (with its deposit collected)
 3. Taps **Schedule Day 1**
 4. Picks a date
 
@@ -286,10 +328,17 @@ After all install tasks are checked, the installer taps **Wrap up install →** 
   - Creates a `/users/{uid}` document tagged as the customer's primary account
 - The new UID is saved on the job as `linkedUserId`
 
+<div>
+
+> **This step does not link the customer's controllers.** Account creation and controller migration are separate mechanisms — the Installer Mode setup wizard is what moves controllers into a customer's account. A customer whose account was created here, and only here, will sign in to an app with no system attached. If Day 2 created the account, confirm the controllers actually appear before you leave.
+
+</div>
+
 #### Step 4 — Close Job
 
 - Installer reviews the summary card (photos captured, materials checked in, account created)
 - Taps **Finish & Close Job** and confirms in the dialog
+- The close step is also where **final payment** is confirmed, if it is being collected on site
 
 **What gets updated at close:**
 
@@ -300,7 +349,7 @@ After all install tasks are checked, the installer taps **Wrap up install →** 
 
 **Automated messages fired at close:**
 
-- **Install Complete Email** to the customer (subject: *"Your Nex-Gen LED system is live!"*) — confirms the install, provides app download links, references the account setup email, and signs off with the dealer name. *(Toggleable per dealer.)*
+- **Install Complete Email** to the customer (subject: *"Your Nex-Gen LED system is live! 💡"*) — confirms the install, provides app download links, references the account setup email, and signs off with the dealer name. *(Toggleable per dealer.)*
 
 **Customer experience:**
 
@@ -310,24 +359,38 @@ After all install tasks are checked, the installer taps **Wrap up install →** 
 
 ---
 
-## 3. Stage summary — who owns what and what fires
+### Stage 10 — Install Complete → Complete (paid)
 
-| # | Status | Owner | Trigger | Customer messages |
+**Owner:** Whoever collects the balance
+
+**What the user does:** confirms final payment (from the Day 2 wrap-up close step, or later).
+
+**What gets updated:** `finalPaymentCollected`, `finalPaymentCollectedAt`, `finalPaymentCollectedBy`; status → **Complete (paid)**. The job is filtered out of the active queues and appears only in historical job lists.
+
+**Automated messages:** None. This is a bookkeeping transition, not a customer milestone.
+
+---
+
+## 4. Stage summary — who owns what and what fires
+
+| # | Status / gate | Owner | Trigger | Customer messages |
 |---|---|---|---|---|
 | 1 | **Draft** | Salesperson | Wizard in progress | None |
 | 2 | **Estimate Sent** | Salesperson | (legacy) | None |
-| 3 | **Signed** | Day 1 electrician | Customer taps **Approve & confirm** | Booking Confirmation Email |
+| 3 | **Signed** | Salesperson → Day 1 | Customer taps **Approve & confirm** | Booking Confirmation Email |
+| 3a | *Deposit gate* | Dealer's choice | Deposit marked collected | **None** — the customer is never told |
 | 4 | **Pre-wire Scheduled** | Day 1 electrician | Electrician picks Day 1 date | Day 1 Confirmation SMS |
 | 5 | *(during wait)* | Day 1 electrician | Cron at 6pm Central night before | Day 1 Reminder SMS |
 | 6 | **Pre-wire Complete** | Day 2 install team | Electrician taps **Mark Day 1 complete** | Day 1 Complete SMS |
 | 7 | **Install Scheduled** | Day 2 install team | Installer picks Day 2 date | Day 2 Confirmation SMS |
 | 8 | *(during wait)* | Day 2 install team | Cron at 6pm Central night before | Day 2 Reminder SMS |
 | 9 | *(during wrap-up)* | Day 2 install team | Installer taps **Create account** in Step 3 | Account Setup Email |
-| 10 | **Install Complete** | Customer | Installer taps **Finish & Close Job** | Install Complete Email |
+| 10 | **Install Complete** | Day 2 install team | Installer taps **Finish & Close Job** | Install Complete Email |
+| 11 | **Complete (paid)** | Bookkeeping | Final payment confirmed | None |
 
 ---
 
-## 4. Technical integration notes
+## 5. Technical integration notes
 
 For technical operators. Field crews can skip this.
 
@@ -339,6 +402,7 @@ For technical operators. Field crews can skip this.
 | **Wizard progress** | `sales_jobs/{jobId}` updated continuously (home photo URL, controller mount, channels, injections) |
 | **Estimate generation** | `sales_jobs/{jobId}.estimateBreakdown` written |
 | **Signature** | Signature PNG uploaded to Cloud Storage; job status → `estimateSigned`; signature URL written |
+| **Deposit gate** | `sales_jobs/{jobId}.depositCollected`, `depositCollectedAt`, `depositCollectedBy`, `depositAmount` |
 | **Day 1 schedule** | `sales_jobs/{jobId}.day1Date` + status → `prewireScheduled` |
 | **Day 1 complete** | `sales_jobs/{jobId}.day1CompletedAt`, `day1TechUid`, status → `prewireComplete` |
 | **Day 2 schedule** | `sales_jobs/{jobId}.day2Date` + status → `installScheduled` |
@@ -346,20 +410,42 @@ For technical operators. Field crews can skip this.
 | **Wrap-up Step 2** | `sales_jobs/{jobId}.actualMaterialUsage` map (per item: estimated, returned, used, waste %) |
 | **Wrap-up Step 3** | New Firebase Auth user; new `users/{uid}` document; `sales_jobs/{jobId}.linkedUserId` |
 | **Wrap-up Step 4** | `sales_jobs/{jobId}.day2CompletedAt`, `day2TechUid`, status → `installComplete` |
+| **Final payment** | `sales_jobs/{jobId}.finalPaymentCollected` + status → `completePaid` |
+
+Note that the payment fields use camelCase, matching the rest of the `SalesJob` model, rather than the snake_case convention used elsewhere in the inventory build.
 
 ### Cloud functions
 
 | Function | Trigger | Purpose |
 |---|---|---|
 | **onSalesJobStatusChanged** | Firestore update on `sales_jobs/{jobId}` | Detects status transitions and Day 1 completion; sends Booking Confirmation Email, Day 1/Day 2 confirmation SMS, Day 1 complete SMS, and Install Complete Email |
-| **sendInstallReminders** | Scheduled cron at 6pm Central daily | Queries jobs whose Day 1 or Day 2 date is tomorrow (Central time), sends reminder SMS to each |
+| **sendInstallReminders** | Scheduled cron, `every day 18:00`, `America/Chicago` | Queries jobs whose Day 1 or Day 2 date is tomorrow (Central time), sends reminder SMS to each |
 | **createCustomerAccount** | Callable from Day 2 wrap-up Step 3 | Creates Firebase Auth user, sends Account Setup Email, seeds user profile document |
+
+### Customer account deletion
+
+The customer-side account lifecycle now has a real end. When a customer taps **Delete Account** in the app, the client re-authenticates, calls the `purgeUserAccount` callable, waits for it to succeed, and only then deletes the Auth user. The purge sweeps `users/{uid}` — the document *and* every subcollection — plus the customer's Cloud Storage prefix, and releases the paired-user field on any Lumina Bridge registered to them. The in-app confirmation dialog enumerates exactly what goes.
+
+Four caveats that matter operationally:
+
+- **The lights keep running.** Whatever schedule is already stored on the controller continues firing until an installer resets the hardware. Account deletion is not de-commissioning.
+- **The bridge does not actually get released.** The purge calls a server-side release of the bridge's paired user, but **the bridge stores its paired uid in NVS (its own flash) and re-asserts that uid on every heartbeat**. A powered, live bridge writes the old pairing straight back, so the release only sticks for a bridge that is unplugged or dead. Freeing a live bridge is a **physical step**: `POST http://<bridge-ip>/api/reset`, then re-pair from the new owner's app. Reset the controller too before re-deploying it. Tracked as **P2-57**.
+- **Not everything is purged yet.** Neighborhood Sync group membership and OAuth refresh tokens are known remaining gaps.
+- **Verify the callable is deployed** in your environment before relying on this. The purge function is a separate deployment from the app build, and an app calling a callable that was never deployed will fail the delete rather than silently half-completing — but you want to know that before a customer discovers it.
 
 ---
 
-## 5. Common failure points and how to recover
+## 6. Common failure points and how to recover
 
 Things go wrong. Here's how to fix them without losing customer data.
+
+### Failure 0 — "The job is signed but I can't schedule Day 1"
+
+**Symptom:** the Day 1 Queue card shows a deposit banner instead of the **Schedule Day 1** button.
+
+**This is not a bug.** The 50% deposit has not been marked collected. Collect it (or confirm with the office that it was collected), mark it on the job, and the scheduling controls appear. See Section 2.
+
+Check this **first** on any job that appears stalled at Signed — it is the single most common cause and it looks identical to an unclaimed job.
 
 ### Failure 1 — Customer phone number is invalid
 
@@ -408,13 +494,23 @@ If the electrician genuinely can't complete a task (a pre-run wire is missing, f
 2. **If the format is invalid:** Verify the email with the customer, edit it on the prospect record, try again.
 3. **If you can't resolve on-site:** Continue through Step 4 to close the job. The customer won't receive their account setup email automatically — contact your dealer admin and have them manually provision the account afterwards.
 
+### Failure 3a — Account created, but the customer's app is empty
+
+**Symptom:** the customer signs in successfully and sees no controllers, no schedules, nothing to control.
+
+**Cause:** account creation and controller migration are separate. The Day 2 wrap-up creates an account; the Installer Mode setup wizard is what moves controllers into it.
+
+**What to do:** run the Installer Mode wizard against that customer (or use **Existing Customer** to attach the hardware to the account that already exists). Do not create a second account — that produces a duplicate and a second set of credentials.
+
 ### Failure 4 — Job is stuck in a status
 
 **Symptom:** A job sits in one status for many days. Customer or dealer wants to advance it.
 
+**Check the deposit gate first** (Failure 0). If that's not it:
+
 **Common scenarios:**
 
-- A job is **Signed** but no electrician has picked it up
+- A job is **Signed** with its deposit collected, but no electrician has picked it up
 - A job is **Pre-wire Complete** but no installer has scheduled Day 2
 - A job somehow got into the wrong status (manual data correction needed)
 
@@ -431,6 +527,8 @@ If the electrician genuinely can't complete a task (a pre-run wire is missing, f
 
 > **Important:** Manual advances still trigger the corresponding automated messages. Use this only when you actually want the customer to receive the next message — don't manually advance a job whose physical work hasn't actually been done.
 
+> **Note:** there is no manual button that advances **Install Complete** to **Complete (paid)** from this screen — that transition comes from the final-payment confirmation.
+
 ### Failure 5 — Wrong photo or info on the prospect
 
 **Symptom:** Salesperson typed something incorrectly or attached the wrong photo.
@@ -442,6 +540,8 @@ If the electrician genuinely can't complete a task (a pre-run wire is missing, f
 3. Correct the field, save
 4. If the job is still in **Draft**, no automated messages have fired — edit freely
 5. If the job is **Signed** or beyond, edits don't re-trigger prior messages — they only affect future messages and the install crews' view of the job
+
+> One exception worth knowing: editing the total price after a deposit was collected does **not** change `depositAmount`. That field is a deliberate snapshot of the figure at collection time.
 
 ### Failure 6 — Installer marks Day 1 or Day 2 complete by accident
 
@@ -485,9 +585,21 @@ This is one of the most damaging errors because it triggers customer messages th
 3. If upload still fails, save the photo to the device gallery and try uploading from there
 4. If Wrap-up Step 1 (install photos) is the blocker, you cannot proceed past Step 1 without a photo for every channel — keep trying until they upload
 
+### Failure 9 — The customer's system works but their schedules never fire
+
+**Symptom:** the customer can control the lights from the app, but a schedule they created does nothing.
+
+This is a hardware-configuration problem, not a pipeline problem, and it almost always traces to Day 2:
+
+1. **Controller clock.** A controller whose clock never synced to NTP fires no schedules at all. Check the pre-flight clock row in Installer Mode.
+2. **Coordinates, for sunrise/sunset schedules.** The app refuses to arm a solar timer when latitude/longitude are unset or `0,0`.
+3. **Off-LAN schedule writes.** In Bridge Mode — the default — schedule and configuration writes cannot be delivered remotely. All schedule setup must happen on the customer's Wi-Fi.
+
+The Dealer & Installer Setup Guide covers all three in Steps 5, 8 and Section 9.
+
 ---
 
-## 6. The customer's end-to-end experience
+## 7. The customer's end-to-end experience
 
 From the customer's point of view:
 
@@ -496,6 +608,7 @@ From the customer's point of view:
 | **Day 0** (sales visit) | Salesperson visits and walks through the wizard live | In person |
 | **Day 0** | Customer signs the estimate on the device | In person |
 | **Day 0** (within seconds) | Booking confirmation email arrives | Email |
+| **Day 0–X** | *(deposit collected — invisible to the customer as a pipeline event)* | — |
 | **Day X** (some days/weeks later) | Day 1 confirmation SMS arrives | SMS |
 | **Day X − 1** (evening) | Day 1 reminder SMS arrives | SMS |
 | **Day X** (during visit) | Electrician arrives and runs all wiring | In person |
@@ -507,30 +620,36 @@ From the customer's point of view:
 | **Day Y** (after visit) | Install complete email arrives | Email |
 | **Day Y** (after install) | Customer downloads Lumina, sets password, controls their lights | App |
 
-The whole experience is designed so the customer is always informed and never has to chase the dealer for status updates.
+The whole experience is designed so the customer is always informed and never has to chase the dealer for status updates. **The one blind spot is the deposit gate** — a job held there sends the customer nothing, so it is on the dealership to communicate.
 
 ---
 
 ## What success looks like
 
 - Jobs move through the pipeline at a steady cadence — no status sitting more than 7–14 days unattended
+- **No signed job sits behind an uncollected deposit for more than a day or two** — this is the pipeline's most common silent stall
 - Every automated message fires on its intended stage transition, and the customer sees confirmations arrive within seconds
 - The night-before reminders reduce missed appointments to near zero
 - Wrap-up Step 3 creates the customer account on the first try, and Step 4 closes the job cleanly
+- The customer's controllers are actually attached to the account that was created for them
+- Final payment is collected and the job reaches **Complete (paid)** rather than resting at Install Complete indefinitely
 - By the time the installer leaves, the customer has downloaded Lumina, set their password, and toggled their lights at least once
 
 ## If something isn't working
 
-Start with the failure point that matches the symptom — they're all covered in Section 5. The short version:
+Start with the failure point that matches the symptom — they're all covered in Section 6. The short version:
 
+**Signed job you can't schedule?** The 50% deposit hasn't been marked collected. That's Failure 0, and it's the first thing to check.
 **Customer not getting messages?** Check phone/email on the job, then the dealer's messaging toggles.
-**Job stuck in a status?** Use the manual advance buttons on the Job Detail screen (but only when the physical work has been done).
+**Job stuck in a status?** Rule out the deposit gate, then use the manual advance buttons on the Job Detail screen (but only when the physical work has been done).
 **Account creation failing?** Look for an existing Lumina account; use **Re-send invite** if found.
+**Account created but the app is empty?** Account creation doesn't attach controllers — run Installer Mode against that customer.
 **Wrong data on the prospect?** Edit via the dealer admin flow. Past messages don't retrigger; future ones use the corrected data.
 **Installer marked complete by accident?** Contact the dealer admin immediately, reach out to the customer, re-do the check-out properly.
+**Schedules never fire?** Controller clock, missing coordinates, or a schedule that was pushed off-LAN. See Failure 9.
 
-If a failure isn't covered in Section 5, contact your Nex-Gen LED LLC corporate contact.
+If a failure isn't covered in Section 6, contact your Nex-Gen LED LLC corporate contact.
 
 ---
 
-**Need help?** This document is the master reference for the job pipeline. For role-specific guides, see the Sales Mode Guide, Day 1 Electrician Guide, Day 2 Install Guide, and Corporate Dashboard Guide.
+**Need help?** This document is the master reference for the job pipeline. For role-specific guides, see the Sales Mode Guide, Day 1 Electrician Guide, Day 2 Install Guide, Dealer & Installer Setup Guide, and Corporate Dashboard Guide.

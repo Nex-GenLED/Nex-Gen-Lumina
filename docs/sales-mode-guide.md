@@ -1,5 +1,7 @@
 # Lumina Sales Mode — Complete Guide
 
+**Describes Lumina app version 2.5.10+88.**
+
 **Audience:** Dealers and sales reps running site visits.
 
 Sales Mode is the app you live in on a home visit. Walk the perimeter, build a complete priced estimate in 15 minutes, collect a signed contract before you leave. Every signed job flows straight into your dealer's Day 1 Queue — no paperwork, no double entry, no lag. Permanent residential and commercial lighting that works as hard as you do, and Sales Mode is how you close faster and hand off cleaner.
@@ -19,7 +21,7 @@ Sales Mode is the app you live in on a home visit. Walk the perimeter, build a c
 Sales Mode is gated behind a 4-digit PIN. First two digits identify your **dealer**; last two identify you as the **salesperson**.
 
 1. Open the Lumina app
-2. Tap the **Lumina logo** 5 times on the login screen to open the Staff PIN screen
+2. Tap the **Lumina logo** 5 times (within 3 seconds) on the login screen to open the Staff PIN screen
 3. Type your 4-digit code. The first two dots turn **violet** (dealer) and the last two turn **cyan** (salesperson) so you can see which half you're typing.
 4. The session starts automatically as soon as the 4th digit is entered
 
@@ -145,6 +147,8 @@ A **channel** is one continuous LED strip wired to one output port on the contro
 
 Each channel must be a single unbroken physical run. If the LEDs turn a corner, that's still one channel. If they restart somewhere else on the house, that's a separate channel.
 
+> **Channels are also how the customer will control their house.** In the app, a schedule or a design can target specific channels rather than the whole run. That capability is derived from the controller's hardware channel configuration, which in turn reflects the channels you define here. A home you quote as one long channel gives the customer nothing to scope — so if a customer talks about wanting "just the garage on a timer," that is a reason to split the run, and worth noting for the install crew.
+
 #### Adding a channel
 
 1. Tap **Add channel** — a bottom sheet opens
@@ -251,7 +255,7 @@ The **Estimate Preview** screen is what you show the customer. Designed to look 
 
 ### What's on the screen
 
-- **Header** — "NEX-GEN LED — Custom lighting estimate", with the job number and a "Valid 30 days" note
+- **Header** — "Custom lighting estimate", with the job number and a "Valid 30 days" note (`Est #NXG-…  ·  Valid 30 days`)
 - **Customer name and address** in bold at the top
 - **Referral badge** (cyan with a gift card icon) if the customer was referred — shows who referred them
 - **Line items grouped by category:**
@@ -262,17 +266,41 @@ The **Estimate Preview** screen is what you show the customer. Designed to look 
   - **LABOR** — install labor
 - **Subtotals** for materials and labor
 - **Total estimate** in very large bold text at the bottom
-- **What's included** — static feature list: Permanent mount, App-controlled, Holiday-ready, Dusk to dawn, 1-year warranty
+- **What's included** — a static four-item list:
+  - Professional 2-day installation
+  - Nex-Gen Lumina app — full color control, scheduling, scenes
+  - Permanent weatherproof hardware — no seasonal removal
+  - Lifetime dealer support and warranty
+
+Individual line items also carry short feature chips (Permanent mount, App-controlled, Holiday-ready, Dusk to dawn). Those are per-item labels, not the included list — don't read them out as the warranty terms.
+
+> **Warranty terms — say these exact words.**
+>
+> - **Product warranty: 5 years.**
+> - **Labor warranty: 1 year minimum** — your dealership may extend it.
+> - **Expected service life: rated 50,000 hours** — 20+ years at typical evening use. *This is what "lifetime" lighting means.*
+>
+> **Never say "lifetime warranty."**
+>
+> The **What's included** list on this screen currently reads *"Lifetime dealer support and warranty."* That wording is wrong and is being corrected. Until the app is updated, **read the terms above out loud instead** — do not let the on-screen line stand as the quote.
 
 ### Walking the customer through it
 
-Take your time. Highlight the line items so the customer understands what they're paying for. Point out the **What's included** section — the included app, dusk-to-dawn automation, and warranty are usually the strongest differentiators.
+Take your time. Highlight the line items so the customer understands what they're paying for. Point out the **What's included** section — the included app, the 2-day professional install, and the permanent weatherproof hardware are usually the strongest differentiators.
+
+### Common customer questions
+
+**"So is it a lifetime warranty?"**
+No — "lifetime" describes how long the lights last, not how long they're covered. The LEDs are rated for 50,000 hours, which is 20+ years at typical evening use; the warranty is 5 years on the product and a minimum of 1 year on labor.
+
+**"What does the app actually do?"**
+Full color control, scheduling (including per-channel schedules and more than one event in a day), saved designs they can apply, rename and duplicate, and automatic game-day lighting for their teams — with a celebration effect that fires when their team scores.
 
 ### Sharing the estimate
 
 Tap **Share with customer** to copy a unique estimate link to your clipboard. Paste it into a text or email if the customer wants a copy before signing.
 
-When the customer is ready to sign, continue forward to the signature screen, or use the dedicated signature route from the bottom of the preview.
+When the customer is ready to sign, continue forward to the signature screen.
 
 ---
 
@@ -305,14 +333,38 @@ The moment the signature is approved, the app:
 3. Records the timestamp of the signature
 4. If the job had a valid referral code, marks the referral as "confirmed" — the referrer's credit is locked in
 5. Sends the customer a **booking confirmation email** explaining the 2-day install process
-6. Drops the job into your dealer's **Day 1 Queue** so the electrician can pick it up
+6. Drops the job into your dealer's **Day 1 Queue**
 7. Returns you to the Sales Landing screen
 
 You'll see a green confirmation: **"Estimate approved — install is confirmed"**.
 
 ---
 
-## 7. The job status pipeline
+## 7. The deposit — the one thing signing does NOT do
+
+<div>
+
+> **Read this section. It is the single most common reason a job you closed never gets installed.**
+
+</div>
+
+Signing the estimate does not collect any money, and **the job cannot be scheduled for Day 1 until a 50% deposit is marked collected.** Until then, the electrician opening the Day 1 Queue sees a deposit banner where the **Schedule Day 1** button would be. There is no way to schedule around it.
+
+The customer is sent **nothing** about this. From their side, a job held at the deposit gate looks exactly like a booked job nobody has gotten to yet — which means the first person to notice is usually the customer, calling to ask when someone is coming.
+
+**What to do:**
+
+- Know your dealership's process. Somebody has to collect the deposit and mark it on the job — the rep, the office, or the electrician on arrival. Find out which, and don't assume.
+- Tell the customer about the deposit at signing, while you're still in the home. It is far easier there than on a follow-up call.
+- Check your own signed jobs periodically. A job sitting at **Signed** for more than a day or two is usually waiting on this.
+
+When the deposit is marked, the app records the amount as a snapshot of 50% of the total **at that moment** — so a later price correction doesn't quietly rewrite what was collected.
+
+There is a second gate at the end: after Day 2, confirming **final payment** moves the job to **Complete (paid)** and archives it out of the active queues.
+
+---
+
+## 8. The job status pipeline
 
 Every job moves through a sequence of statuses. Here's the full pipeline.
 
@@ -320,17 +372,18 @@ Every job moves through a sequence of statuses. Here's the full pipeline.
 |---|---|---|
 | **Draft** | Estimate is being built but not generated or signed | The salesperson — finish the wizard |
 | **Estimate sent** | Estimate generated and shared with the customer but not yet signed. *(Legacy; the wizard usually goes straight to Signed.)* | The salesperson — follow up |
-| **Signed** | Customer has signed. Job is booked. Booking email goes out. | The Day 1 electrician — schedule the visit |
+| **Signed** | Customer has signed. Job is booked. Booking email goes out. | **Whoever collects the deposit** — Day 1 cannot be scheduled until it's marked |
 | **Pre-wire scheduled** | Day 1 has a date. Day 1 confirmation SMS goes out. | The Day 1 electrician — show up and do the work |
 | **Pre-wire complete** | Day 1 is done. Wires are run. "Wiring complete" SMS goes out. | The Day 2 install team — schedule the visit |
 | **Install scheduled** | Day 2 has a date. Day 2 confirmation SMS goes out. | The Day 2 install team — show up and install |
-| **Install complete** | Job is fully done. Customer welcome email with download links goes out. Customer's Lumina account is created. | Nobody — the job is closed |
+| **Install complete** | Job is fully done in the field. Customer welcome email with download links goes out. Customer's Lumina account is created. | Whoever collects the balance |
+| **Complete (paid)** | Final payment collected. Job is archived out of the active queues. | Nobody — the job is closed |
 
 Each status moves the job between queues automatically. You don't manually advance statuses unless something goes wrong (the **Job Detail** screen has manual buttons for those rare cases).
 
 ---
 
-## 8. The My Estimates screen
+## 9. The My Estimates screen
 
 Tap **My Estimates** from the Sales Landing screen (or the **+** floating action button to start a new visit from this screen).
 
@@ -347,6 +400,8 @@ A horizontal row of chips narrows the list:
 
 Tap a chip to filter. Tap **All** to clear.
 
+> Note the chip set does not cover every status. **Install scheduled** and **Complete (paid)** have no chip of their own — use **All** to see those jobs. **Complete** filters on *install complete*, not on paid.
+
 ### What each card shows
 
 | Element | Meaning |
@@ -356,9 +411,9 @@ Tap a chip to filter. Tap **All** to clear.
 | **Address** | Street + city, ellipsized if long |
 | **Status pill** (left, color-coded) | Where the job is in the pipeline |
 | **Total price** (right, green) | The signed estimate total |
-| **Progress bar** (bottom) | Visual fill from 0% (draft) to 100% (install complete) |
+| **Progress bar** (bottom) | Visual fill from 0% (draft) to 100% (complete and paid) |
 
-Tap any card to open the **Job Detail** screen — full job info with manual status-advance buttons (only use if a job is stuck — see the Full Job Lifecycle doc for recovery procedures).
+Tap any card to open the **Job Detail** screen — full job info, a **Download install plan PDF** action (the Day 1 and Day 2 task lists for that job), and manual status-advance buttons (only use if a job is stuck — see the Full Job Lifecycle doc for recovery procedures).
 
 ### Empty state
 
@@ -377,7 +432,8 @@ When you arrive at a new prospect's home, this is the order:
 5. **Note injection point candidates** for any run clearly over 100 feet
 6. **Sit down with the customer** and walk them through the wizard live. Show them the price as it builds.
 7. **Hand them the device** to sign
-8. Done. The booking email goes out automatically.
+8. **Talk about the deposit before you leave** — 50%, and Day 1 can't be booked without it
+9. Done. The booking email goes out automatically.
 
 ---
 
@@ -385,6 +441,7 @@ When you arrive at a new prospect's home, this is the order:
 
 - You finish the wizard on-site in 15 minutes or less
 - The customer signs before you leave the home
+- **The deposit is arranged before you leave the driveway** — this is what actually gets the job scheduled
 - The job appears in the dealer's Day 1 Queue within seconds of signature
 - The customer receives the booking confirmation email while you're still in the driveway
 - The channel count, footage, injection points, and controller location on the estimate match what the install crew will actually find when they arrive
@@ -411,6 +468,12 @@ Your dealer's pricing defaults fell back to something unexpected. Check the deal
 
 **"I left mid-wizard and lost my work."**
 You didn't. Drafts save continuously to the cloud. Open **My Estimates**, find the customer, tap to resume.
+
+**"My customer signed weeks ago and nobody has scheduled them."**
+Check the deposit. A signed job with no deposit marked cannot be scheduled, and nothing notifies anyone that it's waiting. See Section 7.
+
+**"The customer is asking about warranty terms."**
+Product warranty is **5 years**. Labor warranty is **1 year minimum**, and your dealership may extend it. Expected service life is **50,000 hours** — 20+ years at typical evening use, which is what "lifetime" lighting means. **Never say "lifetime warranty."** The estimate screen's "What's included" line still reads "Lifetime dealer support and warranty"; that wording is being corrected — say the terms above instead. See Section 5.
 
 ---
 

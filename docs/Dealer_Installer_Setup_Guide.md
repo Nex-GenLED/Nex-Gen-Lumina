@@ -1,8 +1,8 @@
 ---
 title: "Nex-Gen Lumina — Dealer & Installer Setup Guide"
-subtitle: "From onboarding your dealership to handing off a live customer"
+subtitle: "From onboarding your dealership to handing off a live customer — app 2.5.10+88"
 author: "Nex-Gen LED LLC"
-date: "July 2026"
+date: "August 2026"
 pdf_options:
   format: Letter
   margin: 18mm
@@ -36,6 +36,8 @@ body_class: guide
 </style>
 
 # Nex-Gen Lumina — Dealer & Installer Setup Guide
+
+**Describes Lumina app version 2.5.10+88.**
 
 This is the complete handbook for getting your dealership up and running and completing customer installations end-to-end. Nex-Gen LED LLC ships permanent residential and commercial lighting that works as hard as you do — this guide is how you deliver that experience to every customer on Day 1.
 
@@ -93,7 +95,11 @@ Sales Mode is a separate workflow for reps doing site surveys and generating est
 
 - From the Sales landing screen, tap **My Estimates** to see every job you've created
 - Each row shows status, customer name, and date
-- Status progression: Draft → Estimate Sent → Estimate Signed → Pre-Wire Scheduled → Pre-Wire Complete → Install Complete
+- Status progression: Draft → Estimate Sent → Signed → Pre-wire Scheduled → Pre-wire Complete → Install Scheduled → Install Complete → Complete (paid)
+
+<div class="warning">
+<strong>A signed job does not reach the Day 1 Queue ready to schedule.</strong> There is a <strong>50% deposit gate</strong>: until someone marks the deposit collected on the job, the Day 1 Queue card shows a deposit banner <em>instead of</em> the <strong>Schedule Day 1</strong> button. A rep who signs a customer and walks away without telling the office about the deposit has produced a job nobody can book. After Day 2, a second gate — <strong>final payment</strong> — moves the job to the terminal <strong>Complete (paid)</strong> status and archives it out of the active queues.
+</div>
 
 Sales data flows into the Dealer Dashboard for pipeline tracking — see Section 5. For the full playbook, see the **Sales Mode Guide**.
 
@@ -101,10 +107,11 @@ Sales data flows into the Dealer Dashboard for pipeline tracking — see Section
 
 During a site visit, if the prospect doesn't have a Lumina system installed, you can still put the experience in their hands.
 
-1. On the Lumina login screen, enter the **demo access code** (provided by Nex-Gen)
-2. The prospect sees a simulated Lumina experience on their phone or yours
-3. They can browse patterns, try the AI assistant, and see the dashboard
-4. The app captures their contact info as a lead for follow-up
+1. On the Lumina login screen, tap the **Demo Experience** link below the sign-in form
+2. Enter the **demo access code** (provided by Nex-Gen)
+3. The prospect sees a simulated Lumina experience on their phone or yours
+4. They can browse patterns, try the AI assistant, and see the dashboard
+5. The app captures their contact info as a lead for follow-up
 
 Demo Mode uses simulated lighting — no real hardware required — and it's one of the most persuasive parts of a sales visit.
 
@@ -186,6 +193,7 @@ As a dealer, you have a live dashboard for tracking your business.
 - See every job your team has in progress
 - Filter by status to focus where follow-up is needed
 - Tap any job for full detail
+- From a job's detail screen you can also **Download install plan PDF** — the Day 1 and Day 2 task lists for that specific job, useful for a crew working off paper
 
 <div class="tip">
 <strong>If the Team tab looks empty</strong> on a brand-new dealership, add your first installer from the Admin Portal (Section 4) rather than from the Team tab — the empty state there does not yet offer a create action.
@@ -210,6 +218,7 @@ Every converted referral earns you (and your customers) a reward.
 
 - On the Dealer Dashboard under the **Payouts** tab
 - Also on the **Refer & Earn** customer-facing screen
+- Codes are in `LUM-XXXX` format — four characters after the dash
 
 ### Ambassador tiers
 
@@ -219,6 +228,8 @@ Every converted referral earns you (and your customers) a reward.
 | Silver | 3+ | Increased |
 | Gold | 8+ | Higher |
 | Platinum | 15+ | Maximum |
+
+Tier progress counts referrals that have reached **installed** or **paid** — a signed-but-not-yet-installed referral does not advance your tier.
 
 ### Reward types
 
@@ -258,6 +269,8 @@ Installer Mode is the guided wizard that stands up a customer's Lumina system an
 3. On the **Installer Mode** overview screen, tap **Continue**
 4. Enter your **4-digit PIN** on the numeric keypad
 5. The PIN auto-submits when all 4 digits are entered
+
+The Installer Mode landing screen has four tiles: **New Install**, **Existing Customer**, **Day 1 Queue**, and **Day 2 Queue**.
 
 <div class="warning">
 <strong>Security:</strong> 5 failed PIN attempts triggers a 30-second lockout. Wait it out, or dismiss and reopen the Staff PIN screen.
@@ -357,6 +370,10 @@ Best for single homes with one or more LED runs acting as a unified system.
 3. Linked controllers sync brightness and effects — turn one on, they all turn on
 4. Family members can be invited later (5 by default)
 
+<div class="note">
+<strong>Set expectations on family invites.</strong> Every invited family member currently receives <strong>full control</strong> of the system. Per-permission toggles and a view-only role are planned but not implemented, so do not promise a customer that they can give a teenager brightness-only access today.
+</div>
+
 #### Option B: Commercial (multi-zone)
 
 Best for businesses with independent lighting areas.
@@ -380,6 +397,10 @@ This sets LED type, color order, and per-channel bus assignments on the controll
 
 <div class="warning">
 Only skip this step if the controller was already fully configured on the bench. Wrong LED counts or color order are the #1 cause of "the colors are wrong" and "a section is dark" callbacks.
+</div>
+
+<div class="note">
+<strong>This step is also what makes per-channel features possible.</strong> The customer's channel list is derived from the controller's hardware bus configuration, so a controller that reports a single bus offers no channels to pick from — the customer will not see the per-channel schedule picker or per-channel design targeting at all. If a customer expects to schedule "just the garage," this step is where that capability is created.
 </div>
 
 Tap **Continue**.
@@ -429,7 +450,11 @@ This step shapes the customer's first experience *and* runs the final safety che
 
 **Profile Type** — confirm **Residential** or **Commercial**. Commercial accounts also take a **Manager Email**.
 
-**Favorite Teams** — teams the customer follows, used for automatic game-day lighting. Coverage spans the NFL, NBA, WNBA, MLB, NHL, MLS, NWSL, and major college programs.
+**Favorite Teams** — teams the customer follows, used for automatic game-day lighting. Coverage spans the NFL, NBA, WNBA, MLB, NHL, MLS, NWSL, FIFA, the Champions League, and major college programs (NCAA D-I FBS football and D-I men's basketball).
+
+<div class="note">
+<strong>Where Game Day settings live now.</strong> There is no longer a separate <strong>Sports Alerts</strong> screen under System — it has been retired, and every per-team setting moved onto the team's own card in <strong>Game Day</strong>. Each team card carries its own <strong>Live Scoring</strong> switch (this is the alerts on/off), an <strong>Alerts</strong> row for sensitivity (All Events / Major Only / Clutch Only), a <strong>Celebration</strong> row for the effect that fires on a score or a win, <strong>Skip day games</strong>, and a <strong>Design</strong> row for the look the house runs during the game. If a customer asks "where do I turn off alerts for one team," the answer is that team's card, not Settings.
+</div>
 
 **Favorite Holidays** — Christmas, Halloween, 4th of July, New Year's, St. Patrick's Day, Thanksgiving, Easter, Valentine's Day.
 
@@ -465,7 +490,15 @@ Don't hand off a system with a clock warning. A controller whose clock never syn
 </div>
 
 <div class="note">
-<strong>Coordinates are what make sunset schedules work.</strong> Sunrise/sunset scheduling is live, and the app <strong>refuses to arm a solar timer</strong> when the controller's latitude/longitude are unset or left at <code>0,0</code> — the customer's "on at sunset" schedule then silently never arms. Set them during the defaults push (or in the controller's <code>Config → Time &amp; Macros</code>) and confirm the pre-flight clock row is green. Two constraints worth knowing when you build the first schedule: the system supports <strong>one sunrise and one sunset schedule</strong>, and there's no offset field yet, so a sunset schedule fires at sunset rather than a set number of minutes before.
+<strong>Coordinates are what make sunset schedules work.</strong> The app <strong>refuses to arm a solar timer</strong> when the controller's latitude/longitude are unset or left at <code>0,0</code> — the firmware cannot compute sunrise or sunset without them, so the customer's "on at sunset" schedule silently never arms. Set them during the defaults push (or in the controller's <code>Config → Time &amp; Macros</code>) and confirm the pre-flight clock row is green.
+<br><br>
+Three scheduling limits worth knowing before you build the customer's first schedule:
+<ul>
+<li>The controller has <strong>8 general clock timer slots</strong>. Each on-boundary and each off-boundary consumes one, and any active dated/calendar entry holds one too. The schedule editor shows a live <em>"N of 8 slots used"</em> meter, so you can see the ceiling before you save rather than hitting a "timer slots are full" error afterwards.</li>
+<li>Sunrise and sunset use <strong>two dedicated slots</strong> outside that budget, so solar scheduling does not eat into the 8. But there is exactly <strong>one sunrise slot and one sunset slot</strong>: the system supports one sunrise schedule and one sunset schedule, first one wins, and additional solar boundaries are rejected with a warning. A dusk-to-dawn schedule fills both by itself.</li>
+<li>There is <strong>no offset field</strong>. A sunset schedule fires at sunset, not a set number of minutes before or after it.</li>
+</ul>
+<strong>Verify solar on the job.</strong> Sunrise/sunset scheduling is enabled fleetwide, so the only thing standing between a customer and a working sunset schedule is the controller's own coordinates. A controller left at <code>0,0</code> gets a specific <em>"needs your location set on the controller"</em> refusal rather than silent failure — but do not promise a customer a sunset schedule you have not watched arm. Build it while you are on their Wi-Fi and confirm it appears on the controller.
 </div>
 
 #### Complete Setup
@@ -478,6 +511,16 @@ When you tap **Complete Setup**, the app:
 4. Migrates the controllers you added — including any roofline mapping — to the customer's account
 5. Increments your installation count
 6. Signs you out of the installer session
+
+<div class="warning">
+<strong>Warranty terms — say these exact words.</strong>
+<ul>
+<li><strong>Product warranty: 5 years.</strong></li>
+<li><strong>Labor warranty: 1 year minimum</strong> — your dealership may extend it.</li>
+<li><strong>Expected service life: rated 50,000 hours</strong> — 20+ years at typical evening use. <em>This is what "lifetime" lighting means.</em></li>
+</ul>
+<strong>Never say "lifetime warranty."</strong> Service life and warranty are two different promises, and conflating them creates a claim your dealership cannot honour.
+</div>
 
 ### The customer credentials screen
 
@@ -517,6 +560,64 @@ Give them their credentials and walk them through:
 <strong>Pro tip:</strong> Spend 2 minutes on the dashboard with them — toggle a favorite, drag brightness, and say "Try asking Lumina to set the lights to warm white." A short live demo dramatically reduces support calls. Hand them the <strong>Lumina Homeowner Guide</strong> as well.
 </div>
 
+### The five things worth showing every customer
+
+These are the surfaces that generate the most "how do I…" calls. Two minutes each on the doorstep saves a phone call later.
+
+#### Game Day
+
+Open **Game Day** and show them a team card. Everything for that team is on that one card — the **Live Scoring** switch, the **Alerts** sensitivity row, the **Celebration** effect that fires when their team scores or wins, **Skip day games**, and the **Design** the house runs during the game. Celebrations are picked from a curated list of attention-grabbing effects and preview in the team's own colors.
+
+<div class="tip">
+<strong>Game Day no longer needs a recurring schedule.</strong> It used to be held back for any account without a nightly schedule configured. That requirement is gone — single-day use and Game-Day-only accounts (a customer who never sets a recurring schedule at all) are both fully supported. Do not tell a customer they must build a nightly schedule before Game Day will work.
+</div>
+
+Two readiness conditions **do** remain, and both are yours to satisfy on the job, not the customer's:
+
+- The app must have been **opened at the customer's home, on their Wi-Fi**, so the controller can report its channels. This happens naturally if you finish the install on-site.
+- The account's **saved lighting presets must be in good order**. If the Game Day screen shows *"Game Day is on — not firing yet,"* read the sentence underneath: it names which of the two is missing.
+
+**Light Up Now** on a team card lights the house in team colors immediately for a game already in progress. It creates a **self-expiring session** — it does *not* subscribe the customer to every future game for that team. When the game ends, the house reverts on its own. Tell them that plainly, because the old behavior was the opposite.
+
+<div class="note">
+If Light Up Now cannot find a live game for that team, it still lights the house and arms celebrations, but <strong>without</strong> the auto-revert. The customer turns it off themselves in that case.
+</div>
+
+#### My Designs
+
+Show them that tapping a saved design opens a **detail card** with a preview and its full details, and five actions: **Apply to Lights**, **Edit**, **Rename**, **Duplicate**, **Delete**. **Edit** is unavailable on AI-composed designs — those reopen in the Design Studio, which isn't wired yet, and the card says so.
+
+#### Per-channel scheduling
+
+If the customer has a multi-channel controller, the schedule editor offers a **Channels** row: **All channels**, or specific ones.
+
+<div class="warning">
+<strong>Say this out loud, in these words: "the other channels will turn off during that schedule."</strong> A channel-scoped ON does not leave the excluded channels alone — it turns them off for the duration. The editor states it, but a customer who scopes their first schedule and then finds half the house dark will call you, not read the note. A scoped OFF does not darken anything else.
+</div>
+
+The picker offers channels on the **currently selected controller** and only appears when that controller reports more than one channel. A home with several controllers sees the controller name on scoped rows.
+
+#### Multiple events in one day
+
+A single day can now hold more than one event — two teams playing the same night, or a Game Day plus a holiday, coexist instead of the second one silently replacing the first. Point at the **N of 8 slots** meter in the editor so they understand the real ceiling.
+
+#### Account deletion
+
+<div class="warning">
+<strong>Deleting the Lumina account does not turn the lights off, and it does not free the bridge.</strong> Account deletion removes the customer's profile, controllers, properties, geofences, schedules, scenes, designs, favorites, house photo, Game Day / Autopilot / Neighborhood Sync settings, usage history and diagnostics from Nex-Gen's servers — the in-app dialog lists all of it. Two things it does <em>not</em> do:
+<ul>
+<li><strong>The controller keeps running.</strong> Whatever schedule is already stored on it fires until the hardware is reset.</li>
+<li><strong>The bridge stays paired.</strong> The purge does attempt a server-side release of the bridge's paired user, but <strong>the bridge holds its paired uid in NVS (its own flash) and re-asserts that uid on every heartbeat</strong> — so a powered, live bridge simply writes the old pairing straight back. The server-side release only sticks for a bridge that is unplugged or dead.</li>
+</ul>
+<strong>De-commissioning is a physical job. Do this, in order:</strong>
+<ol>
+<li><strong>Reset the bridge:</strong> <code>POST http://&lt;bridge-ip&gt;/api/reset</code></li>
+<li><strong>Re-pair from the new owner's app.</strong></li>
+<li><strong>Reset the controller before re-deploying it.</strong></li>
+</ol>
+If a customer cancels service or moves out, deleting the account is not a de-commissioning step. Book a truck roll.
+</div>
+
 ---
 
 ## 9. Configuring remote access
@@ -550,8 +651,12 @@ The screen also shows the customer's **User ID** with a **Copy User ID** action 
 <strong>Permissions:</strong> <strong>Detect Home Network</strong> prompts for <strong>Location permission</strong>, which is what allows the app to read the Wi-Fi network name. If the customer declines, the app explains what's needed instead of failing silently. The SSID is encrypted before storage.
 </div>
 
-<div class="note">
-<strong>Schedules are LAN-only writes.</strong> Timer configuration is pushed over the local network. Remote access covers on/off, brightness, and patterns — it does not arm schedules. Do any schedule setup while you're still on the customer's Wi-Fi.
+<div class="warning">
+<strong>In Bridge Mode — the default — schedules are LAN-only writes.</strong> Timer and controller configuration travel over <code>/json/cfg</code>, and the Lumina Bridge relays live state only: it has no handler for configuration writes. Remote access in Bridge Mode covers <strong>on/off, brightness, colors and patterns</strong>. It does <strong>not</strong> arm schedules, push roofline geometry, or change LED hardware config.
+<br><br>
+<strong>Do all schedule and configuration work while you are still on the customer's Wi-Fi.</strong> The app now refuses these writes off-LAN and says so, rather than reporting a success that never reached the controller — which is what earlier builds did.
+<br><br>
+Webhook Mode (DIY) <em>does</em> carry configuration writes, because a Cloud Function performs them directly. That is the only remote path that can arm a schedule today.
 </div>
 
 ---
@@ -575,13 +680,23 @@ Each completed installation automatically creates a warranty record:
 | Field | Value |
 |-------|-------|
 | **Warranty start** | Date of installation |
-| **Warranty duration** | 5 years |
+| **Warranty duration** | 5 years (product) |
 | **Installer** | Your name and PIN |
 | **Dealer** | Your company name and code |
 | **Controllers** | Serial numbers of every installed device |
 | **Address** | Customer's installation address |
 
 These records are available to the Nex-Gen support team for warranty claims.
+
+<div class="warning">
+<strong>Warranty terms — say these exact words.</strong>
+<ul>
+<li><strong>Product warranty: 5 years.</strong> This is the term the installation record above stores.</li>
+<li><strong>Labor warranty: 1 year minimum</strong> — your dealership may extend it. <em>The installation record has no field for this</em>, so track your labor term in your own paperwork; the app will not carry it for you.</li>
+<li><strong>Expected service life: rated 50,000 hours</strong> — 20+ years at typical evening use. <em>This is what "lifetime" lighting means.</em></li>
+</ul>
+<strong>Never say "lifetime warranty."</strong>
+</div>
 
 <div class="pagebreak"></div>
 
@@ -610,8 +725,23 @@ These records are available to the Nex-Gen support team for warranty claims.
 | View sales jobs | Sales Mode → **My Estimates** |
 | Access Dealer Dashboard | Main screen → **Dealer Dashboard** |
 | View referral rewards | Dealer Dashboard → **Payouts** |
-| Use Demo Mode | Login screen → demo access code |
+| Use Demo Mode | Login screen → **Demo Experience** → demo access code |
 | Look up an existing customer | Installer Mode → **Existing Customer** |
+| Per-team alerts & celebrations | Customer's app → **Game Day** → the team's card |
+| Roofline Setup Wizard | Customer's app → **System → System Management → Roofline Setup** |
+| Remote Access | Customer's app → **System → System Management → Remote Access** |
+
+### Scheduling limits at a glance
+
+| Limit | Value |
+|-------|-------|
+| General clock timer slots | **8** (each on-boundary and off-boundary uses one; calendar leases use one) |
+| Sunrise schedules | **1** (dedicated slot, outside the 8) |
+| Sunset schedules | **1** (dedicated slot, outside the 8) |
+| Sunrise/sunset offset | **Not supported** — fires at the event itself |
+| Solar prerequisite | Controller latitude/longitude must be set and not `0,0` |
+| Events per day | **More than one supported** |
+| Channel scoping | Per schedule, on one controller; excluded channels turn **off** during a scoped ON |
 
 ### Support
 Email: **support@nexgenled.com**
@@ -626,7 +756,10 @@ Email: **support@nexgenled.com**
 - A test pattern runs correctly across the whole run, in the right direction
 - Bridge status green (if remote access was configured)
 - A schedule created and synced **while you were still on the customer's Wi-Fi**
+- If the customer wanted sunset scheduling, you **watched it arm** rather than assuming it did
+- The Game Day screen reads **"Game Day is on"** — not "not firing yet" — before you leave
 - Warranty record exists with all controllers and the correct install date
+- The customer has been told, in plain words, that a channel-scoped schedule turns the other channels off
 - The customer shows *you* they can change something themselves
 
 ## If something isn't working
@@ -655,8 +788,20 @@ Re-open Map Roofline and confirm the marks are in the order the pixel actually t
 **"The install said it failed but the customer got an email."**
 If you reached the credentials screen, the install committed. Verify the customer can sign in before re-running anything — a second run would create a duplicate.
 
+**"Game Day says 'on — not firing yet'."**
+Read the sentence under the headline; it names the missing item. *"Open the app at home, on your Wi-Fi"* means the controller has never reported its channels — do it before you leave. *"Your saved lighting presets need repairing"* means the account's preset ladder is damaged and needs a service visit. **A missing recurring schedule is no longer a cause** — that requirement was removed.
+
+**"The customer wants to schedule just one channel."**
+Confirm the controller actually reports more than one channel (Step 5 hardware config is what creates them). Then warn them that the excluded channels turn off during that schedule — that is the behavior, not a bug.
+
+**"I set a sunset schedule and it never fires."**
+Check the controller's latitude and longitude in **Config → Time & Macros**. Unset or `0,0` means the firmware cannot compute sunset and the app will not arm the timer. Also confirm the account isn't already using its single sunset slot for a different schedule.
+
 **"The bridge shows unreachable after setup."**
 Open `http://<bridge-ip>/`. Wi-Fi green but auth red → re-enter the bridge credentials. Power-cycle and wait 30 seconds. Confirm bridge and controller are on the same network.
+
+**"I set up a schedule remotely and it didn't take."**
+In Bridge Mode, schedule writes cannot be delivered — the bridge relays live state only. Go to the property, or use Webhook Mode. Newer builds refuse the write and tell you; older ones reported success and changed nothing.
 
 **"I lost the customer's temporary password."**
 It can't be retrieved. Walk them through **Forgot Password** on the sign-in screen.
@@ -739,9 +884,10 @@ Then **Save Configuration** and test: lights on/off, a pattern across all segmen
 - **Sales Mode Guide** — field sales visits and estimates
 - **Dealer Dashboard Guide** — full dashboard tour
 - **Day 1 Electrician Guide** / **Day 2 Install Guide** — dispatch-day workflows
+- **Complete Job Lifecycle** — the end-to-end pipeline, payment gates, and recovery procedures
 - **ESP32 Bridge Setup Guide** — bridge firmware and pairing
 - **Admin Operations Guide** — for Nex-Gen staff
 
 ---
 
-*Nex-Gen Lumina — Dealer & Installer Setup Guide — July 2026*
+*Nex-Gen Lumina — Dealer & Installer Setup Guide — August 2026 — describes app version 2.5.10+88*

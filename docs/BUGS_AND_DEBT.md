@@ -2910,6 +2910,79 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     stay distinguishable in the data. Needs its own COLLECTION_GROUP index on
     `commands(status, createdAt)` for the new status value.
 
+- [ ] **P2-57 — `releasePairedBridges` is overwritten by the bridge's NVS-sourced heartbeat**
+  - Status: OPEN · Evidence: source-proven (2026-08-27, Phase 1 report)
+  - `purgeUserAccount`'s `releasePairedBridges` clears `bridge_registry.pairedUid` server-side.
+    A **live bridge writes it straight back within one heartbeat interval.** The release only
+    sticks for a bridge that is unplugged or dead — which is the opposite of the case that
+    matters (a customer who cancels service and leaves the hardware powered).
+  - Mechanism, all in `esp32-bridge/src/main.cpp`:
+    - The paired uid is durable in **NVS**, not in the cloud doc: `prefs.getString("uid", …)`
+      at `:171`, `isPaired = nvsUidFound && pairedUserId.length() > 0` at `:185`. A server-side
+      clear does not touch flash, so the bridge still believes it is paired after a reboot.
+    - `updateRegistryHeartbeat()` (`:1122`, called from the loop at `:266`) sends an
+      `updateMask` that **explicitly includes `pairedUid`** (`:1137`) and writes
+      `pairedUid = isPaired ? pairedUserId : ""` (`:1142`). It runs on
+      `REGISTRY_HEARTBEAT_INTERVAL_MS` **whether paired or not** — the comment at `:260-262`
+      says so deliberately, so unclaimed bridges still show `lastSeen` ticking.
+    - There is no re-read path. The pairing poll is gated `if (!isPaired && …)` at **`:243`**
+      (the Phase 1 report cited `:245`; the gate is at `:243`), so **a paired bridge never
+      polls `pendingUid`** and can never learn it was released.
+  - Net effect: the server clear survives at most one heartbeat interval, then the bridge
+    re-asserts the deleted user's uid onto a registry doc whose owner no longer exists.
+  - **FIX (firmware-side, this cannot be fixed from the server):** give the bridge a release
+    path. Either (a) let a paired bridge poll a `release`/`unpair` sentinel on the registry doc
+    and clear its own NVS on seeing it, or (b) have the heartbeat treat a server-cleared
+    `pairedUid` as an unpair command rather than a value to overwrite. (a) is safer — (b) makes
+    every transient read failure a potential accidental unpair.
+  - **Until then the documented remedy is physical**, and both dealer guides now say so:
+    `POST http://<bridge-ip>/api/reset` (handler registered at `:371`), then re-pair from the
+    new owner's app; reset the controller before re-deploying it. Recorded in
+    `docs/Dealer_Installer_Setup_Guide.md` §8 and `docs/full-job-lifecycle.md` §5.
+
+- [ ] **P2-58 — Estimate template says "Lifetime"; must read 5-year product / 1-year labor minimum**
+  - Status: OPEN · Evidence: source-proven + verified-by-data (2026-08-27)
+  - Agreed terms: **product warranty 5 years**; **labor warranty 1 year minimum** (dealer may
+    extend); **expected service life rated 50,000 hours** — 20+ years at typical evening use,
+    which is what "lifetime" lighting means. **"Lifetime warranty" must never be said.**
+  - **(2a) The offending string — exactly one, and it does carry the word "warranty":**
+    `lib/features/sales/screens/estimate_preview_screen.dart:450` —
+    `'Lifetime dealer support and warranty'`, the 4th entry of the `const items` list inside
+    `_buildIncludedSection()`. A repo-wide grep for `lifetime` across `lib/` returns no other
+    customer-facing occurrence; every other hit is a code comment about object/process
+    lifetimes. Note the customer's **take-away PDF is not affected** —
+    `lib/features/sales/services/pdf_service.dart` contains no warranty or "lifetime" text at
+    all, so the bad wording exists only on the on-screen preview the rep presents.
+  - **(2b) Where the 5-year value is written, and the missing labor field:**
+    - Written at `lib/features/installer/installer_setup_wizard.dart:1387` —
+      `warrantyExpires: DateTime.now().add(const Duration(days: 365 * 5))`.
+    - Field is `InstallationModel.warrantyExpires` (`lib/models/installation_model.dart:31`),
+      serialized as `warranty_expires` (`:127`), with `isWarrantyValid` (`:113`) and
+      `warrantyDaysRemaining` (`:116`) derived from it.
+    - **There is no labor-warranty field anywhere.** A grep for `labor.*warrant` /
+      `laborWarranty` / `labor_warranty` across `lib/` and `functions/` returns nothing, and
+      `warrantyExpires` is the only warranty field on the model. **One is needed:**
+      dealer-set, **minimum 1** year, stored alongside `warranty_expires` — the product term
+      is a Nex-Gen constant but the labor term is per-dealer and cannot be derived from it.
+      Until it exists, dealers must track labor coverage in their own paperwork; the dealer
+      guide §11 now says so explicitly.
+  - **(2c) Historical exposure — none.** Read-only census against production Firestore
+    (`icrt6menwsv2d8all8oijs021b06s5`, admin SDK via ADC, 2026-08-27): scanned for any
+    signed-or-beyond `sales_jobs` document whose stored text or estimate line items contain
+    "lifetime" (case-insensitive, recursive over all fields).
+    **Result: 0 — and 0 documents scanned, because the `sales_jobs` collection does not exist
+    in production.** A `listCollections()` enumeration returned 23 top-level collections
+    (`users` 30, `staff_auth_log` 763, `installations` 16, …) and `sales_jobs` was not among
+    them, so the credential and read path are proven working and the collection is genuinely
+    absent. **No document ids to report; no data migration is required** — this is a
+    string-only fix. Sales Mode has never been used against production.
+  - **FIX:** replace the `:450` string with the agreed three-part wording (or split it into
+    separate product / labor / service-life lines), and add the dealer-set labor-warranty
+    field from 2b. Docs are already corrected ahead of the code:
+    `docs/sales-mode-guide.md` §5 + troubleshooting and
+    `docs/Dealer_Installer_Setup_Guide.md` §7 Step 8 + §11 now carry the agreed terms and
+    instruct reps to read them aloud instead of the on-screen line.
+
 ---
 
 ## P3 — debt (no launch relevance)
