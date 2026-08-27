@@ -447,7 +447,9 @@ class _EstimatePreviewScreenState extends ConsumerState<EstimatePreviewScreen> {
       'Professional 2-day installation',
       'Nex-Gen Lumina app — full color control, scheduling, scenes',
       'Permanent weatherproof hardware — no seasonal removal',
-      'Lifetime dealer support and warranty',
+      '5-year product warranty; 1-year labor minimum',
+      'Rated 50,000-hour service life — 20+ years at typical evening use',
+      'Ongoing dealer support',
     ];
 
     return Padding(
