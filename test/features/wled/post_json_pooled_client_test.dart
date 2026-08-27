@@ -44,6 +44,54 @@ Map<String, dynamic> _payload({int fx = 0}) => {
       ],
     };
 
+/// The probe request path. The stub server ignores it so it never lands in the
+/// recorded request lists and skews an assertion.
+const String _kProbePath = '/__loopback_probe';
+
+/// Finds a host this environment can ACTUALLY reach that WledService will not
+/// treat as a simulation host. Returns null when there is none.
+///
+/// WHY THIS IS DISCOVERED RATHER THAN HARDCODED. These tests originally used a
+/// literal `127.0.0.2`, which works on Windows and Linux (the whole 127/8 is
+/// loopback there) but NOT on macOS, where lo0 is assigned only 127.0.0.1 and
+/// anything else in 127/8 is refused unless explicitly aliased. Codemagic's
+/// ios-workflow runs on mac_mini_m2, so the literal passed locally and could
+/// not connect in CI -- a local-passes-CI-fails gap in the test, not the code.
+///
+/// `127.0.0.1` / `localhost` are NOT candidates: WledService short-circuits
+/// them as simulation hosts (wled_service.dart:325) and returns success with
+/// no HTTP at all, which would make every assertion here vacuously pass.
+Future<String?> _reachableNonSimHost(int port) async {
+  final candidates = <String>['127.0.0.2'];
+  try {
+    for (final ni in await NetworkInterface.list(
+        type: InternetAddressType.IPv4, includeLoopback: false)) {
+      for (final a in ni.addresses) {
+        if (!a.isLoopback) candidates.add(a.address);
+      }
+    }
+  } catch (_) {
+    // Interface enumeration can be denied in a sandbox; fall through with the
+    // literal candidate only.
+  }
+
+  for (final host in candidates) {
+    HttpClient? client;
+    try {
+      client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      final req = await client.getUrl(Uri.parse('http://$host:$port$_kProbePath'));
+      final res = await req.close().timeout(const Duration(seconds: 3));
+      await res.drain<void>();
+      return host;
+    } catch (_) {
+      // Not reachable here -- try the next candidate.
+    } finally {
+      client?.close(force: true);
+    }
+  }
+  return null;
+}
+
 void main() {
   // applyJson reads the participation cache (SharedPreferences) before it
   // posts, so the binding and a mock store are required to reach _postJson.
@@ -52,20 +100,28 @@ void main() {
   late HttpServer server;
   late List<HttpHeaders> seen;
   late List<String> bodies;
-  late String base;
+  String? base;  // null when no usable host exists in this environment
 
   Future<void> startServer({int status = 200}) async {
     seen = [];
     bodies = [];
     server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
-    base = 'http://127.0.0.2:${server.port}';
     server.listen((req) async {
+      if (req.uri.path == _kProbePath) {
+        req.response.statusCode = 200;
+        await req.response.close();
+        return;
+      }
       seen.add(req.headers);
       bodies.add(await utf8.decoder.bind(req).join());
       req.response.statusCode = status;
       req.response.write('{"success":true}');
       await req.response.close();
     });
+
+    // Discover, do not assume. See _reachableNonSimHost.
+    final host = await _reachableNonSimHost(server.port);
+    base = host == null ? null : 'http://$host:${server.port}';
   }
 
   setUp(() async {
@@ -79,6 +135,18 @@ void main() {
     await startServer();
   });
 
+  /// Skips CLEANLY (recorded as a skip with a reason, never a silent pass) when
+  /// this environment offers no reachable non-simulation address.
+  bool skipIfNoHost() {
+    if (base != null) return false;
+    markTestSkipped(
+        'no reachable non-simulation loopback address in this environment. '
+        'macOS assigns only 127.0.0.1 to lo0, and WledService treats '
+        '127.0.0.1/localhost/mock as simulation hosts, so there is no address '
+        'that both routes and exercises real HTTP here.');
+    return true;
+  }
+
   tearDown(() async {
     await server.close(force: true);
     resetWledHttpClientsForTest();
@@ -86,7 +154,8 @@ void main() {
 
   group('Part C — the apply POST on the wire', () {
     test('sets an explicit Content-Length matching the body', () async {
-      final svc = WledService(base);
+      if (skipIfNoHost()) return;
+      final svc = WledService(base!);
       final ok = await svc.applyJson(_payload());
 
       expect(ok, isTrue, reason: 'the stub server answers 200');
@@ -98,9 +167,10 @@ void main() {
     });
 
     test('is NOT chunked — settles U2 by measurement', () async {
+      if (skipIfNoHost()) return;
       // WLED 0.15.x silently drops chunked POSTs to /json/state: 200 OK,
       // nothing applied. This is what the sibling migrations guarantee.
-      final svc = WledService(base);
+      final svc = WledService(base!);
       await svc.applyJson(_payload());
 
       final te = seen.single.value(HttpHeaders.transferEncodingHeader);
@@ -110,6 +180,7 @@ void main() {
 
     test('a LARGE payload is still unchunked — the size case that matters',
         () async {
+      if (skipIfNoHost()) return;
       // The wedge symptom was size-dependent, so the small-body case alone
       // would not be reassuring.
       //
@@ -139,7 +210,7 @@ void main() {
       expect(jsonEncode(nearCap).length, lessThan(kMaxApplyPayloadBytes),
           reason: 'and still inside what Part D allows through applyJson');
 
-      final svc = WledService(base);
+      final svc = WledService(base!);
       await svc.applyJson(nearCap);
 
       expect(seen, hasLength(1));
@@ -150,6 +221,7 @@ void main() {
     });
 
     test('a >6KB body on the provisioning path is unchunked too', () async {
+      if (skipIfNoHost()) return;
       // applyGeometryJson is the one /json/state caller Part D exempts, so it
       // is where the genuinely-large-body behaviour still has to hold.
       final big = <String, dynamic>{
@@ -167,7 +239,7 @@ void main() {
         ],
       };
 
-      final svc = WledService(base);
+      final svc = WledService(base!);
       await svc.applyGeometryJson(big);
 
       expect(bodies.single.length, greaterThan(6000),
@@ -180,9 +252,10 @@ void main() {
 
     test('uses the POOLED client — http.post would leave the pool empty',
         () async {
+      if (skipIfNoHost()) return;
       expect(wledHttpClientCacheSize(), 0, reason: 'baseline: pool empty');
 
-      final svc = WledService(base);
+      final svc = WledService(base!);
       await svc.applyJson(_payload());
 
       expect(wledHttpClientCacheSize(), 1,
@@ -192,7 +265,8 @@ void main() {
 
     test('repeated applies REUSE the one client rather than stacking',
         () async {
-      final svc = WledService(base);
+      if (skipIfNoHost()) return;
+      final svc = WledService(base!);
       await svc.applyJson(_payload());
       await svc.applyJson(_payload(fx: 1));
       await svc.applyJson(_payload(fx: 2));
@@ -204,13 +278,14 @@ void main() {
 
     test('behaviour unchanged: exactly ONE attempt, no retry on failure',
         () async {
+      if (skipIfNoHost()) return;
       // The wedge audit (§3) found the single-shot, no-backoff behaviour
       // gap-free and explicitly in scope to PRESERVE. A 500 must produce one
       // request and one `false`, never a retry.
       await server.close(force: true);
       await startServer(status: 500);
 
-      final svc = WledService(base);
+      final svc = WledService(base!);
       final ok = await svc.applyJson(_payload());
 
       expect(ok, isFalse, reason: 'a 500 is a failed write');
