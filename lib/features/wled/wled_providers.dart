@@ -62,6 +62,36 @@ final wledConnectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) 
   return connectivityService.watchConnectivity(homeSsidHash);
 });
 
+/// #91 — is the app on the venue/home LAN right now?
+///
+/// The single question every LAN-ONLY surface must ask before enabling itself.
+/// Three capabilities genuinely cannot cross the relay and must be DISABLED
+/// rather than hidden:
+///   • hardware config editing — `/json/cfg`; `CloudRelayRepository.applyConfig`
+///     raises `CfgWriteUnsupportedException`,
+///   • channel direction — `applyGeometryJson` throws `UnsupportedError`,
+///   • boundary / geometry edits — same provisioning door.
+///
+/// Hiding them was the old behaviour by accident (no channels ⇒ no controls),
+/// and it taught the user that their channels had vanished. Showing a disabled
+/// control with a reason is the honest version.
+///
+/// Defaults to `true` while the stream is loading so a transient gap never
+/// flashes a working control into a disabled one; the stream settles in
+/// milliseconds and a genuinely remote session then disables correctly.
+final isLanConnectedProvider = Provider<bool>((ref) {
+  final status = ref.watch(wledConnectivityStatusProvider).maybeWhen(
+        data: (s) => s,
+        orElse: () => ConnectivityStatus.local,
+      );
+  return status == ConnectivityStatus.local;
+});
+
+/// User-facing reason a LAN-only control is disabled. One string, one place —
+/// so the three surfaces cannot drift into three different explanations.
+const String kLanOnlyMessage =
+    'Connect to venue Wi-Fi to change hardware settings';
+
 /// Last-known connectivity status. Updated whenever the stream emits.
 /// Used as fallback during stream rebuilds so the repository provider
 /// never sees null during the async loading gap.
@@ -1181,7 +1211,17 @@ class WledNotifier extends Notifier<WledStateModel> {
     //
     //    Cached list captured first so the enumeration still has ids if the
     //    refresh fails.
-    final cachedChannels = ref.read(deviceChannelsProvider);
+    //
+    //    #91: that fallback is `displayChannelsProvider`, not
+    //    `deviceChannelsProvider`. OFF-LAN the refresh below ALWAYS resolves to
+    //    null (`CloudRelayRepository.getConfig()` is a stub) AND the cached list
+    //    is empty for the same reason — so case 3 collapsed to the target
+    //    channel alone and turning one channel on lit the whole house, exactly
+    //    the failure the integration test caught on LAN. Display provenance is
+    //    sound HERE, and only here, because the census contributes ids and
+    //    nothing else: `buildChannelPowerPayload` emits `{id, on}` per channel
+    //    and has emitted no bounds since #95.
+    final cachedChannels = ref.read(displayChannelsProvider).channels;
     List<DeviceChannel> channels;
     try {
       ref.invalidate(deviceHardwareConfigProvider);

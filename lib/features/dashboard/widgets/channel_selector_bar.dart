@@ -34,7 +34,13 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
   @override
   Widget build(BuildContext context) {
-    final channels = ref.watch(deviceChannelsProvider);
+    // #91 — DISPLAY source, not device truth. Off-LAN `deviceChannelsProvider`
+    // is empty (the relay has no `/json/cfg` door), which used to blank this bar
+    // entirely even though every per-channel command it fires relays fine.
+    // `displayChannelsProvider` falls back to the pixel map / denormalized ids /
+    // live seg[] and tags which one it used.
+    final display = ref.watch(displayChannelsProvider);
+    final channels = display.channels;
 
     // Don't render anything if we have 0 or 1 channel (no filtering needed).
     if (channels.length <= 1) return const SizedBox.shrink();
@@ -85,8 +91,8 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildHeader(
-                  context, channels, selectedIds, hasZoneNames, participatingSet),
+              _buildHeader(context, channels, selectedIds, hasZoneNames,
+                  participatingSet, display.source),
               if (_expanded)
                 _buildChannelChips(context, channels, selectedIds, zoneLabels, hasZoneNames, participatingSet),
             ],
@@ -102,6 +108,7 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     Set<int>? selectedIds,
     bool hasZoneNames,
     Set<int>? participatingSet,
+    DisplayChannelSource source,
   ) {
     final isFiltered = selectedIds != null;
     final selectedCount = isFiltered ? selectedIds.length : channels.length;
@@ -149,6 +156,33 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                     ),
               ),
             ),
+            // #91 — provenance badge. The chips are fully interactive from a
+            // cached list (per-channel writes carry `id` + intent only, never
+            // bounds, so they are correct regardless of where the list came
+            // from), but the user is told the SHAPE is remembered rather than
+            // measured — which is what makes a wrong channel count explicable
+            // instead of alarming.
+            if (source != DisplayChannelSource.live)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'CACHED',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white.withValues(alpha: 0.55),
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+              ),
             if (isFiltered)
               Padding(
                 padding: const EdgeInsets.only(right: 8),

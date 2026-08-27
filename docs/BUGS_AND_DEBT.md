@@ -3304,6 +3304,49 @@ schedule stack still leads because it gates "sell with certainty."
 > Also folded: ex-#74 (Bug B `e556251` formal verify) → subsumed by **P1-24**. ex-#TD-2 →
 > **P2-17**. ex-#TD-3 → **P2-16**.
 
+- [ ] **P2-62 — Bridge firmware's scalar-by-scalar payload converter silently drops `seg[]`**
+  - Status: OPEN · Evidence: source-proven (2026-08-27, #91 remote-channels audit) · Risk: LATENT
+  - `convertFirestorePayloadToJson` (`esp32-bridge/src/main.cpp`) has two paths. The first,
+    `fields["payload"]["stringValue"]`, returns the JSON **string verbatim** — nesting intact.
+    The second walks the Firestore `mapValue` field-by-field and handles **only** top-level
+    `booleanValue` / `integerValue` / `doubleValue` / `stringValue`. Anything nested — `seg[]`,
+    `col[[…]]`, `i[]` — is **dropped without an error**: the bridge POSTs a truncated body,
+    WLED returns 200, and the command is marked `completed`.
+  - **Why it is latent, not live:** `RemoteCommand.toFirestore` writes
+    `'payload': jsonEncode(payload)` (`lib/models/remote_command.dart:97`), so every command this
+    app sends takes the string path and the map branch is dead code. Per-channel writes therefore
+    relay correctly today — which #91 depends on.
+  - **What would arm it:** any change that stores `payload` as a Firestore map instead of a JSON
+    string — a "cleaner schema" refactor, a server-side command writer, or a second client. The
+    failure mode is the worst kind: a *silent partial apply* reported as success. Per-channel
+    power, channel filtering, and every design apply would degrade to whole-controller writes.
+  - **Fix options:** make the map branch recurse over `arrayValue`/`mapValue`, or delete it
+    outright and hard-fail on a non-string payload so the boundary is loud. Deleting is preferred —
+    a converter nobody exercises is a trap, not a fallback.
+  - Related: `#91` (`displayChannelsProvider`), `project_bug84_native_arrays_of_arrays`.
+
+- [ ] **P2-63 — Provenance-tag `deviceChannelsProvider` for the healer / facts publisher**
+  - Status: OPEN · Evidence: source-proven (2026-08-27, #91) · Risk: DESIGN GAP, not a live bug
+  - #91 added `displayChannelsProvider` (`lib/features/wled/zone_providers.dart`) with a
+    `DisplayChannelSource` tag, and deliberately left `deviceChannelsProvider` and its ~20
+    consumers untouched — the display list may be a cache, and a cache must never be mistaken for
+    device truth. That separation is currently held by **convention and by three switched
+    consumers**, not by the type system.
+  - **The hazard the tag exists to prevent:** if a later change points the healer
+    (`controller_defaults_healer.dart`), the facts publisher (`controller_facts_publisher.dart` →
+    `participating_channels_device_ids`), or `pixelMapStalenessProvider` at the display list, the
+    app would **publish cache-derived data back to Firestore as measured device truth** — and
+    `pixelMapStalenessProvider` would compare a cache against itself and report all-clear forever.
+    Both failures are silent and self-reinforcing: the bad value becomes next session's input.
+  - **Proposed work:** give `DeviceChannel` (or its provider) an explicit provenance field, make
+    the device-truth consumers assert `live`, and pin the assertion in a test. Then the boundary is
+    enforced rather than remembered.
+  - **Why it was not done in #91:** it touches every `deviceChannelsProvider` reader, which is
+    exactly the blast radius a hotfix must not have. Sequence it as its own change with the reader
+    census done first (`#88`'s lesson: a sweep must be a grep of the field names, not a walk of the
+    consumers you already know about).
+  - Related: `#91`, `project_healer_publish_device_facts`, `#95`, `#89`, `#88`.
+
 ---
 
 ## Historical context (from BUG_BACKLOG.md — reference only, not tracked)

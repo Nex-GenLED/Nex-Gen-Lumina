@@ -1,9 +1,14 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
+import 'package:nexgen_command/features/wled/participation_denormalizer.dart';
+import 'package:nexgen_command/models/pixel_map_channel.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 // DeviceChannel + deviceChannelsFromConfig moved to a pure-Dart file (bench/ CLI
@@ -65,6 +70,128 @@ final selectedSegmentsProvider = StateProvider<Set<int>>((ref) => <int>{});
 final deviceChannelsProvider = Provider<List<DeviceChannel>>((ref) {
   final hwConfig = ref.watch(deviceHardwareConfigProvider).valueOrNull;
   return deviceChannelsFromConfig(hwConfig);
+});
+
+// ---------------------------------------------------------------------------
+// DISPLAY channel list (#91) — what to DRAW when the cfg read is unavailable
+// ---------------------------------------------------------------------------
+
+/// Tier 3 source: the channel-id list the facts publisher denormalized onto
+/// `users/{uid}/controllers/{controllerId}.participating_channels_device_ids`
+/// during a LAN session.
+///
+/// A plain `get()`, not a stream — the shape of a controller does not change
+/// while the user is off-site, and a listener would hold a Firestore watch open
+/// for a value that is written at most once per app session. Returns `[]` on
+/// any failure, including a rules denial: this is a display fallback and must
+/// never surface an error where a channel list belongs.
+///
+/// Kept public so tests can override it; not intended for direct use — read
+/// [displayChannelsProvider], which applies the precedence.
+final cachedChannelIdsProvider = FutureProvider<List<int>>((ref) async {
+  final uid = ref.watch(effectiveUserUidProvider);
+  final controllerId = ref.watch(activePixelMapControllerIdProvider);
+  if (uid == null || uid.isEmpty) return const <int>[];
+  if (controllerId == null || controllerId.isEmpty) return const <int>[];
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('controllers')
+        .doc(controllerId)
+        .get();
+    final raw = snap.data()?[kParticipatingChannelsDeviceIdsField];
+    if (raw is! List) return const <int>[];
+    return raw.whereType<num>().map((n) => n.toInt()).toList();
+  } catch (e) {
+    debugPrint('cachedChannelIdsProvider: controller-doc read failed — $e');
+    return const <int>[];
+  }
+});
+
+/// Tier 4 source: channels inferred from the live `/json/state` `seg[]`.
+///
+/// Works off-LAN with no prior LAN session because the bridge relays `getState`
+/// and returns the response body verbatim. This is the last resort precisely
+/// because segment layout is mutable — see [deviceChannelsFromSegments] on the
+/// reboot-collapse case.
+///
+/// Kept public so tests can override it; read [displayChannelsProvider].
+final segmentDerivedChannelsProvider =
+    FutureProvider<List<DeviceChannel>>((ref) async {
+  final repo = ref.watch(wledRepositoryProvider);
+  if (repo == null) return const <DeviceChannel>[];
+  try {
+    final live = await repo.getState();
+    if (live == null) return const <DeviceChannel>[];
+    return deviceChannelsFromSegments(live['seg']);
+  } catch (e) {
+    debugPrint('segmentDerivedChannelsProvider: getState failed — $e');
+    return const <DeviceChannel>[];
+  }
+});
+
+/// DISPLAY-ONLY channel list with provenance. **Never** a substitute for
+/// [deviceChannelsProvider] on a path that touches hardware or publishes facts.
+///
+/// WHY THIS EXISTS. [deviceChannelsProvider] derives from `/json/cfg
+/// hw.led.ins[]`, and `CloudRelayRepository.getConfig()` returns null
+/// unconditionally — the bridge firmware has no cfg dispatch branch. Off-LAN
+/// the bus list is therefore null, `deviceChannelsFromConfig` returns `[]`, and
+/// the dashboard renders no channels at all while `applyJson` (colour,
+/// patterns, whole-controller power) relays perfectly. The channels were never
+/// unreachable; the app just could not draw them.
+///
+/// PRECEDENCE, best-known first. Each tier is consulted only when the ones
+/// above it are empty, and the lower tiers are not even `watch`ed on the LAN
+/// path — so a healthy local session performs no extra Firestore read and no
+/// extra `getState`:
+///   1. [DisplayChannelSource.live] — [deviceChannelsProvider] (`/json/cfg`).
+///   2. [DisplayChannelSource.pixelMap] — `pixelMap/{n}` docs. Preferred over
+///      the tiers below because it carries per-channel lengths AND survives a
+///      segment collapse.
+///   3. [DisplayChannelSource.participation] — the denormalized id list.
+///   4. [DisplayChannelSource.segments] — live `seg[]`, the only tier that
+///      needs no prior LAN session.
+///
+/// Synchronous by construction: every tier is read through `valueOrNull`, so
+/// there is no loading state to flash and the list silently UPGRADES as better
+/// sources resolve. A tier that is still in flight simply does not win yet.
+final displayChannelsProvider = Provider<DisplayChannels>((ref) {
+  // 1. Device truth. Return immediately — the early return is also what keeps
+  //    tiers 2-4 uninstantiated on LAN.
+  final live = ref.watch(deviceChannelsProvider);
+  if (live.isNotEmpty) {
+    return DisplayChannels(live, DisplayChannelSource.live);
+  }
+
+  // 2. Per-channel pixel map.
+  final pixelMap = ref.watch(currentPixelMapChannelsProvider).valueOrNull ??
+      const <PixelMapChannel>[];
+  if (pixelMap.isNotEmpty) {
+    final built = deviceChannelsFromPixelCounts({
+      for (final c in pixelMap) c.channelIndex: c.sourcePixelCount,
+    });
+    if (built.isNotEmpty) {
+      return DisplayChannels(built, DisplayChannelSource.pixelMap);
+    }
+  }
+
+  // 3. Denormalized channel ids from the last LAN session.
+  final ids = ref.watch(cachedChannelIdsProvider).valueOrNull ?? const <int>[];
+  if (ids.isNotEmpty) {
+    return DisplayChannels(
+        deviceChannelsFromIds(ids), DisplayChannelSource.participation);
+  }
+
+  // 4. Live segment layout, relayed through the bridge.
+  final segs = ref.watch(segmentDerivedChannelsProvider).valueOrNull ??
+      const <DeviceChannel>[];
+  if (segs.isNotEmpty) {
+    return DisplayChannels(segs, DisplayChannelSource.segments);
+  }
+
+  return DisplayChannels.empty;
 });
 
 /// Live per-channel power state (P1-43 UI): channel (bus) id → whether that
