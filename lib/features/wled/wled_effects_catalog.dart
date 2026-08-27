@@ -939,15 +939,48 @@ class WledEffectsCatalog {
       effect.category == 'Strobe' ||
       getMotionType(effect.category) == MotionType.pulse;
 
-  /// The celebration-effect picker's list: effects designed to stand out
-  /// against whatever the base design is doing. Excludes 2D and audio-reactive
-  /// effects, which [standardEffects] already filters out — a celebration must
-  /// fire on any install, with no matrix and no microphone.
-  static List<WledEffect> get celebrationPicks {
-    final effects = standardEffects.where(isCelebrationEffect).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
-    return effects;
-  }
+  /// The celebration-effect picker's list: a FIXED, curated set chosen by
+  /// hand rather than derived from [isCelebrationEffect].
+  ///
+  /// The derived set (Strobe category union MotionType.pulse) ran to 31
+  /// entries and swept in effects that read as ambience on a roofline. This
+  /// list is the deliberate subset, in deliberate order: the three headline
+  /// looks first, then the chase family, the ball physics, the strobes, and
+  /// the fireworks. Order is presentation order in the picker — do not sort.
+  ///
+  /// Every id here is a 1D, non-audio effect present on the pinned firmware
+  /// (WLED 0.15.1); `celebration_picker_test.dart` asserts that against
+  /// [standardEffects] so a catalog edit cannot silently strand an entry.
+  ///
+  /// [isCelebrationEffect] is deliberately NOT applied to this list — it
+  /// remains the predicate behind the runtime contrast check
+  /// ([effectsTooSimilar]), which answers a different question ("would these
+  /// two read as the same thing?") from "should we offer this?".
+  static const List<int> celebrationPickIds = [
+    28,  // Chase
+    76,  // Meteor
+    113, // Washing Machine
+    27,  // Android
+    91,  // Bouncing Balls
+    37,  // Chase 2
+    54,  // Chase 3
+    32,  // Chase Flash Rnd
+    29,  // Chase Random
+    64,  // Juggle
+    48,  // Rolling Balls
+    57,  // Lightning
+    23,  // Strobe
+    25,  // Strobe Mega
+    42,  // Fireworks
+    90,  // Fireworks 1D
+    89,  // Fireworks Starburst
+  ];
+
+  /// [celebrationPickIds] resolved against the catalog, in list order.
+  static List<WledEffect> get celebrationPicks => celebrationPickIds
+      .map((id) => _effectsById[id])
+      .whereType<WledEffect>()
+      .toList();
 
   /// True when two effects would read as the same thing on the roofline.
   ///

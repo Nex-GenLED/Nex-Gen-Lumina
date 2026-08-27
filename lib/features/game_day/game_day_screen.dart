@@ -744,6 +744,12 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       builder: (_) => ColorwayEffectSelectorPage(
         paletteNode: node,
         celebrationMode: true,
+        // Reopen on the stored choice rather than effect 0 (Solid), which is
+        // not in the curated list and left the picker showing nothing
+        // selected plus a stray "Static" speed hint.
+        initialEffectId: config.celebrationEffectId,
+        initialSpeed: config.celebrationSpeed,
+        initialIntensity: config.celebrationIntensity,
         onDesignSelected: (selection) async {
           final picked = _celebrationFromPayload(selection.wledPayload);
           navigator.pop();
