@@ -109,6 +109,17 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   /// rather than persisting a base design.
   final bool celebrationMode;
 
+  /// CELEBRATION MODE only. Seeds the picker with the choice already stored on
+  /// the team's config, so reopening it lands on the current celebration
+  /// instead of effect 0 (Solid) — which is not in the curated list, showed a
+  /// stray "Static" speed hint, and left nothing selected.
+  ///
+  /// Null (the default) falls back to the first curated pick. Ignored outside
+  /// celebration mode, so the other three modes seed exactly as before.
+  final int? initialEffectId;
+  final int? initialSpeed;
+  final int? initialIntensity;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
@@ -116,6 +127,9 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
     this.onDesignSelected,
     this.editingDesign,
     this.celebrationMode = false,
+    this.initialEffectId,
+    this.initialSpeed,
+    this.initialIntensity,
   });
 
   /// Opens the tuner on a stored effect design.
@@ -269,9 +283,17 @@ class _ColorwayEffectSelectorPageState
         _seedFromDesign(widget.editingDesign!);
         return;
       }
-      ref.read(selectorEffectIdProvider.notifier).state = 0;
-      ref.read(selectorSpeedProvider.notifier).state = getSpeedProfile(0).rawDefault;
-      ref.read(selectorIntensityProvider.notifier).state = 128;
+      // CELEBRATION seeds from the stored choice (or the first curated pick);
+      // every other mode keeps the historical effect-0 seed byte-for-byte.
+      final seedFx = widget.celebrationMode
+          ? _celebrationSeedEffectId()
+          : 0;
+      ref.read(selectorEffectIdProvider.notifier).state = seedFx;
+      ref.read(selectorSpeedProvider.notifier).state = widget.celebrationMode
+          ? (widget.initialSpeed ?? getSpeedProfile(seedFx).rawDefault)
+          : getSpeedProfile(0).rawDefault;
+      ref.read(selectorIntensityProvider.notifier).state =
+          widget.celebrationMode ? (widget.initialIntensity ?? 128) : 128;
       ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
       ref.read(selectorSpacingProvider.notifier).state = initSpacing;
       ref.read(selectorGradientPresetProvider.notifier).state = initPreset;
@@ -838,18 +860,22 @@ class _ColorwayEffectSelectorPageState
     final showColorLayout = !_isBrightnessGradient &&
         ((effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors));
 
+    // CELEBRATION MODE takes its own, much smaller render path — see
+    // [_buildCelebrationBody]. Returning here rather than threading more
+    // `if (celebrationMode)` branches through the sliver list below is what
+    // keeps the other three modes' render path literally unchanged.
+    if (widget.celebrationMode) {
+      return _buildCelebrationBody(effectId, speed, intensity);
+    }
+
     // Build filtered effect list (only used for non-gradient patterns)
-    final bool showingTopPicks = !widget.celebrationMode &&
-        motionFilter == null &&
-        colorFilter == null;
-    final List<WledEffect> displayEffects = widget.celebrationMode
-        ? WledEffectsCatalog.celebrationPicks
-        : (showingTopPicks
-            ? WledEffectsCatalog.topPicks
-            : WledEffectsCatalog.filterEffects(
-                motionType: motionFilter,
-                colorBehavior: colorFilter,
-              ));
+    final bool showingTopPicks = motionFilter == null && colorFilter == null;
+    final List<WledEffect> displayEffects = showingTopPicks
+        ? WledEffectsCatalog.topPicks
+        : WledEffectsCatalog.filterEffects(
+            motionType: motionFilter,
+            colorBehavior: colorFilter,
+          );
 
     return CustomScrollView(
       slivers: [
@@ -935,11 +961,9 @@ class _ColorwayEffectSelectorPageState
                       size: 18),
                   label: Text(widget.isDesignEdit
                       ? 'Save to design'
-                      : widget.celebrationMode
-                          ? 'Set celebration'
-                          : widget.onDesignSelected != null
-                              ? 'Set design'
-                              : 'Apply'),
+                      : widget.onDesignSelected != null
+                          ? 'Set design'
+                          : 'Apply'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: NexGenPalette.cyan,
                     foregroundColor: NexGenPalette.matteBlack,
@@ -1017,16 +1041,12 @@ class _ColorwayEffectSelectorPageState
 
           const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-          // Motion / colour filter chips. Hidden in celebration mode: the
-          // list is already the one filter that matters there, and offering
-          // "Ambient" or "Rainbow" chips would only let the user filter their
-          // way out of the attention-grabbing set.
-          if (!widget.celebrationMode) ...[
-            SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
-            const SliverToBoxAdapter(child: SizedBox(height: 6)),
-            SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
-            const SliverToBoxAdapter(child: SizedBox(height: 8)),
-          ],
+          // Motion / colour filter chips. Celebration mode never reaches
+          // here — it returns its own body above, with no filters at all.
+          SliverToBoxAdapter(child: _buildMotionFilterRow(motionFilter)),
+          const SliverToBoxAdapter(child: SizedBox(height: 6)),
+          SliverToBoxAdapter(child: _buildColorFilterRow(colorFilter)),
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
           // Section header
           SliverToBoxAdapter(
@@ -1270,6 +1290,168 @@ class _ColorwayEffectSelectorPageState
   // ---------------------------------------------------------------------------
   // Roofline Preview
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Celebration mode
+  // ---------------------------------------------------------------------------
+
+  /// The effect the celebration picker should open on.
+  ///
+  /// Prefers the team's stored choice, but only when it is actually in the
+  /// curated list — a config written before this list was curated can hold an
+  /// id that is no longer offered, and selecting nothing is worse than
+  /// selecting the first pick.
+  int _celebrationSeedEffectId() {
+    final stored = widget.initialEffectId;
+    if (stored != null &&
+        WledEffectsCatalog.celebrationPickIds.contains(stored)) {
+      return stored;
+    }
+    return WledEffectsCatalog.celebrationPickIds.first;
+  }
+
+  /// CELEBRATION MODE's whole layout: the curated effect list, the two knobs
+  /// that actually reach the fired celebration (`sx` / `ix`), and one commit.
+  ///
+  /// Deliberately NOT here, and why:
+  ///   • the LEDs-per-color selector — `grp`/`spc` are base-design geometry;
+  ///     a celebration overlays whatever the house is already showing.
+  ///   • the roofline preview strip — it renders the BASE design's colours at
+  ///     140px and was overflowing its right edge; the per-tile mini previews
+  ///     already show what each effect does.
+  ///   • the motion / colour filter chips and the "N EFFECTS / Clear filters"
+  ///     row — there is one fixed list, so there is nothing to filter.
+  ///
+  /// [Material] and [SafeArea] are supplied HERE rather than by the caller
+  /// because celebration is the only mode pushed as a bare route body; the
+  /// other three render inside a Scaffold that already provides both. Without
+  /// the Material ancestor every Text falls back to Flutter's un-styled
+  /// default (the yellow double-underline); without the SafeArea the header
+  /// sits under the status bar.
+  Widget _buildCelebrationBody(int effectId, int speed, int intensity) {
+    final picks = WledEffectsCatalog.celebrationPicks;
+    return Material(
+      color: NexGenPalette.matteBlack,
+      child: SafeArea(
+        bottom: false,
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: _buildCelebrationHeader()),
+            const SliverToBoxAdapter(child: SizedBox(height: 4)),
+
+            // Speed — drives `sx` on the fired celebration.
+            SliverToBoxAdapter(
+              child: EffectSpeedSlider(
+                key: const ValueKey('celebration-speed'),
+                rawSpeed: speed,
+                effectId: effectId,
+                onChanged: (raw) {
+                  ref.read(selectorSpeedProvider.notifier).state = raw;
+                  _sendToWled();
+                },
+              ),
+            ),
+
+            // Intensity — drives `ix`.
+            SliverToBoxAdapter(
+              child: _buildSlider(
+                label: 'Intensity',
+                value: intensity,
+                onChanged: (v) {
+                  ref.read(selectorIntensityProvider.notifier).state = v.round();
+                  _sendToWled();
+                },
+              ),
+            ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'CELEBRATION EFFECTS',
+                  style: TextStyle(
+                    color: NexGenPalette.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ),
+            ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 6)),
+
+            // The SAME tile the catalog list uses — see [_buildEffectTile].
+            SliverPadding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.paddingOf(context).bottom + 24,
+              ),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final effect = picks[index];
+                    return _buildEffectTile(effect, effect.id == effectId);
+                  },
+                  childCount: picks.length,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCelebrationHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
+      child: Row(
+        children: [
+          IconButton(
+            key: const ValueKey('celebration-back'),
+            onPressed: () => Navigator.of(context).maybePop(),
+            icon: const Icon(Icons.arrow_back, size: 22),
+            tooltip: 'Back',
+            style: IconButton.styleFrom(
+              foregroundColor: NexGenPalette.textHigh,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              widget.paletteNode.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: NexGenPalette.textHigh,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton.icon(
+            key: const ValueKey('celebration-save'),
+            onPressed: _applyPattern,
+            icon: const Icon(Icons.check, size: 18),
+            label: const Text('Set celebration'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: NexGenPalette.cyan,
+              foregroundColor: NexGenPalette.matteBlack,
+              minimumSize: const Size(0, 40),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              textStyle:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildRooflinePreview(int effectId, int speed) {
     final houseImageUrl = ref.watch(currentUserProfileProvider).maybeWhen(

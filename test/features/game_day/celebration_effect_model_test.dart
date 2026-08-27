@@ -153,12 +153,23 @@ void main() {
       expect(WledEffectsCatalog.celebrationPicks, isNotEmpty);
     });
 
-    test('every entry is a Strobe or a pulse-motion effect', () {
-      for (final e in WledEffectsCatalog.celebrationPicks) {
-        expect(WledEffectsCatalog.isCelebrationEffect(e), isTrue,
-            reason: '${e.name} (${e.category}) should not be offered');
-      }
-    });
+    // SUPERSEDED CONTRACT — deliberately no longer asserted here.
+    //
+    // This group used to assert every pick satisfied `isCelebrationEffect`,
+    // because the list WAS that predicate applied to the catalog. The list is
+    // now a hand-curated 17 (`WledEffectsCatalog.celebrationPickIds`) that
+    // deliberately includes chase- and game-motion effects the predicate
+    // rejects, so the assertion no longer describes the product.
+    //
+    // Nor can it be weakened to "no MotionType.solid entries": `Washing
+    // Machine` (id 113) is catalogued under category `Basic`, which maps to
+    // MotionType.solid, despite being a moving effect. The motion map is not a
+    // sound proxy for "is this a celebration" once the list is curated by hand.
+    //
+    // `isCelebrationEffect` is NOT dead — it remains the basis of the runtime
+    // contrast check (`effectsTooSimilar`), covered in
+    // celebration_contrast_test.dart. The exact list, by name and in order, is
+    // pinned in celebration_picker_test.dart.
 
     // The union really is a union: the Strobe CATEGORY maps to
     // MotionType.sweep, not pulse, so filtering on either alone loses half.
