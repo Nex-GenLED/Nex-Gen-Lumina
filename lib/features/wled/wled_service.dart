@@ -17,6 +17,158 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/models/controller_type.dart';
 
+/// Bytes WLED never legitimately writes into `presets.json` and which make a
+/// strict UTF-8 decode throw.
+///
+/// `0xFF` is LittleFS's ERASED-FLASH state. A `pdel` blanks a preset's region
+/// but can leave erased bytes inside the padding WLED keeps between entries, so
+/// the served file ends up with a raw `0xFF` sitting in a run of spaces.
+/// Observed on the bench controller 2026-08-27: seven such bytes, the first at
+/// offset 3868, in the gap between presets 3 and 4 (audit/SOLAR_BENCH_GATE.md).
+const int kPresetsNulByte = 0x00;
+const int kPresetsErasedFlashByte = 0xFF;
+
+/// What `allowMalformed: true` yields for a byte sequence it cannot decode.
+const int _kUnicodeReplacementRune = 0xFFFD;
+
+/// Repairs a `presets.json` body that carries stray non-JSON bytes.
+///
+/// WHY THIS EXISTS (P1-52 / #89). `_readPresetsHttp` used to do
+/// `res.transform(utf8.decoder).join()` — a STRICT decode. A single `0xFF`
+/// anywhere in the file threw a `FormatException`, which the method's outer
+/// catch turned into `unreadable('io')`. `syncAll` then refused to rewrite the
+/// preset block, and the empty-armed guard aborted the sync entirely. So one
+/// erased byte sitting in PADDING silently disabled ALL schedule arming for
+/// that controller, surfaced only as "contact support". Because the app's own
+/// sync deletes presets, the app could brick its own later syncs.
+///
+/// Three deliberately conservative steps:
+///   1. Drop `0x00` and `0xFF` at the BYTE level. Neither is legal anywhere in
+///      a JSON document — not even inside a string literal — so removing them
+///      cannot change the meaning of well-formed content.
+///   2. Decode with `allowMalformed: true`, so any OTHER invalid sequence
+///      degrades to U+FFFD instead of throwing.
+///   3. Drop U+FFFD and stray control characters that land OUTSIDE string
+///      literals. Inside a string they are legal JSON and are left ALONE: a
+///      preset name carrying a mangled character is still a usable preset, and
+///      silently rewriting user-visible names is worse than keeping the smudge.
+///
+/// This does not make corruption tolerable in general. Anything that still
+/// fails `jsonDecode` afterwards stays UNREADABLE — the correct existing
+/// behaviour for a genuinely broken file, and the guard that stops a partial
+/// read from being mistaken for "the device has no presets".
+@visibleForTesting
+String sanitizePresetsJson(List<int> raw) {
+  final cleaned = <int>[];
+  for (final b in raw) {
+    if (b == kPresetsNulByte || b == kPresetsErasedFlashByte) continue;
+    cleaned.add(b);
+  }
+  final text = const Utf8Decoder(allowMalformed: true).convert(cleaned);
+
+  final out = StringBuffer();
+  var inString = false;
+  var escaped = false;
+  for (final rune in text.runes) {
+    if (inString) {
+      out.writeCharCode(rune);
+      if (escaped) {
+        escaped = false;
+      } else if (rune == 0x5C) {
+        escaped = true; // backslash — the next rune is literal
+      } else if (rune == 0x22) {
+        inString = false; // closing quote
+      }
+      continue;
+    }
+    if (rune == 0x22) {
+      inString = true; // opening quote
+      out.writeCharCode(rune);
+      continue;
+    }
+    if (rune == _kUnicodeReplacementRune) continue;
+    if (rune < 0x20 && rune != 0x09 && rune != 0x0A && rune != 0x0D) continue;
+    out.writeCharCode(rune);
+  }
+  return out.toString();
+}
+
+/// Per-entry salvage for a `presets.json` that still fails a whole-file parse.
+///
+/// WHY A SECOND STAGE IS NEEDED (#89). The bench capture proved the stray bytes
+/// come in TWO kinds, and only one of them is repairable:
+///   • PADDING corruption — a `0xFF` in the run of spaces between entries.
+///     [sanitizePresetsJson] removes it and the file parses.
+///   • IN-BAND corruption — a `0xFF` that OVERWROTE a real character, e.g.
+///     `"col":[[0,70,135,0],[0,0,0,<FF>]]` or `"m12":<FF>},<FF>"id"<FF>1`.
+///     Those bytes are GONE. Stripping leaves `[0,0,0,]` — still invalid, and
+///     no amount of byte-level repair can invent the lost digit.
+///
+/// `presets.json` is a flat object of `"<id>": { … }` entries, so one wrecked
+/// entry need not condemn the other twenty-one. This walks the top-level
+/// entries with a brace matcher that respects string literals and escapes,
+/// parses each independently, keeps the ones that are intact and DROPS the
+/// ones that are not.
+///
+/// ⚠️ A dropped slot reads as ABSENT to the caller, so a later sync may
+/// re-`psave` it. That is the deliberate trade: the alternative — the previous
+/// behaviour — was that one destroyed preset made the whole controller
+/// unreadable and blocked EVERY schedule from arming. Rewriting one already-
+/// corrupt slot is a repair; refusing to arm anything is an outage. The drop is
+/// logged by slot id so it is never silent.
+@visibleForTesting
+Map<String, dynamic> salvagePresetEntries(String body) {
+  final kept = <String, dynamic>{};
+  final dropped = <String>[];
+  final entry = RegExp(r'"(\d+)"\s*:\s*\{');
+  for (final m in entry.allMatches(body)) {
+    final key = m.group(1)!;
+    final start = m.end - 1; // the '{'
+    var depth = 0;
+    var i = start;
+    var inString = false;
+    var escaped = false;
+    while (i < body.length) {
+      final c = body[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (c == r'\') {
+          escaped = true;
+        } else if (c == '"') {
+          inString = false;
+        }
+      } else {
+        if (c == '"') {
+          inString = true;
+        } else if (c == '{') {
+          depth++;
+        } else if (c == '}') {
+          depth--;
+          if (depth == 0) break;
+        }
+      }
+      i++;
+    }
+    if (depth != 0 || i >= body.length) {
+      dropped.add(key);
+      continue;
+    }
+    try {
+      final obj = jsonDecode(body.substring(start, i + 1));
+      if (obj is Map) kept[key] = obj;
+    } catch (_) {
+      dropped.add(key);
+    }
+  }
+  if (dropped.isNotEmpty) {
+    debugPrint('WLED readPresets: DROPPED unrecoverable preset slot(s) '
+        '${dropped.join(", ")} — their bytes were overwritten on the device; '
+        'a later sync may re-save them');
+  }
+  return kept;
+}
+
 /// Parsed response from WLED GET /json/info.
 class WledInfoResponse {
   /// Maximum number of segments the firmware supports (proxy for channel count).
@@ -1116,22 +1268,44 @@ class WledService
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 10));
-      final body = await res.transform(utf8.decoder).join();
+      // TOLERANT READ (P1-52 / #89). Collect BYTES and repair them before
+      // decoding. A strict utf8.decoder here threw on one stray 0xFF and took
+      // every schedule's arming down with it. See [sanitizePresetsJson].
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in res.timeout(const Duration(seconds: 10))) {
+        builder.add(chunk);
+      }
+      final rawBytes = builder.takeBytes();
+      final strayBytes = rawBytes
+          .where((b) => b == kPresetsNulByte || b == kPresetsErasedFlashByte)
+          .length;
+      if (strayBytes > 0) {
+        debugPrint('WLED readPresets: repaired $strayBytes stray byte(s) in '
+            'presets.json (0x00/0xFF) before parsing — P1-52 class');
+      }
+      final body = sanitizePresetsJson(rawBytes);
 
       if (res.statusCode < 200 || res.statusCode >= 300) {
         debugPrint('WLED readPresets: HTTP ${res.statusCode} — UNREADABLE');
         return const PresetsRead.unreadable('http');
       }
 
-      final Object? decoded;
+      Object? decoded;
       try {
         decoded = jsonDecode(body);
       } on FormatException catch (e) {
-        // P1-52: a `pdel` can leave presets.json with a stray byte, making the
-        // WHOLE file unparseable. This used to return {} and make the sync
-        // believe every slot was missing.
-        debugPrint('WLED readPresets: presets.json UNPARSEABLE — $e');
-        return const PresetsRead.unreadable('parse');
+        // P1-52 / #89: a `pdel` can leave presets.json with stray bytes. Where
+        // they sat in PADDING, sanitizePresetsJson already removed them. Where
+        // they OVERWROTE real characters the data is gone, so fall back to
+        // per-entry salvage and keep every preset that is still intact.
+        final salvaged = salvagePresetEntries(body);
+        if (salvaged.isEmpty) {
+          debugPrint('WLED readPresets: presets.json UNPARSEABLE — $e');
+          return const PresetsRead.unreadable('parse');
+        }
+        debugPrint('WLED readPresets: whole-file parse failed ($e) — SALVAGED '
+            '${salvaged.length} intact preset(s)');
+        decoded = salvaged;
       }
       if (decoded is! Map) {
         debugPrint('WLED readPresets: presets.json is not a Map — UNREADABLE');
