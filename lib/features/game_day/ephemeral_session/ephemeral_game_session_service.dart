@@ -17,6 +17,7 @@
 // different ESPN polling logic, doubleheader handling), keep this one in sync.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'package:nexgen_command/services/user_service.dart';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -120,7 +121,13 @@ class EphemeralGameSessionService {
       createdAt: DateTime.now(),
     );
 
-    await docRef.set(session.toJson());
+    // SANITIZE AS A BACKSTOP, not as the fix. jsonEncode on
+    // revert_wled_payload (see EphemeralGameSession.toJson) is what makes
+    // this write legal. sanitizeForFirestore is the GUARD: if a future field
+    // ever carries a nested array, it throws a catchable Dart
+    // FirestoreSerializationError naming the key path, instead of letting
+    // the iOS codec abort the process.
+    await docRef.set(UserService.sanitizeForFirestore(session.toJson()));
     _sessions[session.sessionId] = session;
     debugPrint('[EphemeralSession] Created ${session.sessionId} for '
         '$teamSlug game $gameId starting ${game.scheduledDate}');
@@ -431,7 +438,9 @@ class EphemeralGameSessionService {
     );
     _sessions[session.sessionId] = updated;
     try {
-      await _collection.doc(session.sessionId).set(updated.toJson());
+      await _collection
+          .doc(session.sessionId)
+          .set(UserService.sanitizeForFirestore(updated.toJson()));
       debugPrint(
           '[EphemeralSession] ${session.sessionId} ${session.phase.name} → ${newPhase.name}');
     } catch (e) {
@@ -501,7 +510,9 @@ class EphemeralGameSessionService {
           completedReason: EphemeralCompletedReason.gameEnded,
           completedAt: DateTime.now(),
         );
-        await _collection.doc(sessionId).set(completed.toJson());
+        await _collection
+            .doc(sessionId)
+            .set(UserService.sanitizeForFirestore(completed.toJson()));
       } catch (e2) {
         debugPrint(
             '[EphemeralSession] Completed-state fallback write also failed: $e2');
