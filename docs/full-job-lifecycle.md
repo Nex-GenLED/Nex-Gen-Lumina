@@ -1,6 +1,6 @@
 # Complete Job Lifecycle — From Prospect to Installed Customer
 
-**Describes Lumina app version 2.5.10+88.**
+**Describes Lumina app version 2.5.10+89.**
 
 **Audience:** All roles — the operational overview document for understanding how a Lumina job flows from first prospect visit through installed, live customer.
 

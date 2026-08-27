@@ -1,5 +1,7 @@
 # Nex-Gen LED LLC — Operations Overview
 
+**Describes Lumina app version 2.5.10+89.**
+
 **Audience:** New dealers, new hires, and anyone onboarding into the Nex-Gen LED LLC network.
 
 Welcome to Nex-Gen LED LLC. This is the big-picture document — who we are, how we work, how the dealer network fits together, and how the Lumina platform runs your business end to end. Read this first if you're new, then jump into the role-specific guides at the end. Permanent residential and commercial lighting that works as hard as you do — and the more clearly you understand how the pieces connect, the faster you start making money with it.
@@ -331,13 +333,20 @@ Also:
 
 | Document | Audience |
 |---|---|
+| **Complete Job Lifecycle** | All roles — how a job flows from prospect to installed customer |
 | **Sales Mode Guide** | Dealers and salespeople |
+| **Dealer & Installer Setup Guide** | Dealers and installers — onboarding through customer handoff |
 | **Day 1 Electrician Guide** | Day 1 electricians |
 | **Day 2 Install Guide** | Day 2 install techs |
+| **Dealer Dashboard Guide** | Dealers and dealer admins |
 | **Dealer Inventory Guide** | Dealers and dealer admins |
 | **Customer Messaging Configuration Guide** | Dealers |
 | **Corporate Dashboard Guide** | Nex-Gen LED LLC corporate staff |
-| **Complete Job Lifecycle** | All roles — overview of how a job flows from prospect to installed customer |
+| **Admin Operations Guide** | Nex-Gen LED LLC admin staff — dealer/installer management, testers, account deletion |
+| **Lumina Homeowner Guide** | Residential customers |
+| **Commercial User Guide** | Commercial customers |
+| **Lumina Bridge Setup** | Installers and technical customers — remote access hardware |
+| **Media Mode Guide** | Nex-Gen content and media staff |
 
 ---
 
@@ -366,3 +375,7 @@ Contact your Nex-Gen LED LLC corporate account manager. Dealer activation is an 
 ---
 
 **Welcome to Nex-Gen LED LLC.** Take your time getting familiar with the platform — once you've done a few jobs, the workflow becomes second nature. Lumina is built so that field crews never need to context-switch out of the app, and dealers can run their entire business from the dashboard.
+
+---
+
+*Describes Lumina app version 2.5.10+89 — August 2026*

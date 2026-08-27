@@ -1,8 +1,8 @@
 ---
 title: "Nex-Gen Lumina — Homeowner Guide"
-subtitle: "How-to, troubleshooting, and FAQ"
+subtitle: "How-to, troubleshooting, and FAQ — app 2.5.10+89"
 author: "Nex-Gen LED LLC"
-date: "July 2026"
+date: "August 2026"
 pdf_options:
   format: Letter
   margin: 18mm
@@ -45,6 +45,8 @@ body_class: guide
 
 <div class="sub">Everything you need to run your permanent outdoor lighting — plus troubleshooting and answers to the questions we hear most.</div>
 
+**Describes Lumina app version 2.5.10+89.**
+
 ---
 
 Welcome to Lumina. Your lights are installed, tuned, and already talking to the app. This guide covers the parts you'll use every day first, then the "why is it doing that?" moments at the end.
@@ -71,7 +73,7 @@ Welcome to Lumina. Your lights are installed, tuned, and already talking to the 
 7. Talking to Lumina (your AI assistant)
 8. Schedules — set it and forget it
 9. Autopilot — let Lumina plan your week
-10. Game Day and Sports Alerts
+10. Game Day
 11. Neighborhood Sync — light up the whole street
 12. Controlling your lights away from home
 13. Sharing access with your household
@@ -81,7 +83,8 @@ Welcome to Lumina. Your lights are installed, tuned, and already talking to the 
 17. Troubleshooting
 18. Frequently asked questions
 19. Quick reference — where do I find…?
-20. Getting help
+20. Your warranty
+21. Getting help
 
 </div>
 
@@ -101,6 +104,10 @@ If your installer configured a starting look and schedule, you'll see a short we
 
 <div class="tip">
 <strong>Didn't get credentials?</strong> Tap <strong>Forgot Password?</strong> on the sign-in screen and enter your email — or call your installer, who can resend your account details.
+</div>
+
+<div class="note">
+<strong>Installing the app during the beta.</strong> Lumina isn't in the public App Store or Google Play yet, so you can't search for it — your installer sends you an invitation link instead (TestFlight on iPhone, a Play testing link on Android). The <strong>User Setup Guide</strong> walks through accepting that invitation and getting the app onto your phone. Start there if the app isn't installed yet, then come back here.
 </div>
 
 ### Permissions the app asks for
@@ -290,6 +297,20 @@ Design Studio is at its best when your <strong>roofline setup</strong> is comple
 - **My Designs** holds everything you've created or saved. Reach it from the Home screen or Explore.
 - **My Favorites** is your shortlist — the grid right on the Home screen.
 
+Tap any design in My Designs to open it. From there you can:
+
+| Action | What it does |
+|---|---|
+| **Apply to Lights** | Put it on the house right now |
+| **Edit** | Reopen it in Design Studio to change it |
+| **Rename** | Give it a name you'll recognise later |
+| **Duplicate** | Copy it, so you can experiment without losing the original |
+| **Delete** | Remove it permanently |
+
+<div class="tip">
+<strong>If <em>Edit</em> is greyed out</strong>, that design was composed by Lumina from a description rather than built in the editor — there's no editor session to reopen. Use <strong>Duplicate</strong>, or describe what you want again in Design Studio.
+</div>
+
 Any design you save works everywhere else: schedule it, hand it to Lumina, or use it for Game Day.
 
 ### Lumina Studio — a pro design for the rest of the yard
@@ -363,10 +384,21 @@ The **Sync** button at the top right pushes them across. It normally happens on 
 
 ### Things worth knowing
 
-- You can have up to **20 recurring schedules**.
+- **How many schedules you can run is set by your controller, not the app.** Your controller has **8 timer slots**. A schedule with both an on-time and an off-time uses **two** — so about **four** clock-based schedules fills it. The schedule editor shows a live **"N of 8 timer slots used"** meter before you save, so you'll see it coming.
+- **Sunset and sunrise schedules are free.** They run from their own dedicated slots and don't count against the 8. If you're tight on slots, anchoring to Sunset/Sunrise instead of a clock time buys you room.
 - If schedules overlap, an orange banner offers a **Clean Up** tool. Overlapping schedules make lighting unpredictable, so it's worth clearing.
 - A schedule's **off** time turns the lights off even if you manually applied something afterward. When that's coming up soon, the app tells you: *"Heads up — your 'Warm White' schedule turns the lights off at 11:00 PM."*
 - You can anchor a schedule to **Sunset** or **Sunrise** instead of a clock time — one of each per system. See below.
+
+### Scheduling only part of the house
+
+If your system has more than one channel, the schedule editor includes a **Channels** picker. Leave it on **All channels** for a normal whole-house schedule, or tap individual channels to scope the schedule to just those — front eave only, signage only, and so on.
+
+<div class="warning">
+<strong>Scoping turns the rest off.</strong> While a channel-scoped schedule is running, every channel you did <em>not</em> select turns off for its duration. That's deliberate — it's how "light only the front tonight" works — but it surprises people the first time. The editor shows the same warning above the picker.
+</div>
+
+On a single-channel system the picker doesn't appear at all — there's nothing to scope.
 
 ### Editing and deleting
 
@@ -397,9 +429,7 @@ Everything Autopilot creates is a normal schedule. Edit or delete any of it, any
 
 <div class="pagebreak"></div>
 
-## 10. Game Day and Sports Alerts
-
-### Game Day
+## 10. Game Day
 
 **Home → Game Day.**
 
@@ -407,32 +437,43 @@ Everything Autopilot creates is a normal schedule. Edit or delete any of it, any
 2. Choose the design you want that team to use, or let Lumina build it from the team's colors.
 3. Tap **Light Up Now** any time you want team colors immediately — tailgates, draft parties, watch nights.
 
-Turn on **Autopilot** for a team and game days handle themselves. Options include:
+<div class="tip">
+<strong>You don't need a schedule for Game Day to work.</strong> It used to require at least one everyday schedule before it would fire; that requirement was removed. Add a team, turn Autopilot on, and it runs on its own.
+</div>
 
-- **Lead time before game** — how early the lights kick in
-- **Skip day games** — don't bother when the game is fully in daylight
-- **Design variety** — rotate through team designs, or use the same one every game
-- **Motion style** — from subtle to **Fast Motion**
-- **Refresh Schedule** — pull the latest game times
+Turn on **Autopilot** for a team and game days handle themselves. Everything below lives on the team's card, under the Autopilot switch.
 
-**Game Day crews** let you share the moment: create a crew, share the invite code, and neighbors' lights celebrate with yours.
+### The team card, row by row
 
-### Sports Alerts
+| Row | What it does |
+|---|---|
+| **Live Scoring** | The master on/off for score reactions. Off means the house runs your game-day design but never reacts to plays. |
+| **Alerts** | *How often* your lights react — see the table below. |
+| **Celebration** | *What* fires when they do — the motion for a score or a win. |
+| **Skip day games** | Don't bother when the game is fully in daylight at your location. |
+| **Design variety** | Rotate through team designs, or use the same one every game. |
+| **Lead time before game** | How early the lights kick in. |
+| **Refresh Schedule** | Pull the latest game times. |
 
-**System → Sports Alerts** makes your lights react to live scoring.
+**Alerts** offers three sensitivities:
 
-1. Tap **Add Team**.
-2. Set **Alert Sensitivity**:
-   - **All Events** — flash on every scoring play
-   - **Major Only** — touchdowns, goals, and home runs
-   - **Clutch Only** — close, late-game moments only
-3. Tap **Test Alert** to see it once without waiting for a game.
+| Setting | What you get |
+|---|---|
+| **All Events** | Celebrate every scoring play |
+| **Major Only** | Only touchdowns, home runs, goals and the like |
+| **Clutch Only** | Only late-game and go-ahead moments |
 
-Touchdowns get a big light show, field goals a smaller one, and your lights return to whatever was playing afterward.
+Your lights return to whatever was playing once the celebration finishes.
 
 <div class="note">
 Score celebrations run while the Lumina app is open on your phone. Keep the app up during the game — the screen can be off.
 </div>
+
+<div class="tip">
+<strong>Looking for a "Sports Alerts" screen?</strong> There isn't one any more. Everything it used to do now lives on the team's card in Game Day, so there's one place to set a team up instead of two. If you had teams configured under the old screen, they were carried over for you.
+</div>
+
+**Game Day crews** let you share the moment: create a crew, share the invite code, and neighbors' lights celebrate with yours.
 
 <div class="pagebreak"></div>
 
@@ -834,7 +875,7 @@ It makes several homes run one continuous animation so color flows down the stre
 
 No. Different LED counts and different systems all work — each home reports its pixel count and Lumina scales the animation.
 
-<div class="faqq">Will Sports Alerts flash while I'm out?</div>
+<div class="faqq">Will score celebrations flash while I'm out?</div>
 
 Score celebrations play while the Lumina app is open on your phone, so keep the app up during the game.
 
@@ -868,7 +909,17 @@ Two features use it: **Welcome Home** (lights on when you arrive) and detecting 
 
 <div class="faqq">Can Nex-Gen see or control my lights?</div>
 
-Support sees only the diagnostics you choose to send with **Upload system logs**. Your installer can view your system to help troubleshoot, and that access is logged.
+Support sees only the diagnostics you choose to send with **Upload system logs**. Your installer can view your system to help troubleshoot.
+
+<div class="faqq">How do I delete my account?</div>
+
+**System → Security → Delete Account**, at the bottom under **Danger Zone**. You'll be asked for your password first, then to confirm. This permanently removes your profile, saved designs, schedules, and photos. It cannot be undone.
+
+Three things are worth knowing before you do it:
+
+- **Your lights keep running.** Deleting your account does not turn anything off or wipe the controller. Whatever schedule is already stored on it keeps running until an installer resets the hardware.
+- **A bridge that's still plugged in stays claimed.** The bridge remembers its pairing in its own memory, so deleting your account doesn't free it. If someone else is taking over the house, have them factory-reset the bridge from its dashboard — see the *Lumina Bridge Setup* guide.
+- **Ask us to finish the job.** A small amount of data outside your profile — neighborhood crew membership, and any voice-assistant links you set up — isn't removed automatically yet. Email support and we'll clear it by hand.
 
 <div class="pagebreak"></div>
 
@@ -888,10 +939,11 @@ Support sees only the diagnostics you choose to send with **Upload system logs**
 | Push schedules to the controller | Schedule → **Sync** |
 | Let Lumina plan the week | Schedule → Autopilot |
 | Set up a team | Home → Game Day |
-| Score-based light shows | System → Sports Alerts |
+| Score-based light shows | Home → Game Day → team card → **Live Scoring** |
 | Sync with neighbors | Home → Neighborhood Sync |
 | Control lights while away | System → Remote Access |
 | Add a family member | System → Manage Users |
+| Delete my account | System → Security → **Delete Account** |
 | Set up Siri / Alexa / Google | System → Voice Assistants |
 | Add your house photo | System → My Profile → Edit Profile |
 | Choose your white | System → My Whites |
@@ -906,7 +958,23 @@ Support sees only the diagnostics you choose to send with **Upload system logs**
 
 <div class="pagebreak"></div>
 
-## 20. Getting help
+## 20. Your warranty
+
+| Cover | Term |
+|---|---|
+| **Product** | **5 years** from your install date |
+| **Labor** | **1 year minimum** — your dealer may offer longer, so check your paperwork |
+| **Expected service life** | **Rated 50,000 hours** — 20+ years at typical evening use |
+
+<div class="warning">
+<strong>Service life and warranty are two different things.</strong> The 50,000-hour rating is how long the LEDs are expected to last; it is not a 20-year warranty, and nobody at Nex-Gen or your dealership should describe it as one. Your covered terms are the 5-year product and 1-year-minimum labor above.
+</div>
+
+Warranty claims go through the dealer who installed your system — they're your first call. Have your install date handy.
+
+<div class="pagebreak"></div>
+
+## 21. Getting help
 
 ### In the app
 
@@ -934,5 +1002,5 @@ For anything physical — a dark section, a damaged run, a controller that won't
 
 <div style="text-align:center; color:#7C8AA8; margin-top:26px;">
 <strong style="color:#00D4FF;">Enjoy your lights.</strong><br>
-Nex-Gen LED LLC · Powered by Nex-Gen · July 2026
+Nex-Gen LED LLC · Powered by Nex-Gen · August 2026 · describes app version 2.5.10+89
 </div>

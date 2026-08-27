@@ -1,8 +1,8 @@
 ---
 title: "Nex-Gen Lumina — Lumina Bridge Setup"
-subtitle: "Control your lights from anywhere"
+subtitle: "Control your lights from anywhere — app 2.5.10+89"
 author: "Nex-Gen LED LLC"
-date: "July 2026"
+date: "August 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -28,6 +28,8 @@ body_class: guide
 </style>
 
 # Nex-Gen Lumina — Lumina Bridge Setup
+
+**Describes Lumina app version 2.5.10+89 and bridge firmware v1.2.**
 
 The **Lumina Bridge** is a small device that sits on your home Wi-Fi and lets you control your lights from anywhere — the office, a vacation, the driveway. No port forwarding, no tinkering with your router. Once it's set up, remote control just works.
 
@@ -110,7 +112,7 @@ Open the Serial Monitor at **115200 baud**. You should see something like this:
 
 ```
 ╔══════════════════════════════╗
-║  Lumina Bridge v1.0.0        ║
+║  Lumina Bridge v1.2          ║
 ╚══════════════════════════════╝
 
 [FS] LittleFS mounted
@@ -166,6 +168,8 @@ There are two ways to pair. **The in-app flow is easier and is what we recommend
 
 <div class="warning">
 <strong>If you see "Bridge already paired":</strong> this bridge is paired to a different Nex-Gen account. Only continue with <strong>Transfer to my account</strong> if you are the authorized installer for this property — otherwise contact Nex-Gen support to transfer ownership.
+
+<p><strong>Why this appears even after an account was deleted:</strong> the bridge stores its pairing in its own onboard memory, not on the server, and it re-asserts that pairing every 30 seconds. Releasing a bridge from the server side does not free a bridge that is still powered on and online — it will simply overwrite the release on its next check-in. See <em>Releasing a bridge</em> below.</p>
 </div>
 
 <div class="tip">
@@ -243,6 +247,35 @@ From the dashboard you can also:
 
 ---
 
+## Releasing a bridge — moving it to a different account
+
+This is the step most people get wrong, so it is worth reading before you try it.
+
+**The bridge remembers its own pairing.** Your account ID is written into the bridge's onboard memory during setup, and the bridge re-publishes that pairing to the cloud **every 30 seconds** while it is powered on. The cloud record is a copy; the bridge is the original.
+
+That has one consequence that surprises people:
+
+<div class="warning">
+<strong>Clearing the pairing on the server does not free a live bridge.</strong> If the bridge is plugged in and on Wi-Fi, it overwrites the release within 30 seconds and goes straight back to showing <em>paired</em> — to the old account. Deleting the old owner's Nex-Gen account does not free it either. Nothing you do from the app or the cloud will release a bridge that is still running.
+</div>
+
+### The reliable way to release a bridge
+
+Do this from a computer or phone on the same Wi-Fi as the bridge:
+
+1. Open `http://<bridge-ip>/` for the bridge dashboard.
+2. Tap **Factory Reset**.
+3. The bridge erases its stored pairing, reboots, and comes back up unpaired — broadcasting its `Lumina-XXXX` setup Wi-Fi again.
+4. Re-pair it to the new account using Part 2, Step 4.
+
+If you cannot reach the dashboard, unplugging the bridge is not a substitute — it only stops the re-assertion while it is off. The moment it is plugged back in on the old network it re-claims the old account. **The reset is what actually frees it.**
+
+<div class="tip">
+<strong>If the bridge is already gone</strong> — unplugged for good, discarded, or at a house you no longer service — a server-side release <em>does</em> stick, because there is nothing left to overwrite it. The problem is only ever a bridge that is still running.
+</div>
+
+---
+
 ## Bridge LED indicators
 
 | Pattern | What it means |
@@ -257,7 +290,7 @@ From the dashboard you can also:
 
 | Detail | Value |
 |--------|-------|
-| Firmware | Lumina Bridge v1.0.0 |
+| Firmware | Lumina Bridge v1.2 |
 | Bridge Wi-Fi name | `Lumina-XXXX` (unique per device) |
 | Setup URL (while connected to the bridge's Wi-Fi) | `http://192.168.4.1/setup` |
 | Dashboard URL (on your home network) | `http://<bridge-ip>/` |
@@ -300,10 +333,10 @@ Your Lumina user ID isn't entered. Open `http://<bridge-ip>/setup` and re-enter 
 - Check your router's connected devices list — if the bridge is there but Lumina says it's offline, power-cycle the bridge and wait 30 seconds.
 
 **"I need to start over from scratch."**
-Open `http://<bridge-ip>/` and tap **Factory Reset**. The bridge erases all settings and boots back into its setup Wi-Fi, ready for a fresh walkthrough.
+Open `http://<bridge-ip>/` and tap **Factory Reset**. The bridge erases all settings and boots back into its setup Wi-Fi, ready for a fresh walkthrough. This is also the only reliable way to move a bridge to a different account — see *Releasing a bridge*.
 
 Still stuck? Contact Nex-Gen LED LLC support — include your bridge's Wi-Fi name (`Lumina-XXXX`) and a quick description of what the dashboard shows.
 
 ---
 
-*Nex-Gen Lumina — Lumina Bridge Setup — July 2026*
+*Nex-Gen Lumina — Lumina Bridge Setup — August 2026 — describes app version 2.5.10+89, bridge firmware v1.2*

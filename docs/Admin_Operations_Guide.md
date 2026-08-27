@@ -1,8 +1,8 @@
 ---
 title: "Nex-Gen Lumina — Admin Operations Guide"
-subtitle: "Run the dealer, installer, and corporate side of Lumina from inside the app"
+subtitle: "Run the dealer, installer, and corporate side of Lumina from inside the app — app 2.5.10+89"
 author: "Nex-Gen LED LLC"
-date: "July 2026"
+date: "August 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -29,6 +29,8 @@ body_class: guide
 </style>
 
 # Nex-Gen Lumina — Admin Operations Guide
+
+**Describes Lumina app version 2.5.10+89.**
 
 This is your playbook for running the admin side of Lumina — the dealer network, installer team, corporate dashboard, and everything your dealers and installers never see. Permanent residential and commercial lighting that works as hard as you do, and this guide keeps the machine behind it running smoothly.
 
@@ -112,7 +114,7 @@ Type `9999` on the Staff PIN screen. You land on the **Admin Dashboard**, which 
 
 ### App Store reviewer reveal
 
-There's a second hidden gesture: **5 taps on the version text** (e.g., `v2.2.0`) at the bottom of the login form. That reveals an "App Store Review" button that autofills the reviewer test credentials. No time window on this one — taps can be spaced out. Only relevant during App Store review submissions.
+There's a second hidden gesture: **5 taps on the version text** at the bottom of the login form. That reveals an "App Store Review" button that autofills the reviewer test credentials. No time window on this one — taps can be spaced out. Only relevant during App Store review submissions.
 
 The reviewer-reveal gesture used to live on the "POWERED BY NEX-GEN" subtitle, but on iOS its hit-rect could overlap the LUMINA wordmark above and steal taps intended for the staff PIN gesture. It now lives on a dedicated version-text line at the bottom of the form, well clear of the logo.
 
@@ -543,6 +545,20 @@ When dealers sign in, they land on a 4-tab Dealer Dashboard. Knowing what they s
 - Approved and fulfilled payout history
 - Ambassador tier progress indicator
 
+### Inventory tab
+
+- Live stock on hand per material, with low-stock warnings against each reorder threshold
+- Waste intelligence from completed installs' material check-in data
+- Reorder triggers
+
+### Messaging tab
+
+- Sender identity — sender name, reply phone, support email
+- Toggles for the optional customer messages (booking confirmation, both reminders, install complete, default SMS opt-in)
+- Custom SMS sign-off, with a live preview
+
+Dealers have their own guides for these last two — *Dealer Inventory Dashboard* and *Customer Messaging Configuration*.
+
 ---
 
 ## 17. Weekly Brief notifications
@@ -648,13 +664,16 @@ When you sign up a new dealer, here's the full sequence:
 | View network analytics | Corporate Dashboard → **Network** tab |
 | Deploy Weekly Brief | `firebase deploy --only functions:sendWeeklyBrief` |
 | Manage demo codes | Firebase Console → `dealerDemoCodes` |
-| Reveal App Store review button | Login → tap version text (e.g. **v2.2.0**) at bottom of form 5 times |
+| Reveal App Store review button | Login → tap version text at bottom of form 5 times |
+| Add an iOS tester | App Store Connect → Users and Access → invite, then TestFlight → Internal Testing → group |
+| Add an Android tester | Play Console → Testing → Closed testing → Testers, then send the opt-in URL |
+| Check who claims a controller | `collectionGroup('controllers')` query on the controller ID |
 
 ---
 
 ## 21. Security notes
 
-### What's solid in v2.2
+### What's solid today
 
 - **Hidden staff entry** — the visible "Installer / Dealer Access" button is gone. Staff access now requires the 5-tap gesture, dramatically lowering the chance customers stumble onto it.
 - **Corporate PIN uses SHA-256** — never stored in plaintext. This is the pattern to replicate for the other admin PINs.
@@ -674,6 +693,100 @@ When you sign up a new dealer, here's the full sequence:
 
 ---
 
+## 22. Getting a tester onto a build
+
+Lumina is not in the public App Store or on Google Play yet. Every customer, dealer, and staff tester runs a **beta build**, and someone has to add them by hand. This is the single most common onboarding request, so it's worth knowing cold.
+
+Builds reach both tracks from Codemagic. iOS auto-submits — `codemagic.yaml` sets `submit_to_testflight: true`, so a green iOS build lands in TestFlight without anyone pressing anything. Android AABs are uploaded to the **Play closed testing track**.
+
+### iPhone / iPad — TestFlight
+
+TestFlight testers are not a free-text email list; each one has to exist as a **user on the App Store Connect account** first. That's the step people miss.
+
+1. **App Store Connect → Users and Access → Invite (+).** Enter the tester's email and give them a role. **Customer Support** is enough for a tester and grants no build or release powers.
+2. **The tester accepts the invitation email.** It expires — if they sit on it for days, you'll be reissuing it.
+3. **The tester accepts the Apple agreement** the first time they sign in. Until they do, they are not a usable account and adding them to a group silently does nothing useful.
+4. **TestFlight → Internal Testing → your group → add the tester.** Internal groups get every build automatically and need no Apple review.
+5. **The tester installs the TestFlight app** from the App Store, opens the invite link, and redeems it. Lumina then appears inside TestFlight, not as a normal App Store app.
+
+<div class="warning">
+<strong>Order matters.</strong> Users and Access first, agreement accepted second, TestFlight group third. Adding someone to a TestFlight group before they've accepted the account invitation is the usual cause of "I never got the email."
+</div>
+
+### Android — Play closed testing
+
+1. **Play Console → Testing → Closed testing →** your track **→ Testers.**
+2. Add the tester's Google account email to the email list. It must be the **Google account on the device** — a work alias that forwards to it will not work.
+3. Copy the **opt-in URL** for the track and send it to the tester.
+4. The tester opens the link, accepts the invitation, then installs Lumina from Play as normal. It can take a few minutes to appear after opting in.
+
+<div class="tip">
+<strong>"I opted in but Play says the app isn't available."</strong> Nearly always the wrong Google account, or Play cached the old state. Have them confirm the account in Play → profile, then force-stop Play and retry. Propagation of a few minutes is normal.
+</div>
+
+### Telling testers what to do next
+
+Send customers the **User Setup Guide** — it covers accepting the invitation and installing the app. Send dealers and installers the **Dealer & Installer Setup Guide**. Neither audience should be pointed at the App Store, because Lumina isn't there yet.
+
+---
+
+## 23. Deleting a customer account
+
+Account deletion is a customer-initiated action — **System → Security → Delete Account** in their app — but you need to know what it does, because you will be asked what survived.
+
+### The order it runs in
+
+The `purgeUserAccount` Cloud Function runs these steps, in this order, and the order is deliberate:
+
+| # | Step | Note |
+|---|---|---|
+| 1 | **Firestore — the user doc and every subcollection** | One recursive walk, depth-unbounded. Nested paths like `controllers/{id}/pixelMap` are covered without being named. |
+| 2 | **Bridge release** | Deliberately *after* step 1: if the Firestore delete failed, the account still exists and its bridge should stay paired to it. |
+| 3 | **Cloud Storage** | The user's storage prefix, deleted with admin credentials. |
+| 4 | **Verify** | Re-probes every subcollection and the parent doc, and collects warnings. |
+| 5 | **Firebase Auth — last** | Deleted by the client, and only if the verify pass came back clean. |
+
+Auth going last is the safety property: if anything above it fails, the user still has an account they can sign into and retry with, rather than an orphaned pile of data and no way to reach it.
+
+<div class="warning">
+<strong>Releasing a bridge does not free a bridge that is still plugged in.</strong> Step 2 clears the pairing in the cloud, but the bridge stores its pairing in its own onboard memory and re-publishes it every 30 seconds. A powered, online bridge overwrites the release almost immediately. The release only sticks for hardware that is unplugged, dead, or already reset. To genuinely free a live bridge, someone on-site must factory-reset it from its dashboard. Tracked as <strong>P2-57</strong>.
+</div>
+
+### What deletion does NOT remove yet
+
+Be straight with customers about this — do not claim a clean wipe:
+
+- **Neighborhood Sync membership.** A deleted user's ID stays in any crew they joined. Blocked on the server-side leave function that gap #105 owes.
+- **Voice-assistant tokens.** OAuth refresh tokens are not revoked.
+- **Operational health snapshots.** `fleet_health` records embed customer email and are not pruned; a purged customer's address can still be present in past snapshots (**P2-54**).
+
+If a customer asks for a genuinely complete erasure, these three need clearing by hand.
+
+---
+
+## 24. One controller, one owner
+
+**A physical controller must be claimed by exactly one customer account.** This is the operating rule. Follow it.
+
+<div class="warning">
+<strong>Nothing enforces it.</strong> There is no uniqueness check at claim time. A production audit on 2026-08-27 found controller <code>80_f3_da_b4_d1_50</code> claimed by <strong>three</strong> accounts at once — the previous customer, the new customer, and an installer staging account — carrying three different LED counts for one physical strip. Nothing in the write path noticed. Tracked as <strong>P2-52</strong>.
+</div>
+
+### What goes wrong when it's violated
+
+- The old account keeps its claim forever. Health probes keep firing at a stale IP under a dead user.
+- Any lookup that resolves a controller to its owner by "first match" can pick the wrong one.
+- The controller docs disagree about the hardware itself, not just about who owns it — so LED counts, IPs, and channel maps stop being trustworthy.
+
+### What to do about it
+
+- **Re-installing a controller at a new address?** Unlink it from the previous customer's account *before* the installer claims it for the new one.
+- **Decommissioning a customer?** Unlink their controllers as part of the wind-down, not after.
+- **Installer staging copies.** The install wizard leaves a controller doc under the installer's staging account after handoff, and no existing path cleans it up. Sweep these periodically.
+- **Suspect a duplicate?** A `collectionGroup('controllers')` query on the controller ID shows every account holding a claim. More than one row is a defect, not a coincidence.
+
+---
+
 ## What success looks like
 
 - Every active dealer has at least one active installer with a working 4-digit PIN
@@ -686,7 +799,7 @@ When you sign up a new dealer, here's the full sequence:
 ## If something isn't working
 
 **"I can't find the Admin Access button."**
-It's gone — that's by design in v2.2. Go to the Lumina login screen and tap the **Lumina logo** 5 times within 3 seconds. No visual feedback during the taps. The Staff PIN screen opens on tap 5.
+It's gone — that's by design. Go to the Lumina login screen and tap the **Lumina logo** 5 times within 3 seconds. No visual feedback during the taps. The Staff PIN screen opens on tap 5.
 
 **"Maximum dealer limit (99) reached."**
 You've used all 99 dealer codes. You'd need to reclaim deactivated codes (a code change) or expand the code format.
@@ -715,4 +828,4 @@ Check Firebase Console → Functions → `sendWeeklyBrief` logs. Most common cau
 
 ---
 
-*Nex-Gen Lumina — Admin Operations Guide — April 2026 — INTERNAL USE ONLY*
+*Nex-Gen Lumina — Admin Operations Guide — August 2026 — describes app version 2.5.10+89 — INTERNAL USE ONLY*

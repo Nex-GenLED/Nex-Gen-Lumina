@@ -2982,6 +2982,67 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `docs/sales-mode-guide.md` §5 + troubleshooting and
     `docs/Dealer_Installer_Setup_Guide.md` §7 Step 8 + §11 now carry the agreed terms and
     instruct reps to read them aloud instead of the on-screen line.
+  - **UPDATE (2026-08-27, docs pass 2):** the `:450` string half of this is **DONE** on `main`
+    — `7779b70` changed it to `'5-year product warranty; 1-year labor minimum'`. Verified by
+    reading `estimate_preview_screen.dart:450` at `35ff89b`. **Still open:** the dealer-set
+    labor-warranty field from (2b) does not exist. Note the two guides cited above now carry
+    stale "that wording is being corrected" copy and need a follow-up pass.
+
+- [ ] **P2-60 — Media Mode timeout and access logging — documented but unimplemented; decide whether to build**
+  - Status: OPEN · Evidence: source-proven (2026-08-27, docs pass 2)
+  - `docs/Media_Mode_Guide.md` claimed two protections that **do not exist in code**:
+    *"Sessions expire after 4 hours of inactivity"* and *"All access is logged — this is a
+    feature, not something to worry about."* Both have been removed from the guide, which now
+    states the absence plainly rather than the promise.
+  - **(a) No session timeout of any duration.** `lib/features/installer/media_access_providers.dart`
+    and `media_dashboard_screen.dart` contain no timeout constant, no inactivity timer, and no
+    expiry check. Every other staff mode has an explicit pair —
+    `kInstallerSessionTimeout` / `kSessionWarningThreshold` (`installer_providers.dart:15-18`,
+    30 min + 5 min), `kSalesSessionTimeout` (`sales_providers.dart:41-42`, 30 min),
+    `kAdminSessionTimeout` (`admin_providers.dart:16-19`, 30 min),
+    `kCorporateSessionTimeout` (`corporate_providers.dart:15-18`, 60 min). Media Mode is the
+    only staff surface with none, and it is the one that reaches into a **customer's** system.
+  - **(b) No access log.** No write to any audit/log collection on the media path. Nothing
+    records which media user opened which customer's system, when, or what they changed. A
+    customer asking "who turned my lights on Tuesday?" cannot be answered.
+  - Why it matters more here than elsewhere: a media session is third-party access to a
+    paying customer's home. The 5-attempt code lockout
+    (`media_access_code_screen.dart:27`) is the only control that actually exists, and it
+    guards entry, not what happens after.
+  - **DECISION OWED (Tyler):** build both, build one, or accept the gap and keep the guide
+    honest as it now is. If built, (a) should reuse the existing session-timeout pattern
+    rather than inventing a third one, and (b) should write to a dedicated collection with
+    its own retention rule — note `fleet_health` (P2-54) is the cautionary example of an
+    operational log that embeds PII and is never pruned.
+
+- [ ] **P2-61 — `CommercialOnboardingWizard` is unreachable by ANY role; 8 screens of dead code**
+  - Status: OPEN · Evidence: source-proven (2026-08-27, docs pass 2)
+  - The route and the wizard both exist — `AppRoutes.commercialOnboarding = '/commercial/onboarding'`
+    (`lib/app_router.dart:1256`), mounted at `:699-703` — but **nothing in `lib/` navigates to it.**
+    A repo-wide grep for `commercialOnboarding` / `'/commercial/onboarding'` returns the constant,
+    the route definition, the import, and the wizard's own internal state providers. **Zero
+    `context.push` / `context.go` call sites.** Not from the customer app, not from Installer Mode,
+    not from Sales Mode, not from the admin or corporate dashboards.
+  - The code says so itself — `lib/screens/commercial/onboarding/screens/review_go_live_screen.dart:175`:
+    *"The CommercialOnboardingWizard itself is unreachable from in-app navigation (Item #28) and
+    slated for replacement with a short conversion flow in residential Settings."*
+  - **Scope of the dead code:** the wizard plus 8 step screens under
+    `lib/screens/commercial/onboarding/screens/` — business type, brand identity, hours of
+    operation, channel setup, your teams, day parts, multi-location, review/go-live.
+  - **Consequence for customers:** commercial channels, day parts, hours, and brand identity can
+    only be set at commissioning time by an installer. There is no self-service path to change
+    business type, add a location, or reconfigure channels. `docs/User_Guide_Commercial.md` §2
+    documented the wizard as an 8-step flow customers walk themselves; that section has been
+    rewritten to describe installer-commissioned setup instead, which is what actually happens.
+  - Related: `project_commercial_onboarding_unreachable`, `project_commercial_activation_dual_paths`
+    (Phase 6 extracts `CommercialAccountService`), and the Phase 4a decision to replace the entry
+    point with a **Business Tools** card in residential Settings
+    (`docs/commercial_ux_phase_4a_decisions.md` Q1). **`BusinessToolsScreen` does not exist on
+    `main`** — `lib/features/site/business_tools_screen.dart` is absent, so Phase 4a is unbuilt and
+    the replacement entry point is not there either.
+  - **DECISION OWED (Tyler):** wire the wizard to a real entry point, build the Phase 4a Business
+    Tools card that supersedes it, or delete the 9 screens. Leaving it is the worst option — it
+    reads as a shipped feature to anyone grepping the tree, and it already misled a user guide.
 
 ---
 

@@ -1,5 +1,7 @@
 # Dealer Inventory Dashboard — Guide
 
+**Describes Lumina app version 2.5.10+89.**
+
 **Audience:** Dealers and dealer admins managing material stock and tracking install efficiency.
 
 Your inventory is money sitting in boxes. The Inventory Dashboard tells you how much of it you have, how much is walking out the door as waste, and which materials are quietly eating into your margin — so you can fix it. Permanent residential and commercial lighting that works as hard as you do, and the dealers who stay profitable are the ones who know what's happening in their stockroom.
@@ -255,3 +257,7 @@ The item isn't in your catalog yet. Contact your Nex-Gen LED LLC corporate conta
 ---
 
 **Need help?** Contact your Nex-Gen LED LLC corporate contact.
+
+---
+
+*Describes Lumina app version 2.5.10+89 — August 2026*

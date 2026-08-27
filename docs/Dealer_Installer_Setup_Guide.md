@@ -1,6 +1,6 @@
 ---
 title: "Nex-Gen Lumina — Dealer & Installer Setup Guide"
-subtitle: "From onboarding your dealership to handing off a live customer — app 2.5.10+88"
+subtitle: "From onboarding your dealership to handing off a live customer — app 2.5.10+89"
 author: "Nex-Gen LED LLC"
 date: "August 2026"
 pdf_options:
@@ -37,7 +37,7 @@ body_class: guide
 
 # Nex-Gen Lumina — Dealer & Installer Setup Guide
 
-**Describes Lumina app version 2.5.10+88.**
+**Describes Lumina app version 2.5.10+89.**
 
 This is the complete handbook for getting your dealership up and running and completing customer installations end-to-end. Nex-Gen LED LLC ships permanent residential and commercial lighting that works as hard as you do — this guide is how you deliver that experience to every customer on Day 1.
 
@@ -890,4 +890,4 @@ Then **Save Configuration** and test: lights on/off, a pattern across all segmen
 
 ---
 
-*Nex-Gen Lumina — Dealer & Installer Setup Guide — August 2026 — describes app version 2.5.10+88*
+*Nex-Gen Lumina — Dealer & Installer Setup Guide — August 2026 — describes app version 2.5.10+89*

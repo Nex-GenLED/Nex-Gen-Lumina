@@ -1,6 +1,6 @@
 # Lumina Sales Mode — Complete Guide
 
-**Describes Lumina app version 2.5.10+88.**
+**Describes Lumina app version 2.5.10+89.**
 
 **Audience:** Dealers and sales reps running site visits.
 

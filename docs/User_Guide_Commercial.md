@@ -1,8 +1,8 @@
 ---
 title: "Nex-Gen Lumina — Commercial User Guide"
-subtitle: "Multi-zone lighting control for your business"
+subtitle: "Multi-zone lighting control for your business — app 2.5.10+89"
 author: "Nex-Gen LED LLC"
-date: "July 2026"
+date: "August 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -28,13 +28,15 @@ body_class: guide
 
 # Nex-Gen Lumina — Commercial User Guide
 
+**Describes Lumina app version 2.5.10+89.**
+
 Welcome to Lumina for your business. Permanent residential and commercial lighting that works as hard as you do — and this guide is how you make it work for your property, your brand, and your customers. Your installer has already handled the hardware and the network; this guide is about running the lights day to day.
 
 ## What you'll need
 
 - The Lumina app on your phone or tablet
 - Your **email and temporary password** from your installer (you'll change the password on first sign-in)
-- A few minutes to walk through the onboarding wizard if this is your first time
+- Your system already commissioned by your Nex-Gen installer (see Section 2)
 - Your team's email addresses if you want to invite managers or staff
 
 ---
@@ -55,25 +57,13 @@ Your installer handed off a Lumina account at install time.
 
 ---
 
-## 2. Commercial onboarding — 8 quick steps
+## 2. How your system was set up
 
-When your account is first set up (or when you add a new location), you'll walk through an 8-step wizard that tailors the app to your business. It takes about 10 minutes.
+Your Lumina system was configured for your business **before you took it over** — your Nex-Gen installer did this during commissioning, and there is nothing you need to walk through yourself. This section explains what they set up, because the rest of this guide refers to it constantly.
 
-### Step 1: Business type
+### Your channels
 
-Pick what describes your business best — retail, restaurant, bar, office, hotel, mixed-use. This shapes the default settings and day-part suggestions to fit your industry.
-
-### Step 2: Brand identity
-
-Set up your brand colors. These become quick presets throughout the app and can be pushed to all your locations.
-
-### Step 3: Hours of operation
-
-Define business hours per day. The app uses them to build default schedules and decide when lights should be active.
-
-### Step 4: Channels
-
-Configure your lighting channels. Commercial properties typically have several:
+Your lighting is divided into **channels** — the separate runs of light around your property. Commercial sites typically have several:
 
 | Channel role | Example use |
 |-------------|-------------|
@@ -84,15 +74,11 @@ Configure your lighting channels. Commercial properties typically have several:
 | Canopy | Covered outdoor structures |
 | Signage / Accent | Signs and architectural accents |
 
-Each channel has a **Coverage Policy** (Always On, Smart Fill, Scheduled Only) and a **Daylight Mode** (Soft Dim, Hard Off, Disabled).
+Every channel your installer configured has a **Coverage Policy** (Always On, Smart Fill, Scheduled Only) and a **Daylight Mode** (Soft Dim, Hard Off, Disabled). You control channels day to day from the **Channel Selector Bar** — see Section 5.
 
-### Step 5: Your teams
+### Your day parts
 
-Add team members and assign roles. See **Roles and Permissions** (Section 12) for the four-tier role system.
-
-### Step 6: Day parts
-
-Automate lighting transitions through the day:
+Your installer set your **hours of operation** and built **day parts** from them — timed lighting transitions that run through the business day without anyone touching a phone:
 
 | Day part | Typical hours | Example use |
 |----------|--------------|-------------|
@@ -102,18 +88,14 @@ Automate lighting transitions through the day:
 | Evening / Dinner | 5 PM – 9 PM | Warm, ambient mood |
 | Late Night / Close | 9 PM – Close | Dimmed, winding down |
 
-Day parts transition your lighting automatically — no manual taps required.
+Adjusting day parts is covered in Section 7.
 
-### Step 7: Multiple locations
+### Your brand colors and your team
 
-If you manage multiple locations, add them here. Each one gets its own schedule, controllers, and team assignments. Single-location businesses can skip this.
+Brand colors were loaded during setup and appear as quick presets throughout the app (Section 14). Team members and their roles were set up too — see **Roles and Permissions** (Section 12) for the four-tier system and how to invite someone new.
 
-### Step 8: Review and go live
-
-Final check on all settings. Tap **Go Live** to activate your lighting system. You can adjust anything later from the **System** tab.
-
-<div class="tip">
-<strong>Tip:</strong> You can re-run any part of onboarding from <strong>System → Settings</strong> if you need to reconfigure business type, channels, or day parts.
+<div class="warning">
+<strong>Need to change business type, add a location, or reconfigure channels?</strong> Contact your Nex-Gen installer or dealer. These are commissioning settings, and there is no self-service screen for them in the app today. Everything you <em>can</em> change yourself — schedules, day parts, brand colors, patterns, team members, properties — is covered in the sections that follow.
 </div>
 
 ---
@@ -312,7 +294,7 @@ Day parts are a separate layer that handles lighting transitions throughout the 
 
 **To configure:**
 
-1. **System → Settings → Day Parts** (or configure during onboarding Step 6)
+1. **System → Settings → Day Parts**
 2. Define the time range for each day part
 3. Assign a lighting preset to each day part
 4. Day parts apply automatically every day
@@ -540,7 +522,7 @@ Corporate Admins can enforce brand consistency across every location.
 
 ### Setting brand colors
 
-1. **System → Settings → Brand Identity** (or during onboarding Step 2)
+1. **System → Settings → Brand Identity**
 2. Define your primary and secondary brand colors
 3. They appear as quick presets on every location's dashboard
 4. Tap **Save**
@@ -681,4 +663,4 @@ For troubleshooting, see the separate Lumina Troubleshooting Guide.
 
 ---
 
-*Nex-Gen Lumina — Commercial User Guide — July 2026*
+*Nex-Gen Lumina — Commercial User Guide — August 2026 — describes app version 2.5.10+89*

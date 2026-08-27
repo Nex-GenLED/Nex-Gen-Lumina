@@ -1,5 +1,7 @@
 # Customer Messaging Configuration — Guide
 
+**Describes Lumina app version 2.5.10+89.**
+
 **Audience:** Dealers configuring how Lumina automatically communicates with their customers.
 
 Lumina sends emails and SMS to your customers on your behalf at every meaningful moment in the install. Booking confirmations, scheduled-date texts, night-before reminders, "wiring done" updates, account handoff, "your system is live." All automatic. This guide shows every message that goes out, when it fires, what it says, and the parts you control. Get your sender identity and toggles dialed in and the customer experience runs itself — that's fewer support calls, higher review scores, and more referrals.
@@ -423,3 +425,7 @@ You blanked out the **Sender Name** field. It's required. Add your dealer name a
 ---
 
 **Need help?** Contact your Nex-Gen LED LLC corporate contact.
+
+---
+
+*Describes Lumina app version 2.5.10+89 — August 2026*

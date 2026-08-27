@@ -1,5 +1,7 @@
 # Day 2 Install Team — Field Guide
 
+**Describes Lumina app version 2.5.10+89.**
+
 **Audience:** Install techs running the Day 2 LED installation on a Lumina job.
 
 Log in, read the blueprint, put up the strip, walk the customer through wrap-up, close the job. Day 2 is the last mile — get it right and the customer is live the same day.
@@ -29,7 +31,7 @@ You got this from your dealer admin at onboarding.
 ### Steps
 
 1. Open the Lumina app
-2. Tap the **Lumina logo** 5 times on the login screen — the Staff PIN screen opens
+2. Tap the **Lumina logo** 5 times on the login screen — **all five taps within 3 seconds**, or the count resets. There's no visual feedback until the Staff PIN screen opens on tap 5.
 3. Type your 4-digit PIN
 
 ### Session timeout
@@ -216,6 +218,14 @@ Tap **Continue →** when done.
 - Check the email format and try again.
 - If it still fails, complete the rest of the wrap-up — Step 4 still lets you close the job. Note the failure and contact your dealer admin so they can manually provision the account.
 
+<div class="warning">
+<strong>Creating the account does NOT link their controllers.</strong> A green "Account created" is not a finished handoff — the customer can sign in and see nothing. Controllers are linked in Step 4's Controller Setup. Do not skip Step 4 on the assumption that Step 3 finished the job.
+</div>
+
+<div class="warning">
+<strong>Don't tap Create account twice.</strong> If the button seems slow, wait. A double-tap has produced two identical installation records seconds apart, only one of which the customer's account points at — leaving an orphan record carrying a full copy of their personal details. If you think you may have double-tapped, tell your dealer admin so it can be cleaned up.
+</div>
+
 Tap **Continue →** when done.
 
 ### Step 4 — Launch setup for the customer (optional, recommended)
@@ -234,6 +244,10 @@ Optional but **highly recommended** — cuts support calls in the first 48 hours
    - **Controller Setup** — pair the controller with their network
    - **Zone Configuration** — name their zones if needed
    - **Handoff** — final transfer of ownership
+
+<div class="warning">
+<strong>Re-using a controller from another install?</strong> A controller must belong to exactly one customer, but nothing in the app enforces it — claiming a controller that's still linked to a previous customer silently gives it two owners, and both accounts then disagree about its LED count and IP. If this controller has been installed anywhere before, have your dealer admin unlink it from the old account <em>before</em> you claim it here.
+</div>
 5. When done, you're back on the wrap-up screen.
 
 **Coach the customer through the basics before you leave:**
@@ -351,3 +365,7 @@ Confirm all 4 digits. If locked out after 5 failed attempts, wait 30 seconds or 
 ---
 
 **Need help?** Call your dealer admin or your Nex-Gen LED LLC corporate contact.
+
+---
+
+*Describes Lumina app version 2.5.10+89 — August 2026*

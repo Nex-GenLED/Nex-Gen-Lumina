@@ -1,8 +1,8 @@
 ---
 title: "Nex-Gen Lumina — Dealer Dashboard Guide"
-subtitle: "Your real-time pipeline, team, and referral rewards in one place"
+subtitle: "Your real-time pipeline, team, and referral rewards in one place — app 2.5.10+89"
 author: "Nex-Gen LED LLC"
-date: "July 2026"
+date: "August 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -28,6 +28,8 @@ body_class: guide
 </style>
 
 # Nex-Gen Lumina — Dealer Dashboard Guide
+
+**Describes Lumina app version 2.5.10+89.**
 
 The Dealer Dashboard is your business at a glance — every live job, every installer's workload, every referral reward that's pending, in one place. It's how you keep follow-ups tight, installers utilized, and referral payouts flowing. Permanent residential and commercial lighting that works as hard as you do, and your dashboard makes sure the money side of that works just as hard.
 
@@ -84,7 +86,7 @@ Nex-Gen LED LLC admins can view any dealer's dashboard:
 
 ---
 
-## 3. The four tabs
+## 3. The six tabs
 
 | Tab | What it's for |
 |-----|---------|
@@ -92,6 +94,10 @@ Nex-Gen LED LLC admins can view any dealer's dashboard:
 | **Pipeline** | Every sales job grouped by status — your full funnel |
 | **Team** | Your installers with activity and install counts |
 | **Payouts** | Referral rewards — pending, approved, fulfilled |
+| **Inventory** | Stock on hand, waste intelligence, reorder triggers |
+| **Messaging** | Sender identity and the automated customer messages your dealer sends |
+
+The first four are covered in this guide. **Inventory** has its own guide (*Dealer Inventory Dashboard*) and **Messaging** has its own (*Customer Messaging Configuration*) — both go deeper than a shared chapter could.
 
 ---
 
@@ -424,4 +430,4 @@ For the full walkthrough on completing customer installations, see the [Dealer &
 
 ---
 
-*Nex-Gen Lumina — Dealer Dashboard Guide — July 2026*
+*Nex-Gen Lumina — Dealer Dashboard Guide — August 2026 — describes app version 2.5.10+89*

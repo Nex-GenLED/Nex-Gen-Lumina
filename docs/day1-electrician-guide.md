@@ -1,5 +1,7 @@
 # Day 1 Electrician — Field Guide
 
+**Describes Lumina app version 2.5.10+89.**
+
 **Audience:** Electricians running Day 1 wiring prep on a Lumina installation.
 
 Log in, read the blueprint, do the work, check out clean so Day 2 can finish. That's the job.
@@ -29,7 +31,7 @@ You got this from your dealer admin at onboarding.
 ### Steps
 
 1. Open the Lumina app
-2. Tap the **Lumina logo** 5 times on the login screen — the Staff PIN screen opens
+2. Tap the **Lumina logo** 5 times on the login screen — **all five taps within 3 seconds**, or the count resets. There's no visual feedback until the Staff PIN screen opens on tap 5.
 3. Type your 4-digit PIN
 4. The app verifies against your dealer's records and drops you into Installer Mode
 
@@ -258,3 +260,7 @@ Confirm all 4 digits. If you've been locked out after 5 failed attempts, wait 30
 ---
 
 **Need help?** Call your dealer admin or your Nex-Gen LED LLC corporate contact.
+
+---
+
+*Describes Lumina app version 2.5.10+89 — August 2026*

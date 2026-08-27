@@ -1,8 +1,8 @@
 ---
 title: "Nex-Gen Lumina — Media Mode"
-subtitle: "Get the perfect shot of any Lumina home"
+subtitle: "Get the perfect shot of any Lumina home — app 2.5.10+89"
 author: "Nex-Gen LED LLC"
-date: "July 2026"
+date: "August 2026"
 pdf_options:
   format: Letter
   margin: 20mm
@@ -27,6 +27,8 @@ body_class: guide
 
 # Nex-Gen Lumina — Media Mode
 
+**Describes Lumina app version 2.5.10+89.**
+
 Media Mode gives you temporary, respectful access to any Lumina customer's lighting system so you can shoot great content — video, stills, promotional — without ever touching their saved settings, schedules, or account. It's the cleanest way to dial in the perfect look for a customer home, capture it, and leave their system exactly how you found it.
 
 ## What you'll need
@@ -48,6 +50,10 @@ Adjust colors, patterns, brightness, and effects for the duration of your shoot.
 
 ### View-only everywhere else
 You can control lights during your session, but you cannot change schedules, settings, or account info. Customer data stays protected — that's the promise.
+
+<div class="warning">
+<strong>Treat access as a trust, not as an audited action.</strong> Media Mode sessions are not currently recorded to an access log, so nothing after the fact will show what you did or when. Get the customer's agreement before every shoot, and keep your access code to yourself.
+</div>
 
 ---
 
@@ -113,10 +119,14 @@ When you enter a customer's system, the **Home** tab shows a bridge status indic
 
 | Rule | What it means |
 |------|---------|
-| **Timeout** | Sessions expire after 4 hours of inactivity |
-| **Audit log** | All access is logged — this is a feature, not something to worry about |
+| **Code entry** | Five wrong codes in a row locks the keypad — close and reopen the app to try again |
+| **Ending a session** | Tap the X on the View As banner to leave a customer's system. Sign out of the app when you're finished for the day |
 | **Courtesy** | Restore the original lighting when you're done |
 | **Permission** | Make sure the customer has agreed to the shoot |
+
+<div class="warning">
+<strong>Your session does not expire on its own.</strong> There is no inactivity timeout on Media Mode today — if you walk away with a customer's system open, it stays open. Exit View As and sign out when you finish a shoot rather than relying on the app to do it for you.
+</div>
 
 ---
 
@@ -136,7 +146,7 @@ When you enter a customer's system, the **Home** tab shows a bridge status indic
 - Bridge status indicator was green the whole session
 - You captured the content you came for — video, stills, or both
 - The customer's lights are back to exactly how they were when you arrived
-- The audit log shows a clean session with no failed commands
+- You exited View As and signed out when you were done
 
 ## If something isn't working
 
@@ -162,4 +172,4 @@ For troubleshooting beyond this guide, see the separate Lumina Troubleshooting G
 
 ---
 
-*Nex-Gen Lumina — Media Mode — July 2026*
+*Nex-Gen Lumina — Media Mode — August 2026 — describes app version 2.5.10+89*

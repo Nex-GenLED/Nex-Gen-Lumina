@@ -1,5 +1,7 @@
 # Nex-Gen Corporate Dashboard — Guide
 
+**Describes Lumina app version 2.5.10+89.**
+
 **Audience:** Nex-Gen LED LLC internal staff (Tyler and the corporate team)
 
 The Corporate Dashboard is your cross-dealer command center — every dealer's pipeline, every inventory shortfall, every waste trend, plus the admin controls to shape the network itself. Permanent residential and commercial lighting that works as hard as you do, and this dashboard is how you keep the network that delivers it running at the same standard.
@@ -420,3 +422,7 @@ That's expected — PIN changes are immediate. Coordinate rotations in advance, 
 ---
 
 **Need help?** This dashboard is internal-only. Contact the Owner directly for role escalation or system issues.
+
+---
+
+*Describes Lumina app version 2.5.10+89 — August 2026*
