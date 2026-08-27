@@ -25,6 +25,25 @@ import 'package:nexgen_command/utils/rgbw_validation.dart';
 /// See docs/audits/DESIGN_STUDIO_AUDIT_2026-07.md §2b.
 const int kDefaultPixelChunkSize = 224;
 
+/// Hard ceiling on a single `/json/state` apply body, in BYTES.
+///
+/// PART D (audit/GAMEDAY_WEDGE_U1_U6.md §1). `applyJson` had no size bound at
+/// all: a design large enough to require chunking through [applyPerPixel] was
+/// posted as one unbounded body. The bench-measured device ceiling is ~6.0 KB
+/// before WLED answers HTTP 400 `{"error":9}` (see [kDefaultPixelChunkSize]
+/// above), so 4 KB keeps ~33% headroom below known-bad — the same margin the
+/// per-pixel chunk size was chosen with.
+///
+/// Calibrated against REAL data, not guessed. A client-credentialed census of
+/// all 43 `game_day_autopilot` docs (2026-08-26) found exactly ONE carrying a
+/// `saved_design_payload` at all, at **389 bytes**, with no `seg[].i` anywhere
+/// in the fleet. 4 KB is therefore ~10x the largest payload that actually
+/// exists, and no current design comes close to tripping it.
+///
+/// This REFUSES; it does not split. See the Part D note in the commit for why
+/// a cap was chosen over routing through the chunker, and what it leaves open.
+const int kMaxApplyPayloadBytes = 4096;
+
 /// Floor for the retry-on-too-large backoff so a pathological device can't
 /// drive the chunk size to zero.
 const int kMinPixelChunkSize = 16;

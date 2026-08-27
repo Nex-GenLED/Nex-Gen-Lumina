@@ -112,7 +112,9 @@ void main() {
 
     setUp(() {
       applyCalls = [];
-      svc.onApplyPayload = (payload) =>
+      // `async` required: onApplyPayload is now Future<void> Function(...)
+      // so the apply can be awaited (Part A).
+      svc.onApplyPayload = (payload) async =>
           applyCalls.add(Map<String, dynamic>.from(payload));
     });
 

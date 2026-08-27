@@ -532,13 +532,27 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // unified "Light it Up Now" button calls the SAME helper — both
     // call sites must produce identical WLED payloads + labelHint
     // shape so the .250 participation hardware probe's PASS holds.
-    final ok = await applyGameDayConfigToDevice(
-      applyPayloadWithLabel:
-          ref.read(wledStateProvider.notifier).applyPayloadWithLabel,
-      config: config,
-      participatingChannels: ref.read(effectiveChannelIdsProvider),
-      deviceChannels: ref.read(deviceChannelsProvider),
-    );
+    // PART B — POLLING PAUSE FOR THE APPLY (audit/GAMEDAY_WEDGE_U1_U6.md §2,
+    // audit/GAMEDAY_DIRECT_APPLY_WEDGE_AUDIT.md §4). This write was unpaced and
+    // poller-concurrent: the POST and ~10 getState GETs landed on the
+    // controller inside the same 15s window, with no coordination. Mirrors the
+    // pause _doPopulateCalendars already performs for the populate burst.
+    //
+    // resume in a finally — a failed or throwing apply must not leave the
+    // dashboard permanently un-polled.
+    final poller = ref.read(wledStateProvider.notifier);
+    poller.pausePolling();
+    final bool ok;
+    try {
+      ok = await applyGameDayConfigToDevice(
+        applyPayloadWithLabel: poller.applyPayloadWithLabel,
+        config: config,
+        participatingChannels: ref.read(effectiveChannelIdsProvider),
+        deviceChannels: ref.read(deviceChannelsProvider),
+      );
+    } finally {
+      poller.resumePolling();
+    }
     if (!context.mounted) return;
 
     if (ok) {
