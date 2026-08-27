@@ -567,21 +567,42 @@ class WledService
       // wraps across lines). `adb logcat -d | grep LUMINA_WIRE`.
       _logWireSummary(data, allowGeometry: allowGeometry);
 
-      final response = await http.post(
-        _uri('/json/state'),
-        headers: {'Content-Type': 'application/json'},
-        body: body,
-      ).timeout(const Duration(seconds: 15));
+      // PART C — POOLED CLIENT + EXPLICIT CONTENT-LENGTH.
+      //
+      // This was `http.post`, and it was the LAST /json/state writer still on
+      // it. `_postConfig` (Item #61 Workstream B), `savePreset` (P1-53 /
+      // `7ad46ac`) and `_postPerPixelChunk` were each deliberately migrated to
+      // this exact shape after bench-verified failures, and each carries a
+      // "Do NOT swap this back to http.post" comment. The main design-apply
+      // path — the one Game Day fires through — was left behind
+      // (audit/GAMEDAY_DIRECT_APPLY_WEDGE_AUDIT.md §3).
+      //
+      // Setting contentLength explicitly keeps the request out of Dart
+      // HttpClient's chunked transfer-encoding path. WLED 0.15.x on ESP32
+      // silently drops chunked POSTs to /json/state — 200 OK, nothing applied.
+      //
+      // BEHAVIOUR DELIBERATELY UNCHANGED: same 15s timeout, still exactly ONE
+      // attempt, no retry and no backoff. The wedge audit (§3) found that
+      // single-shot behaviour gap-free and it is not what is being fixed here.
+      final bodyBytes = utf8.encode(body);
+      final client = _wledClientFor(const Duration(seconds: 15));
+      final req = await client.postUrl(_uri('/json/state'));
+      req.persistentConnection = false;
+      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+      req.contentLength = bodyBytes.length;
+      req.add(bodyBytes);
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      final resBody = await res.transform(utf8.decoder).join();
 
-      debugPrint('📥 WLED Response: ${response.statusCode}');
-      debugPrint('   Body: ${response.body}');
+      debugPrint('📥 WLED Response: ${res.statusCode}');
+      debugPrint('   Body: $resBody');
 
-      debugPrint('🔍 BridgeRouter: send result=${response.statusCode}, error=none');
-      if (response.statusCode >= 200 && response.statusCode < 300) {
+      debugPrint('🔍 BridgeRouter: send result=${res.statusCode}, error=none');
+      if (res.statusCode >= 200 && res.statusCode < 300) {
         debugPrint('✅ WLED JSON API success');
         return true;
       }
-      debugPrint('❌ WLED JSON API error ${response.statusCode}: ${response.body}');
+      debugPrint('❌ WLED JSON API error ${res.statusCode}: $resBody');
     } catch (e) {
       debugPrint('🔍 BridgeRouter: send result=EXCEPTION, error=$e');
     }
