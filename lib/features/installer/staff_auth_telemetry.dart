@@ -54,7 +54,7 @@ const String kAnonFallbackEventType = 'installer_anon_fallback';
 /// risk than a one-line constant. The whole point of the S-5 gate is telling
 /// ADOPTED builds from STALE ones, so a stale value here defeats the metric.
 /// Logged as debt in docs/BUGS_AND_DEBT.md.
-const String kStaffAuthTelemetryAppVersion = '2.5.10+89';
+const String kStaffAuthTelemetryAppVersion = '2.5.10+90';
 
 /// Discriminator for commissioning-step failures that leave an install
 /// incomplete — see [recordCommissioningFailure]. Separate from
