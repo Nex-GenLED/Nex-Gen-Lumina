@@ -2827,6 +2827,89 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     that covers only the sunrise-off would leave the two paths inconsistent (sunrise-off on every
     controller, schedules on one). Either fan out both or neither — this is one decision, not two.
 
+> Added 2026-08-27 from the dbrosa99 → Nancy Pied hardware-release/purge pass (controller
+> `80_f3_da_b4_d1_50`, bridge `0070077E8F60`). All four were found while inventorying, not while
+> fixing — none is speculative.
+
+- [ ] **P2-52 — Controller IDs are not unique per owner; one controller lived under three uids**
+  - Status: OPEN · Evidence: verified-by-data (2026-08-27)
+  - `collectionGroup('controllers')` returned `80_f3_da_b4_d1_50` under THREE uids at once:
+    the prior customer (`ledCount 100`, ip `.73`), the new customer (`ledCount 400`, ip `.250`),
+    and the installer staging account `staff_installer_5502` (`ledCount 141`, ip `.250`). Three
+    different `ledCount` values for one physical strip — so the docs disagree about the hardware,
+    not just about who owns it. Nothing in the write path noticed.
+  - Consequence: a controller re-installed at a new address stays claimed by the old account
+    forever. Health probes fire against the stale ip under the dead uid (see the expired
+    `fire_health_*` command found under the purged account), and any reader that resolves
+    controller → owner by "first match" can pick the wrong one.
+  - **FIX (two halves, both needed):** (a) claim-time uniqueness check in the installer wizard —
+    before writing `users/{uid}/controllers/{id}`, query for an existing claim on that id and
+    force an explicit transfer/release rather than silently adding a second owner; (b) a
+    healer / fleet-health rule that resolves a controller to its SINGLE owner and flags
+    multi-owner ids as a defect instead of reporting each copy independently.
+  - Note the staging copy is its own sub-case: the installer wizard leaves a controller doc under
+    `staff_installer_5502` after handoff. That copy is never cleaned up by any existing path.
+
+- [ ] **P2-53 — Installer wizard double-writes `installation_records` + `installations`**
+  - Status: OPEN · Evidence: verified-by-data (2026-08-27)
+  - One install produced TWO record pairs 9s apart — `od7tyQK68GpzSvT4PQ2t` (`17:30:57`) and
+    `a1kuNn4vj3UKdXRxWvW7` (`17:31:06`) — byte-identical apart from id and timestamp, both with
+    `is_active: true`. The user doc's `installation_id` pointed at only one of them, so the other
+    was an invisible orphan carrying a full copy of the customer's PII.
+  - Related to the known partial-success bug (`project_install_flow_partial_success`), but this is
+    the duplicate-write half, not the missing-link half.
+  - **FIX:** make the create idempotent — derive a deterministic doc id (e.g. from customer uid +
+    controller id) or guard on an existing active record for the same customer/controller before
+    writing, so a retry updates rather than inserts. A dedupe sweep over existing docs is owed too;
+    only this customer's pair was checked.
+
+- [ ] **P2-54 — `fleet_health` snapshots embed customer email and are never pruned**
+  - Status: OPEN · Evidence: verified-by-data (2026-08-27)
+  - Every daily `fleet_health/{YYYY-MM-DD}` doc embeds `email` and `displayName` alongside `uid`
+    in both `alerts[]` and `roster.neverHadBridge[]`. 21 snapshots (`2026-08-07` … `2026-08-27`)
+    still contain `dbrosa99@icloud.com` AFTER that account was fully purged — Firestore doc,
+    subcollections, Storage, and Auth all gone, the address still readable in 21 places.
+  - This is a real gap against the published delete-or-anonymise-within-30-days promise, and it
+    is invisible to `purgeUserAccount` because the data is not under `users/{uid}`.
+  - **FIX:** (a) store `uid` only in snapshots and resolve display fields at render time;
+    (b) give `scheduledDataCleanup` an age-based prune for `fleet_health` — these are operational
+    dashboards, not records, and have no reason to be unbounded. Left in place deliberately on the
+    2026-08-27 pass; closing it needs the backfill decision made first.
+
+- [ ] **P2-55 — `purgeUserAccount` PENDING_PHASE_2 still owes neighborhoods + OAuth tokens**
+  - Status: OPEN · Evidence: verified-by-source (2026-08-27)
+  - `functions/src/purgeUserAccount.ts` carries `PENDING_PHASE_2 = [neighborhoods.memberUids,
+    oauth_refresh_tokens, google_oauth_refresh_tokens]` — a purge today leaves a deleted uid in
+    any neighborhood it joined, and does not revoke OAuth refresh tokens (audit D-2 / D-3).
+  - `neighborhoods.memberUids` is blocked on the server-side leave callable that gap #105 already
+    owes (join is server-side F-3, leave is client-only) — one fix closes both.
+  - Did not bite on the 2026-08-27 pass only because `/neighborhoods/` and the OAuth collections
+    are currently empty project-wide. That is a fact about today's data, not about the code.
+
+- [ ] **P2-56 — `sweepExpiredCommands` only retires `pending`; commands stuck in `executing` are immortal**
+  - Status: OPEN · Evidence: verified-by-data + verified-by-source (2026-08-27)
+  - `functions/src/sweepExpiredCommands.ts` queries
+    `collectionGroup("commands").where("status", "==", STATUS_PENDING)`, and its pre-write
+    re-check explicitly skips anything whose status has changed — *"if the bridge claimed it in
+    the interim the snapshot is stale — leave the claim alone."* That is correct for a live
+    bridge and wrong for a dead one: a bridge that loses power between claiming a command and
+    writing its terminal status leaves the doc in `executing` permanently. Nothing sweeps it,
+    ever.
+  - Live example (left in place deliberately, do NOT clean up by hand — it is the reproduction):
+    `users/nTIciU8GpfWE95IeaE7HySzDmrl1/commands/UWu0cXj2N300LPaHrmi4`, `type: getState`,
+    `createdAt 2026-08-26T18:14:52Z`, `status: executing`, no `completedAt`. Claimed seconds
+    before the site was unplugged; still `executing` a day later.
+  - Blast radius is small TODAY only because the stuck doc happened to be a read-only `getState`
+    and because the bridge polls `status == "pending"`, so an `executing` doc never replays. It
+    is a monotonically growing pile of undead docs, and it makes "is this command still in
+    flight?" unanswerable for any reader — including a human debugging a customer outage.
+  - **FIX:** give the sweeper a second pass over `status == "executing"` with a short age bound
+    (the claim-to-terminal window is seconds; minutes is already generous), retiring them to a
+    distinct terminal status — `abandoned`, not `expired`, since "the bridge picked it up and
+    then vanished" is a different fact from "the bridge never picked it up" and the two should
+    stay distinguishable in the data. Needs its own COLLECTION_GROUP index on
+    `commands(status, createdAt)` for the new status value.
+
 ---
 
 ## P3 — debt (no launch relevance)
