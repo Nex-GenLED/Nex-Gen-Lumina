@@ -19,6 +19,29 @@
 // re-deriving it: one general slot per CLOCK on-boundary, one per clock
 // off-boundary, none for solar (those live in the dedicated slots 8/9), and the
 // budget reduced by active calendar leases, which hold general slots too.
+//
+// #90 — WHAT "REDUCED BY ACTIVE LEASES" MEANS, AND WHAT IT USED TO MEAN.
+// This file used to shrink the budget by `calendarLeaseEntriesProvider.length`
+// — the number of DATES that have a calendar entry, account-wide, with no
+// horizon filter, no expiry filter, and including the 12 holiday defaults that
+// `CalendarScheduleNotifier` seeds before Firestore even loads. On a real
+// account that was 55, so the budget computed as `8 - 55` and clamped to 0, and
+// the save guard refused EVERY new schedule with "0 of 0 are already used".
+//
+// The firing path never used that number. `ScheduleSyncService` reduces its
+// budget by `leaseTimers.length` — the leases actually reserved on the device,
+// bounded by the 8-slot table and by the 48 h promotion window
+// (`kLeaseWindow`). Both files called their variable `leaseCount`; they were
+// two different quantities. This file now reads the SAME provider the sync
+// merges, `calendarLeaseActiveTimersProvider`, so the claim above is true by
+// construction instead of by coincidence.
+//
+// The ledger is TRI-STATE and that matters here (the P0-9 lesson): `loading`
+// is UNKNOWN, not zero. Coercing it to 0 would invent a budget of 8 and could
+// hand a schedule a slot a lease already owns. Coercing it to "full" would
+// block saves for a reason the user cannot act on. So unknown neither blocks
+// nor pretends: the guard allows the save and says capacity is still being
+// checked.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -55,10 +78,37 @@ int slotsForSchedule(ScheduleItem s, {required bool solarEnabled}) {
 /// A schedule that is currently holding at least one slot, with what it holds.
 typedef SlotHolder = ({String id, String label, int slots});
 
+/// Demand, budget, who is holding what, and whether the answer is trustworthy.
+///
+/// [budget] is the RAW arithmetic and may be zero or negative when leases have
+/// over-committed the table. It is deliberately NOT clamped: clamping made an
+/// over-commitment indistinguishable from a legitimately full pool, and the
+/// guard then refused saves it had no business refusing. Callers that render it
+/// should clamp for display; callers that decide should read [overCommitted].
+typedef SlotUsage = ({
+  int used,
+  int budget,
+  List<SlotHolder> holders,
+  bool overCommitted,
+  bool ledgerUnknown,
+});
+
+/// The reservation to subtract, or null when the lease ledger has not loaded.
+///
+/// `LeaseLedgerLoading` is UNKNOWN — never 0. See the header note.
+int? leaseReservationOf(LeaseLedgerState ledger) =>
+    ledger is LeaseLedgerLoading ? null : ledger.timers.length;
+
 /// The whole picture: demand, budget, and who is holding what.
-({int used, int budget, List<SlotHolder> holders}) computeSlotUsage({
+///
+/// [leaseReservation] is the number of general slots calendar leases actually
+/// hold on the device — `calendarLeaseActiveTimersProvider`'s timer count, the
+/// same value `ScheduleSyncService` subtracts. Pass null when the ledger has
+/// not loaded; the result is then flagged [ledgerUnknown] and must not be used
+/// to refuse anything.
+SlotUsage computeSlotUsage({
   required List<ScheduleItem> schedules,
-  required int leaseCount,
+  required int? leaseReservation,
   required bool solarEnabled,
   String? excludingId,
 }) {
@@ -73,8 +123,14 @@ typedef SlotHolder = ({String id, String label, int slots});
   }
   // Leases hold GENERAL slots — macro 26-41 is a preset-id convention, not a
   // slot reservation (bench-proven, audit §4.2). The budget shrinks by them.
-  final budget = (kGeneralTimerSlots - leaseCount).clamp(0, kGeneralTimerSlots);
-  return (used: used, budget: budget, holders: holders);
+  final budget = kGeneralTimerSlots - (leaseReservation ?? 0);
+  return (
+    used: used,
+    budget: budget,
+    holders: holders,
+    overCommitted: budget <= 0,
+    ledgerUnknown: leaseReservation == null,
+  );
 }
 
 /// Inline meter for the schedule editor.
@@ -89,16 +145,20 @@ class TimerSlotMeter extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final schedules = ref.watch(schedulesProvider);
     final solarEnabled = ref.watch(solarSchedulingEnabledSyncProvider);
-    final leaseCount = ref.watch(calendarLeaseEntriesProvider).length;
+    // The SAME provider the sync path merges — not the calendar entry count.
+    final reservation =
+        leaseReservationOf(ref.watch(calendarLeaseActiveTimersProvider));
 
     final usage = computeSlotUsage(
       schedules: schedules,
-      leaseCount: leaseCount,
+      leaseReservation: reservation,
       solarEnabled: solarEnabled,
       excludingId: editingId,
     );
 
-    final full = usage.used >= usage.budget;
+    // Display clamps; the decision does not (see [SlotUsage.budget]).
+    final shownBudget = usage.budget.clamp(0, kGeneralTimerSlots);
+    final full = usage.overCommitted || usage.used >= shownBudget;
     final colour = full ? NexGenPalette.amber : NexGenPalette.textMedium;
 
     return Row(
@@ -106,13 +166,15 @@ class TimerSlotMeter extends ConsumerWidget {
         Icon(Icons.timer_outlined, size: 14, color: colour),
         const SizedBox(width: 6),
         Text(
-          '${usage.used} of ${usage.budget} timer slots used',
+          usage.ledgerUnknown
+              ? '${usage.used} timer slots used — checking capacity'
+              : '${usage.used} of $shownBudget timer slots used',
           style: TextStyle(fontSize: 11, color: colour),
         ),
-        if (leaseCount > 0) ...[
+        if (!usage.ledgerUnknown && (reservation ?? 0) > 0) ...[
           const SizedBox(width: 6),
           Text(
-            '($leaseCount held by calendar days)',
+            '($reservation held by calendar days)',
             style: TextStyle(fontSize: 10, color: NexGenPalette.textMedium),
           ),
         ],
@@ -132,15 +194,40 @@ Future<bool> confirmSlotCapacity(
 }) async {
   final schedules = ref.read(schedulesProvider);
   final solarEnabled = ref.read(solarSchedulingEnabledSyncProvider);
-  final leaseCount = ref.read(calendarLeaseEntriesProvider).length;
+  final reservation =
+      leaseReservationOf(ref.read(calendarLeaseActiveTimersProvider));
 
   final usage = computeSlotUsage(
     schedules: schedules,
-    leaseCount: leaseCount,
+    leaseReservation: reservation,
     solarEnabled: solarEnabled,
     excludingId: editingId,
   );
   final want = slotsForSchedule(candidate, solarEnabled: solarEnabled);
+
+  // WARN, DO NOT BLOCK (#90). Saving writes Firestore and nothing else. The
+  // sync layer independently refuses to arm what will not fit and reports it
+  // honestly, so a save is never destructive — whereas refusing it strands the
+  // user with no way forward and, when the arithmetic was wrong, no way to tell.
+  // Two cases get a note instead of a refusal:
+  //   • the lease ledger has not loaded — the budget is UNKNOWN, not zero;
+  //   • the budget is <= 0 — leases have over-committed the table, which is a
+  //     lease-side condition the user cannot fix by deleting a schedule.
+  if (usage.ledgerUnknown || usage.overCommitted) {
+    if (!context.mounted) return true;
+    final msg = usage.ledgerUnknown
+        ? 'Still checking how many timer slots your calendar days are '
+            'holding. Your schedule will be saved; if there is no room on the '
+            'controller it will say so when it syncs.'
+        : 'Your calendar days are currently holding every timer slot. Your '
+            'schedule will be saved, but it may not arm until one of those '
+            'days passes.';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 5)),
+    );
+    return true;
+  }
+
   if (usage.used + want <= usage.budget) return true;
 
   if (!context.mounted) return false;
@@ -156,7 +243,7 @@ Future<bool> confirmSlotCapacity(
             'This schedule needs $want '
             '${want == 1 ? 'slot' : 'slots'}, and '
             '${usage.used} of ${usage.budget} are already used'
-            '${leaseCount > 0 ? ' ($leaseCount held by calendar days)' : ''}.',
+            '${(reservation ?? 0) > 0 ? ' ($reservation held by calendar days)' : ''}.',
           ),
           const SizedBox(height: 12),
           const Text('Holding slots now:',
