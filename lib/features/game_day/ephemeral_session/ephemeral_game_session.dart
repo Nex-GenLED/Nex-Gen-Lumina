@@ -10,6 +10,7 @@
 // Persisted at /users/{uid}/ephemeral_game_sessions/{sessionId} so the
 // phase machine resumes after app restart.
 
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Lifecycle phases for an ephemeral one-shot game session.
@@ -151,7 +152,22 @@ class EphemeralGameSession {
         'game_id': gameId,
         'game_start': Timestamp.fromDate(gameStart),
         if (gameEnd != null) 'game_end': Timestamp.fromDate(gameEnd!),
-        'revert_wled_payload': revertWledPayload,
+        // JSON-STRING ENCODED — this field CRASHED THE APP natively.
+        //
+        // revertWledPayload is a verbatim `/json/state` read off the
+        // controller, so it always contains `seg[].col: [[r,g,b,w], ...]` —
+        // directly-nested arrays, which Firestore does not support. The iOS
+        // SDK does not return an error for that: FSTUserDataReader raises
+        // NSInvalidArgumentException -> objc_exception_throw -> abort, an
+        // EXC_CRASH/SIGABRT that NO Dart try/catch and no Flutter error
+        // handler can intercept. Confirmed by crash incident
+        // 51AD90DC-5A9F-4F34-B34C-FB70F82D04B2 on 2.5.10(321).
+        //
+        // Encoding to an opaque String is the same treatment
+        // `saved_design_payload` already uses (game_day_autopilot_config.dart)
+        // and the pattern user_service.dart's sanitizer explicitly points at:
+        // "Upstream fix is to jsonEncode the offending field."
+        'revert_wled_payload': jsonEncode(revertWledPayload),
         'revert_label': revertLabel,
         'created_at': Timestamp.fromDate(createdAt),
         'phase': phase.toJson(),
@@ -170,8 +186,7 @@ class EphemeralGameSession {
       gameId: json['game_id'] as String,
       gameStart: (json['game_start'] as Timestamp).toDate(),
       gameEnd: (json['game_end'] as Timestamp?)?.toDate(),
-      revertWledPayload:
-          Map<String, dynamic>.from(json['revert_wled_payload'] as Map),
+      revertWledPayload: _decodeRevertPayload(json['revert_wled_payload']),
       revertLabel: json['revert_label'] as String,
       createdAt: (json['created_at'] as Timestamp).toDate(),
       phase: EphemeralSessionPhase.fromJson(
@@ -184,4 +199,31 @@ class EphemeralGameSession {
       completedAt: (json['completed_at'] as Timestamp?)?.toDate(),
     );
   }
+}
+
+/// Decodes `revert_wled_payload`, tolerating BOTH storage shapes.
+///
+/// NEW (post-crash-fix): a `jsonEncode`d String. See the note in [toJson].
+///
+/// LEGACY: a raw Map. Kept deliberately rather than assumed impossible — the
+/// native abort that motivated this fix is the iOS Firestore codec's
+/// behaviour, and a document written from a platform whose codec accepted the
+/// nested array would still be a Map on read. A stored doc must never be able
+/// to crash the reader.
+///
+/// Anything else (or malformed JSON) decodes to an empty map: the revert then
+/// no-ops rather than throwing inside a session-restore path.
+Map<String, dynamic> _decodeRevertPayload(Object? raw) {
+  if (raw is String) {
+    if (raw.isEmpty) return <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      // Fall through — a corrupt blob must not take out the session read.
+    }
+    return <String, dynamic>{};
+  }
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  return <String, dynamic>{};
 }
