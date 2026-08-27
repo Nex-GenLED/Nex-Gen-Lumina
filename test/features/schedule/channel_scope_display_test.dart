@@ -215,7 +215,7 @@ void main() {
     test('leases shrink the budget, and holders are named', () {
       final usage = computeSlotUsage(
         schedules: [rec('a', '8:00 PM'), rec('b', '9:00 PM')],
-        leaseCount: 2,
+        leaseReservation: 2,
         solarEnabled: false,
       );
       expect(usage.used, 4);
@@ -230,7 +230,7 @@ void main() {
     test('the edited schedule is excluded from its own usage', () {
       final usage = computeSlotUsage(
         schedules: [rec('a', '8:00 PM'), rec('b', '9:00 PM')],
-        leaseCount: 0,
+        leaseReservation: 0,
         solarEnabled: false,
         excludingId: 'a',
       );
