@@ -26,6 +26,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -110,11 +111,49 @@ void main() {
     test('a LARGE payload is still unchunked — the size case that matters',
         () async {
       // The wedge symptom was size-dependent, so the small-body case alone
-      // would not be reassuring. This body is far larger than any real Game
-      // Day payload measured in U1 (max 389 bytes fleetwide).
-      final big = <String, dynamic>{
+      // would not be reassuring.
+      //
+      // TWO BODIES, because Part D now bounds this path. applyJson refuses
+      // anything over kMaxApplyPayloadBytes (4096), so the largest body it will
+      // ever put on the wire is just under that — tested first. The genuinely
+      // large case then goes through applyGeometryJson, which is deliberately
+      // exempt from the cap (a re-provision states the full installation shape)
+      // and is therefore the path that CAN still send >6KB.
+      final nearCap = <String, dynamic>{
         'on': true,
         'bri': 200,
+        'seg': [
+          for (var i = 0; i < 40; i++)
+            {
+              'id': i,
+              'fx': 27,
+              'col': [
+                [0, 70, 135, 0],
+                [192, 154, 91, 0]
+              ],
+            }
+        ],
+      };
+      expect(jsonEncode(nearCap).length, greaterThan(1500),
+          reason: 'substantially larger than the single-seg case');
+      expect(jsonEncode(nearCap).length, lessThan(kMaxApplyPayloadBytes),
+          reason: 'and still inside what Part D allows through applyJson');
+
+      final svc = WledService(base);
+      await svc.applyJson(nearCap);
+
+      expect(seen, hasLength(1));
+      expect(seen.single.value(HttpHeaders.transferEncodingHeader),
+          anyOf(isNull, isNot(contains('chunked'))),
+          reason: 'the largest body applyJson can send must not chunk');
+      expect(seen.single.contentLength, bodies.single.length);
+    });
+
+    test('a >6KB body on the provisioning path is unchunked too', () async {
+      // applyGeometryJson is the one /json/state caller Part D exempts, so it
+      // is where the genuinely-large-body behaviour still has to hold.
+      final big = <String, dynamic>{
+        'on': true,
         'seg': [
           for (var i = 0; i < 200; i++)
             {
@@ -129,13 +168,12 @@ void main() {
       };
 
       final svc = WledService(base);
-      await svc.applyJson(big);
+      await svc.applyGeometryJson(big);
 
       expect(bodies.single.length, greaterThan(6000),
-          reason: 'past the ~6KB region the per-pixel chunker exists to '
-              'respect');
-      final te = seen.single.value(HttpHeaders.transferEncodingHeader);
-      expect(te, anyOf(isNull, isNot(contains('chunked'))),
+          reason: 'past the ~6KB region the per-pixel chunker respects');
+      expect(seen.single.value(HttpHeaders.transferEncodingHeader),
+          anyOf(isNull, isNot(contains('chunked'))),
           reason: 'a large body must NOT fall into chunked encoding');
       expect(seen.single.contentLength, bodies.single.length);
     });

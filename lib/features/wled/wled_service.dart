@@ -567,6 +567,33 @@ class WledService
       // wraps across lines). `adb logcat -d | grep LUMINA_WIRE`.
       _logWireSummary(data, allowGeometry: allowGeometry);
 
+      // PART D — SIZE CEILING (audit/GAMEDAY_WEDGE_U1_U6.md §1).
+      //
+      // applyJson had NO size bound. applyPerPixel exists precisely because
+      // WLED's JSON buffer chokes above roughly 6.0 KB / ~337 entries and
+      // answers HTTP 400 {"error":9} (per_pixel.dart:20-25, bench-measured on
+      // WLED 0.15.4/ESP32) — yet a design routed through applyJson was posted
+      // as one unbounded body no matter how big it got.
+      //
+      // REFUSE rather than wedge. Returning false here surfaces as a real
+      // failure: the manual button shows its red snackbar, and since Part A the
+      // scheduled path reports through onApplyFailure instead of dropping it.
+      //
+      // Skipped for provisioning (`allowGeometry`): a re-provision states the
+      // FULL expected shape for the installation and a large one is legitimate,
+      // so capping it would break exactly the repair path a big install needs.
+      if (!allowGeometry) {
+        final byteLength = utf8.encode(body).length;
+        if (byteLength > kMaxApplyPayloadBytes) {
+          debugPrint('❌ WLED apply REFUSED: payload ${byteLength}B exceeds the '
+              '${kMaxApplyPayloadBytes}B ceiling. WLED rejects around 6.0KB '
+              '(HTTP 400 error:9); posting this would risk wedging the '
+              'controller. Split the design or route per-pixel data through '
+              'applyPerPixel.');
+          return false;
+        }
+      }
+
       // PART C — POOLED CLIENT + EXPLICIT CONTENT-LENGTH.
       //
       // This was `http.post`, and it was the LAST /json/state writer still on
