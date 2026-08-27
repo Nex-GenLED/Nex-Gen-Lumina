@@ -78,7 +78,24 @@ final gameDayAutopilotServiceProvider =
       debugPrint('[GameDayAutopilot] No WLED repository available');
       throw StateError('No WLED repository available');
     }
-    final ok = await repo.applyJson(payload);
+    // PART B — POLLING PAUSE FOR THE APPLY (audit/GAMEDAY_WEDGE_U1_U6.md §2).
+    //
+    // Same pattern _doPopulateCalendars uses ~930 lines below, for the same
+    // reason: an unpaced write racing the ~1.5s getState poller puts the POST
+    // and roughly ten concurrent GETs on the controller inside one 15s window.
+    // The populate path was taught to pause; this apply — which fires
+    // UNATTENDED on a game clock — never was.
+    //
+    // resume lives in the finally so a failed apply cannot leave the dashboard
+    // permanently un-polled. The depth counter makes nesting safe.
+    final poller = ref.read(wledStateProvider.notifier);
+    poller.pausePolling();
+    final bool ok;
+    try {
+      ok = await repo.applyJson(payload);
+    } finally {
+      poller.resumePolling();
+    }
     // applyJson returns FALSE on timeout/non-2xx rather than throwing, so a
     // silent false is the failure mode this path actually sees. Convert it
     // into something onApplyFailure can report.
