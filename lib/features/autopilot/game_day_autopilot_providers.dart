@@ -67,17 +67,30 @@ final gameDayAutopilotServiceProvider =
   );
 
   // Wire the payload callback to the WLED repository.
-  svc.onApplyPayload = (payload) {
-    try {
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo != null) {
-        repo.applyJson(payload);
-      } else {
-        debugPrint('[GameDayAutopilot] No WLED repository available');
-      }
-    } catch (e) {
-      debugPrint('[GameDayAutopilot] Failed to apply payload: $e');
+  //
+  // PART A — the apply is now AWAITED and its result inspected. Previously
+  // `repo.applyJson(payload)` was called without `await`, so this try/catch
+  // caught only synchronous throws and an apply that timed out reported
+  // nothing at all (audit/GAMEDAY_WEDGE_U1_U6.md §2).
+  svc.onApplyPayload = (payload) async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      debugPrint('[GameDayAutopilot] No WLED repository available');
+      throw StateError('No WLED repository available');
     }
+    final ok = await repo.applyJson(payload);
+    // applyJson returns FALSE on timeout/non-2xx rather than throwing, so a
+    // silent false is the failure mode this path actually sees. Convert it
+    // into something onApplyFailure can report.
+    if (!ok) {
+      throw StateError('WLED apply returned false (device write failed)');
+    }
+  };
+
+  svc.onApplyFailure = (design, error, stack) {
+    debugPrint('[GameDayAutopilot] APPLY FAILED for "${design.designName}": '
+        '$error');
+    debugPrint('[GameDayAutopilot] stack: $stack');
   };
 
   svc.onResumeNormalSchedule = () {

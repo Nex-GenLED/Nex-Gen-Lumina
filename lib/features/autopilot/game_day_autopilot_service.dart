@@ -146,7 +146,16 @@ class GameDayAutopilotService {
 
   /// Callback invoked when the service needs to apply a WLED payload.
   /// Set by the provider layer to bridge into the WLED notifier.
-  void Function(Map<String, dynamic> payload)? onApplyPayload;
+  /// PART A (audit/GAMEDAY_WEDGE_U1_U6.md §2). Returns a Future, and
+  /// [_applyDesign] awaits it.
+  ///
+  /// This was `void Function(...)`, which discarded the Future returned by
+  /// `repo.applyJson`. The handler's own `try/catch` could therefore only ever
+  /// catch a SYNCHRONOUS throw — a timeout or an exception raised inside the
+  /// apply became an unhandled async error and was lost. On the scheduled path
+  /// that meant a controller that failed to light produced no error anywhere,
+  /// unattended, with nobody present to notice.
+  Future<void> Function(Map<String, dynamic> payload)? onApplyPayload;
 
   /// Callback invoked when the service needs to resume normal schedule
   /// or turn lights off after the post-game countdown.
@@ -252,7 +261,7 @@ class GameDayAutopilotService {
       phase: AutopilotSessionPhase.preGame,
       gameStart: DateTime.now(),
     );
-    _applyDesign(design);
+    await _applyDesign(design);
     _notifySessionChanged(config.teamSlug);
   }
 
@@ -566,7 +575,7 @@ class GameDayAutopilotService {
     // Select design — now passes user's style preferences via callback
     final preferredStyles = onGetPreferredStyles?.call() ?? const [];
     final design = selectDesign(config, preferredStyles: preferredStyles);
-    _applyDesign(design);
+    await _applyDesign(design);
     _notifySessionChanged(config.teamSlug);
 
     debugPrint('[GameDayAutopilot] Pre-game activated for '
@@ -795,9 +804,10 @@ class GameDayAutopilotService {
   /// regression tests to assert that an empty seg array prevents the
   /// `onApplyPayload` invocation.
   @visibleForTesting
-  void applyDesignForTest(DesignSelection design) => _applyDesign(design);
+  Future<void> applyDesignForTest(DesignSelection design) =>
+      _applyDesign(design);
 
-  void _applyDesign(DesignSelection design) {
+  Future<void> _applyDesign(DesignSelection design) async {
     // Skip-apply when participation resolved to explicit empty. The
     // applyJson chokepoint ([expandForParticipation], rule 2) passes
     // empty participation THROUGH — it never emits seg:[] on its own —
@@ -813,8 +823,23 @@ class GameDayAutopilotService {
       );
       return;
     }
-    onApplyPayload?.call(design.wledPayload);
+    // AWAITED — see [onApplyPayload]. A failure here is surfaced through
+    // [onApplyFailure] rather than vanishing into a dropped Future.
+    try {
+      await onApplyPayload?.call(design.wledPayload);
+    } catch (e, st) {
+      onApplyFailure?.call(design, e, st);
+      rethrow;
+    }
   }
+
+  /// Reports a failed device apply to the host. Set by the provider wiring.
+  ///
+  /// Exists because the previous shape had nowhere for an async failure to go:
+  /// the Future was dropped, so neither the service nor the provider learned
+  /// that the house never lit.
+  void Function(DesignSelection design, Object error, StackTrace stack)?
+      onApplyFailure;
 
   Map<String, dynamic> _buildWledPayload({
     required int effectId,
