@@ -336,6 +336,8 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
   Widget build(BuildContext context) {
     final state = ref.watch(wledStateProvider);
     final isConnected = state.connected;
+    // #91 — gates the LAN-only direction toggle below.
+    final onLan = ref.watch(isLanConnectedProvider);
 
     // Get effect metadata for context-aware labeling
     final effectMetadata = getEffectMetadata(_effectId ?? state.effectId);
@@ -394,7 +396,9 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                     ButtonSegment(value: true, label: Text('R→L')),
                   ],
                   selected: {_reverse},
-                  onSelectionChanged: (s) {
+                  // #91 - LAN-ONLY, disabled not hidden. See the same gate in
+                  // pattern_grid_widgets.dart.
+                  onSelectionChanged: !onLan ? null : (s) {
                     final rev = s.isNotEmpty ? s.first : false;
                     setState(() => _reverse = rev);
                     _notifyChanged();
@@ -410,6 +414,17 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                 ),
               ],
             ),
+            if (!onLan)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  kLanOnlyMessage,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.white.withValues(alpha: 0.45),
+                  ),
+                ),
+              ),
             // Effect selector (optional)
             if (widget.showEffectSelector) ...[
               const SizedBox(height: 12),

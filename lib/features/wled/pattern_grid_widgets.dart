@@ -2136,6 +2136,8 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   Widget build(BuildContext context) {
     // Solid (0) and non-breathing gradients (83) are static — hide speed/direction controls
     final isStatic = _effectId == 0 || (_isGradient && !_breathing);
+    // #91 — gates the LAN-only direction toggle below.
+    final onLan = ref.watch(isLanConnectedProvider);
 
     return Container(
       decoration: BoxDecoration(
@@ -2352,7 +2354,11 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                         ButtonSegment(value: true, label: Text('R→L', style: TextStyle(fontSize: 12))),
                       ],
                       selected: {_reverse},
-                      onSelectionChanged: (s) {
+                      // #91 - LAN-ONLY, disabled not hidden. Direction is a
+                      // geometry write and the relay throws UnsupportedError
+                      // for it; before this the toggle moved, told the user
+                      // nothing, and left the lights unchanged.
+                      onSelectionChanged: !onLan ? null : (s) {
                         final rev = s.isNotEmpty ? s.first : false;
                         setState(() => _reverse = rev);
                         // Direction is GEOMETRY, so it takes the provisioning
@@ -2368,6 +2374,17 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                     ),
                   ],
                 ),
+                if (!onLan)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      kLanOnlyMessage,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.45),
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
               ],
               // Pixel layout section (hidden for gradient patterns — band width replaces it)

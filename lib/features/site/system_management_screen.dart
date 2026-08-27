@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -219,6 +220,9 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
   @override
   Widget build(BuildContext context) {
     final hwConfigAsync = ref.watch(deviceHardwareConfigProvider);
+    // #91 - the cached/inferred list used when the cfg read is unavailable.
+    final display = ref.watch(displayChannelsProvider);
+    final onLan = ref.watch(isLanConnectedProvider);
     final show2D = ref.watch(show2DEffectsProvider);
     final showAudio = ref.watch(showAudioEffectsProvider);
 
@@ -245,19 +249,24 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
         ),
         const SizedBox(height: 12),
 
+        // #91 - a failed or unavailable cfg read no longer means "no areas".
+        // Off-LAN deviceHardwareConfigProvider resolves to null by design (the
+        // relay has no cfg door), and this tab used to answer that with "No
+        // lighting areas found. Configure your hardware to create areas." - a
+        // statement about the customer's HARDWARE, made from a transport
+        // limitation. Both the null-data and error branches now fall through to
+        // the cached list, which is only genuinely empty when no source has ever
+        // seen this controller.
         hwConfigAsync.when(
           data: (config) => (config == null || config.buses.isEmpty)
-              ? _buildEmptyAreas()
+              ? _buildFallbackAreas(display)
               : Column(
                   children: [
                     for (var i = 0; i < config.buses.length; i++)
                       _buildBusAreaTile(context, config.buses[i], i),
                   ],
                 ),
-          error: (e, _) => Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text('Failed to load channel config: $e'),
-          ),
+          error: (e, _) => _buildFallbackAreas(display),
           loading: () => const Padding(
             padding: EdgeInsets.all(24),
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -284,11 +293,33 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 12),
+              // #91 - LAN-ONLY, shown disabled rather than hidden. Hardware
+              // config is a /json/cfg write and the relay has no cfg door;
+              // letting the button through off-LAN opened a screen whose every
+              // save would fail.
               FilledButton.icon(
-                onPressed: () => context.push(AppRoutes.hardwareConfig),
-                icon: const Icon(Icons.settings, color: Colors.black),
+                onPressed:
+                    onLan ? () => context.push(AppRoutes.hardwareConfig) : null,
+                icon: Icon(onLan ? Icons.settings : Icons.lock_outline,
+                    color: onLan ? Colors.black : null),
                 label: const Text('Open Hardware Config'),
               ),
+              if (!onLan) ...[
+                const SizedBox(height: 8),
+                Row(children: [
+                  Icon(Icons.wifi_off,
+                      size: 14, color: Colors.white.withValues(alpha: 0.5)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      kLanOnlyMessage,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.5),
+                          ),
+                    ),
+                  ),
+                ]),
+              ],
             ]),
           ),
         ),
@@ -416,6 +447,73 @@ class _ZonesChannelsTabState extends ConsumerState<_ZonesChannelsTab> {
         ),
         title: Text('Channel ${index + 1}', overflow: TextOverflow.ellipsis),
         subtitle: Text('$subtitle  \u2022  $gpioLabel'),
+      ),
+    );
+  }
+
+  /// Areas rendered when /json/cfg is unavailable - off-LAN, or a failed read
+  /// on LAN. Falls back to [displayChannelsProvider]; only a genuinely
+  /// sourceless controller reaches [_buildEmptyAreas].
+  Widget _buildFallbackAreas(DisplayChannels display) {
+    if (display.isEmpty) return _buildEmptyAreas();
+    return Column(children: [
+      _buildCachedBanner(),
+      const SizedBox(height: 8),
+      for (var i = 0; i < display.channels.length; i++)
+        _buildDisplayChannelTile(context, display.channels[i], display),
+    ]);
+  }
+
+  Widget _buildCachedBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: NexGenPalette.cyan.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25)),
+      ),
+      child: Row(children: [
+        const Icon(Icons.cloud_outlined, size: 16, color: NexGenPalette.cyan),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Showing your saved channel layout. $kLanOnlyMessage.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.75),
+                ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  /// Tile for a channel that came from a cache or from live segment state.
+  ///
+  /// Deliberately does NOT print a GPIO pin, and prints an LED count only when
+  /// the source actually carries lengths - DisplayChannelSource.participation
+  /// knows ids and nothing else, and a fabricated count here would be a lie the
+  /// user cannot tell apart from a measurement.
+  Widget _buildDisplayChannelTile(
+      BuildContext context, DeviceChannel ch, DisplayChannels display) {
+    final len = ch.stop - ch.start;
+    final subtitle = display.hasLengths && len > 0
+        ? '$len lights \u00b7 saved layout'
+        : 'Saved layout \u2014 connect on site for details';
+
+    return Card(
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(Icons.light_mode,
+              color: Colors.white.withValues(alpha: 0.6), size: 20),
+        ),
+        title: Text(ch.name, overflow: TextOverflow.ellipsis),
+        subtitle: Text(subtitle),
       ),
     );
   }
