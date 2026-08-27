@@ -2541,6 +2541,125 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+87 — LIVE. CI outcome PENDING. First build off a unified main.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-87`** — points at `63e94b1`, **the bump commit itself** (standing convention 1). |
+| **Git SHA (app bytes)** | **`63e94b100eacf7c659b71c44020caf131959dbea`** — `chore(release): 2.5.10+87`. **iOS↔Android join key.** |
+| **Ledger SHA** | This row is committed **AFTER** the tag, outside it — the tag **is** the app-bytes SHA, no exclusion diff. |
+| **Branch at build time** | `main` (= `origin/main` at tag time) |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **87 — NOT YET CONSUMED. No AAB has been built.** Deliberate: see the note below. |
+| **Android artifact** | **NONE.** Not built. |
+| **iOS** | ⏳ **PENDING** — `build-87` pushed to origin, `ios-workflow` triggered by the `build-*` tag pattern. Outcome unknown to the session that wrote this row; no Codemagic credential here. **Fill from the dashboard.** |
+| **Local gate at tag time** | `flutter analyze` **exit 0 — 0 errors**, 12 warnings, 373 infos (the 12/373 baseline) · `flutter test` **2808 passed · 4 skipped · 0 failed** · run 11:13 local, deliberately outside #64's 22:30–00:00 window. Zero failing files. |
+| **Server state** | Unchanged by this build. `purgeUserAccount` and `storage.rules` were deployed at +85's merge; nothing server-side moved for +86 or +87. |
+
+### Why no Android AAB was built for +87 — and this is the point of the row
+
+**+85 and +86 were both built and both burned without shipping** (rows below).
+Android consumes a versionCode at BUILD time, not at upload, so each of those
+cost a code for nothing. +87 breaks that pattern on purpose: **the AAB waits
+until the iOS gate is confirmed green.** If `build-87` fails at step 7 the way
+`build-86` did, versionCode 87 is still spendable and the next attempt costs
+nothing extra. Build the AAB from **this same tag** once CI is confirmed.
+
+### Content over +86
+
+One merge, test-only: **`723083a`** — the two socket-binding tests stop
+hardcoding `127.0.0.2` and discover a reachable non-simulation host at runtime,
+skipping cleanly (`markTestSkipped`, a recorded skip) when none exists. `lib/`
+untouched, verified by `git diff --stat -- lib/`.
+
+⚠️ **That fix is NOT confirmed to be what broke build-86.** A clean-checkout
+reproduction of `build-86` on the build machine came back fully green — analyze
+0 errors, 2808/4/0, all 12 socket cases passing — so the hypothesis could not be
+reproduced locally and remains unproven. What is established is that
+`127.0.0.2` routes on Windows/Linux (all of 127/8 is loopback) but **not on
+macOS**, where `lo0` carries only `127.0.0.1` unless aliased — and
+`ios-workflow` runs on `mac_mini_m2`. This removed a well-founded candidate. **If
+build-87's gate fails again, the cause is elsewhere and the step's inner log is
+required** — build-86's was not captured, which is why this is still a guess.
+
+## 2.5.10+86 — BURNED. iOS gate FAILED at step 7. DO NOT UPLOAD.
+
+> **STATUS: BURNED.** versionCode 86 is CONSUMED — an Android AAB was built —
+> and **nothing shipped on either platform**. The iOS build never produced an
+> artifact, and the Android AAB was never uploaded. Superseded by **+87**.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-86`** — annotated, tag object `6d52549a0e3564f7581bc1b7d4e9dad417c726b7`, points at `2e59eff`, the bump commit itself. |
+| **Git SHA (app bytes)** | **`2e59eff0d8f82e7676593f45b899dad2f5f2af95`** |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **86 — CONSUMED.** `kStaffAuthTelemetryAppVersion` moved in the same commit; both verified in-tree at `2e59eff` before building. |
+| **Android artifact** | Built `2026-08-27`: `app-release.aab`, **72,789,926 bytes**, sha256 `c8705f64cc6277c0e441760c3079958a7a42e283e1a591c7c05279701321b6e8`, Gradle `bundleRelease` 319.4 s. Merged manifest (not pubspec) `versionCode="86"` / `versionName="2.5.10"` / `package="com.nexgenled.lumina"`. **NOT UPLOADED.** |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — verified by **IDENTITY** (standing convention 2), `jar verified`. Same upload key as +85 (keystore md5 `d019d3ec43e7fb0c10ed2b68a658645d`). |
+| **Android symbols** | **NONE.** Built without `--obfuscate --split-debug-info`, so no `.symbols` files exist. A crash report from this build could not have been symbolicated. |
+| **iOS** | ❌ **FAILED.** Codemagic step 7, **"Test and analyze (build gate)"**, exited **1**. Every later step — Build IPA, signing, publishing — was **skipped**. No IPA, no TestFlight submission. |
+| **Local gate at tag time** | `flutter analyze` 0 errors, 12/373 · `flutter test` **2808 · 4 skipped · 0 failed**. **The local gate was GREEN on the exact tagged SHA** — which is the whole problem: the failure is environment-specific, not code-specific. |
+
+### ⚠️ THE ARTIFACT NO LONGER EXISTS, AND THAT WAS AN ACCIDENT
+
+The AAB was destroyed after the fact: `flutter clean` was run in
+`C:\Flutter Projects\lumina-b86` while reproducing CI conditions, which wiped
+`build/`. Recorded rather than quietly omitted — **versionCode 86 is spent and
+there is now no artifact to show for it.** Nothing was lost that mattered (it
+was never going to ship, and it had no symbols), but the sequence is worth not
+repeating: **do not run `flutter clean` in a build worktree whose artifact has
+not been copied out.** +85's artifact survived only because it was copied to
+`C:\Flutter Projects\lumina-b85\` first.
+
+### What +86 carried
+
+Two merges, five fixes — and it was the **first** build to contain any of them,
+since `build-85` → `74036fb` predates both:
+
+- **`4154160`** — the "Light Up Now" **native crash**. `revert_wled_payload` was
+  persisted as a raw Map — a verbatim `/json/state` read, so always containing
+  `seg[].col: [[r,g,b,w], …]`. Firestore rejects nested arrays, and the iOS SDK
+  does so by raising an NSException and aborting the process **below the Dart
+  VM**: `EXC_CRASH`/`SIGABRT`, uncatchable by any `try/catch`. Incident
+  `51AD90DC-5A9F-4F34-B34C-FB70F82D04B2` on `2.5.10(321)`. Now `jsonEncode`d,
+  with all three session writes guarded by `sanitizeForFirestore`.
+- **`90a7d68`** — Game Day direct-apply hardening **A–D**: the apply is awaited
+  and failures reported (the unattended scheduled path could previously fail in
+  total silence); the poller is paused around both applies; `_postJson` moved
+  off `http.post` to the pooled client with explicit `Content-Length`; a
+  4096-byte apply ceiling, provisioning exempt.
+
+**None of this reached a device.** It ships first in **+87**.
+
+## 2.5.10+85 — BURNED. Superseded before upload. DO NOT UPLOAD.
+
+> **STATUS: BURNED.** versionCode 85 is CONSUMED — the AAB was built and
+> verified — but it was **never uploaded to Google Play**, and it was superseded
+> hours later when `main` gained the crash fix and the A–D hardening. Uploading
+> it now would ship a build missing both. Superseded by **+86**, then **+87**.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-85`** — points at `74036fb`, the bump commit itself. |
+| **Git SHA (app bytes)** | **`74036fb23435b7e3fa7df0447fda2ff4fa98adc2`** — `chore(release): 2.5.10+85` |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **85 — CONSUMED.** `kStaffAuthTelemetryAppVersion` moved in the same commit, both verified in-tree before building. |
+| **Android artifact** | Built `2026-08-26`: `app-release.aab`, **68,525,311 bytes**, sha256 `df59f7dac9523fcbad9d27629a678fdc21fb6f8d906e3f6b3b75f6c56ff02806`, Gradle `bundleRelease` 326.4 s. Merged manifest (not pubspec) `versionCode="85"` / `versionName="2.5.10"`. **NOT UPLOADED.** |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, …` — verified by **IDENTITY**, `jar verified`. `PKIX path building failed` alongside it is expected for a self-signed release key and is not a failure. |
+| **Android symbols** | **PRESENT and preserved** — built with `--obfuscate --split-debug-info`. `app.android-arm.symbols` (6,818,932 B), `arm64` (7,831,808 B), `x64` (7,830,328 B). |
+| **Artifact location** | `C:\Flutter Projects\lumina-b85\` — AAB and all three symbol files, copied out of the temp build worktree and verified byte-for-byte (size + md5) after the copy. **Still on disk.** |
+| **iOS** | Tag pushed; `ios-workflow` triggered. **Outcome never reported to this ledger.** Record it if it matters, or leave as unknown — nothing shipped from it either way. |
+| **Local gate at tag time** | `flutter analyze` 0 errors, 12/373 · `flutter test` **2775 passed · 4 skipped · 0 failed** (the pre-A–D, pre-crash-fix baseline). |
+
+### Why it was superseded
+
++85 was cut from `main` at `74036fb`, **before** the two merges listed under
++86. Within hours `main` gained the Light Up Now crash fix and the A–D
+hardening, at which point +85's bytes were a build missing a confirmed,
+100%-reproducible native crash on a shipping button. It was left in place
+deliberately — the artifact and its symbols are the only ones of the three that
+still exist — but it must not be uploaded.
+
 ## 2.5.10+83 — sync pacing; integration test vehicle
 
 > **Cut from `integration/test-build-2026-08-24`, NOT from `main`.** As of this
