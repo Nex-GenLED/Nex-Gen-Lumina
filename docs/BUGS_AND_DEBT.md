@@ -3347,6 +3347,80 @@ schedule stack still leads because it gates "sell with certainty."
     consumers you already know about).
   - Related: `#91`, `project_healer_publish_device_facts`, `#95`, `#89`, `#88`.
 
+> **Numbering note:** P2-64 and P2-65 are unassigned as of 2026-08-28 (`main` @ `e7aba20` ends at
+> P2-63). The two items below were numbered by Tyler; if another session claims 64/65, these keep
+> their numbers.
+
+- [ ] **P2-66 — Assume-local + unreachable LAN = crash-loop instead of a clear "can't reach your controller" state**
+  - Status: OPEN · Evidence: source-proven + field-correlated (2026-08-28, Nancy incident) · Risk: **UX + stability**
+  - `ConnectivityService._checkConnectivity` (`lib/services/connectivity_service.dart:263-266`): when
+    the user profile has **no `homeSsid` hash**, any Wi-Fi connection is classified
+    `ConnectivityStatus.local` — the debug line literally reads `no-hash-configured(assume-local)`.
+    `wledRepositoryProvider` then returns `WledService('http://<lan-ip>')` and the relay is never
+    consulted, **even when the device is nowhere near that LAN.**
+  - **The resulting state is indistinguishable from a broken app.** Every read times out at 15s,
+    `getConfig()` returns null, `deviceChannelsProvider` empties, the dashboard churns on failed
+    polls, and the shell's per-build post-frame callback
+    (`lib/features/dashboard/main_scaffold.dart:147`, unguarded `ref.read`) throws
+    `Bad state: Cannot use "ref" after the widget was disposed` once per queued callback. The user
+    is told neither "you're off your home network" nor "your controller is unreachable" — they get a
+    dead dashboard and a crash burst.
+  - **Field evidence:** `users/nTIciU8GpfWE95IeaE7HySzDmrl1` has `homeSsid` **unset**,
+    `remoteAccessEnabled` undefined, `webhookUrl` unset — and **40 `debug_errors` in the
+    2026-08-27 evening window, 31 of them inside the 04:00Z hour**, every one that same error,
+    `context: FlutterError.onError`, `platform: ios`.
+  - **NOT a one-account problem.** `users/YcSGiwesJuS7Qsh1aql0Qh1jqYh2` (stegall.s@yahoo.com) has the
+    **same unset-SSID configuration**, which is why that account's off-site session only worked over
+    cellular — cellular short-circuits to `remote` at `connectivity_service.dart:257`, bypassing the
+    assume-local branch entirely. **First task on this item is a fleet-wide census of `homeSsid`
+    fill rate**, because every account with it unset is one Wi-Fi hop away from this state.
+  - **What "fixed" looks like:**
+    (a) an explicit unreachable state in the UI — *"Can't reach your controller. Connect to your home
+        Wi-Fi, or set up Remote Access."* — instead of an empty dashboard;
+    (b) reconsider assume-local: with no SSID hash, a failed direct probe should fall back to the
+        relay rather than retrying a LAN address indefinitely;
+    (c) capture/derive `homeSsid` during onboarding so the classifier has something to compare.
+  - **Interaction with #91:** the build-91 display fallback now makes channels *visible* in this
+    state. That is an improvement, but it does not tell the user the device is unreachable — the
+    dashboard arguably now looks MORE functional than it is. That makes (a) more urgent, not less.
+  - **Paired fix:** the `ref`-after-dispose guard in `main_scaffold.dart` is a one-file change
+    reported for **build 93** (not filed separately). It stops the crash; it does not give the user
+    the honest state, which is what this item is for.
+  - Related: `P2-67`, `feedback_connectivity_defaults`, `CLAUDE.md` Common Gotchas §1, `#91`.
+
+- [ ] **P2-67 — Bridge `0070077E8F60` went silent 02:09Z while the entire rest of the fleet stayed healthy**
+  - Status: OPEN · **BLOCKED ON SITE VISIT — attach the visit's findings to this item before closing**
+  - Evidence: registry-proven (2026-08-28) · Account: `nTIciU8GpfWE95IeaE7HySzDmrl1` (nancy.pied@yahoo.com)
+  - `bridge_registry/0070077E8F60` — `pairedUid` correctly hers (**no cross-pairing**),
+    `status: paired`, `ip: 192.168.1.245`, firmware `1.2`, `rssi -31` (strong),
+    `freeHeap 227272` (healthy), **`lastSeen: 2026-08-28T02:09:17Z`**.
+  - **The anomaly is fleet-relative.** Of 12 registry entries, **11 checked in at ~04:18Z within
+    seconds of one another**; hers is the only silent one, ~2 hours stale. This is not a server-side
+    fault and not a firmware-wide regression — it is specific to that device or that site.
+  - **Consequent failures, all hers, all reads:** 4× `getInfo` → `timeout` (02:08:58 → 02:10:28,
+    straddling the last check-in) and 1× `ping` → `expired` at 04:00:37 with
+    *"Command expired before the bridge picked it up (bridge offline or unreachable at fire time)."*
+  - **Suspect site Wi-Fi or power, not code.** `bridge_status/current` reported **`uptime: 759`**
+    (12.6 minutes) with `errors: 3` — the bridge had **recently restarted** shortly before going
+    quiet, which is the signature of a power interruption or an AP dropping it, not a firmware hang.
+    `controller_health` corroborates: `bridgePresence: "silent"`, `lastSuccessAt: null`,
+    `lastProbeAt: null`, `consecutiveFailures: 0`.
+  - **What the visit must capture** (this item cannot close without it): mains/PoE stability at the
+    bridge; AP association history and signal at `192.168.1.245`; ESP32 serial reset reasons;
+    whether `.245` is DHCP and was reassigned; whether the WLED controller at `.250` is itself
+    powered; photos of the install location.
+  - **Ruled out already — do not re-litigate:** no command from any account reached her controller
+    that night (her own 5 commands were all reads and all failed); **no `/json/cfg` or
+    hardware-config command was queued by ANY account fleet-wide in the window**; `pairedUid` is
+    correct; and the `192.168.1.250` overlap with three other customers
+    (`YcSGiwes…`, `VzgTsg31…`, `cndlN3nm…`) is a default-router-range coincidence across unrelated
+    homes — distinct MACs, distinct bridges, uid-scoped command collections.
+  - **Data hygiene noticed in passing** (separate from the outage, pre-dates it): her three LED
+    counts disagree — `controllers/….ledCount: 400`, `pixelMap/0.source_pixel_count: 62`,
+    `roofline_config/config` segment `pixel_count: 100`, `total_channel_count: 1`. Worth resolving
+    while someone is on site with the hardware.
+  - Related: `P2-66`, `project_bridge_timeout_false_vs_real_2026_06_01`, `esp32_bridge_flashing`.
+
 ---
 
 ## Historical context (from BUG_BACKLOG.md — reference only, not tracked)
