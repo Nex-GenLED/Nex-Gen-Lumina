@@ -1144,6 +1144,39 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                 },
                               ),
                               const Divider(height: 24),
+                              // #92 — say it plainly. Before this the dashboard
+                              // showed a cached, healthy-looking UI over a
+                              // controller it could not reach.
+                              if (ref.watch(lanUnreachableProvider))
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange.withValues(alpha: 0.10),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                          color: Colors.orange
+                                              .withValues(alpha: 0.35)),
+                                    ),
+                                    child: Row(children: [
+                                      const Icon(Icons.wifi_off,
+                                          size: 16, color: Colors.orange),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          kLanUnreachableMessage,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.white
+                                                .withValues(alpha: 0.85),
+                                          ),
+                                        ),
+                                      ),
+                                    ]),
+                                  ),
+                                ),
                               const Padding(
                                 padding: EdgeInsets.only(bottom: 8),
                                 child: ChannelSelectorBar(),

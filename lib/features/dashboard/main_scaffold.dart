@@ -70,13 +70,20 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // #92 GUARD (same defect as the build() callback below, once-per-mount
+      // rather than looping): every `ref` touch after an await needs a mounted
+      // check, because the scaffold can be disposed while the permission probe
+      // is in flight.
+      if (!mounted) return;
       // Only start geofence monitoring if location permission is already
       // granted. Never prompt on launch — the dialog is shown contextually
       // when the user enables geofencing from Settings.
       if (await ref.read(geofenceMonitorProvider.notifier).hasLocationPermission()) {
+        if (!mounted) return;
         await ref.read(geofenceMonitorProvider.notifier).start();
       }
 
+      if (!mounted) return;
       ref.read(autopilotSchedulerProvider);
 
       final isSimpleMode = ref.read(simpleModeProvider);
@@ -143,8 +150,23 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     final luminaState = ref.watch(luminaSheetProvider);
     final shellIndex = widget.navigationShell.currentIndex;
 
-    // Sync selectedTabIndexProvider with shell's current index
+    // Sync selectedTabIndexProvider with shell's current index.
+    //
+    // #92 GUARD. This callback is registered from build(), so it re-queues on
+    // EVERY rebuild — and MainScaffold rebuilds continuously while the WLED
+    // poll is failing (it watches six keep-alive providers). A one-shot
+    // post-frame callback fires on the next frame REGARDLESS of whether its
+    // element was unmounted, so at dispose every queued callback fired and
+    // each one threw `Bad state: Cannot use "ref" after the widget was
+    // disposed`. That is the 31-crashes-in-one-hour burst on
+    // users/nTIciU8G…/debug_errors, 2026-08-28 04:00Z.
+    //
+    // DEBT: the guard makes this SAFE, not CORRECT. Queueing a frame callback
+    // from build to mirror state is the root shape; didUpdateWidget or a
+    // ref.listen on the shell index would remove the queue entirely. Filed
+    // rather than done here — a hotfix is the wrong place for it.
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       if (ref.read(selectedTabIndexProvider) != shellIndex) {
         ref.read(selectedTabIndexProvider.notifier).state = shellIndex;
       }

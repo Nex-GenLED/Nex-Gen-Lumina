@@ -92,7 +92,8 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildHeader(context, channels, selectedIds, hasZoneNames,
-                  participatingSet, display.source),
+                  participatingSet, display.source,
+                  ref.watch(lanUnreachableProvider)),
               if (_expanded)
                 _buildChannelChips(context, channels, selectedIds, zoneLabels, hasZoneNames, participatingSet),
             ],
@@ -109,6 +110,7 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     bool hasZoneNames,
     Set<int>? participatingSet,
     DisplayChannelSource source,
+    bool unreachable,
   ) {
     final isFiltered = selectedIds != null;
     final selectedCount = isFiltered ? selectedIds.length : channels.length;
@@ -173,7 +175,10 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    'CACHED',
+                    // #92 — a cached list during a reachable session is
+                    // ordinary; a cached list while the controller cannot be
+                    // reached is the thing the user needs told.
+                    unreachable ? 'CACHED — UNREACHABLE' : 'CACHED',
                     style: TextStyle(
                       fontSize: 9,
                       fontWeight: FontWeight.w700,

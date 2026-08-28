@@ -92,6 +92,34 @@ final isLanConnectedProvider = Provider<bool>((ref) {
 const String kLanOnlyMessage =
     'Connect to venue Wi-Fi to change hardware settings';
 
+/// #92 — the app believes it is on the controller's network, and direct reads
+/// are failing anyway.
+///
+/// WHY THIS IS ITS OWN STATE. With no `homeSsid` hash on the profile,
+/// `_checkConnectivity` classifies ANY Wi-Fi as `local`
+/// (`no-hash-configured(assume-local)`), so the relay is never consulted and
+/// every read retries a LAN address that may be nowhere near the user. The
+/// dashboard then rendered a cached, healthy-LOOKING UI over a device it could
+/// not reach — and #91's display fallback made that MORE convincing, not less,
+/// because the channels came back.
+///
+/// True only when all three hold: connectivity says `local`, a repository
+/// exists (so this is not the no-controller-selected case), and the WLED
+/// notifier is not connected. `connected` already reflects the notifier's own
+/// consecutive-failure handling, so this does not re-count failures.
+///
+/// Deliberately MINIMAL — one honest sentence and a badge. The full state
+/// machine (probe-then-fall-back-to-relay, onboarding SSID capture) is P2-66.
+final lanUnreachableProvider = Provider<bool>((ref) {
+  if (!ref.watch(isLanConnectedProvider)) return false;
+  if (ref.watch(wledRepositoryProvider) == null) return false;
+  return !ref.watch(wledStateProvider).connected;
+});
+
+/// The one sentence shown when [lanUnreachableProvider] is true.
+const String kLanUnreachableMessage =
+    "Can't reach your controller on this network";
+
 /// Last-known connectivity status. Updated whenever the stream emits.
 /// Used as fallback during stream rebuilds so the repository provider
 /// never sees null during the async loading gap.
@@ -239,7 +267,10 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   if (connectivityStatus == ConnectivityStatus.local) {
     debugPrint('RepositoryInit: selected=WledService, '
         'network=${connectivityStatus.name}, hasControllerId=$controllerId');
-    return WledService('http://$ip');
+    // #92 — hand the LAN service the identity it is supposed to be driving so
+    // it can prove the device before the session's first write. Null when no
+    // controller is selected, which skips verification exactly as before.
+    return WledService('http://$ip', expectedControllerId: controllerId);
   }
 
   // ── 6. Remote + Firestore bridge relay ───────────────────────────────────
