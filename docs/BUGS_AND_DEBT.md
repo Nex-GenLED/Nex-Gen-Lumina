@@ -3369,6 +3369,16 @@ schedule stack still leads because it gates "sell with certainty."
     `remoteAccessEnabled` undefined, `webhookUrl` unset — and **40 `debug_errors` in the
     2026-08-27 evening window, 31 of them inside the 04:00Z hour**, every one that same error,
     `context: FlutterError.onError`, `platform: ios`.
+  - **CLEAN REPRO (upgraded 2026-08-28).** Those 31 crashes landed while her bridge was
+    **physically unplugged** (see `P2-67`, closed as not-a-defect). That removes every confound:
+    the controller was definitively absent, `homeSsid` was unset so the app classified the network
+    as `local` and retried a dead LAN address instead of the relay, and the shell crash-looped
+    rather than saying "can't reach your controller." **This is the exact failure this item
+    describes, observed end-to-end with a known cause.** To reproduce deliberately: unplug the
+    bridge and the controller, open the app on any Wi-Fi with `homeSsid` unset, and watch
+    `debug_errors`. Build 92 addresses the CRASH (`main_scaffold` disposal guards) and adds the
+    honest-unreachable banner; the transport decision — probe, then fall back to the relay — is
+    still owed and is what this item tracks.
   - **NOT a one-account problem.** `users/YcSGiwesJuS7Qsh1aql0Qh1jqYh2` (stegall.s@yahoo.com) has the
     **same unset-SSID configuration**, which is why that account's off-site session only worked over
     cellular — cellular short-circuits to `remote` at `connectivity_service.dart:257`, bypassing the
@@ -3388,9 +3398,40 @@ schedule stack still leads because it gates "sell with certainty."
     the honest state, which is what this item is for.
   - Related: `P2-67`, `feedback_connectivity_defaults`, `CLAUDE.md` Common Gotchas §1, `#91`.
 
-- [ ] **P2-67 — Bridge `0070077E8F60` went silent 02:09Z while the entire rest of the fleet stayed healthy**
-  - Status: OPEN · **BLOCKED ON SITE VISIT — attach the visit's findings to this item before closing**
-  - Evidence: registry-proven (2026-08-28) · Account: `nTIciU8GpfWE95IeaE7HySzDmrl1` (nancy.pied@yahoo.com)
+- [x] **P2-67 — Bridge `0070077E8F60` "went silent 02:09Z" — CLOSED, NOT A DEFECT**
+  - Status: **CLOSED 2026-08-28 — the bridge was unplugged overnight by Tyler.** No site visit
+    needed; nothing to fix. Account: `nTIciU8GpfWE95IeaE7HySzDmrl1` (nancy.pied@yahoo.com)
+  - **What actually happened.** The device was powered down at ~21:09 CDT on 2026-08-27, stayed
+    unplugged overnight, and was plugged back in at ~12:39 CDT on 2026-08-28. Every "symptom" this
+    item was filed on is that, and nothing else:
+      • `lastSeen 2026-08-28T02:09:17Z` (21:09 CDT) = the moment it lost power.
+      • ~15.5 hours of silence while 11 of 12 fleet bridges checked in = it was unplugged.
+      • `uptime: 759` (12.6 min) in the last heartbeat before it went quiet = it had been plugged
+        in shortly before, not "restarting repeatedly".
+      • Recovery with `uptime: 639` and zeroed `commands`/`errors` counters = the replug.
+      • Nancy's 4 `getInfo` timeouts (21:08–21:10 CDT) straddle the power-down moment, and the
+        23:00 CDT `ping` expiring with *"bridge offline or unreachable at fire time"* was **literally
+        true and correctly reported**. The relay behaved exactly as designed against absent hardware.
+  - **THE ANALYSIS LESSON, which is the only thing worth keeping from this item.** The registry was
+    read in isolation and an operator action was inferred to be a fault — twice, in the same
+    direction. A fleet-relative comparison ("11 of 12 checked in, hers did not") is a powerful
+    signal precisely because it looks conclusive, and it says nothing about WHY. **Before filing a
+    hardware fault from telemetry alone, ask whether anyone touched the hardware.** One question
+    would have closed this before it was ever written, and a filed item with a wrong premise is
+    worse than no item: this one was about to send someone to a site visit to investigate an
+    unplugged device.
+  - **What was correctly established and still stands** (the forensics were not wrong, only the
+    conclusion): no command from any account reached her controller that night; **no `/json/cfg` or
+    hardware-config command was queued by ANY account fleet-wide in the window**; `pairedUid` was
+    correct throughout; and the `192.168.1.250` overlap across four customers is a
+    default-router-range coincidence between unrelated homes (distinct MACs, distinct bridges,
+    uid-scoped command collections).
+  - **The data hygiene item does NOT close with this** — her three LED counts still disagree:
+    `controllers/….ledCount: 400`, `pixelMap/0.source_pixel_count: 62`, `roofline_config/config`
+    segment `pixel_count: 100` / `total_channel_count: 1`. Unrelated to the outage, pre-dates it,
+    still worth resolving. Track under `P2-66`'s account audit or open a fresh item.
+  - **Superseded framing below, kept so the reasoning is auditable.** Everything after this line was
+    written on the wrong premise:
   - `bridge_registry/0070077E8F60` — `pairedUid` correctly hers (**no cross-pairing**),
     `status: paired`, `ip: 192.168.1.245`, firmware `1.2`, `rssi -31` (strong),
     `freeHeap 227272` (healthy), **`lastSeen: 2026-08-28T02:09:17Z`**.
