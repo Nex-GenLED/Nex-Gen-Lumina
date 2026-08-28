@@ -163,6 +163,64 @@ List<DeviceChannel> deviceChannelsFromPixelCounts(
   return out;
 }
 
+/// Merge a channel-ID census with whatever per-channel LENGTHS are known —
+/// the #92 completeness fix for the gap #91 shipped with.
+///
+/// **The gap, concretely.** #91's precedence took the pixel-map tier on
+/// PRESENCE. A real venue (`YcSGiwes…`) has
+/// `participating_channels_device_ids: [0, 1, 2]` but only ONE pixelMap doc
+/// (`pixelMap/0`), because only channel 0 was ever mapped. Tier 2 therefore
+/// "won" with a single channel, the selector bar hid itself at its
+/// `length <= 1` guard, and that account still saw no channels off-LAN — the
+/// exact symptom #91 set out to fix. The id census knew there were three.
+///
+/// [ids] is the census and decides WHICH channels exist; it is never narrowed
+/// by what the pixel map happens to cover. [lengthByChannelIndex] contributes
+/// a length wherever it has one. Channels are emitted in ascending id order
+/// with `start` as a running sum of the lengths known SO FAR — so a channel
+/// whose length is unknown contributes zero and does not shift the ones after
+/// it by a guessed amount.
+///
+/// The caller decides the provenance tag: `pixelMap` only when the map covers
+/// every id (see [pixelMapCoversAll]); otherwise `participation`, because a
+/// partially-mapped list cannot honestly claim per-channel lengths.
+List<DeviceChannel> mergeChannelIdsWithPixelCounts({
+  required List<int> ids,
+  required Map<int, int> lengthByChannelIndex,
+}) {
+  if (ids.isEmpty) return const [];
+  final unique = ids.toSet().toList()..sort();
+  final out = <DeviceChannel>[];
+  var cursor = 0;
+  for (final id in unique) {
+    final raw = lengthByChannelIndex[id] ?? 0;
+    final len = raw < 0 ? 0 : raw;
+    out.add(DeviceChannel(
+      id: id,
+      name: 'Channel ${id + 1}',
+      start: cursor,
+      stop: cursor + len,
+      gpioPin: -1,
+    ));
+    cursor += len;
+  }
+  return out;
+}
+
+/// True when [lengthByChannelIndex] has an entry for EVERY id in [ids] — the
+/// condition under which a merged list may still be tagged
+/// [DisplayChannelSource.pixelMap] rather than demoted to
+/// [DisplayChannelSource.participation].
+///
+/// An empty census is not "covered": there is nothing to be complete about.
+bool pixelMapCoversAll({
+  required List<int> ids,
+  required Map<int, int> lengthByChannelIndex,
+}) {
+  if (ids.isEmpty) return false;
+  return ids.toSet().every(lengthByChannelIndex.containsKey);
+}
+
 /// Build a display channel list from bare channel IDS — the
 /// `participating_channels_device_ids` array the facts publisher denormalizes
 /// onto the controller doc from a LAN session.

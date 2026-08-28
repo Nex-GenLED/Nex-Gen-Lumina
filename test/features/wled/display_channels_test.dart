@@ -157,10 +157,13 @@ void main() {
       expect(d.hasLengths, isTrue);
     });
 
-    test('2. live absent → pixelMap, with lengths preserved', () async {
+    // #92: the map must COVER the census to be tagged pixelMap. Complete case
+    // — identical behaviour to #91.
+    test('2. live absent → pixelMap when it covers every id (unchanged from 91)',
+        () async {
       final c = _container(
         pixelMap: [_pmChannel(0, 128), _pmChannel(1, 160)],
-        cachedIds: const [0, 1, 2, 3],
+        cachedIds: const [0, 1],
         segments: const [
           DeviceChannel(id: 0, name: 'Channel 1', start: 0, stop: 290, gpioPin: -1),
         ],
@@ -169,7 +172,10 @@ void main() {
       final d = c.read(displayChannelsProvider);
       expect(d.source, DisplayChannelSource.pixelMap);
       expect(d.length, 2);
-      expect(d.channels[1].stop - d.channels[1].start, 160);
+      expect(d.channels[0].start, 0);
+      expect(d.channels[0].stop, 128);
+      expect(d.channels[1].start, 128);
+      expect(d.channels[1].stop, 288);
       expect(d.isLive, isFalse);
       expect(d.hasLengths, isTrue);
     });
@@ -244,6 +250,120 @@ void main() {
       await _settle(c);
       expect(c.read(displayChannelsProvider).source,
           DisplayChannelSource.participation);
+    });
+  });
+
+  // ── #92 COMPLETENESS ────────────────────────────────────────────────────
+  //
+  // #91 took the pixelMap tier on PRESENCE, so a partially-mapped controller
+  // reported however many channels happened to be mapped. On the real venue
+  // account (participation [0,1,2], only pixelMap/0 written) that was ONE
+  // channel — and ChannelSelectorBar hides itself at `length <= 1`, so the
+  // account #91 was written for still saw nothing. The id census decides HOW
+  // MANY; the map only contributes lengths.
+  group('displayChannelsProvider completeness (#92)', () {
+    test('THE VENUE SHAPE: ids [0,1,2] + pixelMap/0 only → 3 channels',
+        () async {
+      final c = _container(
+        pixelMap: [_pmChannel(0, 177)],
+        cachedIds: const [0, 1, 2],
+      );
+      await _settle(c);
+      final d = c.read(displayChannelsProvider);
+
+      expect(d.length, 3,
+          reason: 'the id census knows there are three channels; #91 reported '
+              'one and the selector bar hid itself');
+      expect(d.channels.map((x) => x.id), [0, 1, 2]);
+
+      // ch0 keeps its real mapped length…
+      expect(d.channels[0].start, 0);
+      expect(d.channels[0].stop, 177);
+      // …and the unmapped ones contribute no invented span.
+      expect(d.channels[1].stop - d.channels[1].start, 0);
+      expect(d.channels[2].stop - d.channels[2].start, 0);
+
+      // Partial coverage must NOT claim to be a pixel map.
+      expect(d.source, DisplayChannelSource.participation);
+      expect(d.hasLengths, isFalse,
+          reason: 'a partial map may not present per-channel lengths as '
+              'measured for channels it never saw');
+    });
+
+    test('unmapped channels do not shift each other by a guessed amount',
+        () async {
+      // Only the MIDDLE channel is mapped.
+      final c = _container(
+        pixelMap: [_pmChannel(1, 240)],
+        cachedIds: const [0, 1, 2],
+      );
+      await _settle(c);
+      final d = c.read(displayChannelsProvider);
+      expect(d.length, 3);
+      expect(d.channels[0].stop - d.channels[0].start, 0);
+      expect(d.channels[1].stop - d.channels[1].start, 240);
+      expect(d.channels[2].stop - d.channels[2].start, 0);
+    });
+
+    test('census wins even when the map covers ids the census omits', () async {
+      // A stale pixelMap doc for a channel the device no longer reports.
+      final c = _container(
+        pixelMap: [_pmChannel(0, 100), _pmChannel(7, 50)],
+        cachedIds: const [0, 1],
+      );
+      await _settle(c);
+      final d = c.read(displayChannelsProvider);
+      expect(d.channels.map((x) => x.id), [0, 1],
+          reason: 'a stale map doc must not resurrect a channel the device '
+              'no longer lists');
+      expect(d.source, DisplayChannelSource.participation);
+    });
+
+    test('no id census → pixelMap alone is still the census (91 fallback)',
+        () async {
+      final c = _container(pixelMap: [_pmChannel(0, 128), _pmChannel(1, 160)]);
+      await _settle(c);
+      final d = c.read(displayChannelsProvider);
+      expect(d.source, DisplayChannelSource.pixelMap);
+      expect(d.length, 2);
+    });
+  });
+
+  group('pure merge builders (#92)', () {
+    test('mergeChannelIdsWithPixelCounts enriches by id, cumulative start', () {
+      final out = mergeChannelIdsWithPixelCounts(
+        ids: [2, 0, 1],
+        lengthByChannelIndex: {0: 100, 2: 50},
+      );
+      expect(out.map((c) => c.id), [0, 1, 2]);
+      expect([out[0].start, out[0].stop], [0, 100]);
+      expect([out[1].start, out[1].stop], [100, 100]); // unknown → zero-width
+      expect([out[2].start, out[2].stop], [100, 150]);
+      expect(out.every((c) => c.gpioPin == -1), isTrue);
+    });
+
+    test('empty census yields nothing regardless of map contents', () {
+      expect(
+        mergeChannelIdsWithPixelCounts(
+            ids: const [], lengthByChannelIndex: {0: 10}),
+        isEmpty,
+      );
+    });
+
+    test('pixelMapCoversAll is the tag rule', () {
+      expect(
+        pixelMapCoversAll(ids: [0, 1], lengthByChannelIndex: {0: 1, 1: 2}),
+        isTrue,
+      );
+      expect(
+        pixelMapCoversAll(ids: [0, 1, 2], lengthByChannelIndex: {0: 1}),
+        isFalse,
+      );
+      expect(
+        pixelMapCoversAll(ids: const [], lengthByChannelIndex: {0: 1}),
+        isFalse,
+        reason: 'an empty census is not "covered" — there is nothing to cover',
+      );
     });
   });
 

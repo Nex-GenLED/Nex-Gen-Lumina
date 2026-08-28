@@ -147,10 +147,13 @@ final segmentDerivedChannelsProvider =
 /// path — so a healthy local session performs no extra Firestore read and no
 /// extra `getState`:
 ///   1. [DisplayChannelSource.live] — [deviceChannelsProvider] (`/json/cfg`).
-///   2. [DisplayChannelSource.pixelMap] — `pixelMap/{n}` docs. Preferred over
-///      the tiers below because it carries per-channel lengths AND survives a
-///      segment collapse.
-///   3. [DisplayChannelSource.participation] — the denormalized id list.
+///   2+3. The `pixelMap/{n}` docs and the denormalized id list, resolved
+///      TOGETHER (#92). The id list is the CENSUS — it decides how many
+///      channels exist; the pixel map contributes lengths for the ids it
+///      covers. Tagged [DisplayChannelSource.pixelMap] only when the map
+///      covers every id, else [DisplayChannelSource.participation]. Resolving
+///      these as separate first-non-empty tiers was #91's bug: a controller
+///      with ids [0,1,2] and only `pixelMap/0` reported a single channel.
 ///   4. [DisplayChannelSource.segments] — live `seg[]`, the only tier that
 ///      needs no prior LAN session.
 ///
@@ -165,23 +168,47 @@ final displayChannelsProvider = Provider<DisplayChannels>((ref) {
     return DisplayChannels(live, DisplayChannelSource.live);
   }
 
-  // 2. Per-channel pixel map.
+  // 2 + 3. Pixel map and the denormalized id census, RESOLVED TOGETHER.
+  //
+  // #92: these were separate first-non-empty tiers, and pixelMap won on
+  // PRESENCE. A partially-mapped controller (ids [0,1,2], only pixelMap/0
+  // written) therefore reported ONE channel and the selector bar hid itself —
+  // #91's own bug, on a real account. The id census decides HOW MANY channels
+  // exist; the pixel map only contributes lengths to the ids it covers.
   final pixelMap = ref.watch(currentPixelMapChannelsProvider).valueOrNull ??
       const <PixelMapChannel>[];
-  if (pixelMap.isNotEmpty) {
-    final built = deviceChannelsFromPixelCounts({
-      for (final c in pixelMap) c.channelIndex: c.sourcePixelCount,
-    });
+  final lengthByChannel = <int, int>{
+    for (final c in pixelMap) c.channelIndex: c.sourcePixelCount,
+  };
+  final ids = ref.watch(cachedChannelIdsProvider).valueOrNull ?? const <int>[];
+
+  if (ids.isNotEmpty) {
+    final merged = mergeChannelIdsWithPixelCounts(
+      ids: ids,
+      lengthByChannelIndex: lengthByChannel,
+    );
+    // Tagged pixelMap ONLY when the map covers every id — a partial map has
+    // no business claiming per-channel lengths for channels it never saw.
+    final covered = pixelMapCoversAll(
+      ids: ids,
+      lengthByChannelIndex: lengthByChannel,
+    );
+    return DisplayChannels(
+      merged,
+      covered
+          ? DisplayChannelSource.pixelMap
+          : DisplayChannelSource.participation,
+    );
+  }
+
+  // No id census (older controller doc, or the healer has never run). Fall
+  // back to the pixel map alone — its own doc set is then the only census
+  // available, which is #91's original tier-2 behaviour.
+  if (lengthByChannel.isNotEmpty) {
+    final built = deviceChannelsFromPixelCounts(lengthByChannel);
     if (built.isNotEmpty) {
       return DisplayChannels(built, DisplayChannelSource.pixelMap);
     }
-  }
-
-  // 3. Denormalized channel ids from the last LAN session.
-  final ids = ref.watch(cachedChannelIdsProvider).valueOrNull ?? const <int>[];
-  if (ids.isNotEmpty) {
-    return DisplayChannels(
-        deviceChannelsFromIds(ids), DisplayChannelSource.participation);
   }
 
   // 4. Live segment layout, relayed through the bridge.

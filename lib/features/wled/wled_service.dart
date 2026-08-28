@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/geometry_wire_pin.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/device_identity.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/models/controller_type.dart';
 
@@ -470,7 +471,29 @@ class WledService
   int _simSpeed = 128;
   Color _simColor = const Color(0xFFFFFFFF);
 
-  WledService(this.baseUrl) {
+  /// The controller doc id this service is EXPECTED to be talking to, used by
+  /// the #92 identity guard. Optional and null-by-default so every existing
+  /// construction site (bench CLI, tests, one-off probes) keeps working
+  /// unchanged — a null expectation simply skips verification, exactly the
+  /// behaviour that shipped before #92.
+  final String? expectedControllerId;
+
+  /// Addresses verified THIS PROCESS, keyed `<baseUrl>|<controllerId>`.
+  ///
+  /// Static on purpose. `wledRepositoryProvider` reconstructs a `WledService`
+  /// on every connectivity/profile rebuild, so an instance-level cache would
+  /// re-probe `/json/info` several times per session and put an extra GET in
+  /// front of user taps. The key includes the controller id so re-pointing the
+  /// app at a different controller at the same address re-verifies rather than
+  /// inheriting the previous pass.
+  @visibleForTesting
+  static final Set<String> verifiedDeviceKeys = <String>{};
+
+  /// Test hook — forget every verification so each test starts cold.
+  @visibleForTesting
+  static void resetDeviceVerificationForTest() => verifiedDeviceKeys.clear();
+
+  WledService(this.baseUrl, {this.expectedControllerId}) {
     try {
       final uri = Uri.parse(baseUrl);
       final host = uri.host;
@@ -481,6 +504,59 @@ class WledService
   }
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
+
+  String get _verificationKey => '$baseUrl|$expectedControllerId';
+
+  /// #92 — PROVE THE DEVICE BEFORE WRITING TO IT.
+  ///
+  /// An IP is an address, not an identity. DHCP reassigns it, customers swap
+  /// hardware, and `192.168.1.250` is a default router address that four
+  /// unrelated accounts in this fleet independently use. Before the first
+  /// write of a session to a given address, read `/json/info` once and compare
+  /// the MAC it reports against the controller id the app believes it is
+  /// driving.
+  ///
+  /// Outcomes, all deliberate:
+  ///   • MATCH        → cache the (address, controller) pair and proceed. Every
+  ///                    later write this session costs nothing.
+  ///   • MISMATCH     → throw [WledDeviceMismatchException]. **No HTTP write is
+  ///                    issued.** Something else is at that address and writing
+  ///                    would change a stranger's lights.
+  ///   • UNREADABLE   → throw [WledDeviceUnverifiableException]. Treated as
+  ///                    UNREACHABLE, never as a pass — "I could not ask" is not
+  ///                    "it is the right device", and folding those together is
+  ///                    precisely the bug this guard exists to prevent.
+  ///
+  /// Skipped when simulating (no device to ask) or when no expectation was
+  /// supplied. The RELAY path is untouched: the bridge resolves its target on
+  /// the customer's own LAN and its command docs are already uid-scoped.
+  Future<void> _assertExpectedDevice() async {
+    final expected = expectedControllerId;
+    if (_simulate) return;
+    if (expected == null || expected.isEmpty) return;
+    if (verifiedDeviceKeys.contains(_verificationKey)) return;
+
+    // ONE getInfo per (address, controller) per process — the cache check
+    // above is what keeps this off the hot path of every subsequent write.
+    final info = await getInfo();
+    try {
+      assertDeviceIdentity(
+        baseUrl: baseUrl,
+        expectedControllerId: expected,
+        info: info?.raw,
+      );
+    } on WledDeviceIdentityException catch (e) {
+      debugPrint('LUMINA_IDENTITY REFUSED — ${e.detail}');
+      rethrow;
+    }
+    debugPrint('LUMINA_IDENTITY verified $baseUrl == $expected');
+    verifiedDeviceKeys.add(_verificationKey);
+  }
+
+  /// Test hook for the #92 guard — exercises the real
+  /// `_assertExpectedDevice`, including its cache, without needing a socket.
+  @visibleForTesting
+  Future<void> assertExpectedDeviceForTest() => _assertExpectedDevice();
 
   Future<Map<String, dynamic>?> getState() async {
     if (_simulate) {
@@ -708,6 +784,11 @@ class WledService
       return true;
     }
 
+    // #92 — identity before any /json/state write. Outside the try below on
+    // purpose: that block swallows exceptions into `return false`, which would
+    // turn a refusal into a silent no-op.
+    await _assertExpectedDevice();
+
     // Use JSON API (POST /json/state) - same as WLED web interface
     try {
       final body = jsonEncode(data);
@@ -893,6 +974,9 @@ class WledService
       lastSimulatedPerPixelChunks.add(Map<String, dynamic>.from(payload));
       return PerPixelChunkResult.ok;
     }
+    // #92 — identity before per-pixel paints. Cached after the first chunk, so
+    // a multi-chunk design pays for one getInfo, not one per chunk.
+    await _assertExpectedDevice();
     try {
       final body = jsonEncode(payload);
       final bodyBytes = utf8.encode(body);
@@ -940,6 +1024,9 @@ class WledService
       debugPrint('📤 WLED /json/cfg (simulated): ${jsonEncode(data)}');
       return simulateApplyConfigReturns;
     }
+    // #92 — identity before any /json/cfg write. A cfg POST persists to flash;
+    // writing one to the wrong device is the least recoverable mistake here.
+    await _assertExpectedDevice();
     try {
       final body = jsonEncode(data);
       final bodyBytes = utf8.encode(body);
@@ -1399,6 +1486,9 @@ class WledService
       debugPrint('📤 WLED savePreset (simulated): preset $presetId');
       return simulateSavePresetReturns;
     }
+
+    // #92 — identity before a preset write (psave persists to the device).
+    await _assertExpectedDevice();
 
     try {
       // WLED saves presets via /json/state with "psave" field
