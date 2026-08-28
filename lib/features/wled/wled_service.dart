@@ -553,6 +553,27 @@ class WledService
     verifiedDeviceKeys.add(_verificationKey);
   }
 
+  /// #92b — run the guard and CONVERT a refusal into this repository's
+  /// existing failure contract.
+  ///
+  /// Returns true when the device is verified (or verification does not
+  /// apply). Returns false when the write must not proceed, having parked the
+  /// user-facing sentence via [recordIdentityRefusal] for whoever reports the
+  /// failure.
+  ///
+  /// The exception deliberately stops HERE rather than at 26 call sites. See
+  /// the note in `device_identity.dart`: letting it escape turned a safety
+  /// guard into an unhandled async error on every unguarded caller.
+  Future<bool> _deviceVerifiedOrRefused() async {
+    try {
+      await _assertExpectedDevice();
+      return true;
+    } on WledDeviceIdentityException catch (e) {
+      recordIdentityRefusal(e);
+      return false;
+    }
+  }
+
   /// Test hook for the #92 guard — exercises the real
   /// `_assertExpectedDevice`, including its cache, without needing a socket.
   @visibleForTesting
@@ -784,10 +805,10 @@ class WledService
       return true;
     }
 
-    // #92 — identity before any /json/state write. Outside the try below on
-    // purpose: that block swallows exceptions into `return false`, which would
-    // turn a refusal into a silent no-op.
-    await _assertExpectedDevice();
+    // #92 — identity before any /json/state write. Still OUTSIDE the try
+    // below: that block would swallow the refusal into an indistinguishable
+    // `false`, losing the message. #92b converts it here instead of throwing.
+    if (!await _deviceVerifiedOrRefused()) return false;
 
     // Use JSON API (POST /json/state) - same as WLED web interface
     try {
@@ -976,7 +997,7 @@ class WledService
     }
     // #92 — identity before per-pixel paints. Cached after the first chunk, so
     // a multi-chunk design pays for one getInfo, not one per chunk.
-    await _assertExpectedDevice();
+    if (!await _deviceVerifiedOrRefused()) return PerPixelChunkResult.failed;
     try {
       final body = jsonEncode(payload);
       final bodyBytes = utf8.encode(body);
@@ -1026,7 +1047,7 @@ class WledService
     }
     // #92 — identity before any /json/cfg write. A cfg POST persists to flash;
     // writing one to the wrong device is the least recoverable mistake here.
-    await _assertExpectedDevice();
+    if (!await _deviceVerifiedOrRefused()) return false;
     try {
       final body = jsonEncode(data);
       final bodyBytes = utf8.encode(body);
@@ -1488,7 +1509,7 @@ class WledService
     }
 
     // #92 — identity before a preset write (psave persists to the device).
-    await _assertExpectedDevice();
+    if (!await _deviceVerifiedOrRefused()) return false;
 
     try {
       // WLED saves presets via /json/state with "psave" field

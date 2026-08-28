@@ -145,3 +145,44 @@ void assertDeviceIdentity({
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Refusal hand-off (#92b)
+// ---------------------------------------------------------------------------
+//
+// WHY THE EXCEPTION STOPS AT THE SERVICE. #92 let the guard throw out of the
+// write doors. A caller sweep found 26 provider-sourced call sites with no
+// swallowing try/catch — `_postUpdate`, the Design Studio apply, the geofence
+// setState pair, the schedule-sync preset writes, hardware config — every one
+// of which would have surfaced the refusal as an UNHANDLED ASYNC ERROR. On
+// iOS that is a crash, which would have made a safety guard the second-largest
+// crash source in the app.
+//
+// So the doors now convert: they catch the typed exception, park its message
+// here, and return the EXISTING failure value (`false` / `PerPixelChunkResult
+// .failed`). Every caller keeps the contract it already handled, and nothing
+// needs wrapping. The typed exceptions still exist and are still thrown by
+// `assertDeviceIdentity` — they are the tested decision — they simply no
+// longer escape the repository boundary.
+//
+// TAKE-ONCE on purpose: a refusal consumed by one failure report must not be
+// re-reported against an unrelated failure minutes later.
+
+String? _lastRefusalMessage;
+
+/// Park a refusal for the next failure report. Called by the write doors.
+void recordIdentityRefusal(WledDeviceIdentityException e) {
+  _lastRefusalMessage = e.userMessage;
+}
+
+/// Consume the parked refusal, if any. Returns null when the last failure was
+/// an ordinary one (timeout, non-2xx) rather than an identity refusal.
+String? takeIdentityRefusalMessage() {
+  final m = _lastRefusalMessage;
+  _lastRefusalMessage = null;
+  return m;
+}
+
+/// Drop any parked refusal without reporting it (test hygiene / a successful
+/// write clearing stale state).
+void clearIdentityRefusal() => _lastRefusalMessage = null;

@@ -16,7 +16,10 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
+
 import 'package:nexgen_command/features/wled/device_identity.dart';
+import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 
 /// Non-routable TEST-NET-1 (RFC 5737). Chosen so `_simulate` stays FALSE — a
@@ -57,6 +60,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     WledService.resetDeviceVerificationForTest();
+    clearIdentityRefusal();
   });
   tearDown(WledService.resetDeviceVerificationForTest);
 
@@ -186,38 +190,100 @@ void main() {
     });
 
     // The load-bearing property: a refusal must happen BEFORE the request is
-    // built. applyJson wraps its HTTP in try/catch and returns false on error,
-    // so a guard placed inside that block would silently downgrade a refusal
-    // to a no-op. These tests would time out against TEST-NET-1 if any HTTP
-    // were attempted — they pass fast precisely because none is.
-    test('MISMATCH refuses applyJson by THROWING, with no write on the wire',
-        () async {
+    // built. These tests would time out against TEST-NET-1 if any HTTP were
+    // attempted — they pass fast precisely because none is.
+    //
+    // #92b: the door CONVERTS rather than throws. A caller sweep found 26
+    // provider-sourced sites with no swallowing catch, so an escaping
+    // exception would have been an unhandled async error — a crash — on the
+    // Design Studio apply, the geofence pair, schedule sync, hardware config
+    // and `_postUpdate` itself. The refusal is now `false` plus a parked
+    // message, which every caller already handles.
+    test('MISMATCH refuses applyJson: false, message parked, no write', () async {
       final svc = _CountingService(mac: '80f3dab3b820', reachable: true);
-      await expectLater(
-        svc.applyJson(const {'on': true}),
-        throwsA(isA<WledDeviceMismatchException>()),
-      );
+      final ok = await svc.applyJson(const {'on': true});
+      expect(ok, isFalse, reason: 'the existing failure contract');
       expect(svc.getInfoCalls, 1);
+      expect(takeIdentityRefusalMessage(),
+          'A different device answered at this address — check your network');
     });
 
     test('UNREACHABLE info refuses applyJson — not a silent pass', () async {
       final svc = _CountingService(mac: null, reachable: false);
-      await expectLater(
-        svc.applyJson(const {'on': true}),
-        throwsA(isA<WledDeviceUnverifiableException>()),
-      );
+      expect(await svc.applyJson(const {'on': true}), isFalse);
       expect(svc.getInfoCalls, 1);
+      expect(takeIdentityRefusalMessage(),
+          "Can't reach your controller on this network");
+    });
+
+    test('every guarded door converts, not just applyJson', () async {
+      final svc = _CountingService(mac: '80f3dab3b820', reachable: true);
+      expect(await svc.applyConfig(const {'hw': {}}), isFalse);
+      expect(takeIdentityRefusalMessage(), isNotNull);
+
+      WledService.resetDeviceVerificationForTest();
+      expect(
+        await svc.savePreset(presetId: 1, state: const {'on': true}),
+        isFalse,
+      );
+      expect(takeIdentityRefusalMessage(), isNotNull);
+    });
+
+    test('take-once: a consumed refusal is not re-reported later', () async {
+      final svc = _CountingService(mac: '80f3dab3b820', reachable: true);
+      await svc.applyJson(const {'on': true});
+      expect(takeIdentityRefusalMessage(), isNotNull);
+      expect(takeIdentityRefusalMessage(), isNull,
+          reason: 'a stale refusal must not attach to an unrelated failure');
     });
 
     test('a refused pair is NOT cached — the next attempt re-probes', () async {
       final svc = _CountingService(mac: null, reachable: false);
-      await expectLater(svc.applyJson(const {'on': true}),
-          throwsA(isA<WledDeviceUnverifiableException>()));
-      await expectLater(svc.applyJson(const {'on': true}),
-          throwsA(isA<WledDeviceUnverifiableException>()));
+      expect(await svc.applyJson(const {'on': true}), isFalse);
+      expect(await svc.applyJson(const {'on': true}), isFalse);
       expect(svc.getInfoCalls, 2,
           reason: 'caching a failure would make a transient outage permanent '
               'for the rest of the process');
+    });
+
+    // #92b THE REGRESSION GATE. Each of these mirrors a formerly-EXPOSED
+    // shape from the caller sweep: an unawaited call, a bare await with no
+    // try/catch, and a per-pixel writer. If the door ever throws again, the
+    // zone handler fires and these fail — which is exactly what would have
+    // reached users as a crash.
+    test('NO unhandled async error escapes any formerly-EXPOSED shape',
+        () async {
+      final errors = <Object>[];
+      await runZonedGuarded(() async {
+        final svc = _CountingService(mac: '80f3dab3b820', reachable: true);
+
+        // wled_providers.dart:1214 — bare `await service.applyJson(...)`.
+        await svc.applyJson(const {'on': true});
+
+        // audio_mode_page.dart:65 — UNAWAITED. The worst shape: nothing is
+        // there to catch it even in principle.
+        svc.applyJson(const {'bri': 100});
+
+        // geofence_monitor.dart:344 — bare `await repo.setState(...)`.
+        await svc.setState(on: false);
+
+        // hardware_config_screen.dart:300 — bare `await repo.applyConfig(...)`.
+        await svc.applyConfig(const {'hw': {}});
+
+        // design_apply.dart:58 — the per-pixel writer.
+        final r = await svc.applyPerPixel(
+          segmentId: 0,
+          spans: const [PixelSpan(start: 0, end: 3, color: [255, 0, 0])],
+        );
+        expect(r, isFalse, reason: 'applyPerPixel reports bool, not the chunk enum');
+
+        // Let the unawaited future settle inside the zone.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }, (e, st) => errors.add(e));
+
+      expect(errors, isEmpty,
+          reason: 'a refusal that escapes as an unhandled async error is a '
+              'crash on iOS — the guard would cost more than it saves');
     });
 
     test('no expectation supplied → guard is skipped entirely (back-compat)',

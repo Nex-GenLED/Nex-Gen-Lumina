@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_enforcement.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/device_identity.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/features/wled/ddp_service.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -1291,12 +1292,17 @@ class WledNotifier extends Notifier<WledStateModel> {
 
     final ok = await service.applyJson(payload);
     if (!ok) {
-      if (state.connected) {
+      // #92b — an identity refusal is NOT a connectivity problem, and telling
+      // the user to check their connection would send them to fix the wrong
+      // thing. `takeIdentityRefusalMessage` returns non-null only when this
+      // failure WAS a refusal; otherwise the ordinary sentence stands.
+      final refusal = takeIdentityRefusalMessage();
+      if (refusal == null && state.connected) {
         state = state.copyWith(connected: false);
         _scheduleNextPoll();
       }
       ref.read(wledCommandFailureProvider.notifier).state = WledCommandFailure(
-          "Couldn't reach your lights — check your connection");
+          refusal ?? "Couldn't reach your lights — check your connection");
     }
   }
 
