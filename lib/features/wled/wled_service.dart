@@ -493,7 +493,23 @@ class WledService
   @visibleForTesting
   static void resetDeviceVerificationForTest() => verifiedDeviceKeys.clear();
 
-  WledService(this.baseUrl, {this.expectedControllerId}) {
+  /// #94 — ADOPTION SIGNAL. Fired once, on the write that discovers a legacy
+  /// controller doc's real MAC (`expectedControllerId` was not MAC-shaped and
+  /// the device named itself). The repository does not persist anything itself:
+  /// it has no uid and no Firestore, and giving it either would put a database
+  /// write inside the LAN write path. `wledRepositoryProvider` supplies the
+  /// callback that writes `mac` + `canonical_id` onto the existing document.
+  ///
+  /// Deliberately NOT a re-key of the document id — that is a server-side
+  /// migration with the health/relay/installer readers to move with it. This
+  /// only teaches the existing doc who it is talking to.
+  final void Function(String canonicalMac)? onIdentityAdopted;
+
+  WledService(
+    this.baseUrl, {
+    this.expectedControllerId,
+    this.onIdentityAdopted,
+  }) {
     try {
       final uri = Uri.parse(baseUrl);
       final host = uri.host;
@@ -539,8 +555,9 @@ class WledService
     // ONE getInfo per (address, controller) per process — the cache check
     // above is what keeps this off the hot path of every subsequent write.
     final info = await getInfo();
+    final DeviceIdentityResult result;
     try {
-      assertDeviceIdentity(
+      result = assertDeviceIdentity(
         baseUrl: baseUrl,
         expectedControllerId: expected,
         info: info?.raw,
@@ -549,7 +566,26 @@ class WledService
       debugPrint('LUMINA_IDENTITY REFUSED — ${e.detail}');
       rethrow;
     }
-    debugPrint('LUMINA_IDENTITY verified $baseUrl == $expected');
+
+    if (result.adopted) {
+      // #94 — legacy doc id. The write proceeds (there was no expectation to
+      // violate), and we hand the learned MAC up so the document stops being
+      // identity-less. Fire BEFORE caching so a callback that throws does not
+      // leave a verified key with nothing adopted.
+      debugPrint('LUMINA_IDENTITY ADOPTED $baseUrl — legacy id "$expected" '
+          'learned mac=${result.adoptedMac ?? '(device named none)'}');
+      final mac = result.adoptedMac;
+      if (mac != null) {
+        try {
+          onIdentityAdopted?.call(mac);
+        } catch (e) {
+          // An adoption write failing must never fail the user's light command.
+          debugPrint('LUMINA_IDENTITY adoption write failed (non-fatal) — $e');
+        }
+      }
+    } else {
+      debugPrint('LUMINA_IDENTITY verified $baseUrl == $expected');
+    }
     verifiedDeviceKeys.add(_verificationKey);
   }
 

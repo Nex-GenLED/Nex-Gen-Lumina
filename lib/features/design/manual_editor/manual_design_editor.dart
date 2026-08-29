@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/device_identity.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
@@ -224,7 +225,11 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
           baseRgbw: _doc.baseColor, spansByChannel: _spans(), label: 'Custom Design');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ok ? 'Applied to your lights' : "Couldn't reach your lights."),
+          // #94 — an identity refusal must say so, not blame the network.
+          content: Text(ok
+              ? 'Applied to your lights'
+              : (takeIdentityRefusalMessage() ??
+                  "Couldn't reach your lights.")),
           backgroundColor: ok ? Colors.green : Colors.red.shade800,
         ));
       }
