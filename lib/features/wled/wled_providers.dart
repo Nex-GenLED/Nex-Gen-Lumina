@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
@@ -195,6 +196,62 @@ final bridgeHealthProvider = FutureProvider<BridgeHealth>((ref) async {
 /// 5.  Local WiFi                                   → WledService (direct HTTP, fastest)
 /// 6.  Remote + userId + controllerId               → CloudRelayRepository (bridge relay)
 /// 7.  Everything else                              → null
+/// #94 — ADOPTION WRITE. Teach a legacy, identity-less controller document who
+/// it is actually talking to.
+///
+/// Controller docs created before the claim-fix were keyed by IP
+/// (`192_168_1_150`) or by a Firestore auto-id, and carry no `mac` field at
+/// all. #93's identity guard compares the DOC ID against the reported MAC, so
+/// every one of those accounts had every write refused — four live customers,
+/// shown a connectivity banner while a healthy controller sat there.
+///
+/// This writes what the device reported onto the EXISTING document:
+///   • `mac`          — so the installer flow's dedupe-by-MAC can find it, and
+///                      so the next session has a real identity to check.
+///   • `canonical_id` — the MAC-shaped id this doc SHOULD be keyed by, recorded
+///                      now so the eventual server-side re-key has its mapping
+///                      without having to reach every device again.
+///
+/// The document id is deliberately NOT changed here. Re-keying client-side
+/// would strand `controller_health`, the relay's `controllerId`, pixelMap
+/// subdocs and the installer's readers mid-write, on a phone, with no
+/// transaction across them. That migration is server-side and later.
+///
+/// Merge-write, best effort: this runs inside a light command and must never be
+/// the reason one fails.
+Future<void> adoptControllerIdentity({
+  required String userId,
+  required String controllerDocId,
+  required String canonicalMac,
+}) async {
+  try {
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('controllers')
+        .doc(controllerDocId)
+        .set({
+      'mac': canonicalMac,
+      'canonical_id': canonicalIdFromMac(canonicalMac),
+      'identity_adopted_at': FieldValue.serverTimestamp(),
+      'identity_adopted_from_doc_id': controllerDocId,
+    }, SetOptions(merge: true));
+    debugPrint('LUMINA_IDENTITY adopted mac=$canonicalMac onto '
+        'users/$userId/controllers/$controllerDocId');
+  } catch (e) {
+    debugPrint('LUMINA_IDENTITY adoption write failed (non-fatal) — $e');
+  }
+}
+
+/// `80f3daae6f04` → `80_f3_da_ae_6f_04`, the doc-id shape the fleet uses.
+String canonicalIdFromMac(String canonicalMac) {
+  final pairs = <String>[];
+  for (var i = 0; i + 2 <= canonicalMac.length; i += 2) {
+    pairs.add(canonicalMac.substring(i, i + 2));
+  }
+  return pairs.join('_');
+}
+
 final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   // ── 1. Demo / reviewer mode ───────────────────────────────────────────────
   final isDemo = ref.watch(demoModeProvider);
@@ -271,7 +328,19 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     // #92 — hand the LAN service the identity it is supposed to be driving so
     // it can prove the device before the session's first write. Null when no
     // controller is selected, which skips verification exactly as before.
-    return WledService('http://$ip', expectedControllerId: controllerId);
+    return WledService(
+      'http://$ip',
+      expectedControllerId: controllerId,
+      // #94 — when the expected id is a legacy non-MAC doc id, the guard adopts
+      // instead of refusing and hands the learned MAC here.
+      onIdentityAdopted: (userId == null || controllerId == null)
+          ? null
+          : (mac) => adoptControllerIdentity(
+                userId: userId,
+                controllerDocId: controllerId,
+                canonicalMac: mac,
+              ),
+    );
   }
 
   // ── 6. Remote + Firestore bridge relay ───────────────────────────────────
@@ -1796,7 +1865,13 @@ class WledNotifier extends Notifier<WledStateModel> {
         ok = await service.applyJson(payload);
       }
 
-      if (!ok && state.connected) {
+      // #94 — take the refusal FIRST, before the connectivity bookkeeping. An
+      // identity refusal is not a connectivity failure: marking the controller
+      // disconnected here would start a reconnect poll for a device that is
+      // answering perfectly well, and then tell the user to check a working
+      // network. Same pattern as `_postUpdate`.
+      final refusal = ok ? null : takeIdentityRefusalMessage();
+      if (!ok && refusal == null && state.connected) {
         state = state.copyWith(connected: false);
         _scheduleNextPoll();
       }
@@ -1804,7 +1879,7 @@ class WledNotifier extends Notifier<WledStateModel> {
         // Surface failure so the dashboard can show a non-blocking snackbar.
         // Optimistic state updates above are preserved — this only notifies.
         ref.read(wledCommandFailureProvider.notifier).state =
-            WledCommandFailure(
+            WledCommandFailure(refusal ??
                 "Couldn't reach your lights — check your connection");
       }
       // Wait before allowing poller to read back state.

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/device_identity.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_colors.dart';
@@ -625,7 +626,9 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
             Colors.orange.shade800
           ),
         DesignApplyResult.error => (
-            "Couldn't reach your lights. Check the connection.",
+            // #94 — an identity refusal must say so, not blame the network.
+            takeIdentityRefusalMessage() ??
+                "Couldn't reach your lights. Check the connection.",
             Colors.red.shade800
           ),
       };

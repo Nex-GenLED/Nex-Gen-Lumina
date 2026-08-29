@@ -28,6 +28,19 @@
 String canonicalDeviceId(String raw) =>
     raw.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
+/// Whether [raw] canonicalises to something that could BE a MAC — twelve hex
+/// digits — as opposed to a legacy doc id that was keyed by something else.
+///
+/// #94. Controller docs created before the claim-fix were keyed by IP
+/// (`192_168_1_150` → `1921681150`) or by a Firestore auto-id
+/// (`g6YTg5yhRXOaUvfdM6qL` → `g6ytg5yhrxoauvfdm6ql`). Neither can ever equal a
+/// reported MAC, so #93's guard refused **every** write on those accounts —
+/// four live customers, told to check their connection while the controller sat
+/// there healthy. Such an id is not a wrong expectation; it is the ABSENCE of
+/// one, and the correct response is to learn the identity, not to refuse.
+bool isMacShapedId(String raw) =>
+    RegExp(r'^[0-9a-f]{12}$').hasMatch(canonicalDeviceId(raw));
+
 /// Whether the device that answered ([reportedMac], from `/json/info.mac`) is
 /// the one the app meant to talk to ([expectedControllerId], the Firestore
 /// controller doc id).
@@ -110,18 +123,44 @@ class WledDeviceUnverifiableException extends WledDeviceIdentityException {
       'GET /json/info unreadable at $baseUrl (expected $expectedControllerId)';
 }
 
+/// What the guard concluded. Returned rather than thrown when the write may
+/// proceed, so the caller can act on an ADOPTION without a second code path.
+class DeviceIdentityResult {
+  /// True when [expectedControllerId] was not MAC-shaped and the device was
+  /// reachable — the app had no identity to check against and has now learned
+  /// one. The caller should persist [adoptedMac] onto the controller document.
+  final bool adopted;
+
+  /// Canonical MAC the device reported, when it reported one. Null on a plain
+  /// verification (nothing to learn) or when an adopted device did not name
+  /// itself (nothing to write).
+  final String? adoptedMac;
+
+  const DeviceIdentityResult.verified()
+      : adopted = false,
+        adoptedMac = null;
+
+  const DeviceIdentityResult.adopted(this.adoptedMac) : adopted = true;
+}
+
 /// The whole guard DECISION, with no HTTP in it — so match / mismatch /
-/// unverifiable are all testable without a device or a socket.
+/// adoption / unverifiable are all testable without a device or a socket.
 ///
 /// [info] is the decoded `/json/info` body, or null when the read failed.
-/// Returns normally on a match; throws otherwise. The caller does exactly two
-/// things around this: fetch the info, and cache on success.
+/// Returns on a match or an adoption; throws otherwise.
 ///
-/// A null [info] throws [WledDeviceUnverifiableException] rather than passing.
-/// That asymmetry is the point of the function: there are three outcomes, not
-/// two, and collapsing "could not ask" into "fine, proceed" is the failure
-/// this guard exists to prevent.
-void assertDeviceIdentity({
+/// FOUR outcomes, not two:
+///   • info == null                  → throw [WledDeviceUnverifiableException].
+///     "I could not ask" is never "it is the right device".
+///   • expected id not MAC-shaped    → **adopt** (#94). A legacy IP-keyed or
+///     auto-id doc carries no identity claim, so there is nothing for the
+///     device to contradict. Pre-#93 these accounts wrote freely; refusing them
+///     was a regression, not a protection.
+///   • MAC-shaped and equal          → verified.
+///   • MAC-shaped and different      → throw [WledDeviceMismatchException].
+///     UNCHANGED: a real expectation was violated and writing would change
+///     someone else's lights.
+DeviceIdentityResult assertDeviceIdentity({
   required String baseUrl,
   required String expectedControllerId,
   required Map<String, dynamic>? info,
@@ -134,6 +173,13 @@ void assertDeviceIdentity({
   }
   final reported = info['mac'];
   final mac = reported is String ? reported : null;
+
+  // #94 — legacy doc id: no expectation to violate. Adopt what the device says.
+  if (!isMacShapedId(expectedControllerId)) {
+    final canonical = mac == null ? '' : canonicalDeviceId(mac);
+    return DeviceIdentityResult.adopted(canonical.isEmpty ? null : canonical);
+  }
+
   if (!deviceIdentityMatches(
     reportedMac: mac,
     expectedControllerId: expectedControllerId,
@@ -144,6 +190,7 @@ void assertDeviceIdentity({
       reportedMac: mac ?? '',
     );
   }
+  return const DeviceIdentityResult.verified();
 }
 
 // ---------------------------------------------------------------------------
@@ -167,22 +214,56 @@ void assertDeviceIdentity({
 //
 // TAKE-ONCE on purpose: a refusal consumed by one failure report must not be
 // re-reported against an unrelated failure minutes later.
+//
+// #94 — TAKE-ONCE WAS NOT ENOUGH. Three failure reporters never consumed the
+// park, so a refusal they dropped stayed parked indefinitely and the NEXT
+// reporter — a timeout, an unrelated non-2xx, minutes or hours later — popped
+// it and told the user "a different device answered". A stale park does not
+// just fail to inform; it actively misattributes. So the park is now bound to
+// the write attempt that produced it by a timestamp, and expires.
+
+/// How long a parked refusal stays claimable. Long enough for the failure
+/// reporter on the same write attempt to run (it is the very next await),
+/// short enough that no later, unrelated failure can inherit it.
+const Duration kIdentityRefusalTtl = Duration(seconds: 10);
+
+/// Clock seam so TTL expiry is testable without waiting. Tests assign this and
+/// restore it; production never touches it.
+///
+/// Deliberately NOT annotated `@visibleForTesting`: this file's whole point is
+/// that it imports no flutter and no meta (see the header), so the annotation
+/// would cost the property the header promises. The name carries the contract.
+DateTime Function() identityRefusalClock = DateTime.now;
 
 String? _lastRefusalMessage;
+DateTime? _lastRefusalAt;
 
-/// Park a refusal for the next failure report. Called by the write doors.
+/// Park a refusal for the failure report of THIS write attempt. Called by the
+/// write doors.
 void recordIdentityRefusal(WledDeviceIdentityException e) {
   _lastRefusalMessage = e.userMessage;
+  _lastRefusalAt = identityRefusalClock();
 }
 
-/// Consume the parked refusal, if any. Returns null when the last failure was
-/// an ordinary one (timeout, non-2xx) rather than an identity refusal.
+/// Consume the parked refusal, if any and if still fresh.
+///
+/// Returns null when the last failure was an ordinary one (timeout, non-2xx)
+/// rather than an identity refusal, AND when a refusal was parked but has aged
+/// past [kIdentityRefusalTtl] — an expired park belongs to a write attempt that
+/// is over, and attributing it to this one would be a lie.
 String? takeIdentityRefusalMessage() {
   final m = _lastRefusalMessage;
+  final at = _lastRefusalAt;
   _lastRefusalMessage = null;
+  _lastRefusalAt = null;
+  if (m == null || at == null) return null;
+  if (identityRefusalClock().difference(at) > kIdentityRefusalTtl) return null;
   return m;
 }
 
 /// Drop any parked refusal without reporting it (test hygiene / a successful
 /// write clearing stale state).
-void clearIdentityRefusal() => _lastRefusalMessage = null;
+void clearIdentityRefusal() {
+  _lastRefusalMessage = null;
+  _lastRefusalAt = null;
+}
