@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/models/remote_command.dart';
+import 'package:nexgen_command/services/routing_diagnostics.dart';
 
 /// WLED Repository implementation for remote (cloud relay) control.
 ///
@@ -79,6 +80,8 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
 
   /// Queue a command and wait for its execution result.
   Future<Map<String, dynamic>?> _executeCommand(String type, Map<String, dynamic> payload) async {
+    // #114 diagnostics: every routed relay command passes through here.
+    RoutingDiagnostics.instance.record(RoutePath.bridge, type);
     try {
       // Create the command document
       final command = RemoteCommand.create(

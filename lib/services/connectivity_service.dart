@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
+import 'package:nexgen_command/services/routing_diagnostics.dart';
 
 /// Service for detecting network connectivity and determining if user
 /// is on their home (local) network vs. remote.
@@ -166,20 +167,34 @@ class ConnectivityService {
   /// Returns true (assumes local) if homeSsidHash is null/empty (not configured).
   ///
   /// SECURITY: Uses hashed SSID comparison to avoid storing network name in plain text
-  Future<bool> isOnHomeNetwork(String? homeSsidHash) async {
+  ///
+  /// [capture] (#114 diagnostics) is filled in with which branch decided.
+  /// It is written to, never read — the result is identical with or without it.
+  Future<bool> isOnHomeNetwork(
+    String? homeSsidHash, {
+    HomeNetworkEvaluation? capture,
+  }) async {
     // If no home SSID configured, assume local (backwards compatibility)
     if (homeSsidHash == null || homeSsidHash.isEmpty) {
+      capture
+        ?..fingerprintConfigured = false
+        ..reason = ConnectivityCheckReason.noHomeFingerprint;
       debugPrint('ConnectivityService: No home SSID hash configured, assuming local');
       return true;
     }
 
     final currentSsid = await getCurrentSsid();
+    capture?.fingerprintConfigured = true;
 
     // If we can't determine current SSID (e.g. Android location permission
     // not granted), assume LOCAL. Direct HTTP to the controller is the
     // primary control path — defaulting to remote when SSID is unavailable
     // breaks local control for users without location permission.
     if (currentSsid == null || currentSsid.isEmpty) {
+      capture
+        ?..ssidReadable = false
+        ..ssidFailureReason = lastSsidFailureReason
+        ..reason = ConnectivityCheckReason.ssidUnreadableAssumedLocal;
       debugPrint('ConnectivityService: Cannot determine current SSID, assuming local');
       return true;
     }
@@ -187,9 +202,19 @@ class ConnectivityService {
     // SECURITY: Compare using hashed SSID
     try {
       final isHome = EncryptionService.compareSsid(currentSsid, homeSsidHash);
+      capture
+        ?..ssidReadable = true
+        ..ssidMatched = isHome
+        ..reason = isHome
+            ? ConnectivityCheckReason.ssidMatched
+            : ConnectivityCheckReason.ssidMismatch;
       debugPrint('ConnectivityService: Current SSID hashed, Home SSID hash present, isHome=$isHome');
       return isHome;
     } catch (e) {
+      capture
+        ?..ssidReadable = true
+        ..ssidMatched = null
+        ..reason = ConnectivityCheckReason.compareErrorAssumedLocal;
       debugPrint('ConnectivityService: SSID comparison failed ($e), assuming local');
       return true;
     }
@@ -244,6 +269,10 @@ class ConnectivityService {
       sw.stop();
       debugPrint('🔍 BridgeRouter: isOnHomeNetwork=N/A (no connection), '
           'source=connectivity_plus, age=${sw.elapsedMilliseconds}ms');
+      _publishCheck(types,
+          wifiReported: false,
+          outcome: ConnectivityStatus.offline,
+          reason: ConnectivityCheckReason.noConnection);
       return ConnectivityStatus.offline;
     }
 
@@ -254,18 +283,57 @@ class ConnectivityService {
       sw.stop();
       debugPrint('🔍 BridgeRouter: isOnHomeNetwork=false (cellular only), '
           'source=connectivity_plus, age=${sw.elapsedMilliseconds}ms');
+      _publishCheck(types,
+          wifiReported: false,
+          outcome: ConnectivityStatus.remote,
+          reason: ConnectivityCheckReason.wifiNotReported);
       return ConnectivityStatus.remote;
     }
 
     // WiFi is active → check if it's the home network
-    final isHome = await isOnHomeNetwork(homeSsid);
+    final homeEval = HomeNetworkEvaluation();
+    final isHome = await isOnHomeNetwork(homeSsid, capture: homeEval);
     sw.stop();
     final checkMethod = (homeSsid == null || homeSsid.isEmpty)
         ? 'no-hash-configured(assume-local)'
         : 'ssid-hash-compare';
     debugPrint('🔍 BridgeRouter: isOnHomeNetwork=$isHome, '
         'source=$checkMethod, age=${sw.elapsedMilliseconds}ms');
-    return isHome ? ConnectivityStatus.local : ConnectivityStatus.remote;
+    final status = isHome ? ConnectivityStatus.local : ConnectivityStatus.remote;
+    _publishCheck(types,
+        wifiReported: true,
+        outcome: status,
+        reason: homeEval.reason ?? 'unknown',
+        eval: homeEval);
+    return status;
+  }
+
+  /// #114 diagnostics only: publish what this check saw. Never alters the
+  /// status the caller returns, and never throws.
+  void _publishCheck(
+    List<ConnectivityResult> types, {
+    required bool wifiReported,
+    required ConnectivityStatus outcome,
+    required String reason,
+    HomeNetworkEvaluation? eval,
+  }) {
+    try {
+      RoutingDiagnostics.instance.recordConnectivityCheck(
+        ConnectivityCheckSnapshot(
+          checkedAt: DateTime.now(),
+          reportedTypes: types.map((t) => t.name).toList(),
+          wifiReported: wifiReported,
+          homeFingerprintConfigured: eval?.fingerprintConfigured,
+          ssidReadable: eval?.ssidReadable,
+          ssidMatched: eval?.ssidMatched,
+          ssidFailureReason: sanitizeSsidFailureReason(eval?.ssidFailureReason),
+          outcome: outcome.name,
+          reason: reason,
+        ),
+      );
+    } catch (_) {
+      // Diagnostics must never break the connectivity check.
+    }
   }
 }
 

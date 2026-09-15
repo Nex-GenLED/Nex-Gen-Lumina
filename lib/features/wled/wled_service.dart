@@ -16,6 +16,7 @@ import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/models/controller_type.dart';
+import 'package:nexgen_command/services/routing_diagnostics.dart';
 
 /// Bytes WLED never legitimately writes into `presets.json` and which make a
 /// strict UTF-8 decode throw.
@@ -415,6 +416,12 @@ class WledService
         ClockInfoSource,
         AudioReactiveConfigSource {
   final String baseUrl; // e.g., http://192.168.1.23
+
+  /// #114: true only for the instance [wledRepositoryProvider] hands out, so
+  /// routing diagnostics count ROUTED commands. Direct-IP helpers that build
+  /// their own WledService (installer, site sync, config pusher) talk to the
+  /// LAN whatever the routing is and must not paint the badge "Direct".
+  final bool recordsRouting;
   late final bool _simulate;
   bool? _supportsRgbwCache;
   List<String> _simSegNames = ['Front', 'Roof', 'Garage'];
@@ -470,7 +477,7 @@ class WledService
   int _simSpeed = 128;
   Color _simColor = const Color(0xFFFFFFFF);
 
-  WledService(this.baseUrl) {
+  WledService(this.baseUrl, {this.recordsRouting = false}) {
     try {
       final uri = Uri.parse(baseUrl);
       final host = uri.host;
@@ -480,7 +487,12 @@ class WledService
     }
   }
 
-  Uri _uri(String path) => Uri.parse('$baseUrl$path');
+  Uri _uri(String path) {
+    // #114: every LAN request builds its URL here, so this is the one place a
+    // direct command is recorded. Diagnostics only — never affects routing.
+    if (recordsRouting) RoutingDiagnostics.instance.record(RoutePath.direct, path);
+    return Uri.parse('$baseUrl$path');
+  }
 
   Future<Map<String, dynamic>?> getState() async {
     if (_simulate) {

@@ -23,6 +23,7 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/participation_reconciler.dart';
 import 'package:nexgen_command/features/dashboard/hero_image_resolution.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/features/dashboard/widgets/route_path_badge.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
@@ -393,6 +394,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          const RoutePathBadge(),
           _buildControllerSelector(context, ref, state),
           IconButton(
             icon: const Icon(Icons.settings_suggest_outlined),

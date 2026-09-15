@@ -209,7 +209,8 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   if (connectivityStatus == ConnectivityStatus.local) {
     debugPrint('RepositoryInit: selected=WledService, '
         'network=${connectivityStatus.name}, hasControllerId=$controllerId');
-    return WledService('http://$ip');
+    // recordsRouting: #114 diagnostics — marks this as the ROUTED instance.
+    return WledService('http://$ip', recordsRouting: true);
   }
 
   // ── 6. Remote + Firestore bridge relay ───────────────────────────────────
