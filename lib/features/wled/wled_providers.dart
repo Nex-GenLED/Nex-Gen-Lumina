@@ -340,6 +340,8 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
                 controllerDocId: controllerId,
                 canonicalMac: mac,
               ),
+      // #114 diagnostics — marks this as the ROUTED instance.
+      recordsRouting: true,
     );
   }
 

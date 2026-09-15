@@ -19,6 +19,7 @@ import 'package:nexgen_command/features/sports_alerts/services/foreground_celebr
 import 'package:nexgen_command/features/neighborhood/providers/sync_event_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
+import 'package:nexgen_command/services/routing_diagnostics.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
 import 'package:nexgen_command/theme.dart';
@@ -117,6 +118,10 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     ref
         .read(foregroundCelebrationCoordinatorProvider)
         .setForeground(foreground);
+    if (state == AppLifecycleState.hidden || state == AppLifecycleState.paused) {
+      // #114: persist buffered routing records before the OS suspends us.
+      unawaited(RoutingDiagnostics.instance.flush());
+    }
     if (foreground) {
       // Force-refresh the persisted Firebase ID token so the background
       // workers have a valid token after the user re-foregrounds the app.
