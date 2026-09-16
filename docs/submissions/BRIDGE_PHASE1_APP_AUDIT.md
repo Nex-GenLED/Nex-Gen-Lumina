@@ -30,7 +30,7 @@ No matches. Good — the homeowner UID is not referenced anywhere in app code.
 | [lib/features/site/bridge_setup_screen.dart:146-147](lib/features/site/bridge_setup_screen.dart#L146-L147) | 🟡 WARNING | `_doPair()` hardcodes `email: 'bridge@lumina.local'`, `password: 'bridge@lumina.local'` in the POST body to `/api/bridge/auth`. On the firmware side (`handleBridgeAuth`, main.cpp:348-352), the endpoint is a **no-op stub** that always returns 200 without reading the body — the real credentials come from `config.h`. So app-side this does nothing functional, but it's still a plaintext credential in client code. |
 | [lib/features/site/bridge_setup_screen.dart:215](lib/features/site/bridge_setup_screen.dart#L215) | 🟢 CLEAN | Error message string referencing the email by name. No functional dependency. |
 
-### `grep "Nexgen"` / `"Nexgen365"` in lib/
+### `grep "Nexgen"` / `"<REDACTED:PW-1 bridge-auth = shop-WiFi>"` in lib/
 
 No matches. Good.
 
