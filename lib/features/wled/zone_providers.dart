@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_providers.dart' show appForegroundProvider;
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
@@ -16,18 +17,81 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 export 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart';
 
+/// #112 — how often the segment list is refreshed, or `null` for "not at all".
+///
+/// Was a flat 3.0 s `Timer.periodic`. Over the relay every tick is a `getState`
+/// bridge command, so it issued one every 3 s whether or not anyone was looking
+/// (2026-09-12: the bulk of 194 commands in 6 minutes). Segment names and ids
+/// change only when the hardware layout does.
+class ZoneSegmentsPollPolicy {
+  const ZoneSegmentsPollPolicy._();
+
+  /// Direct (LAN): cheap per tick, but no reason to poll a near-static list
+  /// every 3 s.
+  static const Duration direct = Duration(seconds: 15);
+
+  /// Via Bridge: every tick is a relay command with real cost.
+  static const Duration viaBridge = Duration(seconds: 60);
+
+  static Duration? intervalFor({
+    required bool foreground,
+    required bool dashboardVisible,
+    required bool isRemote,
+  }) {
+    if (!foreground || !dashboardVisible) return null;
+    return isRemote ? viaBridge : direct;
+  }
+}
+
+/// #112 — whether the Home dashboard, the one surface that watches the segment
+/// list continuously, is on screen. `WledDashboardPage` sets it from
+/// `TickerMode` (false while another tab or a pushed route covers it).
+/// Defaults to true so any other consumer keeps being refreshed as before.
+final dashboardVisibleProvider = StateProvider<bool>((ref) => true);
+
 /// Holds and auto-refreshes the list of segments from the WLED device.
 class ZoneSegmentsNotifier extends AsyncNotifier<List<WledSegment>> {
   Timer? _timer;
+  bool _ready = false;
+  bool _disposed = false;
 
   @override
   Future<List<WledSegment>> build() async {
-    ref.onDispose(() => _timer?.cancel());
+    ref.onDispose(() {
+      _disposed = true;
+      _timer?.cancel();
+      _timer = null;
+    });
+    // #112 — re-evaluate the cadence the moment any input changes: app
+    // backgrounded, dashboard covered, route flipped Direct <-> Via Bridge.
+    ref.listen<bool>(appForegroundProvider, (_, __) => _scheduleNext());
+    ref.listen<bool>(dashboardVisibleProvider, (_, __) => _scheduleNext());
+    ref.listen<bool>(isRemoteModeProvider, (_, __) => _scheduleNext());
     // Initial fetch
     final list = await _fetchOnce();
-    // Start light polling to keep names/ids fresh
-    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _refreshSilently());
+    _ready = true;
+    _scheduleNext();
     return list;
+  }
+
+  /// Arms the next refresh per [ZoneSegmentsPollPolicy], or leaves polling
+  /// stopped. One timer at a time (self-scheduling, not periodic), so a slow
+  /// relay fetch can no longer have the next tick stack on top of it.
+  void _scheduleNext() {
+    if (_disposed || !_ready) return;
+    _timer?.cancel();
+    _timer = null;
+    final interval = ZoneSegmentsPollPolicy.intervalFor(
+      foreground: ref.read(appForegroundProvider),
+      dashboardVisible: ref.read(dashboardVisibleProvider),
+      isRemote: ref.read(isRemoteModeProvider),
+    );
+    if (interval == null) return;
+    _timer = Timer(interval, () async {
+      if (_disposed) return;
+      await _refreshSilently();
+      _scheduleNext();
+    });
   }
 
   Future<List<WledSegment>> _fetchOnce() async {
