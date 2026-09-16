@@ -27,7 +27,7 @@ No matches. Good — the homeowner UID is not referenced anywhere in app code.
 | File:line | Classification | Notes |
 |---|---|---|
 | [lib/services/user_service.dart:598](lib/services/user_service.dart#L598) | 🟡 WARNING | Default value of `bridgeEmail` parameter to `saveBridgeConfig()`. Stored in Firestore as `bridge_email` field so security rules can grant the bridge's auth principal access. Not a Phase 1 blocker (bridge still uses this shared service account), but is the secrets-hygiene concern flagged in the plan. |
-| [lib/features/site/bridge_setup_screen.dart:146-147](lib/features/site/bridge_setup_screen.dart#L146-L147) | 🟡 WARNING | `_doPair()` hardcodes `email: 'bridge@lumina.local'`, `password: 'bridge@lumina.local'` in the POST body to `/api/bridge/auth`. On the firmware side (`handleBridgeAuth`, main.cpp:348-352), the endpoint is a **no-op stub** that always returns 200 without reading the body — the real credentials come from `config.h`. So app-side this does nothing functional, but it's still a plaintext credential in client code. |
+| [lib/features/site/bridge_setup_screen.dart:146-147](lib/features/site/bridge_setup_screen.dart#L146-L147) | 🟡 WARNING | `_doPair()` hardcodes `email: 'bridge@lumina.local'`, `password: '<REDACTED:LEGACY-BRIDGE-PW>'` in the POST body to `/api/bridge/auth`. On the firmware side (`handleBridgeAuth`, main.cpp:348-352), the endpoint is a **no-op stub** that always returns 200 without reading the body — the real credentials come from `config.h`. So app-side this does nothing functional, but it's still a plaintext credential in client code. |
 | [lib/features/site/bridge_setup_screen.dart:215](lib/features/site/bridge_setup_screen.dart#L215) | 🟢 CLEAN | Error message string referencing the email by name. No functional dependency. |
 
 ### `grep "Nexgen"` / `"<REDACTED:PW-1 bridge-auth = shop-WiFi>"` in lib/
@@ -55,7 +55,7 @@ Only **one** call site per bridge endpoint exists in the app. All paths go throu
 | Aspect | Finding |
 |---|---|
 | (a) Call site | [bridge_setup_screen.dart:145-148](lib/features/site/bridge_setup_screen.dart#L145-L148) |
-| (b) Payload | `email: 'bridge@lumina.local'`, `password: 'bridge@lumina.local'` — hardcoded in client. Firmware ignores the body (stub handler) so this is a no-op. |
+| (b) Payload | `email: 'bridge@lumina.local'`, `password: '<REDACTED:LEGACY-BRIDGE-PW>'` — hardcoded in client. Firmware ignores the body (stub handler) so this is a no-op. |
 | (c) 4xx/5xx handling | Returns `bool`. Treated identically to pair failure — generic error message. |
 | (d) N/A | Same bridge IP as `/api/bridge/pair` |
 
