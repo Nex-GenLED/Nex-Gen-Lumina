@@ -2541,6 +2541,73 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+97 — targetSdk 36. Android AAB built and verified. iOS build number PENDING.
+
+> **STATUS: Android artifact exists and is signed with the release key.**
+> versionCode 97 is **CONSUMED**. **NOT UPLOADED to Play.** iOS app code is
+> unchanged from +96; `build-97` was pushed anyway so both platforms carry the
+> same version identity — see the iOS row below.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-97`** — annotated, tag object `406d36de84427d25ed3824c63130a060f487da6a`, points at `5b7804b`, the bump commit itself (standing convention 1). `main` was **fast-forwarded** to `5b7804b` (its parent is `d2925ef`, main's tip at merge time), so the bump commit is also the merge result — no merge commit, nothing to prove equivalent. |
+| **Git SHA (app bytes)** | **`5b7804bce47045e2b02ef3a0cb1a00320831a5e5`** |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **97 — CONSUMED.** `kStaffAuthTelemetryAppVersion` moved in the same commit (`pubspec.yaml` `2.5.10+97`, `staff_auth_telemetry.dart:57` `'2.5.10+97'`). |
+| **Android artifact** | Built `2026-09-16` from `5b7804b`: `app-release.aab`, **68,611,733 bytes** (65.4 MB), sha256 `39ad7649e5e8ca87326913585bbee74efef515c744abc2a13f92a6ec61ac4d83`, Gradle `bundleRelease` 218.0 s. Merged manifest (not pubspec) `versionCode="97"` / `versionName="2.5.10"` / `package="com.nexgenled.lumina"`, `minSdkVersion="24"` / `targetSdkVersion="36"` — cross-checked against the bundle's own proto manifest (`versionCode` 97, `versionName` 2.5.10, `minSdkVersion` 24, `targetSdkVersion` 36, `compileSdkVersion` 36). No `FOREGROUND_SERVICE*` token in either. **NOT UPLOADED.** |
+| **Artifact location** | `C:\Users\honey\AppData\Local\Temp\claude\c--Flutter-Projects-Lumina-V-1-6\aa1f7ec0-3c9c-4165-b470-627b48e8020d\scratchpad\wt-97\build\app\outputs\bundle\release\app-release.aab`. **This is under `%TEMP%` — copy the AAB and `build/debug-info/android/` somewhere durable before anything cleans it.** Do NOT run `flutter clean` in that worktree. |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — verified by **IDENTITY** (standing convention 2), `jar verified`. Keystore md5 `d019d3ec43e7fb0c10ed2b68a658645d`, same as +96. `PKIX path building failed` + "self-signed" + "no timestamp" warnings are expected and are not signing failures. |
+| **Signing inputs (convention 3 deviation)** | The three ignored inputs were copied from the `lumina-114-fix` build worktree, **not** from the main repo as convention 3 requires. Checked after the fact against the main repo: `google-services.json` 712 B md5 `7df11c93…d492`, `nex-gen-lumina.keystore` 2776 B md5 `d019d3ec…645d`, `key.properties` 112 B md5 `539a84cf…8335` — **byte-identical in all three**, so no stale input reached this build. Worktree `git status` empty before and after the build. |
+| **Android symbols** | Present — built with `--obfuscate --split-debug-info=build/debug-info/android`: `app.android-arm.symbols` (6,849,852 B), `app.android-arm64.symbols` (7,858,936 B), `app.android-x64.symbols` (7,859,352 B). Native symbols for Play are additionally embedded in the bundle (`BUNDLE-METADATA/com.android.tools.build.debugsymbols/`). |
+| **16 KB page size** | Every 64-bit `.so` in the bundle has LOAD alignment ≥ 16 KB (`libapp.so` / `libflutter.so` 0x10000, `libdatastore_shared_counter.so` 0x4000, arm64-v8a and x86_64). Play enforces this for targetSdk ≥ 35. |
+| **iOS** | **PENDING.** `build-97` pushed 2026-09-16 for version parity; iOS app code is identical to +96 (the diff touches only `android/`, the version line, and a Dart telemetry constant). The Codemagic build number is NOT recorded because no read-only Codemagic API token exists (**#87**) — read it from the build page or TestFlight and amend this row. |
+| **Local gate at tag time** | `flutter analyze` **0 errors**, 12 warnings / 373 infos — the issue list is line-for-line identical to +96's counts and to the pre-merge run on the same tree, with **0 issues on the one Dart line the release changed** (`staff_auth_telemetry.dart:57`). `flutter test` (all suites except `test/hardware`) **2,955 passed · 0 failed**, identical to +96. Run twice: once before the build, and again on `5b7804b` as the post-merge gate before `main` was fast-forwarded. |
+| **Build host** | Windows, `JAVA_HOME` = Adoptium JDK 17.0.17. Android SDK platform 36 + build-tools 36.1.0 installed; AGP 8.7.3 built `compileSdk = 36` with no unsupported-SDK warning in the build log. |
+
+### What +97 carried
+
+**No app-behaviour change. The Play targetSdk 36 requirement, nothing else.**
+`git diff d2925ef 5b7804b` is 4 files, 5 lines: `compileSdk` and `targetSdk`
+35 → 36 in `android/app/build.gradle`; the subproject `compileSdkVersion` override
+in `android/build.gradle` 35 → 36 (left at 35 it would force every plugin to
+compile against 35); `pubspec.yaml` `+96` → `+97`; `kStaffAuthTelemetryAppVersion`.
+
+**Android 16 (API 36) behaviour review — nothing required a code or manifest
+change.** (API 36 is Android 16; Android 15 is API 35, which +96 already
+targeted, so the Android 15 changes — edge-to-edge enforcement, the dataSync FGS
+time limit — were already in force.)
+
+- **Edge-to-edge:** API 36 ignores `windowOptOutEdgeToEdgeEnforcement`. The app
+  never set it, so it has been edge-to-edge since targetSdk 35. No change.
+- **Predictive back:** at target 36 on Android 16, `onBackPressed` /
+  `KEYCODE_BACK` are no longer dispatched by default; `OnBackInvokedCallback` is
+  used instead. `MainActivity.kt` and `ShortcutManagerPlugin.kt` do not override
+  back. Flutter 3.41's `FlutterActivity` already registers an
+  `OnBackInvokedCallback` whenever the framework handles back (36 is Flutter's own
+  default target). `lib/` has 4 `PopScope`, 0 `WillPopScope`; the shell's
+  `canPop: false` scope in `main_scaffold.dart` keeps the callback registered, so
+  non-Home-tab → Home is unchanged. **Not device-verified** — no Android test
+  device since 2026-09-14. Hand-check on an Android 16 phone: back from a nested
+  page, back from a non-Home tab, the segment-setup dirty-discard dialog, and that
+  forced password reset still cannot be backed out of.
+- **Foreground service:** none ships (see the corrected +96 item 4). The API
+  35/36 FGS restrictions become relevant only if
+  `kSportsBackgroundServiceEnabled` is turned back on.
+- **`BLUETOOTH_SCAN` / `NEARBY_WIFI_DEVICES`:** no Android 16 runtime-permission
+  timing change found. Android 16's bond-loss handling does not touch Improv
+  provisioning (no bonding). Local-network protection is developer opt-in only at
+  API 36, not enforced — it will matter for LAN WLED control when a later release
+  enforces it.
+- **Large screens:** API 36 ignores orientation/resizability locks at sw ≥ 600dp.
+  The app sets none (`setPreferredOrientations` / `screenOrientation` absent). No
+  change.
+
+### Before this AAB can be uploaded
+
+1. **Confirm Play's highest uploaded versionCode is below 97.**
+2. Items 2–5 of +96's "Before this AAB can be uploaded" apply unchanged (item 4
+   as corrected).
+
 ## 2.5.10+96 — Android AAB built and verified. iOS build number PENDING.
 
 > **STATUS: Android artifact exists and is signed with the release key.**
@@ -2596,9 +2663,16 @@ check.
    `debug_errors`. `audit/OVERNIGHT_PRIVACY_AUDIT.md` F2/F5/F6 records the
    current disclosures as understated.
 4. **Permissions Play will ask to justify:** `RECORD_AUDIO`, `CAMERA`,
-   `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE_DATA_SYNC` (needs a declared
-   service type), `NEARBY_WIFI_DEVICES`, `BLUETOOTH_SCAN`,
-   `RECEIVE_BOOT_COMPLETED`. No background-location permission is declared.
+   `ACCESS_FINE_LOCATION`, `NEARBY_WIFI_DEVICES`, `BLUETOOTH_SCAN`. No
+   background-location permission is declared.
+   *Corrected 2026-09-16 (before any upload of +96):* this item originally also
+   listed `FOREGROUND_SERVICE_DATA_SYNC` and `RECEIVE_BOOT_COMPLETED`. **Neither
+   ships.** `AndroidManifest.xml` strips both — and `FOREGROUND_SERVICE`, and the
+   `flutter_background_service` `BackgroundService` — with `tools:node="remove"`,
+   so the app declares no foreground service and Play asks for no FGS
+   declaration. Verified absent from +96's merged manifest
+   (`lumina-114-fix/build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml`)
+   and from +97's merged manifest and bundle proto manifest.
 5. **65 MB** because `minifyEnabled = false` in the release build type
    (**P3-54**). Well under Play's limit, but it is the reason for the size.
 
