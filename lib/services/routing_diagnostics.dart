@@ -39,6 +39,16 @@ class ConnectivityCheckReason {
 
   static const noConnection = 'no_connection';
   static const wifiNotReported = 'wifi_not_reported';
+
+  /// #114 FIX — no Wi-Fi interface reported, but the home controller answered
+  /// a direct probe, so this is the home LAN after all.
+  static const wifiNotReportedControllerReachable =
+      'wifi_not_reported_controller_reachable';
+
+  /// #114 FIX — no Wi-Fi interface reported AND the home controller did not
+  /// answer: genuinely remote.
+  static const wifiNotReportedControllerUnreachable =
+      'wifi_not_reported_controller_unreachable';
   static const noHomeFingerprint = 'no_home_fingerprint';
   static const ssidUnreadableAssumedLocal = 'ssid_unreadable_assumed_local';
   static const ssidMatched = 'ssid_matched';
@@ -78,6 +88,9 @@ class ConnectivityCheckSnapshot {
     this.ssidReadable,
     this.ssidMatched,
     this.ssidFailureReason,
+    this.controllerProbed = false,
+    this.controllerReachable,
+    this.probeMs,
   });
 
   final DateTime checkedAt;
@@ -100,6 +113,16 @@ class ConnectivityCheckSnapshot {
   /// `local`, `remote` or `offline`.
   final String outcome;
   final String reason;
+
+  /// #114 FIX — whether the home-controller reachability probe ran. True only
+  /// on the no-Wi-Fi-reported branch with a known controller IP.
+  final bool controllerProbed;
+
+  /// Null when [controllerProbed] is false.
+  final bool? controllerReachable;
+
+  /// How long the probe took, when it ran.
+  final int? probeMs;
 }
 
 /// The path one routed command took, with the connectivity check in force.
@@ -135,6 +158,9 @@ class RoutingDecisionRecord {
         'reported_types': check?.reportedTypes,
         'check_outcome': check?.outcome,
         'check_reason': check?.reason,
+        'controller_probed': check?.controllerProbed,
+        'controller_reachable': check?.controllerReachable,
+        'probe_ms': check?.probeMs,
         'check_age_ms': checkAgeMs,
       };
 }

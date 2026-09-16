@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
+import 'package:nexgen_command/services/routing_diagnostics.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
@@ -58,10 +59,18 @@ final wledConnectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) 
 
   final homeSsidHash = userProfile?.homeSsidHash;
 
+  // #114 FIX — the controller this account drives. Consulted ONLY when Wi-Fi
+  // is not reported as active, so the app can tell "no Wi-Fi interface" from
+  // "actually away". Watched, so re-pointing at another controller re-checks.
+  final homeControllerIp = ref.watch(selectedDeviceIpProvider);
+
   // Clear cached SSID so the first emission uses a live value.
   connectivityService.clearCache();
 
-  return connectivityService.watchConnectivity(homeSsidHash);
+  return connectivityService.watchConnectivity(
+    homeSsidHash,
+    homeControllerIp: homeControllerIp,
+  );
 });
 
 /// #91 — is the app on the venue/home LAN right now?
@@ -127,6 +136,40 @@ const String kLanUnreachableMessage =
 /// never sees null during the async loading gap.
 final _lastConnectivityStatusProvider = StateProvider<ConnectivityStatus?>((ref) => null);
 
+/// When [_lastConnectivityStatusProvider] was cached. Paired with it so the
+/// fallback below can tell which of the two known signals is fresher.
+final _lastConnectivityStatusAtProvider = StateProvider<DateTime?>((ref) => null);
+
+/// #114 TAIL FIX — the status to use while the connectivity stream is in a
+/// loading gap (app resume restarts it; a fresh iOS check can take seconds).
+///
+/// Before: the last EMITTED status was used, so after a completed check had
+/// already decided "local", commands kept routing to the bridge until the new
+/// stream emitted — 3–7 s, observed 2026-09-16 14:53:28–34Z.
+///
+/// Now: whichever is newer, the last emission or the last COMPLETED check
+/// (published by `ConnectivityService._publishCheck`). Pure and unit-tested;
+/// it decides nothing itself, it only picks the fresher of two known answers.
+@visibleForTesting
+ConnectivityStatus? freshestKnownStatus({
+  required ConnectivityStatus? cached,
+  required DateTime? cachedAt,
+  required ConnectivityCheckSnapshot? lastCheck,
+}) {
+  if (lastCheck == null) return cached;
+  if (cachedAt != null && cachedAt.isAfter(lastCheck.checkedAt)) return cached;
+  for (final status in ConnectivityStatus.values) {
+    if (status.name == lastCheck.outcome) return status;
+  }
+  return cached;
+}
+
+ConnectivityStatus? _fallbackStatus(Ref ref) => freshestKnownStatus(
+      cached: ref.read(_lastConnectivityStatusProvider),
+      cachedAt: ref.read(_lastConnectivityStatusAtProvider),
+      lastCheck: RoutingDiagnostics.instance.lastCheck,
+    );
+
 /// Counter that, when incremented, forces [wledConnectivityStatusProvider]
 /// to restart its stream and re-check the network.
 final _connectivityRefreshProvider = StateProvider<int>((ref) => 0);
@@ -148,7 +191,7 @@ void refreshConnectivityStatusFromRef(Ref ref) {
 final isRemoteModeProvider = Provider<bool>((ref) {
   final status = ref.watch(wledConnectivityStatusProvider).maybeWhen(
     data: (s) => s,
-    orElse: () => ref.read(_lastConnectivityStatusProvider),
+    orElse: () => _fallbackStatus(ref),
   );
   return status == ConnectivityStatus.remote;
 });
@@ -293,10 +336,12 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
       // Item #68.
       Future.microtask(() {
         ref.read(_lastConnectivityStatusProvider.notifier).state = status;
+        ref.read(_lastConnectivityStatusAtProvider.notifier).state =
+            DateTime.now();
       });
       return status;
     },
-    orElse: () => ref.read(_lastConnectivityStatusProvider),
+    orElse: () => _fallbackStatus(ref),
   );
 
   if (connectivityStatus == null) {

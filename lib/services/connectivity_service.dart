@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show HttpClient, Platform;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -11,6 +11,17 @@ import 'package:nexgen_command/services/routing_diagnostics.dart';
 /// Service for detecting network connectivity and determining if user
 /// is on their home (local) network vs. remote.
 class ConnectivityService {
+  ConnectivityService({ControllerProbe? controllerProbe})
+      : _controllerProbe = controllerProbe ?? defaultControllerProbe;
+
+  /// #114 FIX — how long the home-controller probe may take. Runs at most once
+  /// per 10 s check, and ONLY when Wi-Fi is not reported as active, so a phone
+  /// that really is on cellular adds at most this much to a background check
+  /// whose result nothing is waiting on (the UI uses the last known status).
+  static const Duration kControllerProbeTimeout = Duration(milliseconds: 1200);
+
+  final ControllerProbe _controllerProbe;
+
   final NetworkInfo _networkInfo = NetworkInfo();
 
   /// Cached SSID to avoid repeated async calls
@@ -241,14 +252,21 @@ class ConnectivityService {
 
   /// Stream that emits connectivity status changes.
   /// Emits immediately on subscription, then polls every 10 seconds.
-  Stream<ConnectivityStatus> watchConnectivity(String? homeSsid) async* {
+  ///
+  /// [homeControllerIp] (#114 FIX) is the controller this account drives. It is
+  /// consulted ONLY when Wi-Fi is not reported as the active interface; null
+  /// keeps the pre-fix behaviour exactly.
+  Stream<ConnectivityStatus> watchConnectivity(
+    String? homeSsid, {
+    String? homeControllerIp,
+  }) async* {
     // Emit immediately so callers don't wait 10s for the first value.
-    yield await _checkConnectivity(homeSsid);
+    yield await _checkConnectivity(homeSsid, homeControllerIp);
 
     // Then poll every 10 seconds.
     await for (final status in Stream.periodic(
       const Duration(seconds: 10),
-      (_) => _checkConnectivity(homeSsid),
+      (_) => _checkConnectivity(homeSsid, homeControllerIp),
     ).asyncMap((future) => future)) {
       yield status;
     }
@@ -260,7 +278,10 @@ class ConnectivityService {
   /// - No connection → offline
   /// - Cellular (no WiFi) → remote (cellular is never the home LAN)
   /// - WiFi → check home SSID hash to decide local vs remote
-  Future<ConnectivityStatus> _checkConnectivity(String? homeSsid) async {
+  Future<ConnectivityStatus> _checkConnectivity(
+    String? homeSsid, [
+    String? homeControllerIp,
+  ]) async {
     final sw = Stopwatch()..start();
     final types = await getConnectivityTypes();
 
@@ -278,15 +299,51 @@ class ConnectivityService {
 
     final hasWifi = types.contains(ConnectivityResult.wifi);
 
-    // Cellular / mobile data only (no WiFi) → always remote
+    // No Wi-Fi interface reported.
+    //
+    // #114 FIX — this is NOT proof of being away. Confirmed live 2026-09-16:
+    // the phone sat on home Wi-Fi with a matching fingerprint while
+    // connectivity_plus reported ["mobile"] for 22 minutes, so every command
+    // took the relay (1.9–34.5 s) instead of the LAN. A VPN tunnel reports
+    // ["other"] and looks identical. So ask the controller directly before
+    // concluding remote; only a silent controller means remote.
+    //
+    // With no controller IP there is nothing to ask, and the behaviour and the
+    // recorded reason are exactly what shipped before.
     if (!hasWifi) {
+      bool? reachable;
+      int? probeMs;
+      if (homeControllerIp != null && homeControllerIp.isNotEmpty) {
+        final probeSw = Stopwatch()..start();
+        reachable = await _probeHomeController(homeControllerIp);
+        probeSw.stop();
+        probeMs = probeSw.elapsedMilliseconds;
+      }
       sw.stop();
-      debugPrint('🔍 BridgeRouter: isOnHomeNetwork=false (cellular only), '
+      debugPrint('🔍 BridgeRouter: wifi not reported, controllerProbe='
+          '${reachable?.toString() ?? 'skipped'} (${probeMs ?? 0}ms), '
           'source=connectivity_plus, age=${sw.elapsedMilliseconds}ms');
+
+      if (reachable == true) {
+        _publishCheck(types,
+            wifiReported: false,
+            outcome: ConnectivityStatus.local,
+            reason: ConnectivityCheckReason.wifiNotReportedControllerReachable,
+            controllerProbed: true,
+            controllerReachable: true,
+            probeMs: probeMs);
+        return ConnectivityStatus.local;
+      }
+
       _publishCheck(types,
           wifiReported: false,
           outcome: ConnectivityStatus.remote,
-          reason: ConnectivityCheckReason.wifiNotReported);
+          reason: reachable == null
+              ? ConnectivityCheckReason.wifiNotReported
+              : ConnectivityCheckReason.wifiNotReportedControllerUnreachable,
+          controllerProbed: reachable != null,
+          controllerReachable: reachable,
+          probeMs: probeMs);
       return ConnectivityStatus.remote;
     }
 
@@ -308,6 +365,23 @@ class ConnectivityService {
     return status;
   }
 
+  /// #114 FIX — one short request to the controller this account drives.
+  /// Failure of ANY kind (no route, refused, timeout, non-200) means "did not
+  /// answer"; it never throws and never changes any other branch.
+  @visibleForTesting
+  Future<bool> probeController(String ip, Duration timeout) =>
+      _controllerProbe(ip, timeout);
+
+  Future<bool> _probeHomeController(String ip) async {
+    try {
+      return await probeController(ip, kControllerProbeTimeout);
+    } catch (e) {
+      debugPrint('ConnectivityService: controller probe threw ($e) — '
+          'treating as unreachable');
+      return false;
+    }
+  }
+
   /// #114 diagnostics only: publish what this check saw. Never alters the
   /// status the caller returns, and never throws.
   void _publishCheck(
@@ -316,6 +390,9 @@ class ConnectivityService {
     required ConnectivityStatus outcome,
     required String reason,
     HomeNetworkEvaluation? eval,
+    bool controllerProbed = false,
+    bool? controllerReachable,
+    int? probeMs,
   }) {
     try {
       RoutingDiagnostics.instance.recordConnectivityCheck(
@@ -329,11 +406,40 @@ class ConnectivityService {
           ssidFailureReason: sanitizeSsidFailureReason(eval?.ssidFailureReason),
           outcome: outcome.name,
           reason: reason,
+          controllerProbed: controllerProbed,
+          controllerReachable: controllerReachable,
+          probeMs: probeMs,
         ),
       );
     } catch (_) {
       // Diagnostics must never break the connectivity check.
     }
+  }
+}
+
+/// #114 FIX — "can the home controller be reached right now?"
+typedef ControllerProbe = Future<bool> Function(String ip, Duration timeout);
+
+/// Default probe: a short GET of `/json/info` on the controller's LAN address.
+///
+/// Read-only and tiny. On cellular the connect fails almost immediately (no
+/// route to a private address); [timeout] caps the pathological case where a
+/// carrier NAT swallows the SYN.
+Future<bool> defaultControllerProbe(String ip, Duration timeout) async {
+  HttpClient? client;
+  try {
+    return await Future<bool>(() async {
+      client = HttpClient()..connectionTimeout = timeout;
+      final req = await client!.getUrl(Uri.parse('http://$ip/json/info'));
+      req.persistentConnection = false;
+      final res = await req.close();
+      await res.drain<void>();
+      return res.statusCode == 200;
+    }).timeout(timeout);
+  } catch (_) {
+    return false;
+  } finally {
+    client?.close(force: true);
   }
 }
 
