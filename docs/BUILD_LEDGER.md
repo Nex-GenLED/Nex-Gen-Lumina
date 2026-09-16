@@ -2541,6 +2541,67 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+96 — Android AAB built and verified. iOS build number PENDING.
+
+> **STATUS: Android artifact exists and is signed with the release key.**
+> versionCode 96 is **CONSUMED** (a built AAB spends its code whether or not it
+> is uploaded). **NOT UPLOADED to Play.** The iOS side was tagged and handed to
+> Codemagic; its build number is not yet recorded — see the iOS row below.
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-96`** — annotated, tag object `69667bdd6c577ef0b49e4089d29ac5ff608fbbfb`, points at `7b4366c`, the bump commit itself (standing convention 1). |
+| **Git SHA (app bytes)** | **`7b4366cc16d8abbaee89e3618fe2ec178141e456`** |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **96 — CONSUMED.** `kStaffAuthTelemetryAppVersion` moved in the same commit; both verified in-tree at `7b4366c` before building (`pubspec.yaml` `2.5.10+96`, `staff_auth_telemetry.dart:57` `'2.5.10+96'`). |
+| **Android artifact** | Built `2026-09-16`: `app-release.aab`, **68,611,531 bytes** (65.4 MB), sha256 `f13a9780113fd0cb205badf0918013d99c1476eed68ec4ba36a38231180b5801`, Gradle `bundleRelease` 283.9 s. Merged manifest (not pubspec) `versionCode="96"` / `versionName="2.5.10"` / `package="com.nexgenled.lumina"`, `minSdkVersion="24"` / `targetSdkVersion="35"` — cross-checked against the bundle's own proto manifest (`versionCode` → `"96"`, `versionName` → `"2.5.10"`). **NOT UPLOADED.** |
+| **Artifact location** | `C:\Flutter Projects\lumina-114-fix\build\app\outputs\bundle\release\app-release.aab`. **Do NOT run `flutter clean` in that worktree** — that is how +86's artifact was destroyed. |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US` — verified by **IDENTITY** (standing convention 2), `jar verified`. Same upload key as +85/+86 (keystore md5 `d019d3ec43e7fb0c10ed2b68a658645d`). `PKIX path building failed` + "self-signed" + "no timestamp" warnings are expected and are not signing failures. |
+| **Android symbols** | Present — built with `--obfuscate --split-debug-info=build/debug-info/android`: `app.android-arm.symbols` (6,795,252 B), `app.android-arm64.symbols` (7,804,336 B), `app.android-x64.symbols` (7,804,752 B). Native symbols for Play are additionally embedded in the bundle (`BUNDLE-METADATA/com.android.tools.build.debugsymbols/`). |
+| **iOS** | **PENDING.** `build-96` was pushed 2026-09-16 and is the only trigger `ios-workflow` honours. The Codemagic build number is NOT recorded here because no read-only Codemagic API token exists (**#87**) — read it from the build page or TestFlight and amend this row. |
+| **Local gate at tag time** | `flutter analyze` **0 errors**, 12 warnings / 373 infos, with **0 issues on any line the release's merges changed**. `flutter test` (all suites except `test/hardware`) **2,955 passed · 0 failed**. |
+| **Build host** | Windows, `JAVA_HOME` = Adoptium JDK 17.0.17 (the `java` on PATH is JDK 8 — Gradle must be given 17 explicitly, or `bundleRelease` runs on the wrong JDK). |
+
+### What +96 carried
+
+**#114, both halves.** `+95` (`build-95`, `947517e`) shipped the routing
+DIAGNOSTICS: the Direct / Via Bridge badge and a per-command routing record
+batched to `users/{uid}/debug_errors`. `+96` adds the routing FIX those records
+justified.
+
+Evidence that produced the fix, from the +95 build's own records (2026-09-16,
+Tyler home on home Wi-Fi the whole time): at `14:31:00Z` `connectivity_plus`
+reported `types:["mobile"]` — cellular only — and the app routed every command
+through the bridge until `14:53:28Z`. Relay latency 1.9–34.5 s against ~70 ms on
+the LAN. The network-name check never failed; it was never reached.
+
+The fix: when Wi-Fi is not reported as the active interface, probe the
+controller (`GET /json/info`, 1200 ms cap) before concluding remote — it answers
+→ local, it is silent → remote, no controller IP known → the pre-fix behaviour
+and the pre-fix reason. Every other branch is untouched and pinned by tests that
+assert the probe is not even consulted. Also fixes the 3–7 s tail where the
+repository followed the last EMITTED status instead of the freshest COMPLETED
+check.
+
+### Before this AAB can be uploaded
+
+1. **Confirm Play's highest uploaded versionCode is below 96.** Records show
+   codes consumed up to ~91 with several never uploaded, so 96 should clear —
+   but only Play Console can confirm, and **an upload consumes a code even when
+   the build is never submitted**.
+2. **Upload is manual.** No Play service-account credential exists on this
+   machine (the only key in `~/.lumina` is the Firebase admin key).
+3. **Data Safety form must match what the app actually collects** — precise
+   location, camera, microphone, photos, address, phone, plus diagnostics to
+   `debug_errors`. `audit/OVERNIGHT_PRIVACY_AUDIT.md` F2/F5/F6 records the
+   current disclosures as understated.
+4. **Permissions Play will ask to justify:** `RECORD_AUDIO`, `CAMERA`,
+   `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE_DATA_SYNC` (needs a declared
+   service type), `NEARBY_WIFI_DEVICES`, `BLUETOOTH_SCAN`,
+   `RECEIVE_BOOT_COMPLETED`. No background-location permission is declared.
+5. **65 MB** because `minifyEnabled = false` in the release build type
+   (**P3-54**). Well under Play's limit, but it is the reason for the size.
+
 ## 2.5.10+87 — LIVE. CI outcome PENDING. First build off a unified main.
 
 | Field | Value |
