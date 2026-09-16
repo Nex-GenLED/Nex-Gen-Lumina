@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/utils/visibility_gated_timer.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_router.dart';
@@ -75,7 +76,14 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   _WebhookCheckResult _bridgeCheck =
       const _WebhookCheckResult(_WebhookStatus.idle);
 
-  Timer? _pollingTimer;
+  /// #112 — the 30 s health poll, gated on this screen actually being on
+  /// screen (app resumed, tab active, route on top). Replaces a
+  /// `Timer.periodic` that kept polling from behind other tabs until the
+  /// screen was popped — every tick a relay command.
+  late final VisibilityGatedTimer _poller = VisibilityGatedTimer(
+    period: const Duration(seconds: 30),
+    onTick: _pollTick,
+  );
 
   /// The current remote access mode — derived from user profile on load.
   RemoteAccessMode _mode = RemoteAccessMode.bridge;
@@ -116,8 +124,18 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // #112 — a tab switch (TickerMode) and a route pushed on top (ModalRoute)
+    // both re-run this.
+    _poller.updateFromContext(context);
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    _poller.setAppLifecycleState(state);
+    // #112 — the on-resume check runs only when this screen is on screen.
+    if (state == AppLifecycleState.resumed && _poller.isVisible) {
       final profile = ref.read(currentUserProfileProvider).maybeWhen(
         data: (u) => u,
         orElse: () => null,
@@ -134,7 +152,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
+    _poller.dispose();
     _webhookUrlController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -148,15 +166,18 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
           orElse: () => null,
         );
     if (profile?.remoteAccessEnabled != true) return;
-    _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_mode == RemoteAccessMode.webhook) {
-        final url = _webhookUrlController.text.trim();
-        if (url.isNotEmpty) _runHealthCheck(url);
-      } else {
-        _runBridgeCheck();
-      }
-    });
+    _poller.setWanted(true);
+  }
+
+  /// One poll tick — the body of the old `Timer.periodic`, unchanged. #112
+  /// changes only when this runs, never what it does.
+  void _pollTick() {
+    if (_mode == RemoteAccessMode.webhook) {
+      final url = _webhookUrlController.text.trim();
+      if (url.isNotEmpty) _runHealthCheck(url);
+    } else {
+      _runBridgeCheck();
+    }
   }
 
   // ── Health check ───────────────────────────────────────────────────────────
@@ -484,7 +505,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
           if (url.isNotEmpty) _runHealthCheck(url);
         }
       } else {
-        _pollingTimer?.cancel();
+        _poller.setWanted(false);
         setState(() {
           _bridgeCheck = const _WebhookCheckResult(_WebhookStatus.idle);
           _webhookCheck = const _WebhookCheckResult(_WebhookStatus.idle);

@@ -67,11 +67,48 @@ final wledConnectivityStatusProvider = StreamProvider<ConnectivityStatus>((ref) 
   // Clear cached SSID so the first emission uses a live value.
   connectivityService.clearCache();
 
-  return connectivityService.watchConnectivity(
-    homeSsidHash,
-    homeControllerIp: homeControllerIp,
+  // #112 — an UNCHANGED result is re-emitted at most every 30 s (Direct /
+  // offline) or 120 s (Via Bridge). Every emission rebuilds
+  // wledRepositoryProvider and re-runs its dependents; over the relay that made
+  // clockHealthProvider issue a `getInfo` command every 10.0 s. A CHANGED result
+  // still passes immediately, so routing reacts exactly as fast as before.
+  return suppressRepeatedConnectivity(
+    connectivityService.watchConnectivity(
+      homeSsidHash,
+      homeControllerIp: homeControllerIp,
+    ),
   );
 });
+
+/// #112 — how long an unchanged connectivity result waits before re-emitting.
+Duration connectivityRepeatInterval(ConnectivityStatus status) =>
+    status == ConnectivityStatus.remote
+        ? const Duration(seconds: 120)
+        : const Duration(seconds: 30);
+
+/// #112 — passes every CHANGE at once, and an unchanged result only once
+/// [connectivityRepeatInterval] has elapsed since the last emission.
+///
+/// Deliberately not `distinct()`: the periodic re-emission is what re-runs
+/// dependents that cache a failure (e.g. `deviceHardwareConfigProvider`, #63),
+/// so it is slowed rather than removed.
+Stream<ConnectivityStatus> suppressRepeatedConnectivity(
+  Stream<ConnectivityStatus> source, {
+  DateTime Function() clock = DateTime.now,
+}) async* {
+  ConnectivityStatus? last;
+  DateTime? lastAt;
+  await for (final status in source) {
+    final now = clock();
+    if (last == null ||
+        status != last ||
+        now.difference(lastAt!) >= connectivityRepeatInterval(status)) {
+      last = status;
+      lastAt = now;
+      yield status;
+    }
+  }
+}
 
 /// #91 — is the app on the venue/home LAN right now?
 ///

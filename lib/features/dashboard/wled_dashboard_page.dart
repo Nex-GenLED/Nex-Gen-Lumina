@@ -187,6 +187,26 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     super.dispose();
   }
 
+  /// Last visibility reported to [dashboardVisibleProvider].
+  bool? _reportedVisible;
+
+  /// #112 — tell the segment poller whether Home is actually on screen.
+  /// `StatefulShellRoute` keeps this page mounted behind other tabs with
+  /// `TickerMode` disabled, and a pushed route does the same.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (visible == _reportedVisible) return;
+    _reportedVisible = visible;
+    // Deferred: this runs during build, and a provider must not be modified
+    // while widgets or providers are building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(dashboardVisibleProvider.notifier).state = visible;
+    });
+  }
+
   Future<bool> _checkSyncWarning() async {
     // Auto-pause sync silently — user actions always take priority.
     // The WledNotifier._postUpdate also handles this, but this catches
