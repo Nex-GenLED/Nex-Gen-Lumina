@@ -41,9 +41,31 @@ class DiscoveryPage extends ConsumerWidget {
             icon: const Icon(Icons.bluetooth_searching),
             onPressed: () => context.push(AppRoutes.deviceSetup),
           ),
+          // ESCAPE HATCH (S-0, docs/audits Apple submission audit 2026-09-17).
+          //
+          // This page had no back button, no Skip and no bottom nav. It is
+          // reached by context.go — from WelcomeWizard._finishWizard and from
+          // signup — so the nav stack is empty and Flutter renders no
+          // automatic back arrow. The only exit was selectedDeviceIpProvider
+          // going non-null, which requires tapping a discovered controller.
+          // With no hardware on the network that is a room with no door:
+          // force-quit was the only way out.
+          //
+          // Going to the dashboard with no controller is a supported state,
+          // not a new dead end — WledDashboardPage raises a dismissible
+          // "We can't find your lights" banner whose action pushes
+          // AppRoutes.wifiConnect, so setup stays one tap away. That banner
+          // deliberately replaced an earlier force-navigate for the same
+          // reason this button exists.
+          TextButton(
+            onPressed: () => context.go(AppRoutes.dashboard),
+            child: Text(
+              'Skip',
+              style: TextStyle(color: NexGenPalette.textMedium),
+            ),
+          ),
         ],
       ),
-      // Show a subtle action to open settings even from welcome flow
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
