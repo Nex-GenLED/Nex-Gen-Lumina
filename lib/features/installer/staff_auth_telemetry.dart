@@ -35,6 +35,7 @@ import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/app_version.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Collection that receives fallback records. See the library doc for why this
@@ -48,13 +49,13 @@ const String kAnonFallbackEventType = 'installer_anon_fallback';
 
 /// App version stamped onto every telemetry row.
 ///
-/// MUST BE BUMPED WITH `pubspec.yaml` ON EVERY RELEASE. There is no runtime
-/// source for this — the project does not depend on `package_info_plus`, and
-/// adding a plugin (with its native config) to a release candidate is a bigger
-/// risk than a one-line constant. The whole point of the S-5 gate is telling
-/// ADOPTED builds from STALE ones, so a stale value here defeats the metric.
-/// Logged as debt in docs/BUGS_AND_DEBT.md.
-const String kStaffAuthTelemetryAppVersion = '2.5.10+98';
+/// Now an alias for [kAppVersion] in `lib/app_version.dart`, which is the
+/// single literal to bump on a release. It used to be its own literal, and the
+/// login screen carried a SECOND, independently-maintained one that had drifted
+/// to `v2.2.0` — three minor versions stale — which is exactly the failure the
+/// S-5 adoption metric (ADOPTED vs STALE builds) cannot tolerate. One source of
+/// truth removes the drift by construction.
+const String kStaffAuthTelemetryAppVersion = kAppVersion;
 
 /// Discriminator for commissioning-step failures that leave an install
 /// incomplete — see [recordCommissioningFailure]. Separate from

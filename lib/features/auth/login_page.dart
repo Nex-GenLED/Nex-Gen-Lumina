@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/app_version.dart';
 import 'package:nexgen_command/auth/auth_manager.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
@@ -538,7 +539,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           onPointerDown: (_) => _onSubtitleTap(),
                           child: Center(
                             child: Text(
-                              'v2.2.0',
+                              'v$kAppVersionName',
                               style: GoogleFonts.montserrat(
                                 color: Colors.white.withValues(alpha: 0.4),
                                 fontSize: 11,
