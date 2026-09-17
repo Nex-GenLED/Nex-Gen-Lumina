@@ -407,6 +407,16 @@ For zones with multiple controllers (Commercial mode):
 
 1. **Riverpod Dispose Errors:** Never cache `notifier` references in State classes. Always use `ref.read().notifier` inline to avoid "Bad state" errors after widget disposal.
 
+   **The rule stands; the hazard is currently clean.** Swept 2026-09-17: **zero**
+   cached `*Notifier` fields anywhere in `lib/`, and exactly **two** uses of
+   `ref.` inside a `dispose()` body, both deliberate and commented —
+   [installer_setup_wizard.dart:320](lib/features/installer/installer_setup_wizard.dart#L320)
+   (synchronous, runs before the ref is torn down) and
+   [pattern_theme_selection.dart:218](lib/features/wled/pattern_theme_selection.dart#L218)
+   (captures the notifier *before* its `Future.microtask`, naming the
+   `debug_errors` doc it fixes). Read this as a convention to preserve, not as
+   an outstanding defect to go hunting for.
+
 2. **WLED JSON API Variability:** The `seg` field in `/json/state` can be either a List or a Map depending on WLED firmware version. Always check type before accessing.
 
 3. **Firestore Offline Persistence:** Firebase Firestore caching can cause stale data. Use `.get(GetOptions(source: Source.server))` to force fresh fetches if needed.
