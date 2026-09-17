@@ -58,7 +58,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Nex-Gen needs this to find your lights</string>
+	<string>Lumina scans your local network to find and control your Nex-Gen lighting controllers.</string>
     <!-- Location usage: required by iOS to read WiFi SSID for home-network
          detection, and to configure the Welcome Home geofence. -->
     <key>NSLocationWhenInUseUsageDescription</key>
