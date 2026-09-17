@@ -82,6 +82,32 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         tools:targetApi="s"
         android:usesCleartextTraffic="true">
+        <!-- Google Maps SDK for Android API key.
+
+             S-2, Apple/Play submission audit 2026-09-17. google_maps_flutter
+             is a dependency and two screens build GoogleMap widgets
+             (features/geofence/geofence_setup_screen.dart and
+             screens/commercial/fleet/FleetDashboardScreen.dart), but neither
+             platform supplied a Maps key: iOS never called
+             GMSServices.provideAPIKey() and this meta-data was absent. Without
+             it the map renders a blank grey tile.
+
+             Same platform-appropriate Firebase client key the Dart side
+             already uses for Places (features/schedule/geocoding_service.dart
+             reads DefaultFirebaseOptions.<platform>.apiKey); matches
+             DefaultFirebaseOptions.android.apiKey in lib/firebase_options.dart.
+             Firebase API keys are public client identifiers by design and
+             already ship in the binary — this is not a new secret exposure.
+
+             REQUIRES A CONSOLE-SIDE STEP THIS COMMIT CANNOT DO: "Maps SDK for
+             Android" must be enabled on this key in Google Cloud Console, and
+             the key wants an Android-app restriction pinned to
+             com.nexgenled.lumina with BOTH the upload and Play App Signing
+             SHA-1 fingerprints. Note this key doubles as the billable Places
+             key, so it also wants a quota cap. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyB2VhrbVD1lBbs_b_JuCkjLa1Yh_AsbWJs"/>
         <activity
             android:name="com.nexgenled.lumina.MainActivity"
             android:exported="true"
