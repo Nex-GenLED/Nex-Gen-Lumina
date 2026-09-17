@@ -191,11 +191,22 @@ class BridgeApiClient {
     }
   }
 
-  /// POST /api/bridge/reset — factory reset the bridge (clears NVS).
+  /// POST /api/reset — factory reset the bridge (clears NVS).
+  ///
+  /// The path used to be `/api/bridge/reset`, which the firmware has never
+  /// served: `setupWebServer()` registers `/api/reset` and `onNotFound`
+  /// answers everything else with `404 {"error":"Not found"}`. So this
+  /// returned false for every bridge ever shipped. The firmware's
+  /// `handleReset()` clears the `bridge` NVS namespace (uid + wledIp),
+  /// replies `200 {"ok":true,"message":"Resetting..."}` and then restarts —
+  /// so the 200 check below is the right success condition.
+  ///
+  /// Endpoint paths are pinned against the firmware's own route table by
+  /// test/services/bridge_api_client_endpoints_test.dart.
   Future<bool> reset() async {
     try {
       final response =
-          await http.post(Uri.parse('$baseUrl/api/bridge/reset')).timeout(_timeout);
+          await http.post(Uri.parse('$baseUrl/api/reset')).timeout(_timeout);
       return response.statusCode == 200;
     } catch (e) {
       debugPrint('[BridgeApiClient] reset failed: $e');
