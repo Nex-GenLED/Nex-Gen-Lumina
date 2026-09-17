@@ -275,6 +275,21 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
       // Unlinked: redirect to link-account for any protected route
       if (role == null || role == 'unlinked') {
+        // ...except the demo. `isDemoRoute` was already computed for the
+        // unauthenticated branch, but the unlinked branch never consulted
+        // it, so the demo door existed ONLY on /login. A reviewer (or a
+        // curious prospect) who taps "Create One", signs up, and lands here
+        // had no way forward at all: every control on this screen leads to a
+        // credential they do not have, and tapping a demo link bounced
+        // straight back here. That is the textbook App Review 2.1 rejection.
+        //
+        // Scope is deliberately narrow: this widens access only for routes
+        // beginning "/demo", and only for users who are signed in but not
+        // linked to a system. It cannot affect a linked customer — they are
+        // resolved by the branches above and never reach this one.
+        if (isDemoRoute) {
+          return null;
+        }
         // Safety net: if the reviewer somehow lands on a protected
         // route before seedForUser() commits (rare — _handleSignIn
         // awaits the seed before navigating — but defensive for any

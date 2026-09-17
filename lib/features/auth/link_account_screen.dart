@@ -123,6 +123,38 @@ class LinkAccountScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              // Option 3: Try the demo.
+              //
+              // Added 2026-09-17. Without this the screen is terminal — an
+              // invitation code, a dealer lookup and a staff PIN are all
+              // credentials a new arrival does not have, so the only way out
+              // was Sign out. The demo door existed only on /login, which
+              // this user has already left. appRedirect's unlinked branch was
+              // widened to permit "/demo*" in the same change; a button alone
+              // would bounce straight back here.
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => context.push(AppRoutes.demoCode),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    side: const BorderSide(color: NexGenPalette.line),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.play_circle_outline,
+                      color: Colors.white),
+                  label: const Text(
+                    'Explore the demo instead',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 32),
               // Professional access section
               Container(
