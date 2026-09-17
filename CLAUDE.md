@@ -48,8 +48,12 @@ The app controls WLED devices (permanent LED light controllers) over HTTP and op
 - `GET /json/info` - Device capabilities (RGBW support, etc.)
 
 **Timeout Configuration:**
-- HTTP timeouts are currently set to **5 seconds** in `WledService`
-- **KNOWN ISSUE:** Previous versions had "System Offline" false alarms. The fix requires increasing timeouts to **15+ seconds** in both `lib/nav.dart` (dashboard reconnect logic) and `lib/features/wled/wled_service.dart`
+- HTTP timeouts are **15 seconds** in `WledService` (verified 2026-09-17 —
+  every `_wledClientFor(...)` and `req.close().timeout(...)` call site).
+- `areaAnyOnProvider` in `lib/features/site/site_providers.dart` is also 15 s.
+- This entry previously said 5 s and described the increase as outstanding. It
+  was stale: the change is in the code and has been for some time. See
+  "Critical Known Issues" below.
 
 ### Firebase Integration
 
@@ -236,26 +240,30 @@ flutter run
 
 ## Critical Known Issues & Fixes
 
-### 1. "System Offline" and "Bad State" Crashes
+### 1. "System Offline" and "Bad State" Crashes — FIXED, verified 2026-09-17
 
-**Problem:** The app shows false "System Offline" warnings and experiences state crashes due to:
-- HTTP timeouts too aggressive (5s insufficient for some networks)
-- Stale notifier references in `nav.dart` causing "Bad state: Trying to use a Notifier after `dispose` was called"
+**Historical problem:** false "System Offline" warnings and state crashes from
+aggressive HTTP timeouts and stale notifier references.
 
-**Fix (MUST BE RE-APPLIED TO FRESH EXPORT):**
+**All three fixes are present in the code.** This section used to read "MUST BE
+RE-APPLIED TO FRESH EXPORT" and list them as outstanding work; that was stale
+and is corrected here. Re-applying them is not a task — verifying them is:
 
-**In [lib/features/wled/wled_service.dart](lib/features/wled/wled_service.dart):**
-- Change all `Duration(seconds: 5)` to `Duration(seconds: 15)` for HTTP client timeouts
+| Fix | State |
+|---|---|
+| `wled_service.dart` HTTP timeouts at 15 s | Present — all client and `req.close()` call sites |
+| `site_providers.dart` `areaAnyOnProvider` at 15 s | Present |
+| No cached notifier refs in dashboard handlers | Present — handlers resolve via `ref.read(...)` inline |
 
-**In [lib/nav.dart](lib/nav.dart):**
-- In `_WledDashboardPageState`, ensure all button handlers use `ref.read()` dynamically, NOT cached notifier references
-- Example: Replace `notifier.togglePower()` with `ref.read(wledStateProvider.notifier).togglePower()` if the notifier was stored in a variable
+**The rule this came from still stands**, and it is the part worth keeping:
+never cache a `notifier` reference in a `State` class — resolve it inline with
+`ref.read(...).notifier` at the call site, or you reintroduce "Bad state: Trying
+to use a Notifier after `dispose` was called". See "Common Gotchas" below.
 
-**In [lib/features/site/site_providers.dart](lib/features/site/site_providers.dart):**
-- Increase timeout in `areaAnyOnProvider` from 4s to 15s:
-  ```dart
-  return await f.timeout(const Duration(seconds: 15));
-  ```
+Note that `lib/nav.dart` is now a four-line barrel re-exporting
+`app_router.dart` and `route_guards.dart`; the dashboard lives in
+`lib/features/dashboard/wled_dashboard_page.dart`. Older instructions pointing
+at `nav.dart` for dashboard code are pointing at the wrong file.
 
 ### 2. Remote Access Architecture — SHIPPED
 
@@ -361,10 +369,25 @@ test/
 
 ### Simulation Mode
 
-`kSimulationMode` constant in [lib/app_providers.dart](lib/app_providers.dart):
-- Currently hardcoded to `true`
-- Bypasses permission prompts and uses virtual devices for web preview
-- Should be tied to `kDebugMode` or build environment in production
+`kSimulationMode` constant in [lib/app_providers.dart:17](lib/app_providers.dart#L17):
+- **Hardcoded to `false`.** (This entry previously said `true`, which was wrong
+  and had been wrong for some time — worth knowing, because a reader who
+  believed it would conclude that release builds bypass permission prompts and
+  talk to virtual devices, and would misread every discovery, BLE and DDP code
+  path as simulated.)
+- When `true` it bypasses permission prompts and network/BLE scanning and
+  substitutes a virtual device. With the shipping value of `false`, every one of
+  those paths is the real-hardware path.
+- Read at eight sites: `lib/services/bridge_discovery_service.dart`,
+  `lib/features/discovery/device_discovery.dart`,
+  `lib/features/ble/provisioning_service.dart`,
+  `lib/features/ble/device_setup_page.dart`,
+  `lib/features/permissions/welcome_wizard.dart`,
+  `lib/features/wled/ddp_service.dart`.
+- It is a compile-time `const`, so the simulated branches are tree-shaken out of
+  release builds rather than merely unreached.
+- Still worth tying to `kDebugMode` or a build flag rather than hand-editing, so
+  that flipping it for local work cannot be committed by accident.
 
 ### Connection Resilience
 
