@@ -593,6 +593,53 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
+      // ── Voice-assistant integrations — ADDED 2026-09-17 ──────────────
+      //
+      // WHY THIS EXISTS. AlexaService.initiateAccountLinking and the Google
+      // Home equivalent both AWAIT a write to
+      // users/{uid}/integrations/{provider} BEFORE launching the assistant
+      // deep link. There was no rules block for this subcollection, so the
+      // write was default-denied, the await threw, the catch returned false,
+      // and the deep link never launched. Account linking could not be
+      // completed by anyone on any build. The link-status listeners were
+      // denied too, so the UI was pinned to "not linked" permanently.
+      //
+      // The backing Cloud Functions (alexaAuth/alexaToken/alexaUnlink,
+      // googleAuth/googleToken) write the real token material with the admin
+      // SDK, which bypasses these rules. So the client needs exactly two
+      // things: read its own link status, and record/clear its own intent.
+      //
+      // WRITES ARE FIELD-LIMITED ON PURPOSE. The client only ever writes
+      // {linkInitiated, initiatedAt} (set with merge:true). Constraining the
+      // key set means a client cannot forge `isLinked` to fake a linked
+      // account, and cannot inject or overwrite token fields that the
+      // functions own. Delete is allowed because unlinking is a client action.
+      match /integrations/{provider} {
+        // Only the two providers the app actually implements.
+        function isKnownProvider() {
+          return provider in ['alexa', 'google_home'];
+        }
+        // The only keys the client is permitted to author.
+        function clientOwnedKeysOnly() {
+          return request.resource.data.diff(
+                   resource == null ? {} : resource.data
+                 ).affectedKeys()
+                 .hasOnly(['linkInitiated', 'initiatedAt']);
+        }
+
+        // Owner reads its own link status. NOT canReadUserData(): these docs
+        // hold OAuth token material written by the functions, so media/admin
+        // reads are deliberately excluded.
+        allow get, list: if isOwner(userId);
+
+        allow create: if isOwner(userId) && isKnownProvider()
+                      && request.resource.data.keys()
+                           .hasOnly(['linkInitiated', 'initiatedAt']);
+        allow update: if isOwner(userId) && isKnownProvider()
+                      && clientOwnedKeysOnly();
+        allow delete: if isOwner(userId) && isKnownProvider();
+      }
+
       // Properties subcollection - user's properties (homes, locations)
       match /properties/{propertyId} {
         // Users can read their own properties, media users can view for content
@@ -2023,6 +2070,71 @@ service cloud.firestore {
     // and the creator is the only client author (writes are mirrored
     // from setGroupPublic / createGroup). Deleting the projection is how
     // a group goes private again.
+    // ── Game Day crews — ADDED 2026-09-17 ────────────────────────────
+    //
+    // WHY THIS EXISTS. GameDayCrewService reads and writes
+    // /game_day_crews/{crewId} and there was no rules block for the
+    // collection, so every operation was default-denied. The failure was
+    // SILENT: gameDayTeamsProvider coerces the error with
+    // `valueOrNull ?? []`, so crews simply never appeared and nothing
+    // surfaced to the user or to logs. Creating, listing, managing, leaving
+    // and dissolving a crew were all impossible.
+    //
+    // MEMBERSHIP IS THE READ BOUNDARY. A crew document carries the host uid,
+    // the member uid list, the team, the design payload and the invite code.
+    // Reads are therefore limited to the people already in the crew.
+    //
+    // JOIN-BY-INVITE-CODE IS DELIBERATELY *NOT* OPENED HERE, and this is the
+    // important part. joinCrew() discovers a crew with a collection query
+    // filtered on invite_code. Firestore rules cannot see a query's `where`
+    // filters — only limit/offset/orderBy — so there is no way to write
+    // "allow this query only when it filters on invite_code". The only rules
+    // that would make that query succeed are ones that let ANY signed-in
+    // user list crews, which hands out every crew's invite code and
+    // reproduces exactly the self-join exposure that
+    // `config/sync_fanout` + the joinNeighborhood callable exist to prevent
+    // (I-18/I-20). Neighborhood joins were moved server-side into the
+    // `joinNeighborhood` callable for this same reason.
+    //
+    // So: joins belong in a callable that looks the code up with the admin
+    // SDK and appends the caller to member_uids. Until that exists, join
+    // stays closed BY DESIGN rather than by an accidental omission. Every
+    // other crew operation now works. (Note the crew "Leave" button is also
+    // still a no-op in game_day_screen.dart — crews need client work beyond
+    // these rules regardless.)
+    match /game_day_crews/{crewId} {
+      function isCrewMember() {
+        return request.auth != null
+               && resource.data.member_uids is list
+               && request.auth.uid in resource.data.member_uids;
+      }
+      function isCrewHost() {
+        return request.auth != null && request.auth.uid == resource.data.host_uid;
+      }
+
+      // Members see their own crews. Covers both the doc listener and the
+      // member_uids arrayContains query the app uses to list "my crews".
+      allow get, list: if isCrewMember();
+
+      // The creator must be the host AND must seed themselves as the only
+      // member, so a crew cannot be created with someone else conscripted
+      // into it.
+      allow create: if request.auth != null
+                    && request.resource.data.host_uid == request.auth.uid
+                    && request.resource.data.member_uids == [request.auth.uid];
+
+      // Any member may update the shared look and the crew-wide switches
+      // (design, live scoring, autopilot) — that is the point of a crew.
+      // The host additionally owns the invite code. host_uid is immutable:
+      // a member cannot promote themselves.
+      allow update: if isCrewMember()
+                    && request.resource.data.host_uid == resource.data.host_uid;
+
+      // Only the host dissolves the crew. A member leaving is an update
+      // (arrayRemove on member_uids), covered above.
+      allow delete: if isCrewHost();
+    }
+
     match /neighborhood_public/{groupId} {
       function isProjectionShapeSafe() {
         return !request.resource.data.keys().hasAny(
