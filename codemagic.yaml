@@ -108,7 +108,20 @@ workflows:
           exit $ANALYZE_EXIT
       - name: Set build number
         script: |
-          BUILD_NUM=${PROJECT_BUILD_NUMBER:-$(date +%s)}
+          # FAIL FAST — never invent a build number.
+          #
+          # This used to be ${PROJECT_BUILD_NUMBER:-$(date +%s)}. If the
+          # variable were ever unset — a re-run outside Codemagic's counter,
+          # a renamed workflow, a local invocation — CFBundleVersion would
+          # become a ~10-digit epoch such as 1789243117. CFBundleVersion must
+          # increase monotonically FOREVER for an app record, so Apple would
+          # accept that build and from then on no build below ~1.79 billion
+          # could ever be uploaded again. The normal +98 -> +99 sequence would
+          # be permanently rejected as "not higher than the previously
+          # uploaded build", unrecoverable without a new app record.
+          #
+          # A failed build costs minutes. The timestamp costs the app record.
+          BUILD_NUM=${PROJECT_BUILD_NUMBER:?PROJECT_BUILD_NUMBER is unset — refusing to invent a build number (an epoch here would permanently burn the CFBundleVersion space)}
           VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
           sed -i '' "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
           echo "Version: $(grep '^version:' pubspec.yaml)"
