@@ -72,16 +72,38 @@
          location capability. -->
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Lumina uses your location only while you are using the app — to detect your home WiFi network and set up the Welcome Home geofence. It does not track your location in the background.</string>
+    <!-- Background modes: declare ONLY what the binary actually implements.
+         Apple 2.5.4 rejects an app that "declares support for a background
+         mode but does not include functionality requiring that mode".
+
+         `remote-notification` is justified: firebase_messaging ships and is
+         registered in GeneratedPluginRegistrant.
+
+         `fetch` and `processing` were REMOVED 2026-09-17, together with the
+         BGTaskSchedulerPermittedIdentifiers array that held
+         `com.nexgenled.lumina.sportscheck` and `.syncEventCheck`. Nothing
+         implemented them:
+           * their only plausible consumer is flutter_background_service, and
+             kSportsBackgroundServiceEnabled is `false` in
+             lib/features/sports_alerts/services/sports_background_service.dart
+             — a deliberate kill-switch for this store release — so
+             service.configure(...) never runs and nothing is ever scheduled;
+           * neither identifier appeared anywhere in lib/ or ios/ (zero hits
+             for BGTaskScheduler, sportscheck, syncEventCheck). They also
+             carried the ANDROID package prefix com.nexgenled.lumina rather
+             than the iOS bundle id com.nexgenled.command, and
+             flutter_background_service_ios registers its own identifier
+             regardless — so they matched nothing even in principle.
+
+         RE-ENABLING: flipping kSportsBackgroundServiceEnabled back to true is
+         already documented as a multi-step act (restore
+         FOREGROUND_SERVICE_DATA_SYNC + the BackgroundService <service> in
+         AndroidManifest.xml, complete the Play FGS declaration). Restore
+         `fetch`/`processing` HERE in that same change, with identifiers that
+         match what the plugin actually registers. -->
     <key>UIBackgroundModes</key>
     <array>
-        <string>fetch</string>
-        <string>processing</string>
         <string>remote-notification</string>
-    </array>
-    <key>BGTaskSchedulerPermittedIdentifiers</key>
-    <array>
-        <string>com.nexgenled.lumina.sportscheck</string>
-        <string>com.nexgenled.lumina.syncEventCheck</string>
     </array>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is required for AR spatial mapping of your lights.</string>

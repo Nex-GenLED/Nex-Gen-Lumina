@@ -28,6 +28,14 @@ import 'score_monitor_service.dart';
 // controls (test-fire, in-app sports UI) are unaffected. Flip back to true —
 // and restore FOREGROUND_SERVICE_DATA_SYNC + the BackgroundService <service> in
 // AndroidManifest.xml, then complete the Play FGS declaration — to re-enable.
+//
+// iOS SIDE, same switch: because this flag is false, `service.configure(...)`
+// never runs and no BGTask is ever scheduled, so the `fetch` and `processing`
+// entries in ios/Runner/Info.plist declared background modes the binary did
+// not implement (Apple 2.5.4). They were removed 2026-09-17 along with the
+// BGTaskSchedulerPermittedIdentifiers array. RESTORE THEM HERE TOO when
+// flipping this flag back on — see the comment at UIBackgroundModes in
+// Info.plist for what to put back and why the old identifiers were wrong.
 const bool kSportsBackgroundServiceEnabled = false;
 
 // ---------------------------------------------------------------------------
