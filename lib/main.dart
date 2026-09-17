@@ -129,98 +129,151 @@ Future<void> main() async {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
   _startupBreadcrumb('main:enter');
+
+  // The whole startup body is wrapped so that runApp() is UNCONDITIONAL —
+  // see the finally at the bottom of main(). Nothing below may be the reason
+  // the app never draws a frame.
   try {
-    if (kIsWeb) {
-      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-    } else {
-      // Prefer native configs from google-services.json / GoogleService-Info.plist when present
-      await Firebase.initializeApp();
+    // GUARDED for exactly the reason documented on the encryption block below:
+    // a step that blocks runApp() must be protected against BOTH failure modes,
+    // and a bare try/catch only covers one of them.
+    //
+    // This block used to catch a throw from the primary attempt and then call
+    // the fallback UNGUARDED — no try/catch, no timeout. A throw from that
+    // fallback aborted main() before runApp(), producing a permanent splash
+    // with no crash dialog: the exact 2.5.10+55 signature described in this
+    // file's header comment. Both attempts are now bounded and caught.
+    //
+    // If both fail the app still starts. That is deliberate: a launched app
+    // whose Firebase calls error is diagnosable by the user and by us; a
+    // process sitting pre-runApp() forever is neither.
+    _startupBreadcrumb('firebase:begin');
+    try {
+      if (kIsWeb) {
+        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+            .timeout(const Duration(seconds: 10));
+      } else {
+        // Prefer native configs from google-services.json / GoogleService-Info.plist when present
+        await Firebase.initializeApp().timeout(const Duration(seconds: 10));
+      }
+      _startupBreadcrumb('firebase:ok');
+    } catch (e) {
+      // Fallback to Dart-side options if native config files are missing or misconfigured
+      debugPrint('Firebase.initializeApp() without options failed, falling back: $e');
+      _startupBreadcrumb('firebase:primary FAILED, trying fallback err=$e');
+      try {
+        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+            .timeout(const Duration(seconds: 10));
+        _startupBreadcrumb('firebase:ok (via fallback)');
+      } catch (e2, st2) {
+        // Both paths are gone. Continue to runApp anyway — see above.
+        _startupBreadcrumb('firebase:FAILED BOTH (continuing) err=$e2');
+        // Fire-and-forget for the same reason as the encryption sink below:
+        // this writes to Firestore, which is precisely what is not working.
+        unawaited(_reportUncaughtError(
+          error: e2,
+          stack: st2,
+          context: 'startup/Firebase.initializeApp',
+        ));
+      }
     }
-  } catch (e) {
-    // Fallback to Dart-side options if native config files are missing or misconfigured
-    debugPrint('Firebase.initializeApp() without options failed, falling back: $e');
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  }
 
-  // Reviewer seed is now triggered post-login in login_page.dart — writing
-  // the profile under the reviewer's actual Firebase Auth UID. Startup-time
-  // seeding against a hardcoded UID produced an orphan doc the signed-in
-  // reviewer could never read.
+    // Reviewer seed is now triggered post-login in login_page.dart — writing
+    // the profile under the reviewer's actual Firebase Auth UID. Startup-time
+    // seeding against a hardcoded UID produced an orphan doc the signed-in
+    // reviewer could never read.
 
-  _startupBreadcrumb('firebase:ok');
+    // SECURITY: Initialize encryption service for sensitive data.
+    //
+    // GUARDED — encryption is NOT essential to launch, so it must never be able
+    // to block runApp(). Two independent failure modes have to be contained, and
+    // a try/catch only covers one of them:
+    //   * throw — e.g. a secure-storage PlatformException; caught below.
+    //   * HANG  — an await that never completes. try/catch does NOTHING for this;
+    //             only the timeout breaks it.
+    // 2.5.10+55 shipped a permanent dead splash on a device whose restored Tink
+    // keyset could not be decrypted (AEADBadTagException): the process sat
+    // pre-runApp() indefinitely, never drew a frame, and never even ANR'd.
+    // Degraded encryption is always preferable to an app that will not start.
+    _startupBreadcrumb('encryption:begin');
+    try {
+      await EncryptionService.initialize().timeout(const Duration(seconds: 10));
+      _startupBreadcrumb('encryption:ok');
+    } catch (e, st) {
+      EncryptionService.markDegraded(e);
+      _startupBreadcrumb('encryption:FAILED (continuing degraded) err=$e');
+      // Fire-and-forget: this sink writes to Firestore and must never be awaited
+      // here, or an unreachable Firestore would recreate the very hang we are
+      // fixing. It no-ops when no user is signed in (typical on a cold start).
+      unawaited(_reportUncaughtError(
+        error: e,
+        stack: st,
+        context: 'startup/EncryptionService.initialize',
+      ));
+    }
 
-  // SECURITY: Initialize encryption service for sensitive data.
-  //
-  // GUARDED — encryption is NOT essential to launch, so it must never be able
-  // to block runApp(). Two independent failure modes have to be contained, and
-  // a try/catch only covers one of them:
-  //   * throw — e.g. a secure-storage PlatformException; caught below.
-  //   * HANG  — an await that never completes. try/catch does NOTHING for this;
-  //             only the timeout breaks it.
-  // 2.5.10+55 shipped a permanent dead splash on a device whose restored Tink
-  // keyset could not be decrypted (AEADBadTagException): the process sat
-  // pre-runApp() indefinitely, never drew a frame, and never even ANR'd.
-  // Degraded encryption is always preferable to an app that will not start.
-  _startupBreadcrumb('encryption:begin');
-  try {
-    await EncryptionService.initialize().timeout(const Duration(seconds: 10));
-    _startupBreadcrumb('encryption:ok');
+    // Initialize timezone database for autopilot scheduling
+    tz.initializeTimeZones();
+
+    // Wire navigator key for notification deep-link navigation
+    NotificationsService.navigatorKey = AppRouter.rootNavigatorKey;
+
+    // Initialize local notifications (no prompts on web).
+    //
+    // GUARDED for the same reason as encryption above. NotificationsService.init()
+    // already swallows exceptions internally, but it awaits
+    // FirebaseMessaging.getInitialMessage(), which can stall indefinitely when
+    // Play Services is wedged — and a stall here is indistinguishable from the
+    // +55 dead splash. Notifications are not worth a launch blocker either.
+    _startupBreadcrumb('notifications:begin');
+    try {
+      await NotificationsService.init().timeout(const Duration(seconds: 10));
+      _startupBreadcrumb('notifications:ok');
+    } catch (e) {
+      _startupBreadcrumb('notifications:FAILED (continuing) err=$e');
+    }
+
+    // Arm FCM for Neighborhood Sync push notifications (no-op on web).
+    //
+    // startAuthWatch() only SUBSCRIBES — it prompts for nothing and touches no
+    // network. This used to be a direct initialize() call, which fired the
+    // Android 13+ POST_NOTIFICATIONS system dialog on the cold-launch frame,
+    // before the login screen and with no in-app explanation, and which also
+    // silently skipped the FCM token write for anyone not already signed in.
+    // See SyncNotificationService.startAuthWatch for both bugs in full.
+    if (!kIsWeb) {
+      SyncNotificationService().startAuthWatch();
+    }
+
+    // Register sports alerts background service (Android foreground + iOS BGFetch)
+    if (!kIsWeb) {
+      initialiseSportsBackgroundService().catchError((e) {
+        debugPrint('Sports background service init failed: $e');
+      });
+    }
+
+    // Initialize background learning service and run startup check
+    final learningService = BackgroundLearningService();
+    learningService.onAppStartup().catchError((e) {
+      debugPrint('Background learning startup failed: $e');
+    });
+
   } catch (e, st) {
-    EncryptionService.markDegraded(e);
-    _startupBreadcrumb('encryption:FAILED (continuing degraded) err=$e');
-    // Fire-and-forget: this sink writes to Firestore and must never be awaited
-    // here, or an unreachable Firestore would recreate the very hang we are
-    // fixing. It no-ops when no user is signed in (typical on a cold start).
+    // ABSOLUTE BACKSTOP. Nothing above is allowed to prevent the first frame.
+    // Every individual step already has its own guard; this exists so that a
+    // future unguarded await added to this function degrades into a running
+    // app with a reported error, not into another silent pre-runApp() hang.
+    _startupBreadcrumb('startup:UNEXPECTED (continuing) err=$e');
     unawaited(_reportUncaughtError(
       error: e,
       stack: st,
-      context: 'startup/EncryptionService.initialize',
+      context: 'startup/main',
     ));
+  } finally {
+    // UNCONDITIONAL — this is the whole point of the wrapper.
+    _startupBreadcrumb('runApp');
+    runApp(const ProviderScope(child: MyApp()));
   }
-
-  // Initialize timezone database for autopilot scheduling
-  tz.initializeTimeZones();
-
-  // Wire navigator key for notification deep-link navigation
-  NotificationsService.navigatorKey = AppRouter.rootNavigatorKey;
-
-  // Initialize local notifications (no prompts on web).
-  //
-  // GUARDED for the same reason as encryption above. NotificationsService.init()
-  // already swallows exceptions internally, but it awaits
-  // FirebaseMessaging.getInitialMessage(), which can stall indefinitely when
-  // Play Services is wedged — and a stall here is indistinguishable from the
-  // +55 dead splash. Notifications are not worth a launch blocker either.
-  _startupBreadcrumb('notifications:begin');
-  try {
-    await NotificationsService.init().timeout(const Duration(seconds: 10));
-    _startupBreadcrumb('notifications:ok');
-  } catch (e) {
-    _startupBreadcrumb('notifications:FAILED (continuing) err=$e');
-  }
-
-  // Initialize FCM for Neighborhood Sync push notifications (no-op on web)
-  if (!kIsWeb) {
-    SyncNotificationService().initialize().catchError((e) {
-      debugPrint('FCM initialization failed: $e');
-    });
-  }
-
-  // Register sports alerts background service (Android foreground + iOS BGFetch)
-  if (!kIsWeb) {
-    initialiseSportsBackgroundService().catchError((e) {
-      debugPrint('Sports background service init failed: $e');
-    });
-  }
-
-  // Initialize background learning service and run startup check
-  final learningService = BackgroundLearningService();
-  learningService.onAppStartup().catchError((e) {
-    debugPrint('Background learning startup failed: $e');
-  });
-
-  _startupBreadcrumb('runApp');
-  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends ConsumerStatefulWidget {

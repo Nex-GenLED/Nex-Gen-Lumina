@@ -105,7 +105,15 @@ class SyncNotificationService {
   StreamSubscription? _tokenRefreshSub;
   StreamSubscription? _foregroundMessageSub;
   StreamSubscription? _messageOpenedSub;
+  StreamSubscription<User?>? _authSub;
+
+  /// True once the ONE-TIME wiring (permission prompt + stream subscriptions)
+  /// has actually completed. Deliberately NOT set on entry — see [initialize].
   bool _initialized = false;
+
+  /// Re-entrancy guard, so two near-simultaneous callers cannot both run the
+  /// wiring. This is what `_initialized = true`-on-entry used to provide.
+  bool _initializing = false;
 
   /// Android notification channel for sync events.
   static const _kChannelId = 'neighborhood_sync';
@@ -143,46 +151,109 @@ class SyncNotificationService {
 
   // ── Initialization ─────────────────────────────────────────────────
 
+  /// Start watching auth state. **This is what main.dart calls at startup.**
+  ///
+  /// It prompts for nothing and touches no network on its own — it only
+  /// subscribes. [initialize] then runs the first time a user is actually
+  /// present, and the token is (re-)stored on every sign-in.
+  ///
+  /// Two bugs are fixed by this indirection, and they are separate:
+  ///
+  /// 1. **Permission timing.** `initialize()` used to be called
+  ///    unconditionally from `main()`, so `requestPermission` fired the
+  ///    Android 13+ POST_NOTIFICATIONS dialog on the cold-launch frame,
+  ///    before the login screen, with no in-app explanation. Now the prompt
+  ///    cannot appear until someone is signed in.
+  ///
+  /// 2. **The FCM token was never stored for anyone who signed in after
+  ///    launch.** `initialize()` set `_initialized = true` on ENTRY, and
+  ///    `_storeToken` early-returns when `uid == null`. On a cold start with
+  ///    no user, the token write was therefore skipped — and because the
+  ///    method was idempotent-by-flag it never ran again for that session.
+  ///    Only `onTokenRefresh` could ever have recovered it, which is rare.
+  ///    Push (weekly brief, sync events) was silently dead for those users.
+  ///
+  /// `authStateChanges()` emits the CURRENT state immediately on subscribe,
+  /// so an already-signed-in user at cold start is handled on the same tick.
+  /// The two halves are called INDEPENDENTLY and each swallows its own
+  /// failure, on purpose. The wiring half touches static
+  /// `FirebaseMessaging.onMessage`/`onMessageOpenedApp` streams, which can
+  /// throw when Play Services is wedged; the token half must still run when
+  /// it does, because storing the token is what makes push work at all.
+  void startAuthWatch() {
+    _authSub ??= _auth.authStateChanges().listen((user) {
+      if (user == null) return;
+      // Wiring half: no-ops after the first successful run.
+      initialize().catchError((Object e) {
+        debugPrint('[SyncNotification] initialize() failed: $e');
+      });
+      // Token half: runs on EVERY sign-in, so a second account on the same
+      // device also gets its token written.
+      _refreshAndStoreToken();
+    });
+  }
+
   /// Initialize FCM: request permission, get token, listen for refresh.
-  /// Called once from main.dart after Firebase.initializeApp().
+  ///
+  /// Safe to call at any time and from anywhere; normally reached via
+  /// [startAuthWatch]. Returns without doing anything — and WITHOUT burning
+  /// the idempotency flag — when no user is signed in.
   Future<void> initialize() async {
-    if (_initialized) return;
-    _initialized = true;
+    if (_initialized || _initializing) return;
 
-    // Request permission (iOS will show the system prompt once)
-    final settings = await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      provisional: false,
-    );
-
-    if (settings.authorizationStatus == AuthorizationStatus.denied) {
-      debugPrint('[SyncNotification] Permission denied');
+    // No user means there is nothing to attach a token to. Do not prompt, and
+    // do not mark initialization as done: startAuthWatch() will call back the
+    // moment a user appears.
+    if (_uid == null) {
+      debugPrint('[SyncNotification] initialize() deferred — no signed-in user');
       return;
     }
 
-    debugPrint(
-      '[SyncNotification] Permission: ${settings.authorizationStatus}',
-    );
+    _initializing = true;
+    try {
+      // Request permission (iOS will show the system prompt once)
+      final settings = await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
 
-    // Get and store the FCM token
-    await _refreshAndStoreToken();
+      // The one-time wiring attempt has now happened. Mark it done even when
+      // permission was denied, so a denial does not re-prompt on every auth
+      // change. A THROW above leaves the flag false, which is what we want —
+      // that is a retryable failure, a denial is not.
+      _initialized = true;
 
-    // Listen for token refresh
-    _tokenRefreshSub = _messaging.onTokenRefresh.listen((newToken) {
-      _storeToken(newToken);
-    });
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        debugPrint('[SyncNotification] Permission denied');
+        return;
+      }
 
-    // Foreground message handler
-    _foregroundMessageSub =
-        FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      debugPrint(
+        '[SyncNotification] Permission: ${settings.authorizationStatus}',
+      );
 
-    // Background message tap handler (app brought to foreground)
-    _messageOpenedSub =
-        FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageTap);
+      // Get and store the FCM token
+      await _refreshAndStoreToken();
 
-    debugPrint('[SyncNotification] Initialized');
+      // Listen for token refresh
+      _tokenRefreshSub = _messaging.onTokenRefresh.listen((newToken) {
+        _storeToken(newToken);
+      });
+
+      // Foreground message handler
+      _foregroundMessageSub =
+          FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+
+      // Background message tap handler (app brought to foreground)
+      _messageOpenedSub =
+          FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageTap);
+
+      debugPrint('[SyncNotification] Initialized');
+    } finally {
+      _initializing = false;
+    }
   }
 
   // ── Token Management ───────────────────────────────────────────────
@@ -768,6 +839,8 @@ class SyncNotificationService {
     _tokenRefreshSub?.cancel();
     _foregroundMessageSub?.cancel();
     _messageOpenedSub?.cancel();
+    _authSub?.cancel();
+    _authSub = null;
   }
 }
 
