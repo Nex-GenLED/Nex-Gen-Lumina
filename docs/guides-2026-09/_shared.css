@@ -1,0 +1,98 @@
+/* Nex-Gen Lumina — How-To Guides, Rev 2026.09
+   Shared stylesheet for the seven-document family.
+   Palette and type per marketing/sell-sheets-2026/SOURCE_OF_TRUTH.md §4. */
+
+:root {
+  --void:   #07091A;  /* hero / cover canvas, footer band */
+  --lumina: #00D4FF;  /* primary brand cyan, accents, CTAs */
+  --pulse:  #6E2FFF;  /* secondary deep purple */
+  --carbon: #111527;  /* panel backgrounds */
+  --frost:  #DCF0FF;  /* body text on dark */
+  --edge:   #1F2542;  /* hairline borders */
+  --muted:  #7C8AA8;  /* subtitles, de-emphasised text */
+  --amber:  #FFAA3C;  /* warnings */
+}
+
+body {
+  font-family: 'DM Sans', 'Segoe UI', Arial, sans-serif;
+  color: var(--frost);
+  background: var(--void);
+  line-height: 1.6;
+  font-size: 10.5pt;
+}
+
+h1, h2, h3, h4 { font-family: 'Exo 2', 'Segoe UI', Arial, sans-serif; }
+
+h1 {
+  font-size: 26pt;
+  background: linear-gradient(90deg, var(--pulse), var(--lumina));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  border-bottom: 2px solid var(--lumina);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+
+h2 {
+  color: var(--lumina);
+  margin-top: 30px;
+  font-size: 15.5pt;
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 5px;
+}
+
+h3 { color: #FFFFFF; margin-top: 20px; font-size: 12pt; }
+h4 { color: #9FD8FF; margin-top: 14px; margin-bottom: 3px; font-size: 10.5pt; }
+
+strong { color: #FFFFFF; }
+code {
+  background: var(--edge);
+  color: var(--lumina);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.88em;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+  background: var(--carbon);
+  font-size: 9.5pt;
+}
+th, td {
+  border: 1px solid var(--edge);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #241A55; color: var(--frost); }
+
+ol, ul { padding-left: 22px; }
+li { margin: 3px 0; }
+hr { border: none; border-top: 1px solid var(--edge); margin: 24px 0; }
+
+/* Callouts. Authored in Markdown as blockquotes opening with a bolded label,
+   so the same source also pastes cleanly into Google Docs. */
+blockquote {
+  background: rgba(0, 212, 255, 0.10);
+  border-left: 4px solid var(--lumina);
+  padding: 9px 14px;
+  margin: 12px 0;
+  border-radius: 4px;
+}
+blockquote.warning { background: rgba(255, 170, 60, 0.10); border-left-color: var(--amber); }
+blockquote.note    { background: rgba(110, 47, 255, 0.14); border-left-color: var(--pulse); }
+
+.sub   { color: var(--muted); font-size: 12pt; }
+.brand { letter-spacing: 6px; font-size: 10pt; color: var(--lumina); font-weight: 600; }
+.mantra {
+  font-family: 'Exo 2', sans-serif;
+  color: var(--lumina);
+  letter-spacing: 2px;
+  text-align: center;
+  margin: 28px 0;
+}
+.pagebreak { page-break-before: always; }
