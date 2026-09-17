@@ -1810,13 +1810,24 @@ class _QuickActionsPanel extends ConsumerWidget {
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
+              // HONESTY FIX (S-3, Apple submission audit 2026-09-17).
+              //
+              // This used to pop a "All channels paused" success SnackBar and
+              // then do nothing — the pause command was never implemented (the
+              // TODO below is the original). A false success is worse than a
+              // dead button: the user walks away believing their lights are
+              // off. Until the command is wired up, say so.
+              //
+              // TODO: send pause command to all controllers, then restore a
+              // real success message here. The dialog copy above ("This will
+              // turn off all channels immediately") must stay in sync with
+              // whatever this actually does.
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('All channels paused'),
+                  content: Text('Pause All is not available yet'),
                   backgroundColor: NexGenPalette.gunmetal,
                 ),
               );
-              // TODO: send pause command to all controllers
             },
             style: FilledButton.styleFrom(
               backgroundColor: NexGenPalette.amber,
