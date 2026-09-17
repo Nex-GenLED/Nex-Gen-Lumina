@@ -180,8 +180,8 @@ functional, and cannot be used — so a report about one of them is not a bug to
 | **Material checkout and check-in screens** | Orphaned. No dealer stock moves automatically. |
 | **Dealer inventory and ordering screens** | Four screens, no route. The dealer Inventory tab is a different screen. |
 | **Brand Library admin** | Permission check cannot pass — §3. |
-| **Game Day crews** | Missing Firestore rules block → every read and write is denied, silently. The whole crew UI is inert. |
-| **Alexa and Google Home linking** | Missing rules block on the integrations path → the link never launches. Backends are deployed; the in-app entry is dead. Siri Shortcuts work. |
+| **Game Day crews** | **Partly fixed 2026-09-17.** The missing rules block is added and deployed, so creating, viewing and managing a crew now works. **Join-by-invite-code is still closed by design** — the join query filters on `invite_code`, rules cannot see query filters, and the only rules that would allow it let any user list every crew's code (the I-18/I-20 self-join exposure). Joins need a callable, like `joinNeighborhood`. The crew **Leave** button is also still a no-op in the client. |
+| **Alexa and Google Home linking** | **Fixed 2026-09-17.** The missing rules block on `users/{uid}/integrations/{provider}` is added and deployed; the awaited write now succeeds and the deep link launches. Verified with a real client-credential write. Store-side availability of the skill/action is unverified from here. |
 | **Welcome Home / geofence setup** | The screen is complete; no route navigates to it, so the config can never be written and the monitor stays inert. |
 | **Neighborhood scheduled syncs** | Saved and listed; nothing executes them. |
 | **Autopilot First-Week Reveal and Calendar screens** | No inbound navigation. |

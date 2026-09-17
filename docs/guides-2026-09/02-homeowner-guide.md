@@ -456,9 +456,11 @@ and their own password. Up to five household members on a residential account.
 On iPhone, save the looks you use most (from Explore, via **Save**), then add each one to Siri with
 **Add to Siri**. After that, *"Hey Siri, warm white"* works without opening the app.
 
-> **Note** — Amazon Alexa and Google Home integrations are still in development and aren't ready to
-> link yet. The screen describes them, but the linking step won't complete. Siri Shortcuts on iPhone
-> is the voice path that works today.
+> **Note** — **Alexa and Google Home: the app's side works as of this release.** A server-side
+> permission fault used to stop the link before it ever handed you to the assistant app; that is
+> fixed. Whether the Nex-Gen skill is live in the Alexa and Google Home stores for your account is
+> a separate question — ask your dealer before relying on it. **Siri Shortcuts on iPhone is the
+> voice path we can promise today.**
 
 Advanced users running Home Assistant will find an integration guide linked on the same screen.
 

@@ -479,7 +479,7 @@ Score celebrations run while the Lumina app is open on your phone. Keep the app 
 </div>
 
 <div class="warning">
-<strong>Corrected 2026-09-17 — Game Day crews are not working yet.</strong> The crew controls (Create a Crew, Join a Crew, Share Invite Code) are present but every crew action is refused by the server, and the app fails quietly, so crews simply never appear. Do not plan around them. For a shared street moment today, use <strong>Neighborhood Sync</strong> instead, which does work while everyone has the app open.
+<strong>Corrected 2026-09-17 — Game Day crews are only partly working.</strong> Every crew action used to be refused by the server, quietly, so crews never appeared at all. Creating, viewing and managing a crew works as of app 2.5.10+98. <strong>Joining someone else's crew with an invite code still does not work</strong>, and the <strong>Leave</strong> button does nothing yet. For a shared street moment today, use <strong>Neighborhood Sync</strong> instead, which works while everyone has the app open.
 </div>
 
 <div class="pagebreak"></div>
@@ -620,7 +620,7 @@ The app includes guided setup for both, linking your Lumina account to the assis
 4. Ask the assistant to discover devices.
 
 <div class="warning">
-<strong>Corrected 2026-09-17 — Google Home and Alexa linking does not complete on this build.</strong> The setup screen is there, but the link step fails before it ever hands you off to the assistant app, so the four steps above cannot be finished today. <strong>Siri Shortcuts on iPhone is the voice path that works</strong> — see above. We will say so plainly here when Alexa and Google are ready.
+<strong>Corrected 2026-09-17 — the app's side of Alexa and Google linking is fixed in 2.5.10+98.</strong> The link step used to fail before it ever handed you off to the assistant app, so the four steps above could not be finished by anyone. That fault is fixed. Whether the Nex-Gen skill is live in the Alexa or Google Home store for your account is a separate question — check with your dealer. <strong>Siri Shortcuts on iPhone remains the voice path we can promise</strong>.
 </div>
 
 ### Home Assistant (advanced)
