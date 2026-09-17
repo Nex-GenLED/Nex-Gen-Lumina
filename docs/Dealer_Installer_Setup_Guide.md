@@ -37,6 +37,11 @@ body_class: guide
 
 # Nex-Gen Lumina — Dealer & Installer Setup Guide
 
+<div class="warning">
+<strong>SUPERSEDED 2026-09-17.</strong> This guide is replaced by <code>docs/guides-2026-09/04-installer-guide.md</code>, which is verified against shipping code at 2.5.10+98. It is kept for reference because its rendered PDF is still in circulation. Inline <em>Corrected 2026-09-17</em> notices mark the passages that were factually wrong; everything else is accurate but may be less current.
+</div>
+
+
 **Describes Lumina app version 2.5.10+89.**
 
 This is the complete handbook for getting your dealership up and running and completing customer installations end-to-end. Nex-Gen LED LLC ships permanent residential and commercial lighting that works as hard as you do — this guide is how you deliver that experience to every customer on Day 1.

@@ -43,6 +43,11 @@ body_class: guide
 
 # Lumina Homeowner Guide
 
+<div class="warning">
+<strong>SUPERSEDED 2026-09-17.</strong> This guide is replaced by <code>docs/guides-2026-09/02-homeowner-guide.md</code>, which is verified against shipping code at 2.5.10+98. It is kept for reference because its rendered PDF is still in circulation. Inline <em>Corrected 2026-09-17</em> notices mark the passages that were factually wrong; everything else is accurate but may be less current.
+</div>
+
+
 <div class="sub">Everything you need to run your permanent outdoor lighting — plus troubleshooting and answers to the questions we hear most.</div>
 
 **Describes Lumina app version 2.5.10+89.**
@@ -114,7 +119,7 @@ If your installer configured a starting look and schedule, you'll see a short we
 
 Only two, and only when they're actually needed:
 
-- **Location** — powers *Welcome Home* and lets the app recognize your home Wi-Fi network for remote access. You can tap **Skip for Now** and enable it later.
+- **Location** — lets the app recognize your home Wi-Fi network, so it knows whether to talk to your controller directly or route remotely. You can tap **Skip for Now** and enable it later.
 - **Notifications** — game alerts and schedule reminders.
 
 Neither is required to control your lights.
@@ -473,7 +478,9 @@ Score celebrations run while the Lumina app is open on your phone. Keep the app 
 <strong>Looking for a "Sports Alerts" screen?</strong> There isn't one any more. Everything it used to do now lives on the team's card in Game Day, so there's one place to set a team up instead of two. If you had teams configured under the old screen, they were carried over for you.
 </div>
 
-**Game Day crews** let you share the moment: create a crew, share the invite code, and neighbors' lights celebrate with yours.
+<div class="warning">
+<strong>Corrected 2026-09-17 — Game Day crews are not working yet.</strong> The crew controls (Create a Crew, Join a Crew, Share Invite Code) are present but every crew action is refused by the server, and the app fails quietly, so crews simply never appear. Do not plan around them. For a shared street moment today, use <strong>Neighborhood Sync</strong> instead, which does work while everyone has the app open.
+</div>
 
 <div class="pagebreak"></div>
 
@@ -612,8 +619,8 @@ The app includes guided setup for both, linking your Lumina account to the assis
 3. Sign in with your Lumina account to link it.
 4. Ask the assistant to discover devices.
 
-<div class="note">
-Google Home and Alexa linking is still rolling out. If it isn't live for your account yet, Siri Shortcuts (iPhone) and the app itself cover everything in the meantime — check with your dealer for current availability.
+<div class="warning">
+<strong>Corrected 2026-09-17 — Google Home and Alexa linking does not complete on this build.</strong> The setup screen is there, but the link step fails before it ever hands you off to the assistant app, so the four steps above cannot be finished today. <strong>Siri Shortcuts on iPhone is the voice path that works</strong> — see above. We will say so plainly here when Alexa and Google are ready.
 </div>
 
 ### Home Assistant (advanced)
@@ -638,14 +645,12 @@ Your lights have a dedicated white channel, so whites come out clean and true ra
 
 ### Welcome Home
 
-**System → Geofence Controls.** Have your lights greet you when you pull in.
+<div class="warning">
+<strong>Corrected 2026-09-17 — Welcome Home is not available yet.</strong> Earlier revisions of this guide described a <em>System → Geofence Controls</em> screen. That screen is built but nothing in the app opens it, so the trigger can never be saved and the feature cannot run. There is no <em>Geofence Controls</em> entry in Settings. It is not lost work — it needs one navigation entry — but do not expect arrival-triggered lighting on this build.
+</div>
 
-1. Set the **Trigger Distance** slider — anywhere from about 330 ft to 3,300 ft. Around 1,000 ft suits most homes.
-2. Choose an action: **Turn On Warm White**, **Start Party Mode**, **Relax**, or **Turn Off**.
-3. Decide whether it should fire **Only at Night**.
-4. Save.
-
-Requires location permission. Too small a radius and the lights may not beat you to the driveway; too large and they'll come on before you're close.
+Use a **Sunset** schedule in the meantime; for most homes it achieves the same thing more reliably,
+because the controller fires it whether or not a phone is nearby.
 
 ### Simple Mode
 
@@ -905,7 +910,7 @@ Yes. The system is rated for permanent outdoor installation — rain, snow, and 
 
 <div class="faqq">Why does the app want my location?</div>
 
-Two features use it: **Welcome Home** (lights on when you arrive) and detecting your home Wi-Fi network name for remote access. Both are optional, and your location stays on your phone.
+It is used to detect your home Wi-Fi network, so the app knows whether you are home or away and routes commands the fast way when you are. Optional, and your location stays on your phone.
 
 <div class="faqq">Can Nex-Gen see or control my lights?</div>
 

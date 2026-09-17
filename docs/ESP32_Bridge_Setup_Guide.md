@@ -29,6 +29,11 @@ body_class: guide
 
 # Nex-Gen Lumina — Lumina Bridge Setup
 
+<div class="warning">
+<strong>SUPERSEDED 2026-09-17.</strong> This guide is replaced by <code>docs/guides-2026-09/07-bridge-setup-guide.md</code>, which is verified against shipping code at 2.5.10+98. It is kept for reference because its rendered PDF is still in circulation. Inline <em>Corrected 2026-09-17</em> notices mark the passages that were factually wrong; everything else is accurate but may be less current.
+</div>
+
+
 **Describes Lumina app version 2.5.10+89 and bridge firmware v1.2.**
 
 The **Lumina Bridge** is a small device that sits on your home Wi-Fi and lets you control your lights from anywhere — the office, a vacation, the driveway. No port forwarding, no tinkering with your router. Once it's set up, remote control just works.
@@ -98,7 +103,7 @@ Run these PlatformIO commands from the sidebar or terminal:
 # Build and upload the firmware
 pio run -t upload
 
-# Upload the web UI (setup page, dashboard, logo)
+# (No web UI to upload — firmware v1.2 serves JSON endpoints only)
 pio run -t uploadfs
 ```
 
@@ -216,8 +221,8 @@ They need to be on the same Wi-Fi network. If you can open both in a browser fro
 
 Run through this list to confirm everything is really working:
 
-- [ ] **Bridge is powered on** and connected to home Wi-Fi (open `http://<bridge-ip>/` for its dashboard)
-- [ ] **Bridge dashboard is all green** — Wi-Fi connected, cloud authenticated, user paired
+- [ ] **Bridge is powered on** and connected to home Wi-Fi (check your router's device list)
+- [ ] **App reports the bridge paired** — System → System & Device Management → Remote Access, then **Test Bridge**
 - [ ] **Your controller is reachable** — open `http://<controller-ip>` in a browser
 - [ ] **Lumina is signed in** to the same account the bridge is paired to
 - [ ] **Home network saved** — Remote Access shows your Wi-Fi name
@@ -227,23 +232,18 @@ Run through this list to confirm everything is really working:
 
 ---
 
-## The bridge dashboard
+## Checking on the bridge
 
-Any time you want to check on the bridge, open `http://<bridge-ip>/` from a browser on your home Wi-Fi. The dashboard shows:
+<div class="warning">
+<strong>Corrected 2026-09-17 — there is no bridge web dashboard.</strong> Earlier revisions of this guide described a status page at <code>http://&lt;bridge-ip&gt;/</code> with Re-run Setup, Reboot and Factory Reset buttons. Firmware v1.2 serves six JSON API endpoints and returns <code>404</code> for everything else — it has never served a web page, and there are no web assets in the firmware image. Verified against <code>esp32-bridge/src/main.cpp</code> (no <code>serveStatic</code>, no filesystem serving, <code>handleNotFound</code> returns JSON).
+</div>
 
-- **Wi-Fi status** — connected or disconnected
-- **Authentication** — whether the bridge is logged into the cloud
-- **User paired** — whether your Lumina account is connected
-- **Commands processed** — total commands the bridge has relayed
-- **Errors** — total failed commands
-- **Controller target** — the IP of your controller
-- **Uptime** — how long the bridge has been running
+Check on the bridge from the app instead: **System → System & Device Management → Remote Access**.
+That screen shows whether the bridge is paired, which controller it targets, and a **Test Bridge**
+button that runs a real round trip through the cloud and back.
 
-From the dashboard you can also:
-
-- **Re-run Setup** — go back to the wizard
-- **Reboot Bridge** — restart the device
-- **Factory Reset** — erase all settings and start fresh
+The dashboard's **Direct / Via Bridge** badge tells you which path your last command took — tap it
+for recent commands and the network decision behind each one.
 
 ---
 
@@ -261,14 +261,20 @@ That has one consequence that surprises people:
 
 ### The reliable way to release a bridge
 
-Do this from a computer or phone on the same Wi-Fi as the bridge:
+A factory reset is what actually frees a bridge. It erases the stored pairing, reboots, and the
+bridge comes back up unpaired — broadcasting its `Lumina-XXXX` setup Wi-Fi again. Re-pair it to the
+new account using Part 2, Step 4.
 
-1. Open `http://<bridge-ip>/` for the bridge dashboard.
-2. Tap **Factory Reset**.
-3. The bridge erases its stored pairing, reboots, and comes back up unpaired — broadcasting its `Lumina-XXXX` setup Wi-Fi again.
-4. Re-pair it to the new account using Part 2, Step 4.
+<div class="warning">
+<strong>A factory reset currently requires installer assistance.</strong> There is no reset control in the app and no web dashboard on the bridge. Contact your dealer or email <strong>support@Nex-GenLED.com</strong>.
+</div>
 
-If you cannot reach the dashboard, unplugging the bridge is not a substitute — it only stops the re-assertion while it is off. The moment it is plugged back in on the old network it re-claims the old account. **The reset is what actually frees it.**
+<div class="note">
+<strong>Installers.</strong> The firmware accepts a factory reset as <code>POST http://&lt;bridge-ip&gt;/api/reset</code> from any client on the same Wi-Fi — it clears NVS and restarts. Reflashing over USB also clears it. Before build 98 the app's own reset call targeted <code>/api/bridge/reset</code>, which the firmware does not serve, so it silently 404'd; that call is corrected in the app as of this release, but note it is not yet surfaced as a button anywhere.
+</div>
+
+Unplugging the bridge is not a substitute — it only stops the re-assertion while it is off. The
+moment it is plugged back in on the old network it re-claims the old account.
 
 <div class="tip">
 <strong>If the bridge is already gone</strong> — unplugged for good, discarded, or at a house you no longer service — a server-side release <em>does</em> stick, because there is nothing left to overwrite it. The problem is only ever a bridge that is still running.
@@ -293,7 +299,7 @@ If you cannot reach the dashboard, unplugging the bridge is not a substitute —
 | Firmware | Lumina Bridge v1.2 |
 | Bridge Wi-Fi name | `Lumina-XXXX` (unique per device) |
 | Setup URL (while connected to the bridge's Wi-Fi) | `http://192.168.4.1/setup` |
-| Dashboard URL (on your home network) | `http://<bridge-ip>/` |
+| Status / testing | In the app: System → System & Device Management → Remote Access |
 | Short-name URL | `http://lumina-xxxx.local/` |
 | Health check timeout | 15 seconds |
 | Remote command timeout | 30 seconds |
@@ -304,21 +310,21 @@ If you cannot reach the dashboard, unplugging the bridge is not a substitute —
 
 ## What success looks like
 
-- The bridge dashboard at `http://<bridge-ip>/` shows green for Wi-Fi, authentication, and user paired
+- The app's Remote Access screen shows the bridge paired, and **Test Bridge** succeeds
 - Your Lumina home screen shows a green bridge status indicator after an app restart
 - When you turn off home Wi-Fi on your phone and use cell data, the app still controls your lights within a couple of seconds
-- The **Commands processed** counter on the bridge dashboard ticks up each time you change something from away
+- The dashboard badge reads **Via Bridge** when you change something from away
 
 ## If something isn't working
 
-**"The bridge dashboard shows 'Not authenticated'."**
-The bridge credentials are wrong or the account doesn't exist. Open `http://<bridge-ip>/setup` and re-enter the email and password. If you just created the account, confirm it exists in your Nex-Gen cloud console.
+**"The bridge never authenticates to the cloud."**
+Its credentials are compiled into the firmware, so this is a firmware/account issue rather than something you can re-enter. Contact your dealer.
 
-**"The bridge dashboard shows 'Not paired'."**
-Your Lumina user ID isn't entered. Open `http://<bridge-ip>/setup` and re-enter it. Make sure the user ID matches the one in your Lumina app under **System → Account**.
+**"The app says the bridge isn't paired."**
+Re-run **Set Up Bridge** from System → System & Device Management → Remote Access. Pairing is driven from the app, not from the bridge.
 
 **"Commands aren't making it to my lights."**
-- Check the error counter on the bridge dashboard — rising errors mean the bridge can't reach your controller.
+- Run **Test Bridge** in the app — a failure there means the bridge can't reach your controller.
 - Confirm your controller's IP is correct and the controller itself is powered on.
 - Make sure the bridge and the controller are on the same Wi-Fi network.
 - If you're comfortable, open the serial monitor (115200 baud) for detailed messages.
@@ -333,9 +339,9 @@ Your Lumina user ID isn't entered. Open `http://<bridge-ip>/setup` and re-enter 
 - Check your router's connected devices list — if the bridge is there but Lumina says it's offline, power-cycle the bridge and wait 30 seconds.
 
 **"I need to start over from scratch."**
-Open `http://<bridge-ip>/` and tap **Factory Reset**. The bridge erases all settings and boots back into its setup Wi-Fi, ready for a fresh walkthrough. This is also the only reliable way to move a bridge to a different account — see *Releasing a bridge*.
+A factory reset erases all settings and boots the bridge back into its setup Wi-Fi. It needs installer assistance — see *Releasing a bridge*. It is also the only reliable way to move a bridge to a different account.
 
-Still stuck? Contact Nex-Gen LED LLC support — include your bridge's Wi-Fi name (`Lumina-XXXX`) and a quick description of what the dashboard shows.
+Still stuck? Contact Nex-Gen LED LLC support — include your bridge's Wi-Fi name (`Lumina-XXXX`) and what the app's Remote Access screen reports.
 
 ---
 

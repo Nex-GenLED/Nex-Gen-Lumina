@@ -28,6 +28,11 @@ body_class: guide
 
 # Nex-Gen Lumina — Commercial User Guide
 
+<div class="warning">
+<strong>SUPERSEDED 2026-09-17.</strong> This guide is replaced by <code>docs/guides-2026-09/03-commercial-guide.md</code>, which is verified against shipping code at 2.5.10+98. It is kept for reference because its rendered PDF is still in circulation. Inline <em>Corrected 2026-09-17</em> notices mark the passages that were factually wrong; everything else is accurate but may be less current.
+</div>
+
+
 **Describes Lumina app version 2.5.10+89.**
 
 Welcome to Lumina for your business. Permanent residential and commercial lighting that works as hard as you do — and this guide is how you make it work for your property, your brand, and your customers. Your installer has already handled the hardware and the network; this guide is about running the lights day to day.
@@ -491,6 +496,11 @@ When a Corporate Admin applies a lock, local managers cannot override the schedu
 ---
 
 ## 13. Fleet dashboard — multi-location at a glance
+
+<div class="warning">
+<strong>Corrected 2026-09-17 — the commercial shell described in this section is not reachable on this build.</strong> The Fleet, Brand, Events and Profile tabs are built, but the routing that used to send commercial accounts to that shell was removed, so commercial customers now land on the same dashboard residential customers use. Nothing in the app navigates to the Fleet Dashboard. Treat this section as a preview of work in progress, not as instructions.
+<p>What a commercial account <em>does</em> get today: the standard app, a <strong>Zones</strong> card in Settings for driving areas independently, up to <strong>20</strong> staff accounts, and brand designs seeded into the library at install. See <code>docs/guides-2026-09/03-commercial-guide.md</code>, which is written against what actually ships.</p>
+</div>
 
 If you manage multiple locations, the Fleet Dashboard gives you the whole operation in one view.
 

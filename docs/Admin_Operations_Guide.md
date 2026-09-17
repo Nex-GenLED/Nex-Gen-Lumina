@@ -30,6 +30,11 @@ body_class: guide
 
 # Nex-Gen Lumina — Admin Operations Guide
 
+<div class="warning">
+<strong>SUPERSEDED 2026-09-17.</strong> This guide is replaced by <code>docs/guides-2026-09/06-admin-guide.md</code>, which is verified against shipping code at 2.5.10+98. It is kept for reference because its rendered PDF is still in circulation. Inline <em>Corrected 2026-09-17</em> notices mark the passages that were factually wrong; everything else is accurate but may be less current.
+</div>
+
+
 **Describes Lumina app version 2.5.10+89.**
 
 This is your playbook for running the admin side of Lumina — the dealer network, installer team, corporate dashboard, and everything your dealers and installers never see. Permanent residential and commercial lighting that works as hard as you do, and this guide keeps the machine behind it running smoothly.

@@ -29,6 +29,11 @@ body_class: guide
 
 # Nex-Gen Lumina — Dealer Dashboard Guide
 
+<div class="warning">
+<strong>SUPERSEDED 2026-09-17.</strong> This guide is replaced by <code>docs/guides-2026-09/05-dealer-guide.md</code>, which is verified against shipping code at 2.5.10+98. It is kept for reference because its rendered PDF is still in circulation. Inline <em>Corrected 2026-09-17</em> notices mark the passages that were factually wrong; everything else is accurate but may be less current.
+</div>
+
+
 **Describes Lumina app version 2.5.10+89.**
 
 The Dealer Dashboard is your business at a glance — every live job, every installer's workload, every referral reward that's pending, in one place. It's how you keep follow-ups tight, installers utilized, and referral payouts flowing. Permanent residential and commercial lighting that works as hard as you do, and your dashboard makes sure the money side of that works just as hard.
