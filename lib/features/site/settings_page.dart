@@ -416,34 +416,6 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
     await _safeLaunch(context, uri);
   }
 
-  Future<void> _uploadDiagnostics(BuildContext context) async {
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Uploading Controller Logs...'),
-        content: Row(children: const [
-          SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-          SizedBox(width: 12),
-          Expanded(child: Text('Please wait while we prepare diagnostics.')),
-        ]),
-      ),
-    );
-  }
-
-  Future<void> _simulateUpload(BuildContext context) async {
-    await Future.delayed(const Duration(milliseconds: 1600));
-    Navigator.of(context).pop();
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Success'),
-        content: const Text('Success. Ref ID: #8821.'),
-        actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
-      ),
-    );
-  }
-
   Future<void> _safeLaunch(BuildContext context, Uri uri) async {
     try {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
@@ -517,18 +489,21 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                 // Welcome Tutorial (Permissions Setup)
                 const _WelcomeTutorialTile(),
                 const Divider(height: 1),
-                // Remote Diagnostics
-                ListTile(
-                  leading: Icon(Icons.medical_services_outlined, color: NexGenPalette.violet),
-                  title: const Text('Remote Diagnostics (Pro)'),
-                  subtitle: const Text('Upload system logs to help our team diagnose hardware issues.'),
-                  trailing: Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  onTap: () async {
-                    await _uploadDiagnostics(context);
-                    await _simulateUpload(context);
-                  },
-                ),
-                const Divider(height: 1),
+                // REMOVED AHEAD OF STORE SUBMISSION — "Remote Diagnostics (Pro)".
+                //
+                // The tile was a mock: _uploadDiagnostics() showed a spinner,
+                // _simulateUpload() waited 1600ms and then reported
+                // "Success. Ref ID: #8821." — a hardcoded string. No logs were
+                // ever collected, nothing was uploaded, and no function backed
+                // it. Under a "(Pro)" label it read as a paid capability, which
+                // is exactly the shape both stores reject (Apple 2.3.1
+                // "hidden or undocumented features" / misleading metadata,
+                // Play's Deceptive Behavior policy).
+                //
+                // This is a PLANNED FUTURE FEATURE, not an implemented one. It
+                // comes back when something real collects and uploads logs —
+                // rebuild the tile then, pointed at that.
+
                 // Privacy Policy
                 ListTile(
                   leading: Icon(Icons.privacy_tip_outlined, color: NexGenPalette.cyan),
