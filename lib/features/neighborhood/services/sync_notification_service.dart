@@ -107,8 +107,13 @@ class SyncNotificationService {
   StreamSubscription? _messageOpenedSub;
   StreamSubscription<User?>? _authSub;
 
-  /// True once the ONE-TIME wiring (permission prompt + stream subscriptions)
-  /// has actually completed. Deliberately NOT set on entry — see [initialize].
+  /// True once the FCM STREAM LISTENERS have been attached.
+  ///
+  /// Scope is deliberately narrow: it guards ONLY the attach-once block at the
+  /// bottom of [initialize]. It does NOT gate the permission request or the
+  /// token write, both of which re-run on every call so a second account
+  /// signing in on the same device re-points the token at its uid. It is also
+  /// NOT set on a permission denial — see the denied branch in [initialize].
   bool _initialized = false;
 
   /// Re-entrancy guard, so two near-simultaneous callers cannot both run the
@@ -180,30 +185,76 @@ class SyncNotificationService {
   /// `FirebaseMessaging.onMessage`/`onMessageOpenedApp` streams, which can
   /// throw when Play Services is wedged; the token half must still run when
   /// it does, because storing the token is what makes push work at all.
+  /// NOT THE PRODUCTION DRIVER — see [onSignedIn].
+  ///
+  /// `main()` deliberately does not call this any more. Driving FCM from a
+  /// service-owned auth subscription meant `main()` had to construct a
+  /// `SyncNotificationService()` of its own, and that instance was an ORPHAN:
+  /// never the object `syncNotificationServiceProvider` builds, so its stream
+  /// subscriptions could never be cancelled by that provider's `ref.onDispose`.
+  /// The production driver is now an `authStateProvider` listener in
+  /// `_MyAppState.build()`, which calls [onSignedIn] on the PROVIDER instance.
+  ///
+  /// DO NOT re-add a call to this from `main()` or from a widget: combined with
+  /// that listener it would double-drive every sign-in.
+  ///
+  /// Retained because it is the entry point the late-sign-in regression suite
+  /// drives (`test/features/neighborhood/
+  /// sync_notification_token_on_late_signin_test.dart`) — a plain Stream seam
+  /// needs no ProviderContainer, so those tests exercise [onSignedIn], the real
+  /// shared core, against fakes. Unlike the production listener it does NOT
+  /// filter anonymous sessions; that guard lives at the call site.
   void startAuthWatch() {
     _authSub ??= _auth.authStateChanges().listen((user) {
       if (user == null) return;
-      // Wiring half: no-ops after the first successful run.
-      initialize().catchError((Object e) {
-        debugPrint('[SyncNotification] initialize() failed: $e');
-      });
-      // Token half: runs on EVERY sign-in, so a second account on the same
-      // device also gets its token written.
-      _refreshAndStoreToken();
+      onSignedIn();
     });
   }
 
-  /// Initialize FCM: request permission, get token, listen for refresh.
+  /// Bootstrap FCM for a user who has just become present.
+  ///
+  /// Called once per sign-in from the `authStateProvider` listener in
+  /// `_MyAppState.build()`, on the provider instance. Safe to call repeatedly.
+  ///
+  /// THE CALLER excludes `null` and ANONYMOUS users. Anonymous sessions are the
+  /// staff-PIN bootstrap, not a real user: they have no neighborhood membership
+  /// to notify, and prompting them would put the notification dialog in front
+  /// of an installer mid-commissioning.
+  ///
+  /// The two halves are called INDEPENDENTLY and each swallows its own failure,
+  /// on purpose. The wiring half touches static
+  /// `FirebaseMessaging.onMessage`/`onMessageOpenedApp` streams, which can
+  /// throw when Play Services is wedged; the token half must still run when it
+  /// does, because storing the token is what makes push work at all. It also
+  /// covers the permission-denied case, where [initialize] returns early: a
+  /// denied LOCAL-display permission is not a reason to leave the server
+  /// without a token.
+  void onSignedIn() {
+    // Wiring half: permission + token re-run on every call; only the stream
+    // listeners are attach-once.
+    initialize().catchError((Object e) {
+      debugPrint('[SyncNotification] initialize() failed: $e');
+    });
+    // Token half: runs on EVERY sign-in, so a second account on the same
+    // device also gets its token written.
+    _refreshAndStoreToken();
+  }
+
+  /// Initialize FCM: request permission, get token, attach stream listeners.
   ///
   /// Safe to call at any time and from anywhere; normally reached via
-  /// [startAuthWatch]. Returns without doing anything — and WITHOUT burning
-  /// the idempotency flag — when no user is signed in.
+  /// [onSignedIn]. Returns without doing anything — and WITHOUT burning the
+  /// idempotency flag — when no user is signed in.
+  ///
+  /// RE-ENTRANT BY DESIGN. Only the STREAM LISTENERS are attach-once; the
+  /// permission request and the token write re-run on every call. That is what
+  /// re-points the token at a second account signing in on the same device.
   Future<void> initialize() async {
-    if (_initialized || _initializing) return;
+    if (_initializing) return;
 
     // No user means there is nothing to attach a token to. Do not prompt, and
-    // do not mark initialization as done: startAuthWatch() will call back the
-    // moment a user appears.
+    // do not mark initialization as done: the authStateProvider listener in
+    // _MyAppState.build() will call back the moment a user appears.
     if (_uid == null) {
       debugPrint('[SyncNotification] initialize() deferred — no signed-in user');
       return;
@@ -211,7 +262,11 @@ class SyncNotificationService {
 
     _initializing = true;
     try {
-      // Request permission (iOS will show the system prompt once)
+      // Request permission. On Android 13+ this is the POST_NOTIFICATIONS
+      // dialog. On iOS this is now the ONLY code that can ever raise the
+      // notification prompt: NotificationsService.init() used to raise it from
+      // a bare DarwinInitializationSettings() before runApp(), and that was
+      // turned off explicitly (see the comment there).
       final settings = await _messaging.requestPermission(
         alert: true,
         badge: true,
@@ -219,13 +274,19 @@ class SyncNotificationService {
         provisional: false,
       );
 
-      // The one-time wiring attempt has now happened. Mark it done even when
-      // permission was denied, so a denial does not re-prompt on every auth
-      // change. A THROW above leaves the flag false, which is what we want —
-      // that is a retryable failure, a denial is not.
-      _initialized = true;
-
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        // DELIBERATELY DOES NOT LATCH.
+        //
+        // The previous code set _initialized = true BEFORE this check, so that
+        // a denial would not re-prompt on every auth change. That reasoning no
+        // longer holds and the behaviour was actively harmful: now that the
+        // iOS Darwin prompt is off, this call is the sole grant path on iOS, so
+        // latching here made "declined once, later enabled in OS Settings"
+        // permanently broken for the rest of the process — the token would
+        // never be stored and push would stay silently dead.
+        //
+        // Re-prompting is not a risk: once the OS has an answer, both platforms
+        // return the stored answer without showing a dialog again.
         debugPrint('[SyncNotification] Permission denied');
         return;
       }
@@ -234,12 +295,28 @@ class SyncNotificationService {
         '[SyncNotification] Permission: ${settings.authorizationStatus}',
       );
 
-      // Get and store the FCM token
+      // Get and store the FCM token. Runs on EVERY call, including when the
+      // listeners below are already attached — that is what re-stores the
+      // token under a newly signed-in uid.
       await _refreshAndStoreToken();
 
-      // Listen for token refresh
+      // ── Everything below is ATTACH-ONCE ──────────────────────────────
+      if (_initialized) return;
+      _initialized = true;
+
+      // Listen for token refresh.
+      //
+      // _storeToken does a Firestore write and can throw (offline, rules). A
+      // bare call left that as an unhandled async error, which
+      // PlatformDispatcher.onError in main.dart turns into a debug_errors
+      // document — noise in the app's only crash sink, generated by a
+      // background refresh the user never triggered.
       _tokenRefreshSub = _messaging.onTokenRefresh.listen((newToken) {
-        _storeToken(newToken);
+        unawaited(
+          _storeToken(newToken).catchError((Object e) {
+            debugPrint('[SyncNotification] Token refresh store failed: $e');
+          }),
+        );
       });
 
       // Foreground message handler

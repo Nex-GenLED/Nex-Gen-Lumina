@@ -147,14 +147,22 @@ Future<void> main() async {
     // If both fail the app still starts. That is deliberate: a launched app
     // whose Firebase calls error is diagnosable by the user and by us; a
     // process sitting pre-runApp() forever is neither.
+    //
+    // TIMEOUTS ARE 15s, matching the project-wide network-timeout standard in
+    // CLAUDE.md. They were 10s. 10s is short enough to trip on a cold cellular
+    // start or a slow DNS resolve and send a perfectly healthy launch down the
+    // fallback path (and then into the degraded both-failed branch), which is
+    // the same class of false alarm as the "System Offline" bug. A longer bound
+    // costs nothing here because the timeout is a backstop against a HANG, not
+    // a latency budget — runApp() is unconditional either way.
     _startupBreadcrumb('firebase:begin');
     try {
       if (kIsWeb) {
         await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-            .timeout(const Duration(seconds: 10));
+            .timeout(const Duration(seconds: 15));
       } else {
         // Prefer native configs from google-services.json / GoogleService-Info.plist when present
-        await Firebase.initializeApp().timeout(const Duration(seconds: 10));
+        await Firebase.initializeApp().timeout(const Duration(seconds: 15));
       }
       _startupBreadcrumb('firebase:ok');
     } catch (e) {
@@ -163,7 +171,7 @@ Future<void> main() async {
       _startupBreadcrumb('firebase:primary FAILED, trying fallback err=$e');
       try {
         await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-            .timeout(const Duration(seconds: 10));
+            .timeout(const Duration(seconds: 15));
         _startupBreadcrumb('firebase:ok (via fallback)');
       } catch (e2, st2) {
         // Both paths are gone. Continue to runApp anyway — see above.
@@ -233,17 +241,24 @@ Future<void> main() async {
       _startupBreadcrumb('notifications:FAILED (continuing) err=$e');
     }
 
-    // Arm FCM for Neighborhood Sync push notifications (no-op on web).
+    // FCM for Neighborhood Sync is NOT armed here. Do not re-add a call.
     //
-    // startAuthWatch() only SUBSCRIBES — it prompts for nothing and touches no
-    // network. This used to be a direct initialize() call, which fired the
-    // Android 13+ POST_NOTIFICATIONS system dialog on the cold-launch frame,
-    // before the login screen and with no in-app explanation, and which also
-    // silently skipped the FCM token write for anyone not already signed in.
-    // See SyncNotificationService.startAuthWatch for both bugs in full.
-    if (!kIsWeb) {
-      SyncNotificationService().startAuthWatch();
-    }
+    // It is driven by an authStateProvider listener in _MyAppState.build(),
+    // which calls onSignedIn() on the PROVIDER instance. Three separate
+    // reasons, all defects rather than preferences:
+    //
+    //   1. ORPHAN INSTANCE. Arming from main() meant constructing a
+    //      `SyncNotificationService()` here, which is never the object
+    //      syncNotificationServiceProvider builds. Its three stream
+    //      subscriptions could therefore never be cancelled by that
+    //      provider's ref.onDispose — a leak nothing owned.
+    //   2. ANONYMOUS SESSIONS. A service-owned auth watch treats any non-null
+    //      user as a sign-in, including the staff-PIN anonymous bootstrap, so
+    //      an installer mid-commissioning got a notification prompt.
+    //   3. Prompt timing / token loss — the original bugs. Arming pre-runApp()
+    //      fired the Android 13+ POST_NOTIFICATIONS dialog on the cold-launch
+    //      frame, and stored no token because _storeToken needs a uid and
+    //      nobody is signed in that early.
 
     // Register sports alerts background service (Android foreground + iOS BGFetch)
     if (!kIsWeb) {
@@ -452,6 +467,42 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
           isAnonymous: user?.isAnonymous ?? true,
           runner: ConnectionMethodMigration.runOnce,
         );
+      });
+    });
+
+    // FCM bootstrap, DEFERRED UNTIL THERE IS A REAL USER.
+    //
+    // This is the SOLE production driver for Neighborhood Sync push. main()
+    // no longer arms it — see the block where it used to, and
+    // SyncNotificationService.startAuthWatch, for why.
+    //
+    // Uses the PROVIDER instance, never a fresh SyncNotificationService(): the
+    // old main() call built an orphan whose three stream subscriptions no
+    // ref.onDispose could ever cancel.
+    //
+    // ANONYMOUS SESSIONS ARE EXCLUDED. `user != null` is not the same as
+    // "somebody signed in": the staff-PIN bootstrap signs in anonymously, and
+    // treating that as a real sign-in put the notification permission prompt
+    // in front of an installer mid-commissioning. Same guard shape as the
+    // ConnectionMethodMigration listener above.
+    //
+    // Re-entrant by design: onSignedIn() re-requests permission and re-stores
+    // the token on every call and latches only its stream listeners, so
+    // sign-out/sign-in as a different user re-points the token at the new uid,
+    // and a user who declined the prompt once and later enabled notifications
+    // in OS Settings is picked up on their next auth-state change. That retry
+    // matters more on iOS, where this is now the only permission path at all
+    // (NotificationsService no longer requests it from its Darwin settings).
+    //
+    // No fireImmediately, matching the listeners above: authStateProvider is a
+    // StreamProvider and is still loading at first build, so its initial value
+    // — including an already-signed-in user restored from a cold start —
+    // arrives as a normal change and this fires for it.
+    ref.listen<AsyncValue<User?>>(authStateProvider, (prev, next) {
+      next.whenData((user) {
+        if (kIsWeb) return;
+        if (user == null || user.isAnonymous) return;
+        ref.read(syncNotificationServiceProvider).onSignedIn();
       });
     });
 

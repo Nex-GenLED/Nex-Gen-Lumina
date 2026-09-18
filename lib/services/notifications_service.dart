@@ -17,7 +17,32 @@ class NotificationsService {
     if (_initialized) return;
     try {
       const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const iosInit = DarwinInitializationSettings();
+      // DO NOT request permission here.
+      //
+      // DarwinInitializationSettings defaults requestAlert/Sound/Badge
+      // Permission to TRUE, so a bare constructor raises the iOS notification
+      // prompt the moment this runs. init() is awaited from main() BEFORE
+      // runApp(), which put the system dialog on the cold-launch frame, on top
+      // of the login screen, before the user had done anything that would
+      // explain it. Apple's HIG and 5.1.1(ii) both discourage that, and it
+      // derails a Play Robo crawl's opening moves.
+      //
+      // This service still initialises early ON PURPOSE: it owns
+      // getInitialMessage() below, which must be read before the first frame
+      // to route a notification tap that launched the app from terminated.
+      // Only the PROMPT moves.
+      //
+      // Permission is now requested once, after a real (non-anonymous)
+      // sign-in, by SyncNotificationService.initialize() via
+      // FirebaseMessaging.requestPermission. That is the SOLE grant path on
+      // iOS now, which is why its permission-denied branch deliberately does
+      // not latch: a user who declines once and later enables notifications in
+      // OS Settings must still get a token stored on the next auth change.
+      const iosInit = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestSoundPermission: false,
+        requestBadgePermission: false,
+      );
       const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
       await _plugin.initialize(
         initSettings,

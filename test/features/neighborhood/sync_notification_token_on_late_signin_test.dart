@@ -61,10 +61,23 @@ class _FakeMessaging implements FirebaseMessaging {
   /// Services / unavailable platform channel. The token half must still run.
   final bool permissionThrows;
 
+  /// When true, `requestPermission` resolves to
+  /// [AuthorizationStatus.denied]. Mutable so a test can simulate the user
+  /// going to OS Settings and turning notifications back on.
+  bool denied;
+
   int getTokenCalls = 0;
   int requestPermissionCalls = 0;
 
-  _FakeMessaging({this.token = 'tok-abc123', this.permissionThrows = true});
+  /// How many times a listener was attached to [onTokenRefresh]. The stream
+  /// listeners are the only attach-once part of `initialize()`.
+  int onTokenRefreshListens = 0;
+
+  _FakeMessaging({
+    this.token = 'tok-abc123',
+    this.permissionThrows = true,
+    this.denied = false,
+  });
 
   @override
   Future<String?> getToken({String? vapidKey}) async {
@@ -73,7 +86,10 @@ class _FakeMessaging implements FirebaseMessaging {
   }
 
   @override
-  Stream<String> get onTokenRefresh => const Stream<String>.empty();
+  Stream<String> get onTokenRefresh {
+    onTokenRefreshListens++;
+    return const Stream<String>.empty();
+  }
 
   @override
   Future<NotificationSettings> requestPermission({
@@ -90,8 +106,26 @@ class _FakeMessaging implements FirebaseMessaging {
     if (permissionThrows) {
       throw Exception('platform unavailable (simulated)');
     }
-    throw UnimplementedError('not needed by these tests');
+    return _settings(
+      denied ? AuthorizationStatus.denied : AuthorizationStatus.authorized,
+    );
   }
+
+  static NotificationSettings _settings(AuthorizationStatus status) =>
+      NotificationSettings(
+        alert: AppleNotificationSetting.enabled,
+        announcement: AppleNotificationSetting.disabled,
+        authorizationStatus: status,
+        badge: AppleNotificationSetting.enabled,
+        carPlay: AppleNotificationSetting.disabled,
+        lockScreen: AppleNotificationSetting.enabled,
+        notificationCenter: AppleNotificationSetting.enabled,
+        showPreviews: AppleShowPreviewSetting.always,
+        timeSensitive: AppleNotificationSetting.disabled,
+        criticalAlert: AppleNotificationSetting.disabled,
+        sound: AppleNotificationSetting.enabled,
+        providesAppNotificationSettings: AppleNotificationSetting.disabled,
+      );
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -260,6 +294,87 @@ void main() {
 
       expect(messaging.getTokenCalls, 0);
       expect(messaging.requestPermissionCalls, 0);
+
+      await auth.close();
+      service.dispose();
+    });
+
+    // ── (c) A DENIAL MUST NOT LATCH ────────────────────────────────────
+    //
+    // The old code set _initialized = true BEFORE checking for a denial, so
+    // that a decline would not re-prompt on every auth change. That became
+    // actively harmful once NotificationsService stopped requesting iOS
+    // permission from its Darwin settings: this call is now the ONLY grant
+    // path on iOS, so latching on a denial made "declined once, later enabled
+    // in OS Settings" permanently broken for the rest of the process.
+    test('a permission denial does not latch — a later sign-in retries',
+        () async {
+      final firestore = FakeFirebaseFirestore();
+      final auth = _FakeAuth();
+      final messaging = _FakeMessaging(permissionThrows: false, denied: true);
+      final service = _build(
+        firestore: firestore,
+        auth: auth,
+        messaging: messaging,
+      );
+
+      service.startAuthWatch();
+
+      // First sign-in: the user declines.
+      auth.emitSignIn('declines');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(messaging.requestPermissionCalls, 1);
+
+      // The user goes to OS Settings, enables notifications, and the app sees
+      // another auth-state change (re-launch, re-auth, or account switch).
+      messaging.denied = false;
+      auth.emitSignOut();
+      await Future<void>.delayed(Duration.zero);
+      auth.emitSignIn('declines');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(messaging.requestPermissionCalls, 2,
+          reason:
+              'a denial must leave initialize() retryable; latching here would '
+              'make a later OS-Settings grant unreachable for the session');
+      final doc =
+          await firestore.collection('users').doc('declines').get();
+      expect(doc.exists, isTrue);
+      expect(doc.data()!['fcmToken'], 'tok-abc123');
+
+      await auth.close();
+      service.dispose();
+    });
+
+    // The stream listeners, by contrast, ARE attach-once: re-entry must not
+    // double-subscribe. Granting on every call and re-storing the token is
+    // deliberate; re-attaching FirebaseMessaging listeners would not be.
+    test('repeated grants re-store the token without re-attaching listeners',
+        () async {
+      final firestore = FakeFirebaseFirestore();
+      final auth = _FakeAuth();
+      final messaging = _FakeMessaging(permissionThrows: false);
+      final service = _build(
+        firestore: firestore,
+        auth: auth,
+        messaging: messaging,
+      );
+
+      service.startAuthWatch();
+      auth.emitSignIn('u4');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      auth.emitSignOut();
+      await Future<void>.delayed(Duration.zero);
+      auth.emitSignIn('u5');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(messaging.onTokenRefreshListens, 1,
+          reason: 'stream listeners are attach-once');
+      expect((await firestore.collection('users').doc('u4').get()).exists,
+          isTrue);
+      expect((await firestore.collection('users').doc('u5').get()).exists,
+          isTrue,
+          reason: 'the token re-stores under the second uid');
 
       await auth.close();
       service.dispose();
