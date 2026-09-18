@@ -618,7 +618,13 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
         'type': 'ping',
         'payload': '{}',
         'controllerId': '',
-        'controllerIp': ref.read(selectedDeviceIpProvider) ?? '',
+        // Deliberately untargeted. The /commands create rule DENIES any
+        // controllerIp not in the user's controller_ips, and the selected
+        // IP on an installer's phone can be stale or mDNS-picked — which
+        // surfaced as "Verification error: permission-denied" on a bridge
+        // that was paired and healthy (field install, 2026-09-18). A ping
+        // proves the bridge round trip; it needs no controller target.
+        'controllerIp': '',
         'webhookUrl': '',
         'createdAt': FieldValue.serverTimestamp(),
         'status': 'pending',
