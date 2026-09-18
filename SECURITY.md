@@ -12,34 +12,55 @@ This document outlines all security measures implemented in the Lumina app and d
 
 ## Critical Security Features
 
-### 1. OpenAI API Protection ✅
+### 1. AI API Protection ✅
 
-**Implementation:** `functions/index.js` - `openaiProxy` function
+> **CORRECTED 2026-09-17.** This section previously described an `openaiProxy`
+> function in `functions/index.js`. **That function no longer exists.** It was
+> deleted from source on the store-submission line (it was unused and carried an
+> API key), and its absence from production was confirmed by running
+> `firebase functions:list` — 46 deployed functions, none named `openaiProxy`.
+>
+> **The AI data recipient is Anthropic, not OpenAI.** All model traffic goes
+> through `claudeProxy`, which calls the Anthropic API via `@anthropic-ai/sdk`.
+> No request reaches OpenAI from this app. Privacy-policy and data-disclosure
+> copy that still names OpenAI as a sub-processor is stale and must be updated
+> before submission — that is a console/website action, not a repo one.
+
+**Implementation:** `functions/src/claudeProxy.js` — `claudeProxy` callable
 
 **Features:**
-- **Rate Limiting:** 10 requests per user per hour
-- **Token Limiting:** Max 2000 tokens per request
-- **Cost Tracking:** Monitors spending per user
-- **Input Sanitization:** Prevents prompt injection
-- **Model Validation:** Only allows approved models (gpt-4o, gpt-4o-mini, gpt-3.5-turbo)
+- **Auth required:** rejects unauthenticated callers with `HttpsError('unauthenticated')`
+  before any other work.
+- **Abuse limiting:** `HOURLY_ABUSE_LIMIT = 50` requests per user per hour — a hard block,
+  sized for runaway/abuse rather than normal metering.
+- **Soft monthly cap:** `MONTHLY_SOFT_LIMIT = 500` — warns only, never blocks (free phase).
+- **Token limiting:** `MAX_TOKENS = 1024`; a caller-supplied `max_tokens` is clamped down
+  to it, never up.
+- **Model allow-list:** only `claude-haiku-4-5-20251001` and `claude-opus-4-6`.
+- **Cost tracking:** per-model input/output pricing recorded on every call.
 
 **Usage Tracking:**
 ```firestore
-/users/{uid}/ai_usage/{usageId}
+/users/{uid}/claude_usage/{usageId}
   - timestamp: Timestamp
   - status: "success" | "failed"
   - model: string
-  - tokensUsed: number
+  - inputTokens / outputTokens: number
   - estimatedCost: number
-  - latency: number
 ```
 
+> **Known gap (not fixed here):** `purgeUserAccount` sweeps a subcollection named
+> `ai_usage`, but `claudeProxy` writes to `claude_usage`. Nothing writes `ai_usage`
+> today, so account deletion currently leaves `claude_usage` behind. Tracked for a
+> follow-up; it does not block submission because the collection holds no content,
+> only token counts and costs.
+
 **To Deploy:**
-1. Set `OPENAI_API_KEY` in Firebase Functions environment:
+1. Set `ANTHROPIC_API_KEY` in the Functions environment:
    ```bash
    cd functions
-   echo "OPENAI_API_KEY=sk-..." > .env
-   firebase deploy --only functions:openaiProxy
+   echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+   firebase deploy --only functions:claudeProxy
    ```
 2. Monitor costs in Firebase Console > Functions > Logs
 
@@ -303,8 +324,8 @@ if (consented == true) {
 
 ### Key Metrics to Monitor
 
-1. **OpenAI API Costs**
-   - Check Firebase Functions logs for high-cost requests
+1. **Anthropic API Costs** (was "OpenAI" — corrected 2026-09-17)
+   - Check Firebase Functions logs for high-cost `claudeProxy` requests
    - Alert if daily cost > $50
 
 2. **Failed Authentication Attempts**
@@ -327,7 +348,7 @@ if (consented == true) {
 
 **Function Logs:**
 ```bash
-firebase functions:log --only openaiProxy
+firebase functions:log --only claudeProxy
 firebase functions:log --only cleanupOldData
 ```
 
@@ -347,15 +368,15 @@ firebase functions:log --only cleanupOldData
 #### 1. API Key Compromised
 
 **Symptoms:**
-- Unexpected OpenAI costs
+- Unexpected Anthropic costs
 - Unknown requests in logs
 
 **Response:**
 1. **Immediately rotate API key:**
    ```bash
-   # Get new key from OpenAI
+   # Get new key from the Anthropic console
    cd functions
-   echo "OPENAI_API_KEY=sk-NEW_KEY" > .env
+   echo "ANTHROPIC_API_KEY=sk-ant-NEW_KEY" > .env
    firebase deploy --only functions
    ```
 2. Review Firebase Functions logs for unauthorized requests
@@ -406,13 +427,13 @@ firebase functions:log --only cleanupOldData
 - Many requests from single IP/user
 
 **Response:**
-1. **Temporarily lower rate limits** in `functions/index.js`:
+1. **Temporarily lower rate limits** in `functions/src/claudeProxy.js`:
    ```javascript
-   const RATE_LIMIT = 5; // Reduce from 10 to 5
+   const HOURLY_ABUSE_LIMIT = 10; // Reduce from 50
    ```
 2. Deploy immediately:
    ```bash
-   firebase deploy --only functions:openaiProxy
+   firebase deploy --only functions:claudeProxy
    ```
 3. Block abusive user IDs in Firebase Authentication
 4. Consider enabling Firebase App Check
@@ -436,9 +457,11 @@ firebase functions:log --only cleanupOldData
 - OAuth tokens: Until revoked
 
 **Privacy Policy Updates Needed:**
-- Disclose OpenAI API usage for Lumina AI chat
+- Disclose **Anthropic** API usage for Lumina AI chat. **This is a live discrepancy:** the
+  published policy still names OpenAI, which has not been the recipient since `openaiProxy`
+  was removed. Fixing it is a website action, not a repo one.
 - Explain data encryption practices
-- List third-party services (Firebase, OpenAI, Alexa)
+- List third-party services (Firebase, Anthropic, Alexa)
 - Provide contact for data requests
 
 ---
@@ -512,7 +535,8 @@ Please do NOT publicly disclose until patched.
 ## Changelog
 
 ### 2026-01-23 - Initial Security Implementation
-- ✅ OpenAI rate limiting and cost tracking
+- ✅ AI-proxy rate limiting and cost tracking (then OpenAI; now `claudeProxy`/Anthropic —
+  see the corrected section 1)
 - ✅ Data encryption for PII (address, webhook URL, SSID)
 - ✅ Firestore security rules hardening
 - ✅ Alexa OAuth security improvements
@@ -529,3 +553,10 @@ Please do NOT publicly disclose until patched.
 - [ ] Bug bounty program
 - [ ] Two-factor authentication
 - [ ] End-to-end encryption for cloud relay
+
+### 2026-09-17 - AI provider correction
+- ✅ `openaiProxy` deleted from source and confirmed absent from production
+  (`firebase functions:list`). `claudeProxy` (Anthropic, via `@anthropic-ai/sdk`) is the
+  sole AI path, and it requires auth.
+- ⚠️ Privacy policy and store data-safety disclosures still name OpenAI. Console/website
+  action, carried forward.

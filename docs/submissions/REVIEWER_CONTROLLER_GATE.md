@@ -1,5 +1,29 @@
 # Reviewer Controller Gate — Dashboard force-navigates to "Add Controller"
 
+> ## ✅ RESOLVED — verified against the tree 2026-09-17
+>
+> **This document is a historical diagnosis. The bug it describes is fixed; do not
+> work from the "Recommended fix" section below as if it were outstanding.**
+>
+> The fix landed in a STRONGER form than the one recommended here. The dashboard
+> does not merely exempt the reviewer from the controller gate — it removed the
+> force-navigate for EVERYONE and replaced it with a dismissible `MaterialBanner`
+> ([wled_dashboard_page.dart](../../lib/features/dashboard/wled_dashboard_page.dart)):
+>
+> * `ReviewerSeedService.isReviewer(user)` returns early before the subcollection
+>   is even queried, so the reviewer never sees the prompt at all.
+> * For every other user, an empty `users/{uid}/controllers` now sets
+>   `_showControllerBanner` instead of pushing `AppRoutes.wifiConnect`. The banner
+>   offers the same destination, and dismissing it sets `_bannerDismissed` so it
+>   does not return. Nobody is ejected from the dashboard on the first frame.
+> * The banner clears itself if controllers appear later.
+>
+> **What this does NOT cover.** A brand-new sign-up never reaches the dashboard at
+> all: `appRedirect` diverts an `unlinked` user to `/link-account` first. That was
+> a separate App Review 2.1 dead end, fixed separately (an "Explore the demo
+> instead" exit plus widening the unlinked branch to allow `/demo*`). See
+> `route_guards.dart` and `link_account_screen.dart`.
+
 **Date:** 2026-04-21
 **Observed symptom:** reviewer signs in, router correctly takes them to `/dashboard` (route-guards race fix from prior prompt is working), but within ~1 frame the app force-navigates to the WLED manual-setup / "Add Controller" screen. Backing out lands on the correctly populated demo home.
 

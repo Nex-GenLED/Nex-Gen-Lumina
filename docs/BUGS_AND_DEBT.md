@@ -69,48 +69,35 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `functions/src/planGameDayFires.ts`. Related **#65** (no floor), **F1**.
 
 
-- [ ] **#69 — App Store reviewer account: password ROTATED 2026-08-13, and the address in
-  the submission docs DOES NOT EXIST**
-  - Status: **ACTION REQUIRED before next submission** · Severity: **P0** (an unusable
-    reviewer login is an automatic 2.1 rejection) · Evidence: verified-by-live-auth
-  - **(a) Password rotated 2026-08-13.** The reviewer account's password was not recoverable
-    — it is not in repo config or docs by design, and Firebase stores only hashes, so no
-    lookup could ever return it. Rotated via the Admin SDK on uid
-    `atzEKyOfrjRWmN6apQQzvJwBgmv1`. **The new credential was handed over in session and is
-    deliberately NOT recorded here or anywhere in version control.** Get it from Tyler.
-    → **App Store Connect → App Review Information must be updated to match before the next
-    submission.** Until it is, the notes carry a dead password.
-  - **(b) THE ADDRESS IN THE DOCS IS WRONG — this is the bigger problem.** Firebase Auth has
-    exactly one reviewer account (full user-list scan, 2026-08-13):
-    - ✅ **`reviewer@nex-genled.com`** (hyphenated) — uid `atzEKyOfrjRWmN6apQQzvJwBgmv1`,
-      provider `password`, not disabled, created 2026-04-21, last sign-in 2026-04-23.
-    - ❌ `reviewer@nexgenled.com` (no hyphen) — **`auth/user-not-found`**.
-    The hyphen-less form is what appears in
-    [SUBMISSION_AUDIT_v1.0.0.md:262](submissions/SUBMISSION_AUDIT_v1.0.0.md#L262),
-    [BUILD_LEDGER.md:322](BUILD_LEDGER.md#L322) and
-    [COMMAND_SAFETY.md:634](../audit/COMMAND_SAFETY.md#L634). **The code is correct** —
-    `ReviewerSeedService.reviewerEmail` is `'reviewer@Nex-GenLED.com'`, which matches the
-    real account (and `isReviewer()` compares case-insensitively, so case is not the issue;
-    the HYPHEN is).
-    → **If the App Store Connect review notes carry the hyphen-less address, Apple's reviewer
-    types an address that does not exist, login fails, and it is a 2.1 rejection regardless
-    of the password.** Verify the notes against the live account, not against these docs.
-    Fix the three docs above so the wrong address stops propagating.
-  - **This closes the open half of V-1** ([LAUNCH_PLAN.md:629](../audit/LAUNCH_PLAN.md#L629),
-    [COMPLIANCE_AND_SECURITY.md:459](../audit/COMPLIANCE_AND_SECURITY.md#L459)) — *"does
-    `reviewer@Nex-GenLED.com` exist in Firebase Auth with a known password?"* Answer: the
-    account exists and the password is now known. The remaining limb is the ASC-side update
-    in (a) + (b), which is Tyler's, not code.
-  - **Blast radius of the rotation: none.** The account holds 0 controllers
-    ([COMMAND_SAFETY.md:634](../audit/COMMAND_SAFETY.md#L634) — *"No exposure"*) and runs on
-    `DemoWledRepository`, so it cannot reach hardware or customer data. Last sign-in was
+- [x] **#69 — App Store reviewer account: address and password. CLOSED (repo half) 2026-09-17;
+  the remaining limb is console-side and is NOT code.**
+  - Status: **CLOSED in-repo · ACTION REMAINS FOR TYLER in App Store Connect** ·
+    Severity was **P0** · Evidence: verified-by-live-auth (2026-08-13) + code re-read
+    (2026-09-17)
+  - **Resolution.** `reviewer@nex-genled.com` (HYPHENATED) is confirmed correct and is the
+    only reviewer account in Firebase Auth. The code was always right:
+    `ReviewerSeedService.reviewerEmail` is `'reviewer@Nex-GenLED.com'`
+    ([reviewer_seed_service.dart:18](../lib/services/reviewer_seed_service.dart#L18)) and
+    `isReviewer()` compares case-insensitively, so only the hyphen ever mattered.
+    **No code change was ever needed and none was made.**
+  - **DELIBERATELY NOT FIND-AND-REPLACED.** The hyphen-less `reviewer@nexgenled.com` still
+    appears in `docs/submissions/SUBMISSION_AUDIT_v1.0.0.md`, `docs/BUILD_LEDGER.md` and
+    `audit/COMMAND_SAFETY.md`. Those are historical audit reports, and at least one cites
+    the hyphen-less form AS THE EVIDENCE of this bug. Rewriting them would destroy the
+    record of how it was found. Leave them.
+  - **What is left is not in this repo.** The only copy that can cause a 2.1 rejection lives
+    in **App Store Connect → App Review Information** (and the Play Console App Access
+    equivalent): the reviewer email must read `reviewer@nex-genled.com`, and the password
+    must be the one rotated 2026-08-13 on uid `atzEKyOfrjRWmN6apQQzvJwBgmv1` (handed over in
+    session, deliberately never committed — get it from Tyler). No repo edit reaches that.
+  - **Blast radius of the rotation: none.** The account holds 0 controllers and runs on
+    `DemoWledRepository`, so it cannot reach hardware or customer data. Last sign-in
     2026-04-23, ~4 months before the rotation, so no review was in flight.
-  - ⚠️ **Related gap, unresolved:** `ReviewerSeedService` seeds only the Firestore profile +
-    installation docs — it does **not** create the Auth user
-    ([SUBMISSION_AUDIT_v1.0.0.md:262](submissions/SUBMISSION_AUDIT_v1.0.0.md#L262)). If that
-    Auth user is ever deleted, reviewer login fails silently and no code path recreates it.
-  - Files (docs to correct): `docs/submissions/SUBMISSION_AUDIT_v1.0.0.md`,
-    `docs/BUILD_LEDGER.md`, `audit/COMMAND_SAFETY.md`. Code is correct, no change needed:
+  - ⚠️ **Related gap, still unresolved and tracked separately:** `ReviewerSeedService` seeds
+    only the Firestore profile + installation docs — it does **not** create the Auth user. If
+    that Auth user is ever deleted, reviewer login fails silently and no code path recreates
+    it.
+  - Files: none changed. Code verified correct at
     `lib/services/reviewer_seed_service.dart:18`. Related **V-1**,
     `docs/submissions/REVIEWER_GATE_DIAGNOSIS.md`.
 

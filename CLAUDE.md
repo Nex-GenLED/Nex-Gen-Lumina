@@ -25,7 +25,14 @@ When reading state in widgets: `ref.watch()`. When mutating state: `ref.read().n
 
 ### Navigation: GoRouter 16.2+
 
-Declarative routing is defined in [lib/nav.dart](lib/nav.dart):
+Declarative routing is defined in [lib/app_router.dart](lib/app_router.dart), with the
+redirect/guard logic in [lib/route_guards.dart](lib/route_guards.dart).
+
+> `lib/nav.dart` is **not** the router. It is a four-line barrel that re-exports both of the
+> files above, kept so existing `import '.../nav.dart'` lines keep working. Edit
+> `app_router.dart` / `route_guards.dart`. The dashboard UI that used to live here moved to
+> [lib/features/dashboard/wled_dashboard_page.dart](lib/features/dashboard/wled_dashboard_page.dart).
+
 - Route constants live in `AppRoutes` class (e.g., `AppRoutes.dashboard`, `AppRoutes.settings`)
 - Navigate with `context.push()` or `context.go()`
 - Path parameters use `:paramName` syntax (e.g., `/explore/:categoryId`)
@@ -176,6 +183,13 @@ flutter run -d android       # Android Emulator
 
 ### Build
 
+**Android SDK levels (verified in `android/app/build.gradle` 2026-09-17):**
+`compileSdk = 36`, `targetSdk = 36`, `minSdkVersion = 24`.
+
+> Google Play's deadline for targeting **Android 16 (API 36)** passed on **2026-08-31**, and
+> the repo is compliant. Anything you read elsewhere describing API 36 as an upcoming risk,
+> or this repo as `targetSdk 35`, is stale.
+
 **Development / quick builds:**
 ```bash
 flutter build apk            # Android APK
@@ -286,7 +300,10 @@ Routing matrix + per-command details: [docs/bridge_command_routing_context_2026-
 lib/
 ├── main.dart                   # Entry point, Firebase init
 ├── app_providers.dart          # Global providers (demoMode, auth)
-├── nav.dart                    # GoRouter config + main dashboard UI
+├── nav.dart                    # Barrel only — re-exports app_router.dart + route_guards.dart
+├── app_router.dart             # GoRouter config + AppRoutes constants
+├── route_guards.dart           # appRedirect / role + link-state gating
+├── app_version.dart            # Single source of truth for the version string
 ├── theme.dart                  # Material 3 theme (NexGenPalette)
 ├── auth/
 │   └── auth_manager.dart       # Firebase Auth abstraction
@@ -324,7 +341,7 @@ lib/
 - Primary accent: Cyan (`#00E5FF`)
 - Glass effects: `BackdropFilter` with blur + semi-transparent overlays
 
-**Bottom Navigation:** 5-tab glass dock (see `_GlassDockNavBar` in [lib/nav.dart](lib/nav.dart))
+**Bottom Navigation:** 5-tab glass dock (see `GlassDockNavBar` in [lib/widgets/navigation/glass_dock_nav_bar.dart](lib/widgets/navigation/glass_dock_nav_bar.dart), mounted by [lib/features/dashboard/main_scaffold.dart](lib/features/dashboard/main_scaffold.dart))
 1. Home - Main dashboard with hero image + quick controls
 2. Schedule - Weekly schedule view
 3. Lumina (center) - AI chat assistant
