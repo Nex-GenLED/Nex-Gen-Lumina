@@ -2541,6 +2541,63 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
+## 2.5.10+99 — field-install fixes. Android AAB built and verified. iOS CI SUCCESS, build number PENDING.
+
+> **STATUS: Android artifact exists and is signed with the release key.**
+> versionCode 99 is **CONSUMED**. **NOT UPLOADED to Play.** Codemagic `iOS Release`
+> for `build-99` completed **success** 2026-09-18T19:47:43Z.
+> **The full local gate was NOT run for this build — see the gate row. Read it
+> before treating +99 as equivalent to a gated build.**
+
+| Field | Value |
+|---|---|
+| **Tag** | **`build-99`** — annotated, tag object `456c2c6b14880b3b4c197d0c83989888ea19b54f`, points at `0695733`, the bump commit itself (standing convention 1). `origin/release/store-submission-consolidated` and `origin/dev/post-submission` were both **fast-forwarded** `e575d32..0695733` (no force, no merge commit). `main` was **not** moved — it is still `699a498` (`+97`), 28 commits behind this line. |
+| **Git SHA (app bytes)** | **`069573339f0ae3230ed07c6f3b36642bc264fd2e`** |
+| **Version name** | `2.5.10` |
+| **Android versionCode** | **99 — CONSUMED.** `pubspec.yaml` and `kAppVersion` (`lib/app_version.dart`) moved together in `0695733`; `kStaffAuthTelemetryAppVersion` is an alias of `kAppVersion` on this line. |
+| **+98** | `build-98` (`e575d32`) ran Codemagic `iOS Release` to success 2026-09-18T04:51:55Z. **No +98 AAB is known to have been built**; treat 98 as consumed regardless. |
+| **Android artifact** | Built `2026-09-18` from `0695733`: `app-release.aab`, **68,623,118 bytes** (65.4 MB), sha256 `9a73ca67e32435ba6194ceec1e066feccfa4ab3fdf0eb366c661c3569530c5dc`, Gradle `bundleRelease` 403.9 s. Merged manifest (not pubspec) `versionCode="99"` / `versionName="2.5.10"` / `targetSdkVersion="36"`. The bundle's proto manifest was **not** separately cross-checked this time. **NOT UPLOADED.** |
+| **Artifact location** | `C:\Flutter Projects\lumina-b99-artifacts\lumina-2.5.10+99-0695733.aab`, symbols in `...\debug-info-android\`, `SHA256.txt` alongside (re-verified `OK` after copy). A plain folder, **not** a git worktree. Note the flatter layout than `lumina-b97-artifacts`. |
+| **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US`, SHA1 `8E:4A:35:82:8B:32:BA:52:B9:93:25:25:B8:5E:B4:D4:FD:0A:57:DA` — verified by identity, `jar verified`. |
+| **Signing inputs** | Copied from the **main repo** (convention 3). md5 main == worktree for all three: `google-services.json` `7df11c93…d492`, `nex-gen-lumina.keystore` `d019d3ec…645d`, `key.properties` `539a84cf…8335` — identical to +96/+97. Worktree `git status` empty before and after the build. |
+| **Android symbols** | `app.android-arm.symbols` (6,847,076 B), `app.android-arm64.symbols` (7,874,040 B), `app.android-x64.symbols` (7,866,088 B). Native debug symbols also embedded in the bundle (3 `debugsymbols` entries). |
+| **iOS** | Codemagic `iOS Release` **success**. Build number NOT recorded (**#87** — no read-only Codemagic token; the number comes from Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec). Read it from TestFlight and amend this row. |
+| **Local gate at tag time** | **PARTIAL — stated plainly.** `flutter analyze` was run on the **two changed Dart files only** (`device_setup_page.dart`, `bridge_setup_screen.dart`): 0 errors, 0 warnings, 2 pre-existing `prefer_interpolation_to_compose_strings` infos on untouched lines. **The full-tree analyze and `flutter test` were NOT run.** Codemagic's own analyze step passed (the build would have failed otherwise). Neither Dart change was exercised on a device — there is no test device. |
+| **Build host** | Windows; same toolchain as +97. |
+
+### What +99 carried
+
+`git log e575d32..0695733` — four commits, five files:
+
+- **`09e53c3` `firestore.rules` — `staffMayReach()` keys on `owner_id`.** SERVER-SIDE,
+  and **already live** as ruleset **`fdaecb9d`** (deployed 2026-09-18T19:18Z; rollback
+  = `c433942c` = the rules at `e575d32`). It is in this build's tree only so the next
+  rules deploy from this line does not revert it; it changes no app bytes. Verified by
+  byte-comparing the live ruleset to this file, a 14-case Rules `:test` suite against
+  both rulesets, and a client-credential probe against production.
+  Cause: `createUserWithEmailAndPassword` signs the wizard in as the new customer for
+  ~1 s, `sync_notification_service._storeToken` `set(merge)`s the FCM token and thereby
+  CREATES `/users/{customerUid}`; the P0-5 rule keyed its claim-only fallback on the doc
+  not existing, so the pixelMap write in the atomic controller migration was DENIED and
+  the retry dead-ended on "No existing customer matches this email". Hit on a real
+  customer install 2026-09-18.
+- **`4d9afaa` `bridge_setup_screen.dart`** — the verify ping sends `controllerIp: ''`.
+  It used to send `selectedDeviceIpProvider`, which the command-safety S1 create rule
+  denies unless it is in `controller_ips` — a false "Verification error:
+  permission-denied" on a paired, heartbeating bridge.
+- **`6318968` `device_setup_page.dart`** — Apple audit **S-9**: check
+  `FlutterBluePlus.adapterState` before scanning and say when Bluetooth is off /
+  unauthorized / unavailable / unsupported. Also makes the pre-existing
+  permission-denied message visible (it was written to `_statusText`, which only renders
+  inside the Wi-Fi form).
+- **`0695733`** — the bump.
+
+**Not in +99, still open:** the install retry dead-end itself (`email-already-in-use`
+with a stub doc cannot self-recover — moot while the rules fix is live, but the app has
+no recovery path). **Play B-6 was closed by decision, not code:** analytics is declared
+REQUIRED; the privacy-policy sentence promising an in-app opt-out must be removed on the
+web side before submission.
+
 ## 2.5.10+97 — targetSdk 36. Android AAB built and verified. iOS build number PENDING.
 
 > **STATUS: Android artifact exists and is signed with the release key.**
