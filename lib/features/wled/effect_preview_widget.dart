@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'solid_palette_blocks.dart';
 import 'wled_effects_catalog.dart';
 
 /// Documents the col[] slot roles for a given WLED effect.
@@ -269,6 +270,16 @@ class _EffectPreviewWidgetState extends State<EffectPreviewWidget>
   Widget _buildPreview() {
     switch (_previewType) {
       case EffectPreviewType.solid:
+        // fx 83 "Solid Pattern" with 2-3 colours is what every apply path
+        // substitutes for Solid + a multi-colour palette, and on the device
+        // (pal:5, positional palette mapping) that is N CONTIGUOUS BLOCKS in
+        // col[] order — thirds, not a per-bulb cycle. Previewing it as one
+        // flat colour under-reported it; cycling bulbs mis-reported it. See
+        // solid_palette_blocks.dart for the firmware trace. Plain fx 0 really
+        // does show col[0] only, and fx 84/85/98 are left as they were.
+        if (widget.effectId == 83 && widget.colors.length >= 2) {
+          return _SolidBlocksPreview(colors: widget.colors);
+        }
         return _SolidPreview(color: primary);
       case EffectPreviewType.gradient:
         return _GradientPreview(colors: widget.colors);
@@ -447,6 +458,40 @@ class _SolidPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(color: color);
+}
+
+/// fx 83 + pal 5 with N colours: N equal contiguous blocks, slot order,
+/// left to right — the roofline read as a strip. Built from plain
+/// [Container]s (one per block) rather than a painter so a widget test can
+/// assert the blocks, their colours and their order directly.
+class _SolidBlocksPreview extends StatelessWidget {
+  final List<Color> colors;
+  const _SolidBlocksPreview({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    // WLED has three colour slots; the partition helper clamps the same way.
+    final blocks = colors.take(3).toList();
+    return Row(
+      children: [
+        for (var k = 0; k < blocks.length; k++)
+          Expanded(
+            // Tie each block to the shared partition by sampling the
+            // MIDPOINT of block k on a 1000-px strip — it must map to slot k.
+            // (Sampling the left edge k/N is off by one at k=2, N=3: integer
+            // truncation lands at 666, which the partition floors into
+            // slot 1. A test caught it.)
+            child: Container(
+              color: blocks[solidPaletteBlockIndex(
+                (2 * k + 1) * 1000 ~/ (2 * blocks.length),
+                1000,
+                blocks.length,
+              )],
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _GradientPreview extends StatelessWidget {

@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/selector_payload.dart';
+import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
@@ -579,8 +580,13 @@ class _ColorwayEffectSelectorPageState
   /// Architectural patterns keep effect 0 — their spacing comes from grp/spc,
   /// not from multi-color distribution.
   int _effectiveEffectId(int selectedId) {
-    if (selectedId == 0 && _paletteColors.length > 1 && !_isArchitectural) return 83;
-    return selectedId;
+    // ONE rule, shared with the previews (solid_palette_blocks.dart), so the
+    // tile and the dot row can never disagree with what this sends.
+    return effectiveSolidEffectId(
+      effectId: selectedId,
+      colorCount: _paletteColors.length,
+      isArchitectural: _isArchitectural,
+    );
   }
 
   void _sendToWled() {
@@ -1686,7 +1692,11 @@ class _ColorwayEffectSelectorPageState
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: EffectPreviewWidget(
-                  effectId: effect.id,
+                  // Preview what tapping this tile SENDS, not the catalog id:
+                  // Solid with a multi-colour palette goes out as fx 83 +
+                  // pal:5, which the device renders as contiguous colour
+                  // blocks. Passing the raw 0 previewed a single flat colour.
+                  effectId: _effectiveEffectId(effect.id),
                   colors: _paletteColors,
                   borderRadius: 8,
                 ),
@@ -1811,12 +1821,28 @@ class _ColorwayEffectSelectorPageState
     final spc = ref.watch(selectorSpacingProvider);
     final cycle = colorGroup + spc;
 
+    // Solid + multi-colour palette is sent as fx 83 + pal:5, and the device
+    // lays the palette out POSITIONALLY — N contiguous blocks in col[] order
+    // (thirds for three colours), regardless of `grp`. This row used to cycle
+    // colours per dot for that case and showed a bulb-by-bulb alternation the
+    // roofline never produces; it was the most-reported preview/reality
+    // mismatch. Every other effect keeps its real grp-band rendering.
+    // Decision comes from the same helper the apply path uses.
+    final solidBlocks = isSolidPaletteSubstitution(
+      effectId: ref.watch(selectorEffectIdProvider),
+      colorCount: colors.length,
+      isArchitectural: _isArchitectural,
+    );
+    const dotCount = 18;
+
     final dots = <Widget>[];
-    for (int i = 0; i < 18; i++) {
+    for (int i = 0; i < dotCount; i++) {
       final bool lit = spc == 0 || cycle == 0 || (i % cycle) < colorGroup;
       final Color dotColor;
       if (lit) {
-        final colorIndex = (i ~/ colorGroup) % colors.length;
+        final colorIndex = solidBlocks
+            ? solidPaletteBlockIndex(i, dotCount, colors.length)
+            : (i ~/ colorGroup) % colors.length;
         dotColor = colors[colorIndex];
       } else {
         dotColor = colors.first.withValues(alpha: 0.10);
