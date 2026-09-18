@@ -222,8 +222,42 @@ service cloud.firestore {
             || request.auth.token.get('role', '') == 'installer');
     }
 
-    function staffMayReach(userId) {
+    // ── STUB-DOC CORRECTION (2026-09-18) ─────────────────────────────────
+    //
+    // The P0-5 form above keyed "unprovisioned" on the document NOT EXISTING.
+    // That premise is false in the field. createUserWithEmailAndPassword signs
+    // the wizard in AS the new customer for ~1s, and in that window
+    // sync_notification_service._storeToken does a set(merge) of
+    // {fcmToken, fcmTokenUpdatedAt} — which CREATES /users/{customerUid}.
+    // assignReferralCode then adds referralCode. By the time the controller
+    // migration batch runs, the doc exists with no dealer_code, the exists()
+    // arm resolves hasStaffClaim(''), and the pixelMap write is DENIED — taking
+    // the atomic controller migration down with it. The retry then dead-ends on
+    // "No existing customer matches this email" because the stub carries
+    // neither email nor dealer_code. Hit on a real customer install 2026-09-18.
+    //
+    // THE DISCRIMINATOR IS owner_id. Census of production the same day: all 24
+    // real user docs carry owner_id (UserModel.toJson always writes it); all 22
+    // docs without it are pure {fcmToken, fcmTokenUpdatedAt, referralCode}
+    // stubs from anonymous/staff sessions. Self-signup customers with no
+    // dealer_code DO carry owner_id, so they stay on the scoped arm and remain
+    // unreachable to every staff session ('' matches no real dealerCode claim).
+    //
+    // RESIDUAL, RESTATED: a staff session may reach these subcollections under
+    // a uid whose user doc is absent OR is a stub with no owner_id. A stub holds
+    // a push token and a referral code — no customer data — and staffMayReach
+    // gates subcollections only, never the user doc itself. The moment the
+    // wizard's UserModel write lands (owner_id + dealer_code together), full
+    // dealer scoping applies. Same-document get()s are cached; cost unchanged
+    // in practice.
+    function isProvisionedUser(userId) {
       return exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId))
+             .data.get('owner_id', '') != '';
+    }
+
+    function staffMayReach(userId) {
+      return isProvisionedUser(userId)
         ? hasStaffClaim(dealerCodeOf(userId))
         : isStaffSession();
     }
