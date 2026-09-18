@@ -2541,7 +2541,7 @@ and exactly **one** `unawaited` ([:173](../lib/features/autopilot/game_day_autop
 the 15-second revert timer. **Nothing was deleted, because there is nothing to
 delete.** If it exists, it is in another window's tree — the ask stands there, not here.
 
-## 2.5.10+99 — field-install fixes. Android AAB built and verified. iOS CI SUCCESS, build number PENDING.
+## 2.5.10+99 — field-install fixes. Android AAB built and verified. iOS = TestFlight build 335.
 
 > **STATUS: Android artifact exists and is signed with the release key.**
 > versionCode 99 is **CONSUMED**. **NOT UPLOADED to Play.** Codemagic `iOS Release`
@@ -2561,7 +2561,7 @@ delete.** If it exists, it is in another window's tree — the ask stands there,
 | **Signer** | `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US`, SHA1 `8E:4A:35:82:8B:32:BA:52:B9:93:25:25:B8:5E:B4:D4:FD:0A:57:DA` — verified by identity, `jar verified`. |
 | **Signing inputs** | Copied from the **main repo** (convention 3). md5 main == worktree for all three: `google-services.json` `7df11c93…d492`, `nex-gen-lumina.keystore` `d019d3ec…645d`, `key.properties` `539a84cf…8335` — identical to +96/+97. Worktree `git status` empty before and after the build. |
 | **Android symbols** | `app.android-arm.symbols` (6,847,076 B), `app.android-arm64.symbols` (7,874,040 B), `app.android-x64.symbols` (7,866,088 B). Native debug symbols also embedded in the bundle (3 `debugsymbols` entries). |
-| **iOS** | Codemagic `iOS Release` **success**. Build number NOT recorded (**#87** — no read-only Codemagic token; the number comes from Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec). Read it from TestFlight and amend this row. |
+| **iOS** | Codemagic `iOS Release` **success**. **TestFlight `2.5.10 (335)`** — read off TestFlight by Tyler 2026-09-18 and installed on his device; the number comes from Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec (**#87** — no read-only Codemagic token, so it was not machine-verified). iOS `CFBundleVersion` 335 ↔ Android versionCode 99 ↔ git `0695733`. The login screen shows `v2.5.10` only (`kAppVersionName`, by design), so it cannot distinguish +99 from +98 — use the TestFlight build number. |
 | **Local gate at tag time** | **PARTIAL — stated plainly.** `flutter analyze` was run on the **two changed Dart files only** (`device_setup_page.dart`, `bridge_setup_screen.dart`): 0 errors, 0 warnings, 2 pre-existing `prefer_interpolation_to_compose_strings` infos on untouched lines. **The full-tree analyze and `flutter test` were NOT run.** Codemagic's own analyze step passed (the build would have failed otherwise). Neither Dart change was exercised on a device — there is no test device. |
 | **Build host** | Windows; same toolchain as +97. |
 
