@@ -45,6 +45,11 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
   final TextEditingController _passCtrl = TextEditingController();
   bool _provisioning = false;
   String? _statusText;
+  // Why a scan could not run at all (Bluetooth off, unsupported, permission
+  // denied). Rendered in place of "No devices found" — `_statusText` only
+  // renders inside the Wi‑Fi form, so a scan-phase message set there is
+  // never seen.
+  String? _scanBlocker;
   bool _showPassword = false;
   bool _provisionSuccess = false;
   String? _provisionedIp;
@@ -185,20 +190,37 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       // these, so the installer flow that drops directly into this
       // screen would otherwise hit a black hole at the customer's
       // house. iOS requires Permission.bluetooth on iOS 13+.
+      if (mounted && _scanBlocker != null) setState(() => _scanBlocker = null);
       if (!kIsWeb && !kSimulationMode) {
         final granted = await _ensureBluetoothPermissions();
         if (!granted) {
           if (mounted) {
             setState(() {
               _isScanning = false;
-              _statusText =
+              _scanBlocker =
                   'Bluetooth permission denied. Open Settings → Apps → Lumina → Permissions to enable Nearby devices, then return here.';
+            });
+          }
+          return;
+        }
+
+        // With the adapter off, startScan neither throws nor returns
+        // results: the radar spins for 9 s and then reports "No devices
+        // found", which reads as a missing controller rather than a
+        // switched-off radio. Say which it is.
+        final blocker = await _bluetoothAdapterBlocker();
+        if (blocker != null) {
+          if (mounted) {
+            setState(() {
+              _isScanning = false;
+              _scanBlocker = blocker;
             });
           }
           return;
         }
       }
 
+      if (!mounted) return;
       setState(() => _isScanning = true);
       await FlutterBluePlus.stopScan();
       // Filter by the Improv service UUID; some devices mask it, so we will also apply a name fallback in onData.
@@ -232,6 +254,39 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       unawaited(Future.delayed(const Duration(seconds: 9), () {
         if (mounted) setState(() => _isScanning = false);
       }));
+    }
+  }
+
+  /// Returns a user-facing reason the adapter cannot scan, or null when it
+  /// can (or when the state is indeterminate — never block on a guess).
+  Future<String?> _bluetoothAdapterBlocker() async {
+    try {
+      if (!await FlutterBluePlus.isSupported) {
+        return 'This device does not support Bluetooth, which is required to set up a new controller.';
+      }
+      // iOS reports `unknown` for a beat after the plugin spins up; wait
+      // for the first real state instead of misreading it as "off".
+      final state = await FlutterBluePlus.adapterState
+          .where((s) => s != BluetoothAdapterState.unknown)
+          .first
+          .timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => FlutterBluePlus.adapterStateNow,
+          );
+      switch (state) {
+        case BluetoothAdapterState.off:
+        case BluetoothAdapterState.turningOff:
+          return 'Bluetooth is turned off. Turn Bluetooth on, then tap Rescan.';
+        case BluetoothAdapterState.unauthorized:
+          return 'Lumina is not allowed to use Bluetooth. Enable Bluetooth for Lumina in your device Settings, then tap Rescan.';
+        case BluetoothAdapterState.unavailable:
+          return 'Bluetooth is unavailable on this device right now. Check that it is turned on, then tap Rescan.';
+        default:
+          return null;
+      }
+    } catch (e) {
+      debugPrint('BLE adapter state check failed: $e');
+      return null;
     }
   }
 
@@ -608,11 +663,11 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
             Expanded(
               child: Center(
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.bluetooth_searching, color: NexGenPalette.violet, size: 48),
+                  Icon(_scanBlocker != null ? Icons.bluetooth_disabled : Icons.bluetooth_searching, color: NexGenPalette.violet, size: 48),
                   const SizedBox(height: 12),
-                  Text('No devices found', style: Theme.of(context).textTheme.titleLarge),
+                  Text(_scanBlocker != null ? 'Bluetooth needed' : 'No devices found', style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 8),
-                  Text('Make sure the controller is in pairing mode and nearby.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
+                  Text(_scanBlocker ?? 'Make sure the controller is in pairing mode and nearby.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
                 ]),
               ),
             )
