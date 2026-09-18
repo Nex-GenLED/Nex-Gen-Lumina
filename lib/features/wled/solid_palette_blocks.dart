@@ -83,3 +83,84 @@ int solidPaletteBlockIndex(int index, int pixelCount, int colorCount) {
   final i = index.clamp(0, pixelCount - 1);
   return ((i * n) ~/ pixelCount).clamp(0, n - 1);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Layout choice: Blocks vs Alternating
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// How a multi-colour palette is laid out when the user picks Solid.
+///
+/// * [blocks] — fx 83 + `pal:5`: N contiguous positional blocks (thirds).
+///   See the header of this file.
+/// * [alternating] — repeating bands of `ledsPerColor` LEDs, cycling the
+///   colours bulb-group by bulb-group. THE DEVICE TRUTH (WLED 0.15.1):
+///     - 3 colours → **fx 84 `mode_tri_static_pattern`** (FX.cpp:2870):
+///       `SEGCOLOR(0..2)` written directly, no palette, in runs of
+///       `segSize = (intensity >> 5) + 1` VIRTUAL pixels. We send `ix:0` so
+///       `segSize == 1`, and let WLED's grouping do the width.
+///     - 2 colours → **fx 83 `mode_static_pattern`** with **`pal:0`**: lit run
+///       `1 + sx` px of `color_from_palette(i, …)`, which at `pal 0` returns
+///       `SEGCOLOR(0)` (FX_fcn.cpp:1173) — no positional mapping; unlit run
+///       `1 + ix` px of `SEGCOLOR(1)`. We send `sx:0, ix:0` for 1 + 1.
+///     - Width comes from **`grp`** in both cases: every virtual pixel is
+///       expanded to `grouping` physical LEDs (`i = i * groupLength()`,
+///       FX_fcn.cpp:831; `groupLength() = grouping + spacing`, FX.h:532). So
+///       `grp = ledsPerColor` gives bands of exactly `ledsPerColor` LEDs, for
+///       any width, with no fx-84 cap at 8.
+///   Sending BOTH a band size (`ix`) AND `grp` multiplies them — bands of
+///   N×N LEDs — which is what the Explore grid card used to do for N > 1.
+enum SolidLayout { blocks, alternating }
+
+/// The segment fields a layout needs. `null` means "leave the caller's value".
+class SolidLayoutFields {
+  final int fx;
+  final int? pal;
+  final int? sx;
+  final int? ix;
+  final int grp;
+  const SolidLayoutFields({
+    required this.fx,
+    this.pal,
+    this.sx,
+    this.ix,
+    required this.grp,
+  });
+
+  @override
+  String toString() =>
+      'SolidLayoutFields(fx:$fx pal:$pal sx:$sx ix:$ix grp:$grp)';
+}
+
+/// The wire fields for Solid + [colorCount] colours in [layout], with bands of
+/// [ledsPerColor] LEDs for the alternating layout. One colour is plain Solid.
+SolidLayoutFields solidLayoutFields({
+  required SolidLayout layout,
+  required int colorCount,
+  required int ledsPerColor,
+}) {
+  final n = colorCount.clamp(1, 3);
+  final grp = ledsPerColor.clamp(1, 255);
+  if (n == 1) return const SolidLayoutFields(fx: 0, grp: 1);
+  switch (layout) {
+    case SolidLayout.blocks:
+      // Positional blocks. sx/ix are irrelevant to the block layout itself
+      // (see the lit/unlit note in the file header) — leave the caller's.
+      return SolidLayoutFields(fx: 83, pal: 5, grp: grp);
+    case SolidLayout.alternating:
+      if (n >= 3) {
+        return SolidLayoutFields(fx: 84, pal: 5, sx: 0, ix: 0, grp: grp);
+      }
+      return SolidLayoutFields(fx: 83, pal: 0, sx: 0, ix: 0, grp: grp);
+  }
+}
+
+/// Which colour slot pixel [index] shows under the alternating layout with
+/// bands of [ledsPerColor]: the device's `grp` expansion, cycling
+/// [colorCount] slots. This is the `(i ~/ grp) % N` the dot row always drew —
+/// now the ONLY case it is correct for.
+int alternatingBandIndex(int index, int ledsPerColor, int colorCount) {
+  final n = colorCount.clamp(1, 3);
+  final w = ledsPerColor.clamp(1, 255);
+  if (n == 1) return 0;
+  return (index < 0 ? 0 : index) ~/ w % n;
+}

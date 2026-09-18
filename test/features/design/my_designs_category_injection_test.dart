@@ -213,32 +213,32 @@ void main() {
       await _primeDesignsStream(c);
       final cats = await c.read(patternCategoriesProvider.future);
       expect(cats.last.id, kMyDesignsCategoryId);
-      expect(cats, hasLength(9));
+      expect(cats, hasLength(10)); // 9 catalog roots (Rainbow added 2026-09-18) + my_designs
     });
 
-    test('signed out → 8 categories, My Designs absent', () async {
+    test('signed out → 9 categories, My Designs absent', () async {
       final c = _container(const [], signedIn: false);
       addTearDown(c.dispose);
       final cats = await c.read(patternCategoriesProvider.future);
-      expect(cats, hasLength(8));
+      expect(cats, hasLength(9)); // 9 catalog roots (Rainbow added 2026-09-18), no my_designs
       expect(cats.map((e) => e.id), isNot(contains(kMyDesignsCategoryId)));
     });
   });
 
   group('node tree root — B4 gate', () {
-    test('9 roots authenticated, 8 unauthenticated', () async {
+    test('10 roots authenticated, 9 unauthenticated', () async {
       final signedIn = _container(const []);
       addTearDown(signedIn.dispose);
       final inRoots =
           await signedIn.read(libraryChildNodesProvider(null).future);
-      expect(inRoots, hasLength(9));
+      expect(inRoots, hasLength(10)); // 9 catalog roots + my_designs
       expect(inRoots.last.id, kMyDesignsCategoryId,
-          reason: 'sortOrder 8 puts it after the 8 catalog roots');
+          reason: 'sortOrder 9 puts it after the 9 catalog roots');
 
       final guest = _container(const [], signedIn: false);
       addTearDown(guest.dispose);
       final outRoots = await guest.read(libraryChildNodesProvider(null).future);
-      expect(outRoots, hasLength(8));
+      expect(outRoots, hasLength(9));
       expect(outRoots.map((n) => n.id), isNot(contains(kMyDesignsCategoryId)));
     });
 

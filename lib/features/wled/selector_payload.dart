@@ -37,6 +37,18 @@ class SelectorState {
   /// device's own master control the level; a stored design carries its own.
   final int brightness;
 
+  /// An explicit `pal` that beats [WledEffectsCatalog.paletteForEffect].
+  ///
+  /// Two callers, both deliberate exceptions to the derived-palette rule:
+  ///   * the Alternating solid layout with two colours needs `pal:0` so fx 83
+  ///     writes `col[0]` instead of mapping `pal:5` positionally
+  ///     (solid_palette_blocks.dart);
+  ///   * a Rainbow-folder card running a rainbow-family effect needs `pal:0`
+  ///     so WLED's `color_wheel` uses its hue wheel — the full spectrum —
+  ///     instead of sampling a gradient of the three `col[]` slots
+  ///     (rainbow_scope.dart).
+  final int? paletteOverride;
+
   const SelectorState({
     required this.effectId,
     required this.speed,
@@ -45,6 +57,7 @@ class SelectorState {
     this.grouping = kDesignDefaultGrp,
     this.spacing = kDesignDefaultSpc,
     this.brightness = 255,
+    this.paletteOverride,
   });
 
   SelectorState copyWith({
@@ -55,6 +68,7 @@ class SelectorState {
     int? spacing,
     List<List<int>>? colors,
     int? brightness,
+    int? paletteOverride,
   }) {
     return SelectorState(
       effectId: effectId ?? this.effectId,
@@ -64,6 +78,7 @@ class SelectorState {
       spacing: spacing ?? this.spacing,
       colors: colors ?? this.colors,
       brightness: brightness ?? this.brightness,
+      paletteOverride: paletteOverride ?? this.paletteOverride,
     );
   }
 
@@ -76,15 +91,17 @@ class SelectorState {
       other.grouping == grouping &&
       other.spacing == spacing &&
       other.brightness == brightness &&
+      other.paletteOverride == paletteOverride &&
       _colorsEqual(other.colors, colors);
 
   @override
-  int get hashCode => Object.hash(
-      effectId, speed, intensity, grouping, spacing, brightness, colors.length);
+  int get hashCode => Object.hash(effectId, speed, intensity, grouping,
+      spacing, brightness, paletteOverride, colors.length);
 
   @override
   String toString() => 'SelectorState(fx:$effectId sx:$speed ix:$intensity '
-      'grp:$grouping spc:$spacing bri:$brightness cols:${colors.length})';
+      'grp:$grouping spc:$spacing bri:$brightness cols:${colors.length}'
+      '${paletteOverride == null ? '' : ' pal!:$paletteOverride'})';
 }
 
 bool _colorsEqual(List<List<int>> a, List<List<int>> b) {
@@ -119,7 +136,7 @@ Map<String, dynamic> buildSelectorPayload(SelectorState s) {
         'fx': s.effectId,
         'sx': s.speed,
         'ix': s.intensity,
-        'pal': WledEffectsCatalog.paletteForEffect(s.effectId),
+        'pal': s.paletteOverride ?? WledEffectsCatalog.paletteForEffect(s.effectId),
         'grp': s.grouping,
         'spc': s.spacing,
         'col': cols,
@@ -162,13 +179,24 @@ SelectorState selectorStateFromPayload(Map<String, dynamic> payload) {
     }
   }
 
+  final fx = asInt(seg['fx'], 0);
+  // A stored `pal` that is not the one the effect derives is an override and
+  // must survive the round trip, or an Alternating/Rainbow payload would be
+  // rewritten to positional/palette on its next save.
+  final storedPal = seg['pal'];
+  final override = storedPal is num &&
+          storedPal.toInt() != WledEffectsCatalog.paletteForEffect(fx)
+      ? storedPal.toInt()
+      : null;
+
   return SelectorState(
-    effectId: asInt(seg['fx'], 0),
+    effectId: fx,
     speed: asInt(seg['sx'], 128),
     intensity: asInt(seg['ix'], 128),
     grouping: asInt(seg['grp'], kDesignDefaultGrp),
     spacing: asInt(seg['spc'], kDesignDefaultSpc),
     colors: colors,
     brightness: asInt(payload['bri'], 255),
+    paletteOverride: override,
   );
 }

@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/selector_payload.dart';
 import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
+import 'package:nexgen_command/features/wled/rainbow_scope.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
@@ -556,6 +557,11 @@ class _ColorwayEffectSelectorPageState
   bool get _isBrightnessGradient =>
       widget.paletteNode.metadata?['type'] == 'brightness_gradient';
 
+  /// Whether this node lives under the Rainbow root. Only then are rainbow-
+  /// family effects offered, and only then do they go out with `pal:0` so
+  /// the firmware's hue wheel renders the full spectrum (rainbow_scope.dart).
+  bool get _isRainbowPalette => isRainbowLibraryNode(widget.paletteNode);
+
   /// Compute gradient colors from the base (100%) color and preset steps.
   List<Color> _gradientColorsForPreset(int presetIndex) {
     final presets = PatternRepository.brightnessGradientPresets;
@@ -582,11 +588,33 @@ class _ColorwayEffectSelectorPageState
   int _effectiveEffectId(int selectedId) {
     // ONE rule, shared with the previews (solid_palette_blocks.dart), so the
     // tile and the dot row can never disagree with what this sends.
-    return effectiveSolidEffectId(
+    return _solidFieldsFor(selectedId)?.fx ?? selectedId;
+  }
+
+  /// The Solid-layout wire fields for [selectedId], or null when Solid is not
+  /// being substituted (one colour, architectural node, or not Solid at all).
+  /// Blocks → fx 83 + pal:5; Alternating → fx 84 (3 colours) or fx 83 + pal:0
+  /// (2 colours), bands of `selectorColorGroupProvider` LEDs via grp.
+  SolidLayoutFields? _solidFieldsFor(int selectedId) {
+    if (!isSolidPaletteSubstitution(
       effectId: selectedId,
       colorCount: _paletteColors.length,
       isArchitectural: _isArchitectural,
+    )) {
+      return null;
+    }
+    return solidLayoutFields(
+      layout: ref.read(selectorSolidLayoutProvider),
+      colorCount: _paletteColors.length,
+      ledsPerColor: ref.read(selectorColorGroupProvider),
     );
+  }
+
+  /// The fields for the CURRENTLY selected effect, or null (also null for
+  /// brightness gradients, which resolve fx 83 on their own path).
+  SolidLayoutFields? _activeSolidFields() {
+    if (_isBrightnessGradient) return null;
+    return _solidFieldsFor(ref.read(selectorEffectIdProvider));
   }
 
   void _sendToWled() {
@@ -627,13 +655,20 @@ class _ColorwayEffectSelectorPageState
       // from the effect's colour behaviour there, not hardcoded — palette-
       // driven effects sweep a gradient of the USER's colours (pal 4);
       // col-based effects keep them discrete (pal 5).
+      // Solid layout (Blocks/Alternating) may pin sx/ix/grp/pal; a Rainbow-
+      // folder card pins pal:0 for rainbow-family effects. Both are explicit,
+      // deliberate exceptions to the derived-palette rule — see SelectorState.
+      final solid = _activeSolidFields();
       var payload = buildSelectorPayload(SelectorState(
         effectId: fxId,
-        speed: speed,
-        intensity: ref.read(selectorIntensityProvider),
-        grouping: colorGroup,
+        speed: solid?.sx ?? speed,
+        intensity: solid?.ix ?? ref.read(selectorIntensityProvider),
+        grouping: solid?.grp ?? colorGroup,
         spacing: spacing,
         colors: cols,
+        paletteOverride: solid?.pal ??
+            rainbowPaletteOverride(
+                effectId: fxId, rainbowScope: _isRainbowPalette),
       ));
 
       // Apply channel filter so all targeted segments receive the change
@@ -693,13 +728,19 @@ class _ColorwayEffectSelectorPageState
 
       // Same builder as the preview path and save-to-design, so the payload
       // persisted to Game Day cannot drift from the one previewed.
+      // Same overrides as the preview path, so what was previewed is what
+      // gets committed (and what a saved design round-trips back to).
+      final solid = _activeSolidFields();
       var payload = buildSelectorPayload(SelectorState(
         effectId: fxId,
-        speed: speed,
-        intensity: intensity,
-        grouping: colorGroup,
+        speed: solid?.sx ?? speed,
+        intensity: solid?.ix ?? intensity,
+        grouping: solid?.grp ?? colorGroup,
         spacing: spacing,
         colors: cols,
+        paletteOverride: solid?.pal ??
+            rainbowPaletteOverride(
+                effectId: fxId, rainbowScope: _isRainbowPalette),
       ));
 
       // SELECTION MODE (e.g. the schedule picker) — the SAVE exit. The live
@@ -861,6 +902,10 @@ class _ColorwayEffectSelectorPageState
         ? (breathing ? 100 : 0)
         : speed;
 
+    // Watched here so the effect tiles and the dot row rebuild when the
+    // Blocks/Alternating toggle changes (the helpers below use ref.read).
+    ref.watch(selectorSolidLayoutProvider);
+
     final effect = WledEffectsCatalog.getById(effectId);
     final hasMultipleColors = _paletteColors.length > 1;
     final showColorLayout = !_isBrightnessGradient &&
@@ -876,12 +921,18 @@ class _ColorwayEffectSelectorPageState
 
     // Build filtered effect list (only used for non-gradient patterns)
     final bool showingTopPicks = motionFilter == null && colorFilter == null;
-    final List<WledEffect> displayEffects = showingTopPicks
-        ? WledEffectsCatalog.topPicks
-        : WledEffectsCatalog.filterEffects(
-            motionType: motionFilter,
-            colorBehavior: colorFilter,
-          );
+    // Rainbow-family effects are offered ONLY under the Rainbow root. They
+    // used to reach every palette through topPicks (which carried fx 9) and
+    // through the unfiltered "All"/"Any Color" list — the Rainbow leak.
+    final List<WledEffect> displayEffects = scopeRainbowEffects(
+      showingTopPicks
+          ? WledEffectsCatalog.topPicks
+          : WledEffectsCatalog.filterEffects(
+              motionType: motionFilter,
+              colorBehavior: colorFilter,
+            ),
+      rainbowScope: _isRainbowPalette,
+    );
 
     return CustomScrollView(
       slivers: [
@@ -1335,7 +1386,7 @@ class _ColorwayEffectSelectorPageState
   /// default (the yellow double-underline); without the SafeArea the header
   /// sits under the status bar.
   Widget _buildCelebrationBody(int effectId, int speed, int intensity) {
-    final picks = WledEffectsCatalog.celebrationPicks;
+    final picks = scopeRainbowEffects(WledEffectsCatalog.celebrationPicks, rainbowScope: _isRainbowPalette);
     return Material(
       color: NexGenPalette.matteBlack,
       child: SafeArea(
@@ -1693,12 +1744,17 @@ class _ColorwayEffectSelectorPageState
                 borderRadius: BorderRadius.circular(8),
                 child: EffectPreviewWidget(
                   // Preview what tapping this tile SENDS, not the catalog id:
-                  // Solid with a multi-colour palette goes out as fx 83 +
-                  // pal:5, which the device renders as contiguous colour
-                  // blocks. Passing the raw 0 previewed a single flat colour.
+                  // Solid with a multi-colour palette goes out as fx 83
+                  // (Blocks) or fx 84 / fx 83+pal:0 (Alternating). Passing
+                  // the raw 0 previewed a single flat colour.
                   effectId: _effectiveEffectId(effect.id),
                   colors: _paletteColors,
                   borderRadius: 8,
+                  alternatingLedsPerColor: _solidFieldsFor(effect.id) != null &&
+                          ref.read(selectorSolidLayoutProvider) ==
+                              SolidLayout.alternating
+                      ? ref.read(selectorColorGroupProvider)
+                      : null,
                 ),
               ),
             ),
@@ -1759,6 +1815,41 @@ class _ColorwayEffectSelectorPageState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Blocks vs Alternating — only meaningful when Solid is being
+          // substituted for a multi-colour palette. Both names are new
+          // product copy: docs/guides-2026-09 has no term for either layout,
+          // the catalog calls them "Solid Pattern" / "Solid Pattern Tri", and
+          // the AI composer's enum says `alternating`. Flagged in the report.
+          if (_solidFieldsFor(ref.watch(selectorEffectIdProvider)) != null) ...[
+            Text(
+              'Layout',
+              style: TextStyle(
+                color: NexGenPalette.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                for (final layout in SolidLayout.values) ...[
+                  _buildFilterChip(
+                    label: layout == SolidLayout.blocks
+                        ? 'Blocks'
+                        : 'Alternating',
+                    isSelected:
+                        ref.watch(selectorSolidLayoutProvider) == layout,
+                    onTap: () {
+                      ref.read(selectorSolidLayoutProvider.notifier).state =
+                          layout;
+                      _sendToWled();
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
           Text(
             'LEDs per color',
             style: TextStyle(
@@ -1829,10 +1920,13 @@ class _ColorwayEffectSelectorPageState
     // mismatch. Every other effect keeps its real grp-band rendering.
     // Decision comes from the same helper the apply path uses.
     final solidBlocks = isSolidPaletteSubstitution(
-      effectId: ref.watch(selectorEffectIdProvider),
-      colorCount: colors.length,
-      isArchitectural: _isArchitectural,
-    );
+          effectId: ref.watch(selectorEffectIdProvider),
+          colorCount: colors.length,
+          isArchitectural: _isArchitectural,
+        ) &&
+        ref.watch(selectorSolidLayoutProvider) == SolidLayout.blocks;
+    // (Alternating keeps the `(i ~/ colorGroup) % N` rendering below — that IS
+    // the device's grp expansion, and is now the only case it is drawn for.)
     const dotCount = 18;
 
     final dots = <Widget>[];

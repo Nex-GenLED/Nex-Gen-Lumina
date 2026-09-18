@@ -10,6 +10,8 @@ import 'package:nexgen_command/data/seasonal_colorways.dart';
 import 'package:nexgen_command/data/party_event_palettes.dart';
 import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
 import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
+import 'package:nexgen_command/data/rainbow_palettes.dart';
+import 'package:nexgen_command/features/wled/rainbow_scope.dart';
 import 'package:flutter/material.dart';
 
 /// In-memory data source for the Pattern Library.
@@ -789,6 +791,13 @@ class PatternRepository {
     }
 
     try {
+      // Rainbow: genuine full-spectrum colourways (own root, not Nature)
+      nodes.addAll(RainbowPalettes.getRainbowPaletteNodes());
+    } catch (e) {
+      debugPrint('[PatternRepository] Rainbow failed: $e');
+    }
+
+    try {
       // Architectural & Security: direct palettes
       nodes.addAll(_buildArchitecturalPalettes());
       nodes.addAll(_buildSecurityPalettes());
@@ -859,6 +868,18 @@ class PatternRepository {
         sortOrder: 4,
         imageUrl: 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a',
       ),
+      // Genuine rainbow colourways. Its own root — a rainbow is a colourway,
+      // not an environment — and the ONLY place rainbow-family effects are
+      // offered (rainbow_scope.dart). No stock photo: the swatch is the
+      // spectrum itself.
+      LibraryNode(
+        id: LibraryCategoryIds.rainbow,
+        name: 'Rainbow',
+        description: 'Full-spectrum colourways',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 8,
+        themeColors: kRainbowSpectrum,
+      ),
       // The user's saved designs. A REAL root node rather than a runtime
       // synthesis (audit/MY_DESIGNS_AUDIT.md §2b.3): being in the tree is what
       // makes search, pinning, breadcrumbs and every LibraryNode-driven picker
@@ -875,7 +896,7 @@ class PatternRepository {
         name: 'My Designs',
         description: 'Designs you have saved',
         nodeType: LibraryNodeType.category,
-        sortOrder: 8, // last, after the 8 catalog roots
+        sortOrder: 9, // last, after the 9 catalog roots
         metadata: {'isDynamic': true},
       ),
     ];
