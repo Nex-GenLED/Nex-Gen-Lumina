@@ -300,6 +300,10 @@ final currentRooflineConfigProvider =
 /// whose live length has drifted is stale ("roofline changed — remap channel
 /// N"). UI consumption is Slice 2/5; Slice 1 provides the state. A device that
 /// is unreachable (no live channels) yields all-false (not provably stale).
+///
+/// Also true when a channel's stored segments do not FIT the strip (see
+/// [PixelMapChannel.segmentsFitChannel]) — a length-only comparison reports a
+/// map whose every segment lies past the end of the channel as healthy.
 final pixelMapStalenessProvider = Provider<Map<int, bool>>((ref) {
   final channels = ref.watch(currentPixelMapChannelsProvider).maybeWhen(
         data: (list) => list,
@@ -311,7 +315,7 @@ final pixelMapStalenessProvider = Provider<Map<int, bool>>((ref) {
   };
   return {
     for (final c in channels)
-      c.channelIndex: c.isStaleAgainst(liveByChannel[c.channelIndex]),
+      c.channelIndex: c.needsRemapAgainst(liveByChannel[c.channelIndex]),
   };
 });
 

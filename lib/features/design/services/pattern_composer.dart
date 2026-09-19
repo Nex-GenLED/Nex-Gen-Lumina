@@ -154,22 +154,24 @@ class PatternComposer {
   ) {
     switch (zone.type) {
       case ZoneSelectorType.all:
-        return [_PixelRange(0, config.totalPixelCount - 1)];
+        return [_PixelRange(0, config.globalPixelCount - 1)];
 
       case ZoneSelectorType.segments:
         if (zone.segmentIds == null) {
-          return [_PixelRange(0, config.totalPixelCount - 1)];
+          return [_PixelRange(0, config.globalPixelCount - 1)];
         }
         return config.segments
             .where((s) => zone.segmentIds!.contains(s.id))
-            .map((s) => _PixelRange(s.startPixel, s.endPixel))
+            .map((s) => _PixelRange(
+                config.globalStartOf(s), config.globalEndOf(s)))
             .toList();
 
       case ZoneSelectorType.architectural:
         if (zone.roles == null) return [];
         return config.segments
             .where((s) => _segmentMatchesRoles(s, zone.roles!))
-            .map((s) => _PixelRange(s.startPixel, s.endPixel))
+            .map((s) => _PixelRange(
+                config.globalStartOf(s), config.globalEndOf(s)))
             .toList();
 
       case ZoneSelectorType.location:
@@ -177,14 +179,16 @@ class PatternComposer {
         final location = zone.location?.toLowerCase() ?? '';
         return config.segments
             .where((s) => _segmentMatchesLocation(s, location))
-            .map((s) => _PixelRange(s.startPixel, s.endPixel))
+            .map((s) => _PixelRange(
+                config.globalStartOf(s), config.globalEndOf(s)))
             .toList();
 
       case ZoneSelectorType.level:
         if (zone.level == null) return [];
         return config.segments
             .where((s) => s.level == zone.level)
-            .map((s) => _PixelRange(s.startPixel, s.endPixel))
+            .map((s) => _PixelRange(
+                config.globalStartOf(s), config.globalEndOf(s)))
             .toList();
 
       case ZoneSelectorType.custom:
@@ -423,12 +427,15 @@ class PatternComposer {
       case SpacingType.anchorsOnly:
         // Only light anchor points in the affected segments
         for (final segment in config.segments) {
-          if (segment.startPixel > range.end || segment.endPixel < range.start) {
+          // Whole-controller indices (startPixel itself is channel-local).
+          final segStart = config.globalStartOf(segment);
+          if (segStart > range.end ||
+              config.globalEndOf(segment) < range.start) {
             continue; // Segment doesn't overlap
           }
 
           for (final anchorLocal in segment.anchorPixels) {
-            final anchorGlobal = segment.startPixel + anchorLocal;
+            final anchorGlobal = segStart + anchorLocal;
             if (anchorGlobal >= range.start && anchorGlobal <= range.end) {
               // Add anchor with its LED count
               final anchorEnd = math.min(

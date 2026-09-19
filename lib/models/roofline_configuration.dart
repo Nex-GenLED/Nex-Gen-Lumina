@@ -48,6 +48,14 @@ class RooflineConfiguration {
   /// In-memory identity only — not serialized into the legacy `toJson`.
   final String controllerId;
 
+  /// Device-truth LED count per hardware channel (channelIndex → bus length),
+  /// when known. Set by [aggregatePixelMapChannelsToConfig] from each channel
+  /// doc's `source_pixel_count`, or via [withChannelPixelCounts] from the live
+  /// device. In-memory only — never serialized. Used SOLELY to translate the
+  /// channel-local [RooflineSegment.startPixel] into a whole-controller index
+  /// for the few consumers that think globally (see [globalStartOf]).
+  final Map<int, int> channelPixelCounts;
+
   const RooflineConfiguration({
     required this.id,
     required this.name,
@@ -58,6 +66,7 @@ class RooflineConfiguration {
     this.sourceAspectRatio,
     this.totalChannelCount = 1,
     this.controllerId = '',
+    this.channelPixelCounts = const {},
   });
 
   /// Total number of pixels across all segments
@@ -71,7 +80,10 @@ class RooflineConfiguration {
   List<int> get allGlobalAnchorPixels {
     final anchors = <int>[];
     for (final segment in segments) {
-      anchors.addAll(segment.globalAnchorPixels);
+      // RooflineSegment.globalAnchorPixels is channel-local (startPixel +
+      // anchor); lift it to a whole-controller index.
+      final offset = channelGlobalOffset(segment.channelIndex);
+      anchors.addAll(segment.globalAnchorPixels.map((a) => a + offset));
     }
     anchors.sort();
     return anchors;
@@ -218,11 +230,86 @@ class RooflineConfiguration {
   /// Returns null if the pixel is out of range.
   RooflineSegment? segmentForPixel(int globalPixel) {
     for (final segment in segments) {
-      if (globalPixel >= segment.startPixel && globalPixel <= segment.endPixel) {
+      if (globalPixel >= globalStartOf(segment) &&
+          globalPixel <= globalEndOf(segment)) {
         return segment;
       }
     }
     return null;
+  }
+
+  // ── Index bases ─────────────────────────────────────────────────────────
+  // ONE rule: [RooflineSegment.startPixel] is CHANNEL-LOCAL — LED 0 is the
+  // first LED of that segment's own hardware channel. Every writer produces it
+  // that way (the installer capture, the refine reflow, and
+  // [recalculateStartPixels]) and every per-pixel consumer reads it that way
+  // (the editor's selection tools, smart presets, the preview, `seg[].i`
+  // writes keyed by channel).
+  //
+  // A few older consumers think in whole-controller indices (the AI composer,
+  // the Lumina prompt context). They MUST translate through [globalStartOf] /
+  // [globalEndOf] rather than reading startPixel raw. The historical defect
+  // (design-studio-audit-2026-09-19 F4) was exactly this seam left implicit:
+  // one writer numbering globally, new readers assuming channel-local.
+
+  /// Whole-controller index of the first LED of [channelIndex]: the summed
+  /// length of every lower-indexed channel. Uses device-truth
+  /// [channelPixelCounts] when known, else that channel's mapped total.
+  int channelGlobalOffset(int channelIndex) {
+    int offset = 0;
+    for (int ch = 0; ch < channelIndex; ch++) {
+      offset += channelPixelCounts[ch] ??
+          segmentsForChannel(ch).fold<int>(0, (sum, s) => sum + s.pixelCount);
+    }
+    return offset;
+  }
+
+  /// Whole-controller index of [segment]'s first LED.
+  int globalStartOf(RooflineSegment segment) =>
+      channelGlobalOffset(segment.channelIndex) + segment.startPixel;
+
+  /// Whole-controller index of [segment]'s last LED (inclusive).
+  int globalEndOf(RooflineSegment segment) =>
+      channelGlobalOffset(segment.channelIndex) + segment.endPixel;
+
+  /// Whole-controller LED count spanned by this map: one past the highest
+  /// [globalEndOf]. Equals [totalPixelCount] for a fully-mapped home.
+  int get globalPixelCount {
+    int end = 0;
+    for (final s in segments) {
+      final e = globalEndOf(s) + 1;
+      if (e > end) end = e;
+    }
+    return end;
+  }
+
+  /// Same map with device-truth channel lengths attached (in-memory only).
+  RooflineConfiguration withChannelPixelCounts(Map<int, int> counts) =>
+      copyWith(channelPixelCounts: counts, updatedAt: updatedAt);
+
+  /// Channels whose segments do NOT form an ordered run that fits inside the
+  /// channel: a segment overlaps its predecessor, or ends past the channel's
+  /// length ([liveCountsByChannel], else [channelPixelCounts]). A map in this
+  /// state selects/paints the wrong LEDs or none — it is the signature of a
+  /// cumulative (pre-fix) `start_pixel`, and of a map drawn for a different
+  /// strip. Unknown channel length → only the ordering is checked.
+  Set<int> channelsWithMisfitSegments([
+    Map<int, int> liveCountsByChannel = const {},
+  ]) {
+    final bad = <int>{};
+    for (final ch in allChannelIndices) {
+      final length = liveCountsByChannel[ch] ?? channelPixelCounts[ch];
+      int cursor = 0;
+      for (final seg in segmentsForChannel(ch)) {
+        if (seg.startPixel < cursor ||
+            (length != null && seg.endPixel >= length)) {
+          bad.add(ch);
+          break;
+        }
+        cursor = seg.endPixel + 1;
+      }
+    }
+    return bad;
   }
 
   /// Get the segment at a specific index
@@ -244,7 +331,9 @@ class RooflineConfiguration {
   bool isAnchorPixel(int globalPixel) {
     final segment = segmentForPixel(globalPixel);
     if (segment == null) return false;
-    return segment.isGlobalAnchorPixel(globalPixel);
+    // RooflineSegment.isGlobalAnchorPixel takes a CHANNEL-LOCAL index.
+    return segment.isGlobalAnchorPixel(
+        globalPixel - channelGlobalOffset(segment.channelIndex));
   }
 
   /// Validate that the total pixel count matches the expected device count.
@@ -275,17 +364,26 @@ class RooflineConfiguration {
 
   /// Recalculate start pixels for all segments based on their order.
   /// Returns a new configuration with updated start pixels.
+  ///
+  /// CHANNEL-LOCAL: each hardware channel gets its OWN running counter, so a
+  /// channel's first segment always starts at 0. This used to be one counter
+  /// across the whole home, which re-numbered channel 2+ cumulatively on EVERY
+  /// anchor toggle / add / reorder / delete — and every per-pixel consumer then
+  /// read those as channel-local, painting the wrong LEDs or none
+  /// (design-studio-audit-2026-09-19 F4; followup N1b, bench-confirmed).
+  /// `sortOrder` stays the position in the whole list.
   RooflineConfiguration recalculateStartPixels() {
-    int currentStart = 0;
+    final nextStartByChannel = <int, int>{};
     final updatedSegments = <RooflineSegment>[];
 
     for (int i = 0; i < segments.length; i++) {
       final segment = segments[i];
+      final start = nextStartByChannel[segment.channelIndex] ?? 0;
       updatedSegments.add(segment.copyWith(
-        startPixel: currentStart,
+        startPixel: start,
         sortOrder: i,
       ));
-      currentStart += segment.pixelCount;
+      nextStartByChannel[segment.channelIndex] = start + segment.pixelCount;
     }
 
     return copyWith(
@@ -338,6 +436,7 @@ class RooflineConfiguration {
     double? sourceAspectRatio,
     int? totalChannelCount,
     String? controllerId,
+    Map<int, int>? channelPixelCounts,
   }) {
     return RooflineConfiguration(
       id: id ?? this.id,
@@ -349,6 +448,7 @@ class RooflineConfiguration {
       sourceAspectRatio: sourceAspectRatio ?? this.sourceAspectRatio,
       totalChannelCount: totalChannelCount ?? this.totalChannelCount,
       controllerId: controllerId ?? this.controllerId,
+      channelPixelCounts: channelPixelCounts ?? this.channelPixelCounts,
     );
   }
 

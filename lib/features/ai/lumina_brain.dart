@@ -1020,14 +1020,15 @@ class LuminaBrain {
     buffer.writeln('\nSegments:');
     for (final segment in config.segments) {
       buffer.write('- ${segment.name} (${_segmentTypeName(segment.type)}): ');
-      buffer.writeln('LED range ${segment.startPixel} to ${segment.endPixel}');
+      buffer.writeln('LED range ${config.globalStartOf(segment)} to '
+          '${config.globalEndOf(segment)}');
     }
 
     if (highlightAnchors) {
       final anchors = <String>[];
       for (final segment in config.segments) {
         for (final anchorIdx in segment.anchorPixels) {
-          final globalIdx = segment.startPixel + anchorIdx;
+          final globalIdx = config.globalStartOf(segment) + anchorIdx;
           anchors.add('LED $globalIdx (${segment.name})');
         }
       }
@@ -1326,7 +1327,8 @@ class LuminaBrain {
       if (segment.location != null && segment.location!.isNotEmpty) {
         buffer.write(' - ${segment.location}');
       }
-      buffer.write(': LEDs ${segment.startPixel}-${segment.endPixel}');
+      buffer.write(': LEDs ${config.globalStartOf(segment)}-'
+          '${config.globalEndOf(segment)}');
       buffer.write(' (${segment.pixelCount} pixels)');
       if (segment.anchorPixels.isNotEmpty) {
         buffer.write(' [${segment.anchorPixels.length} anchors]');

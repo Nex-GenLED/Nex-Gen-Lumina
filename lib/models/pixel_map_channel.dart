@@ -74,6 +74,30 @@ class PixelMapChannel {
   bool isStaleAgainst(int? liveCount) =>
       liveCount != null && liveCount != sourcePixelCount;
 
+  /// True when the segments form an ordered, non-overlapping run that fits in
+  /// `[0, length)` — [liveCount] when known, else [sourcePixelCount] (0 =
+  /// never recorded → only the ordering is checked).
+  ///
+  /// [isStaleAgainst] only compares bus LENGTHS, so it reports a channel whose
+  /// every segment sits past the end of the strip as healthy (audit F4: 28 of
+  /// 28 production docs said `is_stale:false` while 9 did not fit). A map that
+  /// fails this selects/paints the wrong LEDs or none and needs a remap.
+  bool segmentsFitChannel([int? liveCount]) {
+    final length = liveCount ?? (sourcePixelCount > 0 ? sourcePixelCount : null);
+    int cursor = 0;
+    for (final s in segments) {
+      if (s.startPixel < cursor) return false;
+      if (length != null && s.endPixel >= length) return false;
+      cursor = s.endPixel + 1;
+    }
+    return true;
+  }
+
+  /// The "this channel needs a remap" signal: the strip changed length, OR the
+  /// stored segments do not fit the strip.
+  bool needsRemapAgainst(int? liveCount) =>
+      isStaleAgainst(liveCount) || !segmentsFitChannel(liveCount);
+
   PixelMapChannel copyWith({
     String? controllerId,
     int? channelIndex,
@@ -180,7 +204,14 @@ List<PixelMapChannel> splitConfigToPixelMapChannels(
       PixelMapChannel(
         controllerId: controllerId,
         channelIndex: ch,
-        segments: config.segmentsForChannel(ch),
+        // WRITE BOUNDARY: every pixelMap doc is born here, so this is where
+        // "start_pixel is channel-local" is enforced rather than hoped for.
+        // Segments are a gapless ordered run within a channel (every writer
+        // builds them that way), so start_pixel is DERIVED data — re-deriving
+        // it is a no-op for a correct map and the fix for one that arrives
+        // numbered across channels (the legacy per-user config folded in by
+        // migrateLegacyToPixelMap is cumulative by design).
+        segments: rebaseSegmentsChannelLocal(config.segmentsForChannel(ch)),
         sourcePixelCount: sourceCounts[ch] ??
             config
                 .segmentsForChannel(ch)
@@ -194,6 +225,20 @@ List<PixelMapChannel> splitConfigToPixelMapChannels(
         photoPath: config.photoPath,
       ),
   ];
+}
+
+/// Re-derives `startPixel` for ONE channel's ordered segments so the first
+/// starts at 0 and each follows its predecessor (channel-local, gapless).
+/// Order, counts, anchors and every other field are untouched. Pure.
+List<RooflineSegment> rebaseSegmentsChannelLocal(
+    List<RooflineSegment> channelSegments) {
+  final out = <RooflineSegment>[];
+  int start = 0;
+  for (final s in channelSegments) {
+    out.add(s.startPixel == start ? s : s.copyWith(startPixel: start));
+    start += s.pixelCount;
+  }
+  return out;
 }
 
 /// Aggregates per-channel [channels] docs back into a single
@@ -238,5 +283,13 @@ RooflineConfiguration aggregatePixelMapChannelsToConfig(
     photoPath: sorted.firstWhere((c) => c.photoPath != null,
         orElse: () => sorted.first).photoPath,
     totalChannelCount: maxChannel + 1,
+    // Device-truth bus lengths captured at map time — lets the few
+    // whole-controller consumers translate channel-local indices
+    // (RooflineConfiguration.globalStartOf). 0 = never recorded → omit so the
+    // mapped total is used instead.
+    channelPixelCounts: {
+      for (final c in sorted)
+        if (c.sourcePixelCount > 0) c.channelIndex: c.sourcePixelCount,
+    },
   );
 }

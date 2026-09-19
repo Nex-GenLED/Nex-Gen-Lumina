@@ -8,6 +8,8 @@ import 'package:nexgen_command/features/design/services/constraint_solver.dart';
 import 'package:nexgen_command/features/design/services/design_studio_orchestrator.dart';
 import 'package:nexgen_command/features/design/services/nlu_service.dart';
 import 'package:nexgen_command/features/design/services/pattern_composer.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/models/roofline_configuration.dart';
 
 // =============================================================================
 // Service Providers
@@ -172,12 +174,26 @@ final lastCompositionResultProvider = StateProvider<CompositionResult?>((ref) {
 // Processing Actions
 // =============================================================================
 
+/// The roofline map as the AI pipeline needs it: with LIVE device bus lengths
+/// attached when the controller is reachable. The composer emits
+/// whole-controller LED groups, so it has to know where each channel really
+/// starts on the wire — including channels that carry no map at all (see
+/// RooflineConfiguration.globalStartOf). Falls back to the lengths recorded at
+/// map time, which the config already carries.
+RooflineConfiguration? _configForAiPipeline(Ref ref) {
+  final config = ref.read(currentRooflineConfigProvider).valueOrNull;
+  if (config == null) return null;
+  final deviceChannels = ref.read(deviceChannelsProvider);
+  if (deviceChannels.isEmpty) return config;
+  return config.withChannelPixelCounts({
+    for (final c in deviceChannels) c.id: c.stop - c.start,
+  });
+}
+
 /// Provider for processing user input through the orchestrator.
 final processInputProvider = FutureProvider.family<DesignStudioResult, String>((ref, prompt) async {
   final orchestrator = ref.read(designStudioOrchestratorProvider);
-  final configAsync = ref.read(currentRooflineConfigProvider);
-
-  final config = configAsync.valueOrNull;
+  final config = _configForAiPipeline(ref);
 
   // Update state to processing
   ref.read(designStudioStateProvider.notifier).state = DesignStudioStatus.processing;
@@ -214,9 +230,7 @@ final applyClarificationsProvider = FutureProvider<DesignStudioResult>((ref) asy
   final intent = ref.read(currentDesignIntentProvider);
   final questions = ref.read(pendingClarificationsProvider);
   final choices = ref.read(clarificationChoicesProvider);
-  final configAsync = ref.read(currentRooflineConfigProvider);
-
-  final config = configAsync.valueOrNull;
+  final config = _configForAiPipeline(ref);
 
   if (intent == null || config == null) {
     return DesignStudioResult.error('No design intent or configuration available');
