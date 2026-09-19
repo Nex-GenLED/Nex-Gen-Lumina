@@ -4,7 +4,7 @@
 /// "All" / "Any Color" filters return every rainbow-family effect for every
 /// palette. Top picks are the DEFAULT list on every palette's effect selector,
 /// so a Rainbow tile sat on every card in the library, unscoped. It is now
-/// visible only for nodes under the Rainbow root ([isRainbowLibraryNode]).
+/// visible only for rainbow-scoped nodes ([isRainbowLibraryNode]).
 ///
 /// THE COLOURS. On WLED 0.15.1 (the pinned firmware) a rainbow effect does
 /// NOT ignore the palette: `Segment::color_wheel` (FX_fcn.cpp:1145) is
@@ -39,13 +39,19 @@ const List<Color> kRainbowSpectrum = [
   Color(0xFF8B00FF), // violet
 ];
 
-/// A node that lives under the Rainbow root, or the root itself, or a node
-/// explicitly tagged `metadata: {'rainbow': true}`.
+/// A node explicitly tagged `metadata: {'rainbow': true}` — the primary,
+/// placement-independent signal — or one that is, or sits directly inside,
+/// the Nature & Outdoors > Rainbow folder.
+///
+/// The folder arm exists so a card dropped into that folder later is scoped
+/// without anyone remembering the tag. It names [NatureFolderIds.rainbow]; it
+/// used to name a `cat_rainbow` ROOT, which no longer exists (relocated
+/// 2026-09-19). Nothing else in the rainbow logic knows where the folder is.
 bool isRainbowLibraryNode(LibraryNode? node) {
   if (node == null) return false;
-  return node.id == LibraryCategoryIds.rainbow ||
-      node.parentId == LibraryCategoryIds.rainbow ||
-      node.metadata?['rainbow'] == true;
+  return node.metadata?['rainbow'] == true ||
+      node.id == NatureFolderIds.rainbow ||
+      node.parentId == NatureFolderIds.rainbow;
 }
 
 /// Whether [effectId] is a rainbow-family effect: the catalog's registry of
@@ -56,7 +62,7 @@ bool isRainbowEffectId(int effectId) {
 }
 
 /// The effect list a palette's selector may show. Rainbow-family effects are
-/// dropped unless [rainbowScope] (the node is under the Rainbow root).
+/// dropped unless [rainbowScope] (the node is rainbow-scoped).
 List<WledEffect> scopeRainbowEffects(
   List<WledEffect> effects, {
   required bool rainbowScope,

@@ -172,16 +172,23 @@ class LibraryCategoryIds {
   static const String movies = 'cat_movies';
   static const String nature = 'cat_nature';
 
-  /// Genuine rainbow colourways — its own root, distinct from Nature &
-  /// Outdoors. Rainbow-family effects are visible ONLY under this root
-  /// (rainbow_scope.dart).
-  static const String rainbow = 'cat_rainbow';
-
   /// The user's saved designs. Lives here with the catalog roots because it
   /// is a REAL tree root, not a synthesis (audit/DESIGN_CARD_P3.md).
   /// `kMyDesignsCategoryId` in pattern_providers.dart aliases this so the
   /// existing call sites keep compiling.
   static const String myDesigns = 'my_designs';
+}
+
+/// Sub-folder IDs under Nature & Outdoors that code needs to name.
+///
+/// Only the Rainbow folder is here: it is the one Nature sub-folder whose
+/// membership changes behaviour (rainbow_scope.dart). The other seven are
+/// plain string literals in `nature_outdoors_palettes.dart`.
+class NatureFolderIds {
+  /// Nature & Outdoors > Rainbow. Was briefly a root (`cat_rainbow`,
+  /// 2026-09-18); relocated here 2026-09-19 — Rainbow is navigated INTO from
+  /// Nature & Outdoors, not a sibling of it.
+  static const String rainbow = 'nature_rainbow';
 }
 
 /// Special folder IDs for personalized content

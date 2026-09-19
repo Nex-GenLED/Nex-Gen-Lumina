@@ -1,4 +1,4 @@
-// The Rainbow leak and the Rainbow folder.
+// The Rainbow leak and the Rainbow folder (Nature & Outdoors > Rainbow).
 //
 // Leak: `topPickIds` carried fx 9, and the All/Any-Color filter returns every
 // rainbow-family effect, so a Rainbow tile sat on EVERY palette's selector.
@@ -70,11 +70,32 @@ void main() {
   });
 
   group('the scope — which nodes count as Rainbow', () {
-    test('a child of the Rainbow root, the root itself, or a tagged node', () {
-      expect(isRainbowLibraryNode(_node('x', parentId: LibraryCategoryIds.rainbow)),
-          isTrue);
-      expect(isRainbowLibraryNode(_node(LibraryCategoryIds.rainbow)), isTrue);
+    test('a tagged node, the Rainbow folder itself, or a child of it', () {
       expect(isRainbowLibraryNode(_node('x', meta: {'rainbow': true})), isTrue);
+      expect(isRainbowLibraryNode(_node(NatureFolderIds.rainbow)), isTrue);
+      expect(isRainbowLibraryNode(_node('x', parentId: NatureFolderIds.rainbow)),
+          isTrue);
+    });
+
+    test('the TAG scopes a card wherever it is placed — scoping is not a path',
+        () {
+      for (final parent in [
+        LibraryCategoryIds.nature,
+        LibraryCategoryIds.holidays,
+        'nature_ocean',
+        null,
+      ]) {
+        expect(
+            isRainbowLibraryNode(
+                _node('x', parentId: parent, meta: {'rainbow': true})),
+            isTrue,
+            reason: 'tagged card under $parent');
+      }
+    });
+
+    test('the retired cat_rainbow root id scopes nothing', () {
+      expect(isRainbowLibraryNode(_node('cat_rainbow')), isFalse);
+      expect(isRainbowLibraryNode(_node('x', parentId: 'cat_rainbow')), isFalse);
     });
 
     test('Nature & Outdoors nodes are NOT rainbow-scoped', () {
@@ -130,44 +151,155 @@ void main() {
     });
   });
 
-  group('the folder — Rainbow is its own root, Nature is untouched', () {
+  group('the folder — Nature & Outdoors > Rainbow > Full Spectrum', () {
     late PatternRepository repo;
     setUp(() => repo = PatternRepository());
 
-    test('cat_rainbow exists as a root category, after Nature, before My Designs',
-        () async {
+    /// Every node reachable from the roots, via the same getChildNodes the
+    /// Explore screens use. My Designs is dynamic (no static children).
+    Future<List<LibraryNode>> walk() async {
+      final out = <LibraryNode>[];
+      final queue = <String?>[null];
+      while (queue.isNotEmpty) {
+        final kids = await repo.getChildNodes(queue.removeLast());
+        for (final k in kids) {
+          out.add(k);
+          if (!k.isPalette) queue.add(k.id);
+        }
+      }
+      return out;
+    }
+
+    test('Rainbow is NOT a top-level folder; the roots are the original eight '
+        '+ My Designs, which is last at its original sortOrder 8', () async {
       final roots = await repo.getChildNodes(null);
-      final ids = roots.map((n) => n.id).toList();
-      expect(ids, contains(LibraryCategoryIds.rainbow));
-      final rainbow = roots.firstWhere((n) => n.id == LibraryCategoryIds.rainbow);
-      expect(rainbow.nodeType, LibraryNodeType.category);
-      expect(rainbow.name, 'Rainbow');
-      final nature = roots.firstWhere((n) => n.id == LibraryCategoryIds.nature);
-      expect(rainbow.sortOrder > nature.sortOrder, isTrue);
-      final mine = roots.firstWhere((n) => n.id == LibraryCategoryIds.myDesigns);
-      expect(mine.sortOrder > rainbow.sortOrder, isTrue,
-          reason: 'My Designs must stay last');
+      expect(roots.map((n) => n.id).toSet(), {
+        LibraryCategoryIds.architectural,
+        LibraryCategoryIds.sports,
+        LibraryCategoryIds.holidays,
+        LibraryCategoryIds.movies,
+        LibraryCategoryIds.nature,
+        LibraryCategoryIds.parties,
+        LibraryCategoryIds.seasonal,
+        LibraryCategoryIds.security,
+        LibraryCategoryIds.myDesigns,
+      });
+      expect(roots.map((n) => n.id), isNot(contains('cat_rainbow')));
+      expect(roots.where((n) => n.name.toLowerCase().contains('rainbow')),
+          isEmpty);
+      expect(roots.any(isRainbowLibraryNode), isFalse);
+      expect(await repo.getNodeById('cat_rainbow'), isNull,
+          reason: 'the old root is gone, not orphaned');
+
+      final mine =
+          roots.firstWhere((n) => n.id == LibraryCategoryIds.myDesigns);
+      expect(mine.sortOrder, 8, reason: 'restored from 9');
+      expect(roots.last.id, LibraryCategoryIds.myDesigns);
     });
 
-    test('Nature & Outdoors still has exactly its seven sub-folders and no '
-        'rainbow node', () async {
+    test('Nature & Outdoors keeps its seven sub-folders, unmoved, and gains '
+        'Rainbow as the eighth', () async {
       final kids = await repo.getChildNodes(LibraryCategoryIds.nature);
       final folders = kids.where((n) => n.isFolder).toList();
-      expect(folders, hasLength(7));
-      expect(kids.any(isRainbowLibraryNode), isFalse);
-      expect(kids.map((n) => n.id), isNot(contains(RainbowPalettes.fullSpectrumId)));
+      expect(folders.map((n) => n.id).toList(), [
+        'nature_space',
+        'nature_forest',
+        'nature_ocean',
+        'nature_mountain',
+        'nature_garden',
+        'nature_earth',
+        'nature_wildlife',
+        NatureFolderIds.rainbow,
+      ]);
+      expect(folders.take(7).map((n) => n.sortOrder).toList(),
+          [0, 1, 2, 3, 4, 5, 6]);
+      final rainbow = folders.last;
+      expect(rainbow.name, 'Rainbow');
+      expect(rainbow.nodeType, LibraryNodeType.folder);
+      expect(rainbow.parentId, LibraryCategoryIds.nature);
+      expect(rainbow.themeColors, kRainbowSpectrum);
+      // The card is INSIDE Rainbow, not beside it.
+      expect(kids.map((n) => n.id),
+          isNot(contains(RainbowPalettes.fullSpectrumId)));
     });
 
-    test('the Full Spectrum card lives under cat_rainbow and is rainbow-scoped',
+    test('navigation: Nature → Rainbow → Full Spectrum → fx 9 goes out pal:0',
         () async {
-      final kids = await repo.getChildNodes(LibraryCategoryIds.rainbow);
-      expect(kids.map((n) => n.id), contains(RainbowPalettes.fullSpectrumId));
-      final card = await repo.getNodeById(RainbowPalettes.fullSpectrumId);
-      expect(card, isNotNull);
-      expect(card!.parentId, LibraryCategoryIds.rainbow);
-      expect(isRainbowLibraryNode(card), isTrue);
+      final nature = await repo.getChildNodes(LibraryCategoryIds.nature);
+      final folder = nature.firstWhere((n) => n.id == NatureFolderIds.rainbow);
+
+      final cards = await repo.getChildNodes(folder.id);
+      expect(cards.map((n) => n.id).toList(), [RainbowPalettes.fullSpectrumId]);
+      final card = cards.single;
+      expect(card.name, 'Full Spectrum');
+      expect(card.isPalette, isTrue);
+      expect(card.parentId, NatureFolderIds.rainbow);
       expect(card.themeColors, kRainbowSpectrum);
       expect(card.metadata?['suggestedEffectId'], 9);
+
+      // The breadcrumb is the navigation path.
+      final crumbs = await repo.getAncestors(card.id);
+      expect(
+          crumbs.map((n) => n.id).toList(),
+          containsAllInOrder(
+              [LibraryCategoryIds.nature, NatureFolderIds.rainbow]));
+
+      // Selecting it: the selector computes scope from the node and the
+      // override from the scope — the same two calls the page makes.
+      final scope = isRainbowLibraryNode(card);
+      expect(scope, isTrue);
+      final seg = (buildSelectorPayload(SelectorState(
+        effectId: 9,
+        speed: 128,
+        intensity: 200,
+        colors: const [
+          [255, 0, 0, 0],
+          [255, 140, 0, 0],
+          [255, 255, 0, 0]
+        ],
+        paletteOverride:
+            rainbowPaletteOverride(effectId: 9, rainbowScope: scope),
+      ))['seg'] as List)
+          .first as Map;
+      expect(seg['fx'], 9);
+      expect(seg['pal'], 0);
+      expect(
+          scopeRainbowEffects(WledEffectsCatalog.filterEffects(),
+                  rainbowScope: scope)
+              .any((e) => e.id == 9),
+          isTrue,
+          reason: 'the Rainbow effect is offered on this card');
+    });
+
+    test('the folder holds however many cards are placed in it — untagged '
+        'ones included', () {
+      // A card dropped in later is scoped by its parentId even if the tag is
+      // forgotten.
+      expect(
+          isRainbowLibraryNode(
+              _node('rainbow_pastel', parentId: NatureFolderIds.rainbow)),
+          isTrue);
+    });
+
+    test('WHOLE LIBRARY: the only rainbow-scoped nodes are the Rainbow folder '
+        'and what is inside it — no leak after the move', () async {
+      final all = await walk();
+      expect(all.length, greaterThan(100), reason: 'sanity: the walk ran');
+      final scoped = all.where(isRainbowLibraryNode).map((n) => n.id).toSet();
+      expect(scoped, {NatureFolderIds.rainbow, RainbowPalettes.fullSpectrumId});
+
+      // Nature's other seven folders and every card in them stay unscoped.
+      final natureSiblings = all.where((n) =>
+          n.parentId != null &&
+          n.parentId!.startsWith('nature_') &&
+          n.parentId != NatureFolderIds.rainbow);
+      expect(natureSiblings, isNotEmpty);
+      expect(natureSiblings.any(isRainbowLibraryNode), isFalse);
+
+      // Exactly one node named Rainbow anywhere, and it is not a root.
+      final named = all.where((n) => n.name == 'Rainbow').toList();
+      expect(named.map((n) => n.id).toList(), [NatureFolderIds.rainbow]);
+      expect(named.single.parentId, LibraryCategoryIds.nature);
     });
   });
 }

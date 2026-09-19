@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/data/rainbow_palettes.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 
 /// Nature and Outdoors themed color palettes for the Design Library.
@@ -845,7 +846,14 @@ class NatureOutdoorsPalettes {
   // ================= PUBLIC API =================
 
   /// Get all nature folder nodes
-  static List<LibraryNode> getAllNatureFolders() => getNatureFolders();
+  ///
+  /// Nature's own seven environments plus the Rainbow sub-folder, which is
+  /// defined in `rainbow_palettes.dart` (its cards change effect scoping, so
+  /// they live beside that logic) but is PLACED here, in Nature's tree.
+  static List<LibraryNode> getAllNatureFolders() => [
+        ...getNatureFolders(),
+        RainbowPalettes.rainbowFolder,
+      ];
 
   /// Get all palette nodes across all nature categories
   static List<LibraryNode> getAllNaturePaletteNodes() {
@@ -857,6 +865,7 @@ class NatureOutdoorsPalettes {
       ..._gardenPalettes(),
       ..._earthPalettes(),
       ..._wildlifePalettes(),
+      ...RainbowPalettes.getRainbowPaletteNodes(),
     ];
   }
 }
