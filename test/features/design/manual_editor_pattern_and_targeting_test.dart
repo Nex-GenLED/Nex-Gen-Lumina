@@ -12,7 +12,6 @@ import 'package:nexgen_command/features/design/manual_editor/pixel_design_docume
 import 'package:nexgen_command/features/design/manual_editor/selection_logic.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
-import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 class _CapturingService implements DesignService {

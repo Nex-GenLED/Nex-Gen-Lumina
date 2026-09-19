@@ -19,6 +19,9 @@ class _Host extends StatefulWidget {
 
 class _HostState extends State<_Host> {
   late Color color = widget.initial;
+
+  /// The parent choosing a colour itself (another swatch, an RGB slider…).
+  void choose(Color c) => setState(() => color = c);
   @override
   Widget build(BuildContext context) => MaterialApp(
         home: Scaffold(
@@ -84,12 +87,12 @@ void main() {
   testWidgets('a colour chosen OUTSIDE the picker re-seeds it', (tester) async {
     final (picker, host) = await pump(tester, blue);
     // e.g. the user taps another swatch / a Common Color / moves an RGB slider.
-    host.setState(() => host.color = const Color(0xFFFF0000));
+    host.choose(const Color(0xFFFF0000));
     await tester.pump();
     expect(picker.hsv.hue, closeTo(0, 0.5));
     expect(picker.hsv.saturation, closeTo(1, 0.01));
     // …but an outside BLACK keeps the wheel where it was instead of snapping.
-    host.setState(() => host.color = const Color(0xFF000000));
+    host.choose(const Color(0xFF000000));
     await tester.pump();
     expect(picker.hsv.value, 0);
     expect(picker.hsv.saturation, closeTo(1, 0.01));

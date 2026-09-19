@@ -156,6 +156,11 @@ Future<FindLedResult> lightSingleLed({
 /// `rev`/`of`/`mi`) is deliberately NOT replayed — a design path never asserts
 /// geometry (#76). No `i` key, so the apply chokepoint clears the per-pixel
 /// freeze and each segment's effect renders again.
+///
+/// LIMIT, by construction: a look that was itself a per-pixel PICTURE (a
+/// painted design — the segment reads `frz:true`) cannot be put back from
+/// `/json/state`, because the pixel buffer is not part of it. Such a segment
+/// comes back as its base effect/colour; re-apply the design to see it again.
 Map<String, dynamic>? buildRestorePayload(Map<String, dynamic>? prior) {
   if (prior == null) return null;
   final segs = prior['seg'];

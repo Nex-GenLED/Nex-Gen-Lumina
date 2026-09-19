@@ -259,7 +259,7 @@ class RooflineConfiguration {
     int offset = 0;
     for (int ch = 0; ch < channelIndex; ch++) {
       offset += channelPixelCounts[ch] ??
-          segmentsForChannel(ch).fold<int>(0, (sum, s) => sum + s.pixelCount);
+          segmentsForChannel(ch).fold<int>(0, (total, s) => total + s.pixelCount);
     }
     return offset;
   }

@@ -12,7 +12,6 @@ import 'package:nexgen_command/features/design/manual_editor/pixel_design_docume
 import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
 import 'package:nexgen_command/features/scenes/scene_models.dart';
 import 'package:nexgen_command/features/scenes/scene_providers.dart';
-import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';

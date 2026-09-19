@@ -14,7 +14,6 @@ import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_apply.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_models.dart';
-import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';

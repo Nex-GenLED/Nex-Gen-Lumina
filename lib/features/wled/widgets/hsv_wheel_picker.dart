@@ -46,9 +46,9 @@ class HsvWheelPickerState extends State<HsvWheelPicker> {
   }
 
   @override
-  void didUpdateWidget(covariant HsvWheelPicker old) {
-    super.didUpdateWidget(old);
-    if (widget.color == _emitted || widget.color == old.color) return;
+  void didUpdateWidget(covariant HsvWheelPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.color == _emitted || widget.color == oldWidget.color) return;
     // Changed from outside. A colourless colour (black / grey / white) has no
     // hue of its own — keep the wheel where the user left it rather than
     // snapping to red.

@@ -10,7 +10,6 @@ import 'package:nexgen_command/features/design/manual_editor/manual_design_edito
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/screens/ai_design_studio_screen.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
-import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 Future<void> _pump(WidgetTester tester) async {
