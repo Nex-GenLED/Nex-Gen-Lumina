@@ -596,6 +596,10 @@ final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String nam
       speed: wledState.speed,
       intensity: wledState.intensity,
       ledCount: seg.ledCount,
+      // The running look's banding — a saved "1 On 4 Off" used to come back
+      // with every LED lit.
+      grouping: wledState.colorGroupSize.clamp(1, 255),
+      spacing: wledState.spacing.clamp(0, 255),
     )).toList();
 
     final now = DateTime.now();

@@ -256,6 +256,9 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
         speed: state.speed,
         intensity: state.intensity,
         reverse: false,
+        // Keep the running look's banding with the design (followup N3b).
+        grouping: ref.read(wledStateProvider).colorGroupSize.clamp(1, 255),
+        spacing: ref.read(wledStateProvider).spacing.clamp(0, 255),
       );
 
       // Create the CustomDesign

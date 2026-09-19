@@ -346,10 +346,12 @@ class CustomDesign {
           : channel.effectId;
 
       segments.add({
-        // #88 — grp/spc asserted at their DESIGN defaults, first so a channel
-        // that ever gains its own banding overrides rather than fights. A
-        // saved design must not inherit the spacing of whatever ran before it.
-        ...kDesignSpacingDefaults,
+        // #88 — grp/spc are always ASSERTED, never omitted: a saved design must
+        // not inherit the spacing of whatever ran before it. They now come
+        // from the channel (defaults 1 / 0 for every older design) instead of
+        // being pinned to the defaults, which erased a saved "1 On 4 Off".
+        'grp': channel.grouping,
+        'spc': channel.spacing,
         'id': channel.channelId,
         'col': colors,
         'fx': fx,
@@ -425,6 +427,18 @@ class ChannelDesign {
   /// Total LED count for this channel (for visualization)
   final int ledCount;
 
+  /// WLED `grp` — LEDs per lit band ("N on"). 1 = no grouping.
+  ///
+  /// `grp`/`spc` are DESIGN fields (#88, decision of record 2026-08-17) — and
+  /// until now a design had nowhere to keep them. A saved "1 On 4 Off" came
+  /// back from My Designs with every LED lit, and the tuner could neither show
+  /// nor change the spacing of a design it was editing
+  /// (design-studio-followup-2026-09-19 N3b).
+  final int grouping;
+
+  /// WLED `spc` — dark LEDs between bands ("M off"). 0 = no spacing.
+  final int spacing;
+
   const ChannelDesign({
     required this.channelId,
     required this.channelName,
@@ -435,6 +449,8 @@ class ChannelDesign {
     this.intensity = 128,
     this.reverse = false,
     this.ledCount = 0,
+    this.grouping = kDesignDefaultGrp,
+    this.spacing = kDesignDefaultSpc,
   });
 
   ChannelDesign copyWith({
@@ -447,6 +463,8 @@ class ChannelDesign {
     int? intensity,
     bool? reverse,
     int? ledCount,
+    int? grouping,
+    int? spacing,
   }) {
     return ChannelDesign(
       channelId: channelId ?? this.channelId,
@@ -458,6 +476,8 @@ class ChannelDesign {
       intensity: intensity ?? this.intensity,
       reverse: reverse ?? this.reverse,
       ledCount: ledCount ?? this.ledCount,
+      grouping: grouping ?? this.grouping,
+      spacing: spacing ?? this.spacing,
     );
   }
 
@@ -475,6 +495,13 @@ class ChannelDesign {
       intensity: json['intensity'] as int? ?? 128,
       reverse: json['reverse'] as bool? ?? false,
       ledCount: json['led_count'] as int? ?? 0,
+      // Absent on every design saved before these fields existed → the #88
+      // design defaults, which is exactly what those designs have always been
+      // applied with. Clamped to what WLED accepts.
+      grouping: ((json['grouping'] as num?)?.toInt() ?? kDesignDefaultGrp)
+          .clamp(1, 255),
+      spacing: ((json['spacing'] as num?)?.toInt() ?? kDesignDefaultSpc)
+          .clamp(0, 255),
     );
   }
 
@@ -489,6 +516,8 @@ class ChannelDesign {
       'intensity': intensity,
       'reverse': reverse,
       'led_count': ledCount,
+      'grouping': grouping,
+      'spacing': spacing,
     };
   }
 

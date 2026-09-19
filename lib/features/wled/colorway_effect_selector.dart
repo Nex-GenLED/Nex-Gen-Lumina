@@ -351,6 +351,10 @@ class _ColorwayEffectSelectorPageState
       effectId: ch?.effectId ?? 0,
       speed: ch?.speed ?? 128,
       intensity: ch?.intensity ?? 128,
+      // Were not passed at all → the tuner opened every design at grp 1 /
+      // spc 0 whatever it had been saved with (followup N3b).
+      grouping: ch?.grouping ?? kDesignDefaultGrp,
+      spacing: ch?.spacing ?? kDesignDefaultSpc,
       colors: _paletteColsRgbw(),
       brightness: design.brightness,
     ));
@@ -407,10 +411,10 @@ class _ColorwayEffectSelectorPageState
   /// design writer uses, carrying the ORIGINAL id so `saveDesign` routes to
   /// update and never to create.
   ///
-  /// Only fx / speed / intensity / brightness are written. Colours are not:
-  /// the tuner has no colour editor, it renders whatever the node supplies.
-  /// `grp` / `spc` are not written either — see the report; `ChannelDesign`
-  /// has no field for them.
+  /// fx / speed / intensity and the layout (`grp` / `spc`) are written.
+  /// Colours are not: the tuner has no colour editor, it renders whatever the
+  /// node supplies. (`grp` / `spc` used to be dropped here because
+  /// `ChannelDesign` had no field for them.)
   Future<void> _saveToDesign() async {
     final design = widget.editingDesign;
     if (design == null) return;
@@ -423,6 +427,8 @@ class _ColorwayEffectSelectorPageState
                   effectId: state.effectId,
                   speed: state.speed,
                   intensity: state.intensity,
+                  grouping: state.grouping,
+                  spacing: state.spacing,
                 )
               : ch,
       ],
@@ -1899,9 +1905,71 @@ class _ColorwayEffectSelectorPageState
               );
             }),
           ),
+          const SizedBox(height: 12),
+          // The OFF count. There was no control for `spc` anywhere in the
+          // tuner — it could only be inherited from whichever "N On M Off"
+          // card was opened (max 4 off) and could never be changed, so going
+          // from "4 off" to "6 off" was impossible here (followup N3b).
+          Text(
+            'Dark LEDs between',
+            style: TextStyle(
+              color: NexGenPalette.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildSpacingSelector(ref.watch(selectorSpacingProvider)),
           const SizedBox(height: 8),
           _buildColorLayoutPreview(colorGroup),
         ],
+      ),
+    );
+  }
+
+  /// 0–10 dark LEDs between bands (`spc`). Horizontally scrollable so eleven
+  /// 40 px chips fit a phone without shrinking below a tappable size.
+  Widget _buildSpacingSelector(int spacing) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: List.generate(11, (value) {
+          final isSelected = spacing == value;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: GestureDetector(
+              onTap: () {
+                ref.read(selectorSpacingProvider.notifier).state = value;
+                _sendToWled();
+              },
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? NexGenPalette.cyan.withValues(alpha: 0.2)
+                      : NexGenPalette.gunmetal,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
+                    width: isSelected ? 2 : 1,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    '$value',
+                    style: TextStyle(
+                      color: isSelected
+                          ? NexGenPalette.cyan
+                          : NexGenPalette.textMedium,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
