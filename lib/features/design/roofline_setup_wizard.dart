@@ -3,9 +3,14 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/features/design/find_led.dart';
+import 'package:nexgen_command/features/design/roofline_channel_assignment.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/led_channel_config.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -79,12 +84,38 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     setState(() => _isValidating = true);
 
     try {
-      // Build the configuration
+      // Lay the flat, walked-in-order segment list onto the hardware channels.
+      // Channel index = position among the SELECTED channels (WLED numbers its
+      // buses 0..n-1 in configuration order, not by output port label).
+      final channelNums = _selectedChannels.toList()..sort();
+      final typedCounts = [
+        for (final n in channelNums) _channelLedCounts[n] ?? 0,
+      ];
+      final assignment = assignSegmentsToChannels(
+        segmentLedCounts: [for (final d in _segments) d.ledCount],
+        channelLedCounts: typedCounts,
+        segmentNames: [for (final d in _segments) d.name],
+      );
+      if (!assignment.isValid) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(assignment.error!),
+            backgroundColor: Colors.red.shade800,
+            duration: const Duration(seconds: 8),
+          ));
+        }
+        return; // nothing written; `finally` clears the busy flag
+      }
+
+      // Build the configuration. startPixel is CHANNEL-LOCAL — one running
+      // counter per channel (see RooflineConfiguration.recalculateStartPixels).
       final segments = <RooflineSegment>[];
-      int currentStart = 0;
+      final nextStartByChannel = <int, int>{};
 
       for (int i = 0; i < _segments.length; i++) {
         final draft = _segments[i];
+        final channelIndex = assignment.channelIndexBySegment[i];
+        final currentStart = nextStartByChannel[channelIndex] ?? 0;
 
         // Determine architectural role based on segment type for AI
         ArchitecturalRole? aiRole;
@@ -109,8 +140,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           isProminent: draft.isProminent,
           isConnectedToPrevious: draft.isConnectedToPrevious,
           level: draft.level,
+          channelIndex: channelIndex,
         ));
-        currentStart += draft.ledCount;
+        nextStartByChannel[channelIndex] = currentStart + draft.ledCount;
       }
 
       // Generate a meaningful name based on architecture type
@@ -122,7 +154,19 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
         segments: segments,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
+        totalChannelCount: channelNums.length,
       );
+
+      // Per-channel device-truth length for the map's staleness/fit check:
+      // the live bus length when the controller is reachable, else what the
+      // installer typed in step 2. (Was never passed → source_pixel_count fell
+      // back to the mapped total, so a mis-typed roof always looked "fresh".)
+      final liveChannels = ref.read(deviceChannelsProvider);
+      final sourceCounts = <int, int>{
+        for (int i = 0; i < typedCounts.length; i++)
+          if (typedCounts[i] > 0) i: typedCounts[i],
+        for (final c in liveChannels) c.id: c.stop - c.start,
+      };
 
       // Save to the active controller's per-channel pixelMap (Slice 1). Use
       // effectiveUserUid so an installer-impersonation session writes into the
@@ -138,7 +182,7 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
       final service = ref.read(rooflineConfigServiceProvider);
       if (controllerId != null) {
         await service.savePixelMap(userId, controllerId, config,
-            createdBy: userId);
+            sourceCounts: sourceCounts, createdBy: userId);
       } else {
         await service.saveConfiguration(userId, config);
       }
@@ -2532,83 +2576,177 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     );
   }
 
+  /// "Find LED" — lights ONE real LED on the controller. The light, the
+  /// checked result and the restore-on-close all live in [_FindLedDialog] /
+  /// find_led.dart; this used to be a stub that reported success and sent
+  /// nothing.
   void _showFindLedDialog() {
-    final controller = TextEditingController();
-
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: NexGenPalette.gunmetal90,
-        title: Text(
-          'Find LED',
-          style: TextStyle(color: NexGenPalette.textHigh),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Enter an LED number to identify its position on the roofline. The LED will light up red on the controller.',
-              style: TextStyle(color: NexGenPalette.textMedium),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              style: TextStyle(color: NexGenPalette.textHigh),
-              decoration: InputDecoration(
-                labelText: 'LED Number (0-${_totalLedCount - 1})',
-                labelStyle: TextStyle(color: NexGenPalette.textMedium),
-                filled: true,
-                fillColor: NexGenPalette.matteBlack,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Ensure the controller is connected and online.',
-              style: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.7), fontSize: 12),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Close', style: TextStyle(color: NexGenPalette.textMedium)),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final ledIndex = int.tryParse(controller.text);
-              if (ledIndex != null && ledIndex >= 0 && ledIndex < _totalLedCount) {
-                // Note: This would need a connected repository to work
-                // For now, show a message about what would happen
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('LED $ledIndex should now be lit red on the controller'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Please enter a valid LED number (0-${_totalLedCount - 1})'),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
-              }
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: NexGenPalette.cyan,
-              foregroundColor: Colors.black,
-            ),
-            child: const Text('Light It Up'),
-          ),
-        ],
-      ),
+      builder: (_) => _FindLedDialog(typedTotalLedCount: _totalLedCount),
     );
   }
 
+}
+
+/// Dialog body for the wizard's Find-LED tool. Captures the controller's look
+/// before the first light and puts it back when the dialog goes away, however
+/// it goes away (Close, barrier tap, back).
+class _FindLedDialog extends ConsumerStatefulWidget {
+  const _FindLedDialog({required this.typedTotalLedCount});
+
+  /// The total the installer typed in step 2 — only a hint for the label; the
+  /// controller's own channel ranges decide what is valid.
+  final int typedTotalLedCount;
+
+  @override
+  ConsumerState<_FindLedDialog> createState() => _FindLedDialogState();
+}
+
+class _FindLedDialogState extends ConsumerState<_FindLedDialog> {
+  final _controller = TextEditingController();
+  bool _busy = false;
+  FindLedResult? _result;
+  String? _inputError;
+
+  // Captured once, before the first write. Held in fields (not re-read) and
+  // restored through a repository reference taken up front — `ref` is not
+  // usable inside dispose().
+  Map<String, dynamic>? _priorState;
+  bool _captured = false;
+  WledRepository? _repoForRestore;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    if (_captured) {
+      // Fire-and-forget by necessity (dispose is sync); best-effort, and the
+      // next normal apply corrects it regardless.
+      restoreAfterFindLed(_repoForRestore, _priorState);
+    }
+    super.dispose();
+  }
+
+  Future<void> _light() async {
+    final index = int.tryParse(_controller.text.trim());
+    if (index == null || index < 0) {
+      setState(() {
+        _inputError = 'Enter a whole number, 0 or higher.';
+        _result = null;
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _inputError = null;
+    });
+    final repo = ref.read(wledRepositoryProvider);
+    final channels = ref.read(deviceChannelsProvider);
+    if (!_captured && repo != null) {
+      try {
+        _priorState = await repo.getState();
+      } catch (_) {
+        _priorState = null;
+      }
+      _repoForRestore = repo;
+      _captured = true;
+    }
+    final result = await lightSingleLed(
+      repo: repo,
+      channels: channels,
+      globalIndex: index,
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _result = result;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final channels = ref.watch(deviceChannelsProvider);
+    final deviceTotal =
+        channels.fold<int>(0, (m, c) => c.stop > m ? c.stop : m);
+    final max = deviceTotal > 0 ? deviceTotal : widget.typedTotalLedCount;
+    final result = _result;
+    return AlertDialog(
+      backgroundColor: NexGenPalette.gunmetal90,
+      title: Text('Find LED', style: TextStyle(color: NexGenPalette.textHigh)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Enter an LED number. That one LED lights red and the rest of the '
+            'roofline goes dark, so you can see exactly where it is. Your '
+            'lights go back to what they were showing when you close this.',
+            style: TextStyle(color: NexGenPalette.textMedium),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            keyboardType: TextInputType.number,
+            style: TextStyle(color: NexGenPalette.textHigh),
+            onSubmitted: (_) => _busy ? null : _light(),
+            decoration: InputDecoration(
+              labelText: 'LED Number (0-${max - 1})',
+              labelStyle: TextStyle(color: NexGenPalette.textMedium),
+              errorText: _inputError,
+              filled: true,
+              fillColor: NexGenPalette.matteBlack,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (result != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  result.isLit ? Icons.check_circle : Icons.error_outline,
+                  size: 18,
+                  color: result.isLit ? Colors.green : Colors.redAccent,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    result.message,
+                    style: TextStyle(
+                      color: result.isLit ? Colors.green : Colors.redAccent,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            )
+          else if (channels.isEmpty)
+            Text(
+              'Not connected to a controller yet.',
+              style: TextStyle(
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.7),
+                  fontSize: 12),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Close', style: TextStyle(color: NexGenPalette.textMedium)),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : _light,
+          style: FilledButton.styleFrom(
+            backgroundColor: NexGenPalette.cyan,
+            foregroundColor: Colors.black,
+          ),
+          child: Text(_busy ? 'Lighting…' : 'Light It Up'),
+        ),
+      ],
+    );
+  }
 }
 
 /// Simplified segment types for the installer wizard
