@@ -18,7 +18,6 @@
 // Live-view values are post-gamma RGB with W folded in, so colours are
 // compared by WHICH LEDs are lit and their dominant channel, not byte-for-byte.
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -29,7 +28,6 @@ import 'package:nexgen_command/features/design/find_led.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/features/design/manual_editor/pixel_design_document.dart';
 import 'package:nexgen_command/features/design/manual_editor/selection_logic.dart';
-import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
