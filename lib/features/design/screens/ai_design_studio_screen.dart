@@ -36,7 +36,6 @@ class AIDesignStudioScreen extends ConsumerStatefulWidget {
 class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   final _textController = TextEditingController();
   final _focusNode = FocusNode();
-  bool _showManualControls = false;
   bool _isSaving = false;
   bool _isApplying = false;
   _StudioMode _mode = _StudioMode.ai;
@@ -114,7 +113,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
                 AIUnderstandingPanel(
                   intent: intent,
                   onEditLayer: _handleEditLayer,
-                  onOpenManual: () => setState(() => _showManualControls = true),
+                  onOpenManual: _openManual,
                 ),
 
               // Clarification dialog (when needed)
@@ -123,9 +122,8 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
                   flex: 2,
                   child: ClarificationDialogWidget(
                     onComplete: _handleClarificationsComplete,
-                    onManualRequested: (aspect) {
-                      setState(() => _showManualControls = true);
-                    },
+                    // "Set manually" in a clarification question.
+                    onManualRequested: (aspect) => _openManual(),
                   ),
                 ),
 
@@ -202,12 +200,14 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
           },
           tooltip: livePreviewEnabled ? 'Preview on lights: ON' : 'Preview on lights: OFF',
         ),
-        // Manual controls button
-        IconButton(
-          icon: const Icon(Icons.tune, color: Colors.white70),
-          onPressed: () => setState(() => _showManualControls = !_showManualControls),
-          tooltip: 'Manual controls',
-        ),
+        // Manual controls button — a second, labelled door to the SAME place
+        // the AI | Manual toggle in the title leads. Hidden once there.
+        if (_mode == _StudioMode.ai)
+          IconButton(
+            icon: const Icon(Icons.tune, color: Colors.white70),
+            onPressed: _openManual,
+            tooltip: 'Manual controls',
+          ),
       ],
     );
   }
@@ -518,10 +518,25 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     _handleSubmit();
   }
 
+  /// Every "manual controls" affordance on this screen lands here: the tune
+  /// icon in the app bar, "open manual" in the AI understanding panel, a
+  /// layer's edit button, and "Set manually" in a clarification question.
+  ///
+  /// They used to set `_showManualControls` — a flag written in four places
+  /// and read in NONE (its panel was removed when the per-pixel editor
+  /// arrived), so each of them silently did nothing and a user looking for
+  /// manual control concluded there wasn't any (audit F1). The real editor is
+  /// the Manual mode of the AI | Manual toggle; this just goes there.
+  void _openManual() {
+    if (_mode == _StudioMode.manual) return;
+    FocusScope.of(context).unfocus(); // drop the AI prompt keyboard
+    setState(() => _mode = _StudioMode.manual);
+  }
+
   void _handleEditLayer(String layerId) {
-    // Open manual controls for this specific layer
-    setState(() => _showManualControls = true);
-    // TODO: Focus on the specific layer in manual controls
+    // The paint editor works on pixels, not on AI layers, so there is no
+    // per-layer focus to restore — it opens the editor.
+    _openManual();
   }
 
   Future<void> _handleClarificationsComplete() async {
