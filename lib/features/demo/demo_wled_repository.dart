@@ -1,10 +1,23 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
 /// In-memory repository that simulates a WLED device for demo/offline mode.
-class DemoWledRepository implements WledRepository {
+class DemoWledRepository implements WledRepository, PerPixelWriter {
+  /// The virtual device accepts per-pixel paints like every other write.
+  /// Needed now that the design apply spine reports the REAL outcome: a
+  /// repository that cannot paint is a failed paint, and demo / App-Review
+  /// sessions must not see an error for a device that does not exist.
+  @override
+  Future<bool> applyPerPixel({
+    int segmentId = 0,
+    required List<PixelSpan> spans,
+    int chunkSize = kDefaultPixelChunkSize,
+  }) async =>
+      true;
+
   bool _on = true;
   int _bri = 180; // 0-255
   int _speed = 128; // 0-255

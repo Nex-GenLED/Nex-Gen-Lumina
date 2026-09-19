@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_logic.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_state.dart';
+import 'package:nexgen_command/features/wled/device_write_reporter.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -67,6 +68,8 @@ class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
 
   // ── Spotlight / walk ────────────────────────────────────────────────────
 
+  final _walkReporter = DeviceWriteReporter(what: 'walk cursor');
+
   PerPixelWriter? get _writer {
     final repo = ref.read(wledRepositoryProvider);
     return repo is PerPixelWriter ? repo as PerPixelWriter : null;
@@ -93,10 +96,14 @@ class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
     final ch = _selectedChannel;
     final writer = _writer;
     if (ch == null || writer == null) return;
-    await writer.applyPerPixel(
+    // The result used to be dropped (audit F7): an installer walking the roof
+    // with a controller that had stopped answering saw a cursor moving in the
+    // app and a roof that wasn't, with nothing saying why.
+    final ok = await writer.applyPerPixel(
       segmentId: ch,
       spans: [PixelSpan.single(local, const [255, 255, 255, 0])],
     );
+    if (mounted) _walkReporter.report(context, ok);
   }
 
   /// Restores the walked channel's prior state (re-applies its captured segment

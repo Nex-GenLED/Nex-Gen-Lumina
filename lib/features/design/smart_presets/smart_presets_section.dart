@@ -163,6 +163,19 @@ class SmartPresetsSection extends ConsumerWidget {
           ),
         ));
         break;
+      case SmartPresetApplyResult.noFeatures:
+        messenger.showSnackBar(SnackBar(
+          content: const Text(
+              "Nothing to apply here — your roofline map doesn't have any "
+              'corners or peaks marked yet, so there is nothing for this '
+              "preset to accent. Your lights weren't changed."),
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: 'Roofline setup',
+            onPressed: () => context.push(AppRoutes.segmentSetup),
+          ),
+        ));
+        break;
       case SmartPresetApplyResult.error:
         messenger.showSnackBar(const SnackBar(
             content: Text('Couldn’t reach your lights. Check the connection.')));

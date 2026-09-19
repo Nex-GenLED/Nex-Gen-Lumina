@@ -13,6 +13,15 @@ enum SmartPresetApplyResult {
   /// No pixel map for the active controller (or all channels skipped).
   noMap,
 
+  /// There IS a map, but it holds none of the features this preset accents
+  /// (no corners for Corner Accents, no peaks for Peak Highlights, nothing
+  /// but runs for Feature Outline). NOTHING was sent to the lights.
+  ///
+  /// This used to fall through: zero accent spans compiled, the spine painted
+  /// the plain base, and the app reported "Applied." — for every production
+  /// user, since no production map carries a corner or peak yet (audit F5).
+  noFeatures,
+
   /// Applied best-effort, but at least one channel's map is stale (drift vs
   /// live bus length) — surface the "roofline changed" prompt.
   staleApplied,
@@ -50,6 +59,13 @@ Future<SmartPresetApplyResult> applySmartPreset(
     busLenByChannel: busLen,
     cornerSpread: cornerSpread,
   );
+
+  // Nothing to accent → say so and leave the lights alone. A smart preset
+  // with no accents is just a solid colour; painting one and calling it
+  // "Corner Accents" is the false success this guard exists to stop.
+  if (accentsByChannel.values.every((spans) => spans.isEmpty)) {
+    return SmartPresetApplyResult.noFeatures;
+  }
 
   // Shared spine: base solid + per-channel accent `i` spans. Empty effective
   // set / unreachable device → false (U1 gate), exactly like other applies.

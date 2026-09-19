@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/design/manual_editor/design_preview.dart
 import 'package:nexgen_command/features/design/refine/boundary_nudge_logic.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/wled/device_write_reporter.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -71,6 +72,8 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
 
   // ── Device spotlight (live feedback) ────────────────────────────────────
 
+  final _spotlightReporter = DeviceWriteReporter(what: 'highlight');
+
   PerPixelWriter? get _writer {
     final repo = ref.read(wledRepositoryProvider);
     return repo is PerPixelWriter ? repo as PerPixelWriter : null;
@@ -97,14 +100,17 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
       final segs = _segs(ch);
       if (fi < 0 || fi >= segs.length) return;
       final f = segs[fi];
-      // Dim base + bright accent on the selected feature.
-      await writer.applyPerPixel(
+      // Dim base + bright accent on the selected feature. Result checked
+      // (was dropped — audit F7) so a dead controller is not mistaken for one
+      // that is following the nudges.
+      final ok = await writer.applyPerPixel(
         segmentId: ch,
         spans: [
           PixelSpan(start: 0, end: channelTotal(segs) - 1, color: _dim),
           PixelSpan(start: f.startPixel, end: f.endPixel, color: _accent),
         ],
       );
+      if (mounted) _spotlightReporter.report(context, ok);
     });
   }
 

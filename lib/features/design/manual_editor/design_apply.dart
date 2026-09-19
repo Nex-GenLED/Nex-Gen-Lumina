@@ -19,21 +19,81 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 enum DesignApplyResult { applied, noMap, staleApplied, error }
 
-/// Base solid + per-channel `i` spans. Returns false when the device is
-/// unreachable or the effective-channel set is empty (the U1 gate). Applies
-/// spans only for channels in the effective set. Sets [label] on success.
+/// What actually happened on the wire. Every caller of the spine gets this —
+/// the spine used to `await` both device writes, DROP both booleans and
+/// `return true`, so the editor, the AI studio and the smart presets all
+/// reported success whether or not anything reached the lights (audit F7).
+enum SpineWriteResult {
+  /// Every write was accepted by the controller.
+  ok,
+
+  /// No repository — not connected to a controller.
+  noDevice,
+
+  /// The effective-channel set is empty (the U1 gate): nothing to target.
+  noChannels,
+
+  /// The base write was refused. Nothing was painted.
+  baseFailed,
+
+  /// The base landed but a per-pixel paint did not: the lights are showing
+  /// the BASE colour without (all of) the painted pixels.
+  pixelsFailed;
+
+  bool get isOk => this == SpineWriteResult.ok;
+
+  /// A sentence a user can act on; null on success or when the transport
+  /// layer has a more specific reason queued (identity refusal, #94).
+  String? get userMessage {
+    switch (this) {
+      case SpineWriteResult.ok:
+        return null;
+      case SpineWriteResult.noDevice:
+        return "Not connected to your lights.";
+      case SpineWriteResult.noChannels:
+        return 'No channels are selected to receive this.';
+      case SpineWriteResult.baseFailed:
+        return "Couldn't reach your lights — nothing was changed.";
+      case SpineWriteResult.pixelsFailed:
+        return "Only part of this reached your lights — the background "
+            "arrived but the painted pixels didn't. Try again.";
+    }
+  }
+}
+
+/// Base solid + per-channel `i` spans. True ONLY when the controller accepted
+/// every write. See [applyBaseAndSpansDetailed] for the reason on failure.
 Future<bool> applyBaseAndSpans(
   WidgetRef ref, {
   required List<int> baseRgbw,
   required Map<int, List<PixelSpan>> spansByChannel,
   String? label,
 }) async {
+  final result = await applyBaseAndSpansDetailed(
+    ref,
+    baseRgbw: baseRgbw,
+    spansByChannel: spansByChannel,
+    label: label,
+  );
+  return result.isOk;
+}
+
+/// Base solid + per-channel `i` spans, with the wire outcome. Applies spans
+/// only for channels in the effective set. Sets [label] ONLY on full success —
+/// a "Now Playing" label for a look that never arrived is the same lie as the
+/// toast.
+Future<SpineWriteResult> applyBaseAndSpansDetailed(
+  WidgetRef ref, {
+  required List<int> baseRgbw,
+  required Map<int, List<PixelSpan>> spansByChannel,
+  String? label,
+}) async {
   final repo = ref.read(wledRepositoryProvider);
-  if (repo == null) return false;
+  if (repo == null) return SpineWriteResult.noDevice;
 
   final deviceChannels = ref.read(deviceChannelsProvider);
   final effective = ref.read(effectiveChannelIdsProvider);
-  if (effective.isEmpty) return false;
+  if (effective.isEmpty) return SpineWriteResult.noChannels;
   final effectiveSet = effective.toSet();
 
   var basePayload = <String, dynamic>{
@@ -49,13 +109,24 @@ Future<bool> applyBaseAndSpans(
     ],
   };
   basePayload = applyChannelFilter(basePayload, effective, deviceChannels);
-  await repo.applyJson(basePayload);
+  final baseOk = await repo.applyJson(basePayload);
+  if (!baseOk) return SpineWriteResult.baseFailed;
 
-  if (repo is PerPixelWriter) {
+  final toPaint = [
+    for (final entry in spansByChannel.entries)
+      if (entry.value.isNotEmpty && effectiveSet.contains(entry.key)) entry,
+  ];
+  if (toPaint.isNotEmpty) {
+    // A repository that cannot paint per-pixel used to be skipped silently —
+    // base applied, pixels dropped, success reported.
+    if (repo is! PerPixelWriter) return SpineWriteResult.pixelsFailed;
     final writer = repo as PerPixelWriter;
-    for (final entry in spansByChannel.entries) {
-      if (entry.value.isEmpty || !effectiveSet.contains(entry.key)) continue;
-      await writer.applyPerPixel(segmentId: entry.key, spans: entry.value);
+    for (final entry in toPaint) {
+      final ok =
+          await writer.applyPerPixel(segmentId: entry.key, spans: entry.value);
+      // Stop at the first refusal: later channels would only add to a frame
+      // that is already wrong, and the caller is about to say so.
+      if (!ok) return SpineWriteResult.pixelsFailed;
     }
   }
 
@@ -64,7 +135,7 @@ Future<bool> applyBaseAndSpans(
         .read(activePresetLabelProvider.notifier)
         .setLabelWithFingerprint(label, ref.read(wledStateProvider));
   }
-  return true;
+  return SpineWriteResult.ok;
 }
 
 /// Channel-local [LedColorGroup]s → [PixelSpan]s (RGBW-normalized). RGB-only

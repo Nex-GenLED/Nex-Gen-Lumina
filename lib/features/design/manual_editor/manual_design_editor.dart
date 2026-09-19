@@ -15,8 +15,10 @@ import 'package:nexgen_command/features/design/manual_editor/selection_logic.dar
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_models.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/wled/device_write_reporter.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// Design Studio Slice 4 — the manual per-pixel editor body (rendered inside
@@ -43,6 +45,7 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
   bool _livePreview = false;
   Timer? _previewThrottle;
   bool _busy = false;
+  final _previewReporter = DeviceWriteReporter(what: 'preview');
 
   PixelDesignDocument get _doc => _history!.current;
 
@@ -142,17 +145,45 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
   }
 
   void _selectFeature(FeatureFilter filter) {
-    final config = ref.read(currentRooflineConfigProvider).valueOrNull;
-    final ch = _activeChannel;
-    if (config == null || ch == null) return;
-    _addAll(ch, featureIndices(config.segmentsForChannel(ch), filter));
+    final what = switch (filter) {
+      FeatureFilter.allCorners => 'corners',
+      FeatureFilter.allPeaks => 'peaks',
+      FeatureFilter.allRuns => 'runs',
+    };
+    _selectMapped(what, (segs) => featureIndices(segs, filter));
   }
 
-  void _selectAnchors() {
-    final config = ref.read(currentRooflineConfigProvider).valueOrNull;
+  void _selectAnchors() => _selectMapped('anchors', anchorIndices);
+
+  /// Adds the map-derived [pick] to the selection — and SAYS SO when there is
+  /// nothing to pick. These tools used to be silent no-ops whenever the map
+  /// held no such feature, which is every production map today (audit F5): the
+  /// user tapped "All corners", nothing happened, and nothing said why.
+  void _selectMapped(
+    String what,
+    Set<int> Function(List<RooflineSegment> channelSegments) pick,
+  ) {
     final ch = _activeChannel;
-    if (config == null || ch == null) return;
-    _addAll(ch, anchorIndices(config.segmentsForChannel(ch)));
+    if (ch == null) return;
+    final config = ref.read(currentRooflineConfigProvider).valueOrNull;
+    final len = _channelLengths()[ch] ?? 0;
+    final segs = config?.segmentsForChannel(ch) ?? const <RooflineSegment>[];
+    // Only LEDs that exist on this channel count as "found".
+    final found = pick(segs).where((i) => i >= 0 && i < len).toSet();
+    if (found.isEmpty) {
+      final noMap = config == null || config.segments.isEmpty;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(noMap
+              ? "Nothing to select — your roofline isn't mapped yet."
+              : 'Nothing to select — Channel ${ch + 1} has no $what marked '
+                  'in your roofline map.'),
+          duration: const Duration(seconds: 5),
+        ));
+      return;
+    }
+    _addAll(ch, found);
   }
 
   Future<void> _everyNthDialog() async {
@@ -212,23 +243,28 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
 
   void _scheduleLivePreview() {
     _previewThrottle?.cancel();
-    _previewThrottle = Timer(const Duration(milliseconds: 300), () {
-      applyBaseAndSpans(ref,
+    _previewThrottle = Timer(const Duration(milliseconds: 300), () async {
+      // Was fire-and-forget with the result dropped: a controller that had
+      // stopped answering looked exactly like one following along (F7).
+      final ok = await applyBaseAndSpans(ref,
           baseRgbw: _doc.baseColor, spansByChannel: _spans(), label: 'Design (preview)');
+      if (mounted) _previewReporter.report(context, ok);
     });
   }
 
   Future<void> _apply() async {
     setState(() => _busy = true);
     try {
-      final ok = await applyBaseAndSpans(ref,
+      final result = await applyBaseAndSpansDetailed(ref,
           baseRgbw: _doc.baseColor, spansByChannel: _spans(), label: 'Custom Design');
+      final ok = result.isOk;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           // #94 — an identity refusal must say so, not blame the network.
           content: Text(ok
               ? 'Applied to your lights'
               : (takeIdentityRefusalMessage() ??
+                  result.userMessage ??
                   "Couldn't reach your lights.")),
           backgroundColor: ok ? Colors.green : Colors.red.shade800,
         ));
