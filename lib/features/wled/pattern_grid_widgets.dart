@@ -2046,11 +2046,20 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     super.dispose();
   }
 
+  // Keys changed since the last send. ONE debounce serves every slider, so the
+  // pending update has to ACCUMULATE: it used to be replaced, which meant
+  // moving Grouping and then Spacing within 200 ms sent only `spc` and the
+  // `grp` change was silently dropped.
+  final Map<String, dynamic> _pendingSegUpdate = {};
+
   void _applyChange(Map<String, dynamic> segUpdate) {
+    _pendingSegUpdate.addAll(segUpdate);
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), () async {
       final repo = ref.read(wledRepositoryProvider);
       if (repo == null) return;
+      final segUpdate = Map<String, dynamic>.from(_pendingSegUpdate);
+      _pendingSegUpdate.clear();
       var payload = <String, dynamic>{'seg': [segUpdate]};
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isEmpty) {
