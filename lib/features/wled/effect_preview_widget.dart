@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'solid_palette_blocks.dart';
 import 'wled_effects_catalog.dart';
 
 /// Documents the col[] slot roles for a given WLED effect.
@@ -143,11 +144,18 @@ class EffectPreviewWidget extends StatefulWidget {
   final List<Color> colors;
   final double borderRadius;
 
+  /// When set, a Solid-family effect (fx 83/84) previews as the ALTERNATING
+  /// layout: bands this many LEDs wide, cycling the colours — WLED's `grp`
+  /// expansion (solid_palette_blocks.dart, [SolidLayout.alternating]). When
+  /// null, fx 83 previews as positional blocks and fx 84 as 1-wide bands.
+  final int? alternatingLedsPerColor;
+
   const EffectPreviewWidget({
     super.key,
     required this.effectId,
     required this.colors,
     this.borderRadius = 12,
+    this.alternatingLedsPerColor,
   });
 
   @override
@@ -269,6 +277,32 @@ class _EffectPreviewWidgetState extends State<EffectPreviewWidget>
   Widget _buildPreview() {
     switch (_previewType) {
       case EffectPreviewType.solid:
+        // fx 83 "Solid Pattern" with 2-3 colours is what every apply path
+        // substitutes for Solid + a multi-colour palette, and on the device
+        // (pal:5, positional palette mapping) that is N CONTIGUOUS BLOCKS in
+        // col[] order — thirds, not a per-bulb cycle. Previewing it as one
+        // flat colour under-reported it; cycling bulbs mis-reported it. See
+        // solid_palette_blocks.dart for the firmware trace. Plain fx 0 really
+        // does show col[0] only, and fx 84/85/98 are left as they were.
+        final multi = widget.colors.length >= 2;
+        final solidFamily = widget.effectId == 83 || widget.effectId == 84;
+        // Alternating layout (caller knows the band width — it set grp).
+        if (multi && solidFamily && widget.alternatingLedsPerColor != null) {
+          return _AlternatingBandsPreview(
+            colors: widget.colors,
+            ledsPerColor: widget.alternatingLedsPerColor!,
+          );
+        }
+        // fx 84 "Solid Pattern Tri" picked as a catalog effect: repeating
+        // runs of SEGCOLOR(0..2) — alternating by construction. The run width
+        // on the device is `(ix >> 5) + 1` virtual pixels × grp, which this
+        // tile cannot know, so it shows the 1-wide form as representative.
+        if (multi && widget.effectId == 84) {
+          return _AlternatingBandsPreview(colors: widget.colors, ledsPerColor: 1);
+        }
+        if (multi && widget.effectId == 83) {
+          return _SolidBlocksPreview(colors: widget.colors);
+        }
         return _SolidPreview(color: primary);
       case EffectPreviewType.gradient:
         return _GradientPreview(colors: widget.colors);
@@ -448,6 +482,72 @@ class _SolidPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(color: color);
 }
+
+/// fx 83 + pal 5 with N colours: N equal contiguous blocks, slot order,
+/// left to right — the roofline read as a strip. Built from plain
+/// [Container]s (one per block) rather than a painter so a widget test can
+/// assert the blocks, their colours and their order directly.
+class _SolidBlocksPreview extends StatelessWidget {
+  final List<Color> colors;
+  const _SolidBlocksPreview({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    // WLED has three colour slots; the partition helper clamps the same way.
+    final blocks = colors.take(3).toList();
+    return Row(
+      children: [
+        for (var k = 0; k < blocks.length; k++)
+          Expanded(
+            // Tie each block to the shared partition by sampling the
+            // MIDPOINT of block k on a 1000-px strip — it must map to slot k.
+            // (Sampling the left edge k/N is off by one at k=2, N=3: integer
+            // truncation lands at 666, which the partition floors into
+            // slot 1. A test caught it.)
+            child: Container(
+              color: blocks[solidPaletteBlockIndex(
+                (2 * k + 1) * 1000 ~/ (2 * blocks.length),
+                1000,
+                blocks.length,
+              )],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Alternating layout: [kAlternatingPreviewCells] equal cells left to right,
+/// cell i coloured by the device's own band formula
+/// (`alternatingBandIndex`: `(i ~/ ledsPerColor) % N`). Plain [Container]s so
+/// a widget test can assert the cycle, the width and the order directly.
+class _AlternatingBandsPreview extends StatelessWidget {
+  final List<Color> colors;
+  final int ledsPerColor;
+  const _AlternatingBandsPreview({
+    required this.colors,
+    required this.ledsPerColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final slots = colors.take(3).toList();
+    return Row(
+      children: [
+        for (var i = 0; i < kAlternatingPreviewCells; i++)
+          Expanded(
+            child: Container(
+              color: slots[alternatingBandIndex(i, ledsPerColor, slots.length)],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Cells in the alternating tile preview. 12 shows 1-wide bands of two or
+/// three colours as several full cycles, and 2-3-wide bands as at least one.
+const int kAlternatingPreviewCells = 12;
 
 class _GradientPreview extends StatelessWidget {
   final List<Color> colors;

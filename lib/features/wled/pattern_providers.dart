@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
@@ -720,6 +721,12 @@ final selectorColorGroupProvider = StateProvider<int>((ref) => 1);
 
 /// Spacing (dark LEDs between lit groups, 0-4) in the effect selector.
 final selectorSpacingProvider = StateProvider<int>((ref) => 0);
+
+/// How Solid + a multi-colour palette is laid out: contiguous Blocks (fx 83,
+/// positional) or Alternating bands of `selectorColorGroupProvider` LEDs
+/// (fx 84 / fx 83+pal:0). Default is Blocks — the pre-existing behaviour.
+final selectorSolidLayoutProvider =
+    StateProvider<SolidLayout>((ref) => SolidLayout.blocks);
 
 /// Active gradient preset index for brightness gradient patterns.
 final selectorGradientPresetProvider = StateProvider<int>((ref) => 0);

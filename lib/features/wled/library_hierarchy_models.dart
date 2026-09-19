@@ -172,6 +172,11 @@ class LibraryCategoryIds {
   static const String movies = 'cat_movies';
   static const String nature = 'cat_nature';
 
+  /// Genuine rainbow colourways — its own root, distinct from Nature &
+  /// Outdoors. Rainbow-family effects are visible ONLY under this root
+  /// (rainbow_scope.dart).
+  static const String rainbow = 'cat_rainbow';
+
   /// The user's saved designs. Lives here with the catalog roots because it
   /// is a REAL tree root, not a synthesis (audit/DESIGN_CARD_P3.md).
   /// `kMyDesignsCategoryId` in pattern_providers.dart aliases this so the

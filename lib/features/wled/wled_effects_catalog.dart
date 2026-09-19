@@ -913,7 +913,10 @@ class WledEffectsCatalog {
     49,  // Fairy
     76,  // Meteor
     66,  // Fire 2012
-    9,   // Rainbow
+    // 9 (Rainbow) was here. Top picks are the DEFAULT effect list for EVERY
+    // palette, so it put a rainbow tile on every card in the library. Rainbow
+    // effects are now offered only inside the Rainbow folder
+    // (rainbow_scope.dart) — the leak was this line.
     87,  // Glitter
   ];
 
