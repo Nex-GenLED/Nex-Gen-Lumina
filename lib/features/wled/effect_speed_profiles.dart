@@ -304,7 +304,11 @@ const List<EffectSpeedProfile> _allProfiles = [
 
   // ─── Sparkle / Twinkle effects ─────────────────────────────────────────
   // 17: Twinkle
-  EffectSpeedProfile(effectId: 17, rawMin: 5, rawMax: 170, rawDefault: 40, rawRecommendedMax: 110, curveType: SpeedCurveType.logarithmic, label: 'Twinkle rate'),
+  // WLED Twinkle lights ONE new pixel every `20 + (255 - sx) * 5` ms. The old
+  // default (40) was a new pixel every ~1.1 s — on the bench, 2–6 LEDs lit on a
+  // 290-LED roof and two frame changes in 10 s: it does not read as animated.
+  // 200 → ~0.3 s per pixel. Ceiling raised so the slider still has headroom.
+  EffectSpeedProfile(effectId: 17, rawMin: 60, rawMax: 250, rawDefault: 200, rawRecommendedMax: 235, curveType: SpeedCurveType.logarithmic, label: 'Twinkle rate'),
   // 20: Sparkle
   EffectSpeedProfile(effectId: 20, rawMin: 5, rawMax: 180, rawDefault: 45, rawRecommendedMax: 120, curveType: SpeedCurveType.logarithmic, label: 'Sparkle rate'),
   // 21: Sparkle Dark

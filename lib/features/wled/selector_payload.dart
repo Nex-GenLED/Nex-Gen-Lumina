@@ -11,6 +11,7 @@
 // without a widget or a container.
 
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
+import 'package:nexgen_command/features/wled/sparkle_background.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 
 /// Everything the tuner's seven selector providers contribute to a payload.
@@ -128,6 +129,11 @@ Map<String, dynamic> buildSelectorPayload(SelectorState s) {
           [255, 255, 255, 0]
         ]
       : s.colors;
+  // Sparkle-over-a-field effects (Twinkle & co.) paint their BACKGROUND with
+  // col[1]. When that would be indistinguishable from the sparkles — every
+  // Architectural white pair is — send a dim field instead, or the effect
+  // renders as a solid (bench-confirmed). See sparkle_background.dart.
+  final sparkle = readableSparkleColors(s.effectId, cols);
   return <String, dynamic>{
     'on': true,
     'bri': s.brightness,
@@ -136,10 +142,12 @@ Map<String, dynamic> buildSelectorPayload(SelectorState s) {
         'fx': s.effectId,
         'sx': s.speed,
         'ix': s.intensity,
-        'pal': s.paletteOverride ?? WledEffectsCatalog.paletteForEffect(s.effectId),
+        'pal': s.paletteOverride ??
+            sparkle.paletteOverride ??
+            WledEffectsCatalog.paletteForEffect(s.effectId),
         'grp': s.grouping,
         'spc': s.spacing,
-        'col': cols,
+        'col': sparkle.colors,
       }
     ],
   };

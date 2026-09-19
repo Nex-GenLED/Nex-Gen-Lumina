@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/wled/sparkle_background.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -279,8 +280,12 @@ class PatternRepository {
   /// On RGBW strips, small stray values in non-dominant channels cause
   /// visible color shifts (e.g., red + small blue = pink).
   static List<int> _cleanForLed(int r, int g, int b) {
-    // White/near-white: pass through
-    if (r > 240 && g > 240 && b > 240) return [r, g, b];
+    // White/near-white: pass through. Every channel >= 225 is a white by any
+    // definition. This used to require all three > 240, so a COOL white such
+    // as 6500K "Moonlight"'s (238, 242, 255) fell through to the blue-dominant
+    // branch below, had its red stripped, and went out as saturated CYAN
+    // [0, 242, 255] (found 2026-09-19 while fixing Architectural Twinkle).
+    if (r >= 225 && g >= 225 && b >= 225) return [r, g, b];
 
     const dominant = 150;
     const noise = 60;
@@ -1249,6 +1254,31 @@ class PatternRepository {
   /// Produces 23 pattern variations with clever names combining the
   /// colorway name with the effect type.
   Future<List<PatternItem>> generatePatternsForNode(LibraryNode node) async {
+    // ONE post-pass over whatever the four generators below produce, so a
+    // sparkle-over-a-field card (Twinkle, Sparkle, Fairytwinkle, Twinklefox…)
+    // can never ship a field colour that hides its own sparkles — whichever
+    // generator made it, and whichever is added next. sparkle_background.dart.
+    final items = await _generatePatternsForNodeRaw(node);
+    return [
+      for (final item in items)
+        item.copyWith(wledPayload: _withReadableSparkleFields(item.wledPayload)),
+    ];
+  }
+
+  static Map<String, dynamic> _withReadableSparkleFields(
+      Map<String, dynamic> payload) {
+    final seg = payload['seg'];
+    if (seg is! List) return payload;
+    return {
+      ...payload,
+      'seg': [
+        for (final s in seg)
+          s is Map ? withReadableSparkleField(Map<String, dynamic>.from(s)) : s,
+      ],
+    };
+  }
+
+  Future<List<PatternItem>> _generatePatternsForNodeRaw(LibraryNode node) async {
     if (!node.isPalette) return [];
 
     final colors = node.themeColors!;
@@ -1280,7 +1310,12 @@ class PatternRepository {
     // For regular palettes, use full kColorwayEffectIds for creative pattern variations
     // Note: include 3-color effects (12, 6, 51, 46) so palettes with 3+ colors display properly
     final effectIds = hasSpacingMetadata
-        ? const [0, 2, 12, 6, 15, 51, 46, 41] // Solid, Breathe, Fade, Sweep, Running, Gradient, Twinklefox, Lighthouse
+        // Solid, Breathe, Fade, Sweep, Running, Fairytwinkle, Gradient, Lighthouse.
+        // (This comment used to read "…Gradient, Twinklefox…" — pre-0.14 ids.
+        // On fw 0.15.1, 51 IS Fairytwinkle and 46 IS Gradient, which is what
+        // the cards have always been labelled. The ids are kept: card ids
+        // embed them, and Fairytwinkle now gets a readable field.)
+        ? const [0, 2, 12, 6, 15, 51, 46, 41]
         : kColorwayEffectIds;
 
     final items = <PatternItem>[];
@@ -1497,7 +1532,9 @@ class PatternRepository {
 
     // Twinkle effect variations
     final twinkleEffects = [
-      (id: 17, name: 'Classic Twinkle', speed: 80, intensity: 180),
+      // Twinkle adds ONE pixel per `20 + (255 - sx) * 5` ms: sx 80 was a
+      // new star every ~0.9 s — too slow to read as twinkling.
+      (id: 17, name: 'Classic Twinkle', speed: 200, intensity: 180),
       (id: 49, name: 'Fairy Twinkle', speed: 100, intensity: 200),
       (id: 80, name: 'Twinklefox', speed: 90, intensity: 190),
       (id: 74, name: 'Colortwinkles', speed: 70, intensity: 160),
@@ -1530,9 +1567,10 @@ class PatternRepository {
 
     // Add slow/medium/fast variations of the basic twinkle
     final speedVariations = [
-      (name: 'Slow Shimmer', speed: 40),
-      (name: 'Gentle Sparkle', speed: 80),
-      (name: 'Lively Stars', speed: 150),
+      // (was 40 / 80 / 150 = a new star every 1.1 s / 0.9 s / 0.55 s)
+      (name: 'Slow Shimmer', speed: 150),
+      (name: 'Gentle Sparkle', speed: 200),
+      (name: 'Lively Stars', speed: 235),
     ];
 
     for (final variation in speedVariations) {
