@@ -53,6 +53,7 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
   @override
   void dispose() {
     _previewThrottle?.cancel();
+    _goToController.dispose();
     super.dispose();
   }
 
@@ -187,40 +188,108 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
     _addAll(ch, found);
   }
 
+  // Last values used in the pattern dialog, per editor session. They used to
+  // be locals re-initialised on every open (Start 0 / End last / Every 3), so
+  // adjusting a pattern meant re-entering it from scratch.
+  int? _patStart, _patEnd;
+  int _patOn = 1, _patOff = 2;
+
+  /// The "N on, M off" pattern tool (was "Every-Nth").
+  ///
+  /// Every-Nth only ever ADDED to the selection, and Paint only ever ADDS
+  /// pixels, so re-running it to widen a pattern produced the UNION of old and
+  /// new — every-5th re-run as every-7th left 41 LEDs lit where a clean
+  /// every-7th is 19 (followup N3a). "Paint pattern" now writes BOTH halves in
+  /// one undoable step: the lit LEDs get the paint colour and the dark LEDs in
+  /// the range are cleared, so changing "4 off" to "6 off" gives exactly the
+  /// new pattern. "Select" replaces the selection inside the range.
   Future<void> _everyNthDialog() async {
     final ch = _activeChannel;
     if (ch == null) return;
     final len = _channelLengths()[ch] ?? 0;
-    int start = 0, end = len - 1, step = 3;
-    await showDialog<void>(
+    if (len <= 0) return;
+    int start = (_patStart ?? 0).clamp(0, len - 1);
+    int end = (_patEnd ?? len - 1).clamp(0, len - 1);
+    int on = _patOn, off = _patOff;
+
+    final action = await showDialog<_PatternAction>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) => AlertDialog(
-          backgroundColor: NexGenPalette.gunmetal90,
-          title: const Text('Every-Nth', style: TextStyle(color: Colors.white)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            _numRow('Start', start, 0, len - 1, (v) => set(() => start = v)),
-            _numRow('End', end, 0, len - 1, (v) => set(() => end = v)),
-            _numRow('Every', step, 1, 20, (v) => set(() => step = v)),
-          ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () {
-                _addAll(ch, everyNthInRange(start: start, end: end, step: step));
-                Navigator.pop(ctx);
-              },
-              child: const Text('Select'),
-            ),
-          ],
-        ),
+        builder: (ctx, set) {
+          final pattern =
+              onOffPatternInRange(start: start, end: end, on: on, off: off);
+          final lit = pattern.lit.length;
+          final span = end - start + 1;
+          // The one way this tool yields a single LED: a range shorter than
+          // one repeat (e.g. End left at 6 with 1 on / 6 off).
+          final degenerate = end >= start && lit <= 1 && len > on + off;
+          return AlertDialog(
+            backgroundColor: NexGenPalette.gunmetal90,
+            title: const Text('On / off pattern',
+                style: TextStyle(color: Colors.white)),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              _numRow('Lit', on, 1, 10, (v) => set(() => on = v)),
+              _numRow('Dark', off, 0, 20, (v) => set(() => off = v)),
+              _numRow('From LED', start, 0, len - 1, (v) => set(() => start = v)),
+              _numRow('To LED', end, 0, len - 1, (v) => set(() => end = v)),
+              const SizedBox(height: 8),
+              Text(
+                end < start
+                    ? '"To LED" is before "From LED" — nothing will be lit.'
+                    : '$on on, $off off across LEDs $start–$end '
+                        '($span LEDs) → $lit lit.',
+                key: const ValueKey('pattern-summary'),
+                style: TextStyle(
+                    color: end < start ? Colors.orangeAccent : NexGenPalette.textMedium,
+                    fontSize: 12),
+              ),
+              if (degenerate)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Only one LED — the range is shorter than one repeat of the '
+                    'pattern. Raise "To LED" to cover more of the channel.',
+                    style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
+                  ),
+                ),
+            ]),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, _PatternAction.select),
+                  child: const Text('Select')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx, _PatternAction.paint),
+                  child: const Text('Paint pattern')),
+            ],
+          );
+        },
       ),
     );
+    // Remember the numbers even on Cancel — the next open resumes from them.
+    _patStart = start;
+    _patEnd = end;
+    _patOn = on;
+    _patOff = off;
+    if (action == null || !mounted) return;
+
+    final pattern = onOffPatternInRange(start: start, end: end, on: on, off: off);
+    // Selection is REPLACED inside the range (not unioned with what was there).
+    _sel(ch)
+      ..removeWhere((i) => i >= start && i <= end)
+      ..addAll(pattern.lit);
+    if (action == _PatternAction.paint) {
+      _commit(_doc.clearToBase(ch, pattern.dark).paint(ch, pattern.lit, _paintColor));
+    } else {
+      setState(() {});
+    }
   }
 
   Widget _numRow(String label, int value, int min, int max, ValueChanged<int> onChanged) {
     return Row(children: [
-      SizedBox(width: 60, child: Text(label, style: const TextStyle(color: NexGenPalette.textMedium))),
+      SizedBox(width: 72, child: Text(label, style: const TextStyle(color: NexGenPalette.textMedium))),
       Expanded(
         child: Slider(
           value: value.toDouble().clamp(min.toDouble(), max.toDouble()),
@@ -231,8 +300,45 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
           onChanged: (v) => onChanged(v.round()),
         ),
       ),
-      SizedBox(width: 30, child: Text('$value', style: const TextStyle(color: Colors.white))),
+      // − / + so an exact number is reachable: on a 162-LED channel one slider
+      // division is about 2 px of finger travel.
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        icon: const Icon(Icons.remove, size: 16, color: Colors.white70),
+        onPressed: value > min ? () => onChanged(value - 1) : null,
+      ),
+      SizedBox(width: 30, child: Text('$value', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        icon: const Icon(Icons.add, size: 16, color: Colors.white70),
+        onPressed: value < max ? () => onChanged(value + 1) : null,
+      ),
     ]);
+  }
+
+  // ── Go to LED (audit F2) ────────────────────────────────────────────────
+
+  final _goToController = TextEditingController();
+  final _stripKey = GlobalKey<_SelectionStripState>();
+  String? _goToError;
+
+  /// Selects LED `57` or the range `12-40` typed into the "Go to LED" box and
+  /// brings it into view, zoomed in. The strip draws a whole channel in one
+  /// row — ~2 px per LED at 128–162 LEDs, where a fingertip covers ~20 — so a
+  /// specific pixel could not be reached by touch at all.
+  void _goToLed() {
+    final ch = _activeChannel;
+    if (ch == null) return;
+    final len = _channelLengths()[ch] ?? 0;
+    final target = parseLedTarget(_goToController.text, len);
+    if (target == null) {
+      setState(() => _goToError = 'Enter an LED 0–${len - 1}, or a range like 12-40');
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    _goToError = null;
+    _selectRange(ch, target.start, target.end); // calls setState
+    _stripKey.currentState?.reveal(target.start, target.end);
   }
 
   // ── Apply / preview / save ──────────────────────────────────────────────
@@ -435,12 +541,42 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
           const SizedBox(height: 8),
           // Selection strip (tap toggle + drag range).
           _SelectionStrip(
+            key: _stripKey,
             length: lengths[ch] ?? 0,
             selected: _sel(ch),
             colorAt: (i) => _toColorLocal(_doc.colorAt(ch, i)),
             onToggle: (i) => _toggle(ch, i),
             onRange: (a, b) => _selectRange(ch, a, b),
           ),
+          const SizedBox(height: 8),
+          // Go to LED — reach one specific pixel (or a range) by NUMBER.
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: TextField(
+                key: const ValueKey('go-to-led'),
+                controller: _goToController,
+                keyboardType: TextInputType.text,
+                textInputAction: TextInputAction.go,
+                onSubmitted: (_) => _goToLed(),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  isDense: true,
+                  labelText: 'Go to LED  (e.g. 57 or 12-40)',
+                  labelStyle: const TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+                  errorText: _goToError,
+                  helperText: '${_sel(ch).length} selected on Channel ${ch + 1} '
+                      '(LEDs 0–${(lengths[ch] ?? 1) - 1})',
+                  helperStyle: const TextStyle(color: NexGenPalette.textMedium, fontSize: 11),
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: FilledButton(onPressed: _goToLed, child: const Text('Select')),
+            ),
+          ]),
           const SizedBox(height: 10),
           // Selection tools.
           Wrap(spacing: 8, runSpacing: 8, children: [
@@ -448,7 +584,7 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
             _tool('All peaks', () => _selectFeature(FeatureFilter.allPeaks)),
             _tool('All runs', () => _selectFeature(FeatureFilter.allRuns)),
             _tool('Anchors', _selectAnchors),
-            _tool('Every-Nth', _everyNthDialog),
+            _tool('On / off pattern', _everyNthDialog),
             _tool('Clear sel.', _clearSelection),
           ]),
           const Divider(color: NexGenPalette.line, height: 24),
@@ -511,11 +647,21 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
       a.length == b.length && a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
 }
 
-/// A horizontal LED strip for selection: tap toggles a cell, horizontal drag
-/// selects a range. Each cell shows its current paint color; selected cells get
-/// a highlight ring.
+enum _PatternAction { select, paint }
+
+/// A horizontal LED strip for selection: tap toggles a cell, a drag selects a
+/// range. Each cell shows its current paint color; selected cells get a ring.
+///
+/// ZOOM + PAN (audit F2). The whole channel used to be squeezed into the
+/// available width — `cell = width / length` — which at 128–162 LEDs is ~2 px
+/// per LED with a fingertip covering ~20: no specific pixel could be aimed at
+/// or even seen. The − / + buttons scale the cells (1× = fit, up to 32×); once
+/// zoomed the strip scrolls sideways and shows LED numbers. At 1× a horizontal
+/// drag selects a range as before; when zoomed a plain drag PANS and a
+/// long-press-drag selects, so both remain possible.
 class _SelectionStrip extends StatefulWidget {
   const _SelectionStrip({
+    super.key,
     required this.length,
     required this.selected,
     required this.colorAt,
@@ -534,54 +680,235 @@ class _SelectionStrip extends StatefulWidget {
 }
 
 class _SelectionStripState extends State<_SelectionStrip> {
-  int? _dragStart;
+  static const _zoomLevels = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0];
+  static const double _minRevealCell = 18; // px per LED after a "Go to LED"
 
-  int _indexAt(double dx, double width) {
-    if (widget.length <= 0) return 0;
-    final cell = width / widget.length;
-    return (dx / cell).floor().clamp(0, widget.length - 1);
+  final _scroll = ScrollController();
+  int _zoomIndex = 0;
+  int? _dragStart;
+  int? _lastTouched;
+  double _viewport = 0;
+
+  double get _zoom => _zoomLevels[_zoomIndex];
+  double get _cell =>
+      widget.length <= 0 ? 0 : (_viewport / widget.length) * _zoom;
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  int _indexAt(double dxInContent) {
+    if (widget.length <= 0 || _cell <= 0) return 0;
+    return (dxInContent / _cell).floor().clamp(0, widget.length - 1);
+  }
+
+  void _setZoom(int index, {int? keepLed}) {
+    final next = index.clamp(0, _zoomLevels.length - 1);
+    // Keep the same LED under the middle of the viewport while zooming.
+    final centreLed = keepLed ??
+        (_scroll.hasClients && _cell > 0
+            ? ((_scroll.offset + _viewport / 2) / _cell).floor()
+            : widget.length ~/ 2);
+    setState(() => _zoomIndex = next);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _centreOn(centreLed));
+  }
+
+  void _centreOn(int led) {
+    if (!_scroll.hasClients) return;
+    final target = (led + 0.5) * _cell - _viewport / 2;
+    _scroll.jumpTo(target.clamp(0.0, _scroll.position.maxScrollExtent));
+  }
+
+  /// Zooms in far enough to see LEDs [a]–[b] individually and scrolls to them.
+  void reveal(int a, int b) {
+    if (widget.length <= 0 || _viewport <= 0) return;
+    int idx = _zoomIndex;
+    while (idx < _zoomLevels.length - 1 &&
+        (_viewport / widget.length) * _zoomLevels[idx] < _minRevealCell) {
+      idx++;
+    }
+    setState(() => _lastTouched = a);
+    _setZoom(idx, keepLed: (a + b) ~/ 2);
   }
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, c) {
-      final width = c.maxWidth;
-      return GestureDetector(
-        onTapDown: (d) => widget.onToggle(_indexAt(d.localPosition.dx, width)),
-        onHorizontalDragStart: (d) => _dragStart = _indexAt(d.localPosition.dx, width),
-        onHorizontalDragUpdate: (d) {
-          if (_dragStart != null) {
-            widget.onRange(_dragStart!, _indexAt(d.localPosition.dx, width));
-          }
-        },
-        onHorizontalDragEnd: (_) => _dragStart = null,
-        child: Container(
-          height: 34,
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      LayoutBuilder(builder: (context, c) {
+        _viewport = c.maxWidth;
+        final zoomed = _zoomIndex > 0;
+        final content = SizedBox(
+          width: _cell * widget.length,
+          height: zoomed ? 52 : 34,
+          child: CustomPaint(
+            painter: _StripPainter(
+              length: widget.length,
+              cell: _cell,
+              colorAt: widget.colorAt,
+              selected: widget.selected,
+              showNumbers: _cell >= 8,
+            ),
+          ),
+        );
+        final gestures = GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          // onTapUp, not onTapDown: a finger resting on the strip while the
+          // PAGE scrolls must not toggle a pixel.
+          onTapUp: (d) {
+            final i = _indexAt(d.localPosition.dx);
+            setState(() => _lastTouched = i);
+            widget.onToggle(i);
+          },
+          // 1× — nothing to pan, so a plain drag selects (as before).
+          onHorizontalDragStart: zoomed
+              ? null
+              : (d) => _dragStart = _indexAt(d.localPosition.dx),
+          onHorizontalDragUpdate: zoomed
+              ? null
+              : (d) {
+                  if (_dragStart == null) return;
+                  final i = _indexAt(d.localPosition.dx);
+                  setState(() => _lastTouched = i);
+                  widget.onRange(_dragStart!, i);
+                },
+          onHorizontalDragEnd: zoomed ? null : (_) => _dragStart = null,
+          // Zoomed — a plain drag pans the scroll view; long-press-drag selects.
+          onLongPressStart: (d) {
+            _dragStart = _indexAt(d.localPosition.dx);
+            setState(() => _lastTouched = _dragStart);
+            widget.onRange(_dragStart!, _dragStart!);
+          },
+          onLongPressMoveUpdate: (d) {
+            if (_dragStart == null) return;
+            final i = _indexAt(d.localPosition.dx);
+            setState(() => _lastTouched = i);
+            widget.onRange(_dragStart!, i);
+          },
+          onLongPressEnd: (_) => _dragStart = null,
+          child: content,
+        );
+        return Container(
           decoration: BoxDecoration(
             color: NexGenPalette.matteBlack,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: NexGenPalette.line),
           ),
-          padding: const EdgeInsets.all(3),
-          child: Row(
-            children: [
-              for (int i = 0; i < widget.length; i++)
-                Expanded(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 0.3),
-                    decoration: BoxDecoration(
-                      color: widget.colorAt(i),
-                      borderRadius: BorderRadius.circular(2),
-                      border: widget.selected.contains(i)
-                          ? Border.all(color: NexGenPalette.cyan, width: 2)
-                          : null,
-                    ),
-                  ),
-                ),
-            ],
+          clipBehavior: Clip.antiAlias,
+          child: SingleChildScrollView(
+            key: const ValueKey('strip-scroll'),
+            controller: _scroll,
+            scrollDirection: Axis.horizontal,
+            physics: zoomed
+                ? const ClampingScrollPhysics()
+                : const NeverScrollableScrollPhysics(),
+            child: gestures,
+          ),
+        );
+      }),
+      const SizedBox(height: 4),
+      Row(children: [
+        IconButton(
+          key: const ValueKey('strip-zoom-out'),
+          tooltip: 'Zoom out',
+          visualDensity: VisualDensity.compact,
+          onPressed: _zoomIndex > 0 ? () => _setZoom(_zoomIndex - 1) : null,
+          icon: const Icon(Icons.zoom_out, color: Colors.white70),
+        ),
+        Text('${_zoom.toStringAsFixed(0)}×',
+            style: const TextStyle(color: Colors.white, fontSize: 12)),
+        IconButton(
+          key: const ValueKey('strip-zoom-in'),
+          tooltip: 'Zoom in',
+          visualDensity: VisualDensity.compact,
+          onPressed: _zoomIndex < _zoomLevels.length - 1
+              ? () => _setZoom(_zoomIndex + 1)
+              : null,
+          icon: const Icon(Icons.zoom_in, color: Colors.white70),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            _zoomIndex == 0
+                ? 'Tap a light · drag to select a range · zoom in to reach one LED'
+                : 'Tap a light · drag to pan · press-and-hold then drag to select'
+                    '${_lastTouched == null ? '' : '   ·   LED $_lastTouched'}',
+            style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 11),
           ),
         ),
-      );
-    });
+      ]),
+    ]);
   }
+}
+
+/// Paints the strip. A CustomPainter rather than a Row of N widgets: at 32× a
+/// 162-LED channel is 5,000+ px wide and would otherwise build 162 containers
+/// on every selection change.
+class _StripPainter extends CustomPainter {
+  _StripPainter({
+    required this.length,
+    required this.cell,
+    required this.colorAt,
+    required this.selected,
+    required this.showNumbers,
+  }) : _selectionSnapshot = Set<int>.of(selected);
+
+  final int length;
+  final double cell;
+  final Color Function(int) colorAt;
+  final Set<int> selected;
+  final bool showNumbers;
+  final Set<int> _selectionSnapshot;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (length <= 0 || cell <= 0) return;
+    const pad = 3.0;
+    final barHeight = showNumbers ? size.height - 18 : size.height;
+    final gap = cell >= 4 ? 0.6 : 0.0;
+    final fill = Paint();
+    // WHITE ring: the default paint colour is cyan (#00E5FF), and a cyan
+    // selection ring (#00D4FF) on a cyan pixel was indistinguishable.
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..color = Colors.white
+      ..strokeWidth = cell >= 6 ? 2 : 1;
+    for (int i = 0; i < length; i++) {
+      final rect = Rect.fromLTWH(
+          i * cell + gap, pad, (cell - 2 * gap).clamp(0.5, cell), barHeight - 2 * pad);
+      fill.color = colorAt(i);
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(2)), fill);
+      if (selected.contains(i)) {
+        if (cell >= 4) {
+          canvas.drawRRect(
+              RRect.fromRectAndRadius(rect.deflate(0.5), const Radius.circular(2)), ring);
+        } else {
+          // Too narrow for a ring: a white tick on top marks the selection.
+          canvas.drawRect(Rect.fromLTWH(i * cell, 0, cell, pad), Paint()..color = Colors.white);
+        }
+      }
+    }
+    if (!showNumbers) return;
+    // Label every LED when there is room, else every 5th / 10th.
+    final every = cell >= 26 ? 1 : (cell >= 12 ? 5 : 10);
+    for (int i = 0; i < length; i += every) {
+      final tp = TextPainter(
+        text: TextSpan(
+            text: '$i',
+            style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 9)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(i * cell + (cell - tp.width) / 2, barHeight + 2));
+    }
+  }
+
+  @override
+  bool shouldRepaint(_StripPainter old) =>
+      old.length != length ||
+      old.cell != cell ||
+      old.showNumbers != showNumbers ||
+      old.colorAt != colorAt ||
+      old._selectionSnapshot.length != _selectionSnapshot.length ||
+      !old._selectionSnapshot.containsAll(_selectionSnapshot);
 }
