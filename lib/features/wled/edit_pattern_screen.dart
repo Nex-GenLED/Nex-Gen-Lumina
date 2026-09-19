@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/wled/edit_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/widgets/hsv_wheel_picker.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
@@ -712,80 +713,23 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     );
   }
 
-  Widget _buildHsvPicker() {
-    // Get the current editing color
-    Color currentColor;
-    if (_editingBgColor) {
-      currentColor = _pattern.backgroundColor;
-    } else if (_selectedColorIndex < _pattern.actionColors.length) {
-      currentColor = _pattern.actionColors[_selectedColorIndex];
-    } else {
-      currentColor = Colors.white;
+  Color _currentEditingColor() {
+    if (_editingBgColor) return _pattern.backgroundColor;
+    if (_selectedColorIndex < _pattern.actionColors.length) {
+      return _pattern.actionColors[_selectedColorIndex];
     }
+    return Colors.white;
+  }
 
-    final hsv = HSVColor.fromColor(currentColor);
-
-    return Column(
-      children: [
-        // Hue bar
-        SizedBox(
-          height: 32,
-          child: SliderTheme(
-            data: SliderThemeData(
-              activeTrackColor: Colors.transparent,
-              inactiveTrackColor: Colors.transparent,
-              thumbColor: Colors.white,
-              trackHeight: 28,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10),
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      gradient: LinearGradient(
-                        colors: List.generate(
-                          7,
-                          (i) => HSVColor.fromAHSV(1, i * 60.0, 1, 1).toColor(),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Slider(
-                  value: hsv.hue,
-                  min: 0,
-                  max: 360,
-                  onChanged: (v) {
-                    final newColor = HSVColor.fromAHSV(1, v, hsv.saturation, hsv.value).toColor();
-                    _applyColor(newColor);
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        // Saturation + Value in a row
-        Row(
-          children: [
-            Expanded(
-              child: _buildSmallSlider('Sat', hsv.saturation, (v) {
-                final newColor = HSVColor.fromAHSV(1, hsv.hue, v, hsv.value).toColor();
-                _applyColor(newColor);
-              }),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildSmallSlider('Val', hsv.value, (v) {
-                final newColor = HSVColor.fromAHSV(1, hsv.hue, hsv.saturation, v).toColor();
-                _applyColor(newColor);
-              }),
-            ),
-          ],
-        ),
-      ],
+  /// "Color Picker" tab — the app's own colour WHEEL plus one brightness
+  /// control ([HsvWheelPicker]). It used to be a hue bar + Sat + Val sliders
+  /// under a tab labelled "Color Picker", which also lost the hue whenever
+  /// saturation or value touched 0 (HSV re-derived from RGB every build).
+  Widget _buildHsvPicker() {
+    return HsvWheelPicker(
+      key: const ValueKey('edit-pattern-color-wheel'),
+      color: _currentEditingColor(),
+      onChanged: _applyColor,
     );
   }
 
@@ -833,23 +777,6 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     );
   }
 
-  Widget _buildSmallSlider(String label, double value, ValueChanged<double> onChanged) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 11)),
-        SliderTheme(
-          data: SliderThemeData(
-            activeTrackColor: NexGenPalette.cyan,
-            inactiveTrackColor: NexGenPalette.trackDark,
-            thumbColor: NexGenPalette.cyan,
-            trackHeight: 4,
-          ),
-          child: Slider(value: value, min: 0, max: 1, onChanged: onChanged),
-        ),
-      ],
-    );
-  }
 
   void _applyColor(Color color) {
     if (_editingBgColor) {
