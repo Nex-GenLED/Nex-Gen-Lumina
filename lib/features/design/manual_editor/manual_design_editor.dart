@@ -5,6 +5,7 @@ import 'package:nexgen_command/features/wled/device_identity.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/design_save_errors.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
@@ -308,7 +309,14 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
 
   Future<void> _save() async {
     final uid = ref.read(effectiveUserUidProvider);
-    if (uid == null) return;
+    if (uid == null) {
+      // Used to return without a word — Save looked like it did nothing.
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Sign in to save designs. Nothing was saved.'),
+        backgroundColor: Colors.red.shade800,
+      ));
+      return;
+    }
 
     // EDIT vs NEW. When the editor was opened on a stored design, save must
     // UPDATE THAT DOC — carrying its id forward is what routes
@@ -371,6 +379,18 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
                 ? 'Updated "$name"'
                 : 'Saved "$name" to My Designs'),
             backgroundColor: NexGenPalette.cyan));
+      }
+    } catch (e, st) {
+      // There was NO catch here. DesignService rethrows, so a denied or failed
+      // write escaped as an unhandled async error and the screen showed
+      // nothing: buttons greyed, came back, design not in My Designs (F6).
+      debugPrint('ManualDesignEditor save failed: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(describeDesignSaveError(e, isEdit: existing != null)),
+          backgroundColor: Colors.red.shade800,
+          duration: const Duration(seconds: 7),
+        ));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
