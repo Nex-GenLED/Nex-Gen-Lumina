@@ -263,6 +263,28 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
       if (context.canPop()) context.pop();
       return;
     }
+    // A POSITIONAL design (painted / AI-composed) cannot be handed to a
+    // schedule or a Game Day slot. Both replay their stored payload
+    // UNATTENDED through a WLED preset, and a preset stores segment settings,
+    // not the pixel buffer — so the picture is lost at save time and what
+    // fires later is the bare base (dark, for a painted design). This picker
+    // used to hand back the lossy effect-shaped payload instead (first three
+    // colours, positions dropped, fx:83 — audit F3), which scheduled a look
+    // the user never made. Refuse plainly rather than schedule the wrong
+    // thing; the design still applies faithfully from My Designs.
+    if (match.isPositional) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(
+              '"${match.name}" is a per-pixel design. Those can\'t be scheduled '
+              'yet — your controller\'s timers can only replay colours and '
+              'effects, not a painted picture. You can still apply it any time '
+              'from My Designs.'),
+          duration: const Duration(seconds: 7),
+        ));
+      return; // stay in the picker so another design can be chosen
+    }
     cb(LibraryDesignSelection(
       id: match.id,
       name: match.name,

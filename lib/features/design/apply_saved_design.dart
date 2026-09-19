@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
+import 'package:nexgen_command/features/wled/device_identity.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
@@ -54,21 +56,48 @@ Future<void> applySavedDesign(
     return;
   }
 
-  var payload = design.toWledPayload();
-  payload = applyChannelFilter(
-    payload,
-    channels,
-    ref.read(deviceChannelsProvider),
-  );
-
-  final success = await repo.applyJson(payload);
-  if (!success) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to apply ${design.name}')),
-      );
+  // A POSITIONAL design (painted, or AI-composed) goes through the SAME
+  // per-pixel spine the editor's own Apply uses, so it lands exactly as it
+  // looked when it was saved. This button used to push every design through
+  // the effect shape — first three colour groups, positions discarded, fx:83 —
+  // which turned a painted house almost entirely dark under an "Applied"
+  // toast (audit F3; bench: 257 black + one 33-LED block). The chunked spine
+  // also has no payload-size ceiling, unlike a single applyJson.
+  Map<String, dynamic> payload;
+  if (design.isPositional) {
+    payload = const <String, dynamic>{};
+    final result = await applyCustomDesignToLights(ref, design);
+    if (result != DesignApplyResult.applied &&
+        result != DesignApplyResult.staleApplied) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result == DesignApplyResult.noMap
+              ? '"${design.name}" has no lit pixels to apply.'
+              // #94 — an identity refusal must say so, not blame the network.
+              : (takeIdentityRefusalMessage() ??
+                  "Couldn't apply \"${design.name}\" — your lights didn't "
+                      'accept it. Check the connection and try again.')),
+          backgroundColor: Colors.red.shade800,
+        ));
+      }
+      return;
     }
-    return;
+  } else {
+    payload = applyChannelFilter(
+      design.toWledPayload(),
+      channels,
+      ref.read(deviceChannelsProvider),
+    );
+
+    final success = await repo.applyJson(payload);
+    if (!success) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to apply ${design.name}')),
+        );
+      }
+      return;
+    }
   }
 
   final previewColors = _previewColorsFromDesign(design);
@@ -76,7 +105,10 @@ Future<void> applySavedDesign(
     (c) => c.included,
     orElse: () => const ChannelDesign(channelId: 0, channelName: ''),
   );
-  final effectId = _wireEffectIdFromPayload(payload) ?? firstChannel.effectId;
+  // A per-pixel frame is static (fx 0) whatever effect id the channel stores.
+  final effectId = design.isPositional
+      ? 0
+      : (_wireEffectIdFromPayload(payload) ?? firstChannel.effectId);
 
   ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: previewColors,

@@ -78,6 +78,12 @@ Future<bool> applyBaseAndSpans(
   return result.isOk;
 }
 
+/// `ref.read`, from either a `WidgetRef` (screens) or a `Ref` (providers).
+/// The spine only ever READS providers, so taking the reader rather than the
+/// ref lets provider-side appliers (scenes) share the one implementation
+/// instead of growing a second, drifting copy.
+typedef ProviderReader = T Function<T>(ProviderListenable<T> provider);
+
 /// Base solid + per-channel `i` spans, with the wire outcome. Applies spans
 /// only for channels in the effective set. Sets [label] ONLY on full success —
 /// a "Now Playing" label for a look that never arrived is the same lie as the
@@ -87,12 +93,22 @@ Future<SpineWriteResult> applyBaseAndSpansDetailed(
   required List<int> baseRgbw,
   required Map<int, List<PixelSpan>> spansByChannel,
   String? label,
+}) =>
+    applyBaseAndSpansWith(ref.read,
+        baseRgbw: baseRgbw, spansByChannel: spansByChannel, label: label);
+
+/// The spine itself. See [applyBaseAndSpansDetailed].
+Future<SpineWriteResult> applyBaseAndSpansWith(
+  ProviderReader read, {
+  required List<int> baseRgbw,
+  required Map<int, List<PixelSpan>> spansByChannel,
+  String? label,
 }) async {
-  final repo = ref.read(wledRepositoryProvider);
+  final repo = read(wledRepositoryProvider);
   if (repo == null) return SpineWriteResult.noDevice;
 
-  final deviceChannels = ref.read(deviceChannelsProvider);
-  final effective = ref.read(effectiveChannelIdsProvider);
+  final deviceChannels = read(deviceChannelsProvider);
+  final effective = read(effectiveChannelIdsProvider);
   if (effective.isEmpty) return SpineWriteResult.noChannels;
   final effectiveSet = effective.toSet();
 
@@ -131,9 +147,8 @@ Future<SpineWriteResult> applyBaseAndSpansDetailed(
   }
 
   if (label != null) {
-    ref
-        .read(activePresetLabelProvider.notifier)
-        .setLabelWithFingerprint(label, ref.read(wledStateProvider));
+    read(activePresetLabelProvider.notifier)
+        .setLabelWithFingerprint(label, read(wledStateProvider));
   }
   return SpineWriteResult.ok;
 }
@@ -146,6 +161,25 @@ List<PixelSpan> ledColorGroupsToSpans(List<LedColorGroup> groups) {
     for (final g in groups)
       PixelSpan(start: g.startLed, end: g.endLed, color: _rgbw(g.color)),
   ];
+}
+
+/// Applies a stored POSITIONAL design (painted, or AI-composed) exactly the
+/// way the editor's own "Apply to Lights" does — the ONE routine behind My
+/// Designs, scenes, and anything else holding a [CustomDesign]. Provider-side
+/// callers pass `ref.read`.
+Future<DesignApplyResult> applyPositionalDesignWith(
+  ProviderReader read,
+  CustomDesign design,
+) async {
+  final spans = customDesignToSpans(design);
+  if (spans.isEmpty) return DesignApplyResult.noMap;
+  final result = await applyBaseAndSpansWith(
+    read,
+    baseRgbw: const [0, 0, 0, 0], // groups define the lit picture
+    spansByChannel: spans,
+    label: design.name,
+  );
+  return result.isOk ? DesignApplyResult.applied : DesignApplyResult.error;
 }
 
 List<int> _rgbw(List<int> c) {
@@ -185,14 +219,5 @@ Map<int, List<PixelSpan>> customDesignToSpans(CustomDesign design) {
 Future<DesignApplyResult> applyCustomDesignToLights(
   WidgetRef ref,
   CustomDesign design,
-) async {
-  final spans = customDesignToSpans(design);
-  if (spans.isEmpty) return DesignApplyResult.noMap;
-  final ok = await applyBaseAndSpans(
-    ref,
-    baseRgbw: const [0, 0, 0, 0], // groups define the lit picture
-    spansByChannel: spans,
-    label: design.name,
-  );
-  return ok ? DesignApplyResult.applied : DesignApplyResult.error;
-}
+) =>
+    applyPositionalDesignWith(ref.read, design);

@@ -14,14 +14,14 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 
-/// How a design was authored. Derived, not stored — the writers all land in
-/// one collection and the shape is what distinguishes them
-/// (audit/MY_DESIGNS_AUDIT.md §2.5).
+/// How a design was authored. `aiComposed` and `perPixel` are read from
+/// stored markers (`composed_pattern`, `per_pixel`); only docs that predate
+/// the `per_pixel` marker fall back to shape — see [CustomDesign.isPositional].
 enum DesignKind {
   /// Authored in the AI Design Studio; carries the `composed_pattern` layer.
   aiComposed,
 
-  /// Per-LED paint: multiple color groups on at least one channel.
+  /// Per-LED paint: the channel colour groups are positional runs.
   perPixel,
 
   /// A captured look: one color group per channel plus an effect id.
@@ -52,16 +52,21 @@ extension DesignKindLabel on DesignKind {
   }
 }
 
-/// Classifies a stored design by its shape.
+/// Classifies a stored design.
 ///
-/// `composedPattern` wins because it is the only unambiguous provenance marker
-/// on the doc. Note this READS the field's presence only — it does not decode
-/// or interpret it (deliberately out of scope for this change).
+/// `composedPattern` wins because it is an unambiguous provenance marker. Note
+/// this READS the field's presence only — it does not decode or interpret it.
+///
+/// Per-pixel is decided by [CustomDesign.isPositional] — the SAME predicate
+/// that decides how the design is sent to the lights, so what Edit opens and
+/// what Apply sends can never disagree. It used to be "some channel has more
+/// than one colour group", which was wrong both ways: a painted design in a
+/// single colour (or blank) was classed `effect` and opened in the colourway
+/// tuner, and the colour editor's three-colour "save as pattern" (three
+/// single-LED groups) was classed `perPixel` and opened in the paint editor.
 DesignKind designKindOf(CustomDesign design) {
   if (design.composedPattern != null) return DesignKind.aiComposed;
-  final included = design.channels.where((c) => c.included);
-  final multiGroup = included.any((c) => c.colorGroups.length > 1);
-  return multiGroup ? DesignKind.perPixel : DesignKind.effect;
+  return design.isPositional ? DesignKind.perPixel : DesignKind.effect;
 }
 
 /// Design detail for `/explore/library/design_{id}`.

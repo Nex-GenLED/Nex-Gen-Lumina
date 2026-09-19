@@ -206,14 +206,19 @@ void main() {
             channelName: 'A',
             included: true,
             effectId: 0,
+            // PALETTE-shaped, exactly as the colour editor's "save as
+            // pattern" writes it (current_colors_provider.dart): one
+            // single-LED group per colour, no led_count. Groups that TILE a
+            // channel (0-4 red, 5-9 green on 10 LEDs) are a painted picture
+            // and are now — correctly — sent per-pixel, not as fx 83.
             colorGroups: [
-              LedColorGroup(startLed: 0, endLed: 4, color: const [255, 0, 0, 0]),
-              LedColorGroup(startLed: 5, endLed: 9, color: const [0, 255, 0, 0]),
+              LedColorGroup(startLed: 0, endLed: 0, color: const [255, 0, 0, 0]),
+              LedColorGroup(startLed: 1, endLed: 1, color: const [0, 255, 0, 0]),
             ],
-            ledCount: 10,
           ),
         ],
       );
+      expect(multiColour.isPositional, isFalse);
 
       final viaPayload =
           selectorStateFromPayload(multiColour.toWledPayload()).effectId;

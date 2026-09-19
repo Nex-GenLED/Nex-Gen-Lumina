@@ -2,6 +2,7 @@ import 'dart:ui' show Color;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/scenes/scene_models.dart';
@@ -153,10 +154,24 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
       //     applyChannelFilter would template off seg.first and flatten
       //     per-channel colors. Goes straight through the chokepoint.
       //   • snapshot/system → full-device-state blob; also pre-shaped.
+      //   • custom + POSITIONAL (a painted / AI-composed design — every saved
+      //     design is also a custom scene) → the shared per-pixel spine, the
+      //     same routine My Designs and the editor use. It chunks, so it has
+      //     no payload-size ceiling, and it reports the real wire outcome.
+      //     (`payload` above is already faithful for these — it is kept for
+      //     the usage log — but a single applyJson is capped at 4 KB.)
       final notifier = ref.read(wledStateProvider.notifier);
-      final success = scene.type == SceneType.library
-          ? await notifier.applyToDevice(payload, labelHint: scene.name)
-          : await notifier.applyPayloadWithLabel(payload, labelHint: scene.name);
+      final design = scene.type == SceneType.custom ? scene.customDesign : null;
+      final bool success;
+      if (design != null && design.isPositional) {
+        success = await applyPositionalDesignWith(ref.read, design) ==
+            DesignApplyResult.applied;
+      } else if (scene.type == SceneType.library) {
+        success = await notifier.applyToDevice(payload, labelHint: scene.name);
+      } else {
+        success =
+            await notifier.applyPayloadWithLabel(payload, labelHint: scene.name);
+      }
 
       // Immediately update local state with scene colors and preset label
       // This prevents the UI from showing stale colors during the polling delay

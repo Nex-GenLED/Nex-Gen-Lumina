@@ -347,6 +347,8 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
               name: name,
               channels: channels,
               updatedAt: DateTime.now(),
+              // Whatever it was when it was opened, it has now been painted.
+              perPixel: true,
             )
           : CustomDesign(
               id: '',
@@ -355,6 +357,12 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
               updatedAt: DateTime.now(),
               ownerId: uid,
               channels: channels,
+              // STATED, not inferred: a painted design that is one colour (or
+              // blank) is a single group per channel and is otherwise
+              // indistinguishable from a captured solid — it used to be
+              // classed "effect", so Edit opened the colourway tuner instead
+              // of this editor.
+              perPixel: true,
             );
       await ref.read(designServiceProvider).saveDesign(uid, design);
       if (mounted) {

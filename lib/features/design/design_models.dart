@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
+import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 
@@ -83,6 +84,21 @@ class CustomDesign {
   /// copying the loaded one WILL silently destroy it.
   final Map<String, dynamic>? composedPattern;
 
+  /// True when this design was PAINTED: its channels' colour groups are
+  /// positional runs — "LEDs 40–44 are blue" — not a list of palette colours.
+  ///
+  /// Stored (`per_pixel`), because the two meanings share one field and cannot
+  /// be told apart reliably by shape: a painted design that is all one colour
+  /// (or blank) has a single group per channel and looks exactly like a
+  /// captured solid, while the colour editor's "save as pattern" writes three
+  /// single-LED groups (`0–0, 1–1, 2–2`) that look positional and are not.
+  /// Guessing got it wrong in both directions — and the guess decided which
+  /// editor opened AND, worse, how the design was sent to the lights.
+  ///
+  /// Written by the manual paint editor. Absent on older docs → see
+  /// [isPositional] for the fallback.
+  final bool perPixel;
+
   const CustomDesign({
     required this.id,
     required this.name,
@@ -99,6 +115,7 @@ class CustomDesign {
     this.segmentColorGroups,
     this.segmentPatternConfig,
     this.composedPattern,
+    this.perPixel = false,
   });
 
   CustomDesign copyWith({
@@ -117,6 +134,7 @@ class CustomDesign {
     List<LedColorGroup>? segmentColorGroups,
     Map<String, dynamic>? segmentPatternConfig,
     Map<String, dynamic>? composedPattern,
+    bool? perPixel,
   }) {
     return CustomDesign(
       id: id ?? this.id,
@@ -134,6 +152,7 @@ class CustomDesign {
       segmentColorGroups: segmentColorGroups ?? this.segmentColorGroups,
       segmentPatternConfig: segmentPatternConfig ?? this.segmentPatternConfig,
       composedPattern: composedPattern ?? this.composedPattern,
+      perPixel: perPixel ?? this.perPixel,
     );
   }
 
@@ -210,6 +229,7 @@ class CustomDesign {
               .toList(),
       segmentPatternConfig: data['segment_pattern_config'] as Map<String, dynamic>?,
       composedPattern: parsedComposedPattern,
+      perPixel: data['per_pixel'] as bool? ?? false,
     );
   }
 
@@ -237,11 +257,71 @@ class CustomDesign {
       // otherwise THROWS on nested lists) — mirrors logPatternUsage's
       // 'wled': jsonEncode(wled). Decoded back in fromFirestoreData.
       if (composedPattern != null) 'composed_pattern': jsonEncode(composedPattern),
+      // Only ever written as `true`: absence keeps meaning "not stated", so
+      // older docs and the legacy fallback in [isPositional] stay valid.
+      if (perPixel) 'per_pixel': true,
     };
   }
 
-  /// Converts this design to a WLED JSON API payload
+  /// Whether the channels hold an LED PICTURE (positional runs) that has to be
+  /// sent per-pixel, rather than "up to three colours + an effect".
+  ///
+  /// * [perPixel] — stated by the paint editor.
+  /// * [composedPattern] — AI Design Studio designs; their channel groups are
+  ///   the composed layout clipped per channel, and the studio's own Apply has
+  ///   always sent them per-pixel.
+  /// * Legacy docs with neither: positional only when some channel's groups
+  ///   genuinely TILE that channel (start at 0, contiguous, end at
+  ///   `ledCount - 1`, more than one run). That is what the paint editor has
+  ///   always written, and what no palette-style writer produces.
+  bool get isPositional {
+    if (perPixel || composedPattern != null) return true;
+    return channels.any((c) => c.included && c.tilesItsChannel);
+  }
+
+  /// A self-contained per-pixel payload: every included channel as `fx:0` with
+  /// an `i` array covering EVERY LED (uncovered LEDs are written black).
+  ///
+  /// Full coverage is what makes a single payload safe. A per-pixel write
+  /// freezes the segment in the same request, so a base colour sent alongside
+  /// it never renders — any LED the `i` array skipped would keep whatever the
+  /// previous look left in the buffer.
+  Map<String, dynamic> _positionalPayload() {
+    final segments = <Map<String, dynamic>>[];
+    for (final channel in channels) {
+      if (!channel.included) continue;
+      final spans = channel.fullCoverageSpans();
+      if (spans.isEmpty) continue;
+      final seg = (buildPerPixelPayload(spans, channel.channelId)['seg'] as List)
+          .first as Map<String, dynamic>;
+      segments.add({
+        ...kDesignSpacingDefaults,
+        ...seg, // id, on, fx:0, i
+        'pal': 0,
+        'col': const [
+          [0, 0, 0, 0]
+        ],
+      });
+    }
+    return {'on': true, 'bri': brightness, 'seg': segments};
+  }
+
+  /// Converts this design to a WLED JSON API payload.
+  ///
+  /// A POSITIONAL design ([isPositional]) is emitted per-pixel. It used to be
+  /// pushed through the effect shape below like everything else — first three
+  /// colour groups, every position discarded, `fx:83` — which for a painted
+  /// design (whose first group is nearly always the unlit base) turned the
+  /// house almost entirely dark under an "Applied" toast (audit F3, twice
+  /// bench-confirmed). Every payload consumer inherits this: My Designs,
+  /// scenes (every saved design IS a custom scene), the Lumina command router.
+  ///
+  /// NOTE a payload is bounded by `kMaxApplyPayloadBytes`; callers that can,
+  /// apply a positional design through the chunked spine instead
+  /// (`applyCustomDesignToLights`), which has no such ceiling.
   Map<String, dynamic> toWledPayload() {
+    if (isPositional) return _positionalPayload();
+
     final segments = <Map<String, dynamic>>[];
 
     for (final channel in channels) {
@@ -410,6 +490,53 @@ class ChannelDesign {
       'reverse': reverse,
       'led_count': ledCount,
     };
+  }
+
+  /// True when [colorGroups] tile this channel: more than one run, starting at
+  /// 0, contiguous, ending at `ledCount - 1`. See [CustomDesign.isPositional].
+  bool get tilesItsChannel {
+    if (ledCount <= 0 || colorGroups.length < 2) return false;
+    int cursor = 0;
+    for (final g in colorGroups) {
+      if (g.startLed != cursor || g.endLed < g.startLed) return false;
+      cursor = g.endLed + 1;
+    }
+    return cursor == ledCount;
+  }
+
+  /// [colorGroups] as channel-local RGBW [PixelSpan]s, exactly as stored.
+  /// RGB-only colours get W=0 (the same rule the apply spine uses).
+  List<PixelSpan> positionalSpans() => [
+        for (final g in colorGroups)
+          if (g.endLed >= g.startLed && g.startLed >= 0)
+            PixelSpan(start: g.startLed, end: g.endLed, color: _rgbwOf(g.color)),
+      ];
+
+  /// [positionalSpans] with every gap up to the channel's length filled black,
+  /// so the result covers the whole channel (see `_positionalPayload`).
+  List<PixelSpan> fullCoverageSpans() {
+    final spans = positionalSpans()..sort((a, b) => a.start.compareTo(b.start));
+    if (spans.isEmpty) return spans;
+    final length = ledCount > 0 ? ledCount : spans.last.end + 1;
+    final out = <PixelSpan>[];
+    int cursor = 0;
+    for (final s in spans) {
+      if (s.start > cursor) {
+        out.add(PixelSpan(start: cursor, end: s.start - 1, color: const [0, 0, 0, 0]));
+      }
+      out.add(s);
+      if (s.end + 1 > cursor) cursor = s.end + 1;
+    }
+    if (cursor < length) {
+      out.add(PixelSpan(start: cursor, end: length - 1, color: const [0, 0, 0, 0]));
+    }
+    return out;
+  }
+
+  static List<int> _rgbwOf(List<int> c) {
+    if (c.length >= 4) return [c[0], c[1], c[2], c[3]];
+    if (c.length == 3) return [c[0], c[1], c[2], 0];
+    return const [0, 0, 0, 0];
   }
 
   /// Gets the primary color for display (first color group or white)
