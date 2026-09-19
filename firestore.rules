@@ -1041,10 +1041,23 @@ service cloud.firestore {
     // schema can evolve. Added 2026-05-28 to close a default-deny gap —
     // the path had no rule and these three save paths silently failed
     // since they shipped.
+    //
+    // STAFF REACH (2026-09-19, design-studio audit F6). Design Studio's Save
+    // writes to effectiveUserUid — in installer "Existing Customer" mode that
+    // is the CUSTOMER's uid while request.auth.uid is the staff session. With
+    // an owner-only rule the write was denied, and because the editor's save
+    // had no catch, denied SILENTLY: an installer demoing Design Studio on a
+    // customer's account pressed Save, saw nothing, and the design was gone.
+    // create/update now mirror pixelMap: the owner, or staff of THAT
+    // customer's dealer via staffMayReach() (dealer-scoped once the user doc
+    // is provisioned — see its definition; no `request.auth != null` arm).
+    // read and delete stay owner-only on purpose: saving a design for a
+    // customer does not need to list or remove the customer's own designs,
+    // and this change is meant to widen nothing it does not have to.
     match /users/{userId}/designs/{designId} {
       allow read:   if isOwner(userId);
-      allow create: if isOwner(userId);
-      allow update: if isOwner(userId);
+      allow create: if isOwner(userId) || staffMayReach(userId);
+      allow update: if isOwner(userId) || staffMayReach(userId);
       allow delete: if isOwner(userId);
     }
 
