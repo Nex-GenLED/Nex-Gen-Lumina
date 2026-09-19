@@ -250,16 +250,24 @@ class _StripPreview extends StatelessWidget {
           ? const Text('No pixels',
               style: TextStyle(color: NexGenPalette.textMedium))
           : LayoutBuilder(builder: (context, c) {
-              final w = (c.maxWidth - 16) / leds.length;
+              // Each LED gets one SLOT; its margin comes out of the slot. The
+              // width used to be the whole slot (floored at 1 px) PLUS a
+              // 0.6 px margin, so N dots always overflowed by 0.6·N px — at a
+              // real 290-LED home on a phone the right third of the roofline
+              // was cut off (found 2026-09-19 by the editor widget tests).
+              final slot = ((c.maxWidth - 16) / leds.length).clamp(0.0, 12.6);
+              final margin = slot >= 3 ? 0.3 : 0.0;
+              final w = slot - 2 * margin;
               return Padding(
                 padding: const EdgeInsets.all(8),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     for (final color in leds)
                       Container(
-                        width: w.clamp(1.0, 12.0),
+                        width: w,
                         height: 22,
-                        margin: const EdgeInsets.symmetric(horizontal: 0.3),
+                        margin: EdgeInsets.symmetric(horizontal: margin),
                         decoration: BoxDecoration(
                           color: color,
                           borderRadius: BorderRadius.circular(2),
