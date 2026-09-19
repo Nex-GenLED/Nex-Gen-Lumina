@@ -61,6 +61,18 @@ class ConstraintSolver {
     final rule = layer.colors.spacingRule!;
     final pixelCount = _getPixelCountForZone(layer.targetZone, config);
 
+    // The user already answered the spacing question for this rule. Do not
+    // ask it again — see SpacingRule.acceptRemainder.
+    if (rule.acceptRemainder) {
+      return _SpacingValidationResult(
+        constraint: DesignConstraint(
+          type: ConstraintType.spacingMath,
+          isSatisfied: true,
+          layerId: layer.id,
+        ),
+      );
+    }
+
     switch (rule.type) {
       case SpacingType.pattern:
         return _validatePatternSpacing(

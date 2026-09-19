@@ -49,13 +49,63 @@ class NLUService {
 
   /// Normalize a prompt for parsing (lowercase, trim, standardize).
   String _normalizePrompt(String prompt) {
-    return prompt
+    final basic = prompt
         .toLowerCase()
         .trim()
         .replaceAll(RegExp(r'\s+'), ' ')
         .replaceAll('colour', 'color')
         .replaceAll("'", '')
         .replaceAll('"', '');
+    return canonicalizeSpacingPhrases(basic);
+  }
+
+  static const _numberWords = {
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+  };
+
+  // "4", "four", optionally followed by a unit ("4 leds", "four lights").
+  static const _count =
+      r'(\d+|one|two|three|four|five|six|seven|eight|nine|ten)'
+      r'(?:\s*(?:leds?|lights?|pixels?|bulbs?))?';
+  // What may sit between the two halves: "1 on, 6 off" / "1 on and 6 off" /
+  // "1 on then 6 off" / "1 on / 6 off" / "1 on 6 off".
+  static const _joiner = r'\s*(?:,|/|&|-|and|then)?\s*';
+
+  static final _onThenOff =
+      RegExp('\\b$_count\\s*on\\b$_joiner$_count\\s*off\\b');
+  static final _offThenOn =
+      RegExp('\\b$_count\\s*off\\b$_joiner$_count\\s*on\\b');
+
+  /// The token a recognised "N on, M off" phrase is rewritten to. It contains
+  /// no colour word and no clause separator on purpose.
+  static final _spacingToken = RegExp(r'\bspc:(\d+):(\d+)\b');
+
+  static int _toCount(String raw) => _numberWords[raw] ?? int.parse(raw);
+
+  /// Rewrites every on/off spacing phrase — in EITHER order, with or without a
+  /// comma / "and" / "then", digits or number words, optional units — to the
+  /// canonical token `spc:<on>:<off>`, BEFORE the prompt is split into clauses
+  /// or scanned for colours. That one step fixes three defects at once
+  /// (design-studio-followup-2026-09-19 N3c):
+  ///
+  ///  * "6 off 1 on" / "6 off, 1 on" were not recognised at all — the old
+  ///    pattern was `(\\d+)\\s*on\\s*(\\d+)\\s*off`, on-first only;
+  ///  * "1 on, 6 off" and "1 on and 6 off" were torn in two by the clause
+  ///    splitter (and `\\s*` cannot cross a comma) — spacing ignored, every
+  ///    LED lit;
+  ///  * the colour table maps the word "off" to BLACK, so a clause with two
+  ///    colour words plus a spacing phrase got `accentColor = black` and the
+  ///    composer painted the LIT pixels black: "warm white 1 on 3 off"
+  ///    composed a completely dark pattern.
+  ///
+  /// Public + static so it can be tested directly.
+  static String canonicalizeSpacingPhrases(String normalized) {
+    var out = normalized.replaceAllMapped(_onThenOff,
+        (m) => 'spc:${_toCount(m.group(1)!)}:${_toCount(m.group(2)!)}');
+    out = out.replaceAllMapped(_offThenOn,
+        (m) => 'spc:${_toCount(m.group(2)!)}:${_toCount(m.group(1)!)}');
+    return out;
   }
 
   /// Split a prompt into separate clauses for layer parsing.
@@ -322,14 +372,19 @@ class NLUService {
       return SpacingRule.everyNth(int.parse(everyNMatch.group(1)!));
     }
 
-    // Check for "N on M off" patterns
-    final onOffMatch = RegExp(r'(\d+)\s*on\s*(\d+)\s*off').firstMatch(clause);
+    // "N on, M off" in any phrasing — already canonicalised by
+    // [canonicalizeSpacingPhrases]. WLED-style: a lit band first.
+    final onOffMatch = _spacingToken.firstMatch(clause);
     if (onOffMatch != null) {
-      return SpacingRule(
-        type: SpacingType.pattern,
-        onCount: int.parse(onOffMatch.group(1)!),
-        offCount: int.parse(onOffMatch.group(2)!),
-      );
+      final on = int.parse(onOffMatch.group(1)!);
+      final off = int.parse(onOffMatch.group(2)!);
+      if (on >= 1 && off >= 0) {
+        return SpacingRule(
+          type: SpacingType.pattern,
+          onCount: on,
+          offCount: off,
+        );
+      }
     }
 
     return null;

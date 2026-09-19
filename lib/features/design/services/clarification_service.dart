@@ -525,6 +525,12 @@ class ClarificationService {
       }
     }
 
+    // "original" with a label that did not parse (should not happen) still
+    // means "keep what I asked for": fall back to the layer's own rule.
+    if (newRule == null && option.id == 'original') {
+      newRule = layer.colors.spacingRule;
+    }
+
     if (newRule != null) {
       return layer.copyWith(
         colors: ColorAssignment(
@@ -532,7 +538,12 @@ class ClarificationService {
           secondaryColor: layer.colors.secondaryColor,
           accentColor: layer.colors.accentColor,
           fillColor: layer.colors.fillColor,
-          spacingRule: newRule,
+          // ACCEPTED: the user has answered the spacing question. Without
+          // this the solver re-validated the chosen rule, found it did not
+          // divide evenly either — "(with remainder)" never can, and several
+          // stretch/compress suggestions don't — and asked the same question
+          // again, forever.
+          spacingRule: newRule.accepted(),
         ),
       );
     }

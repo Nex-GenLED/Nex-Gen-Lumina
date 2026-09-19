@@ -400,13 +400,32 @@ class SpacingRule {
   /// Total spacing interval (for equally spaced).
   final int? interval;
 
+  /// The USER has chosen this spacing knowing it may not divide evenly into
+  /// the zone — set when it comes from an answered "the spacing doesn't quite
+  /// work" question. The constraint solver must then accept it rather than
+  /// raise the same question again: that was an endless loop, because picking
+  /// "N on, M off (with remainder)" re-submitted the very rule that had just
+  /// failed the divisibility check (design-studio-followup-2026-09-19 N3d).
+  final bool acceptRemainder;
+
   const SpacingRule({
     required this.type,
     this.onCount = 1,
     this.offCount = 1,
     this.startWithOn = true,
     this.interval,
+    this.acceptRemainder = false,
   });
+
+  /// The same rule, marked as explicitly accepted by the user.
+  SpacingRule accepted() => SpacingRule(
+        type: type,
+        onCount: onCount,
+        offCount: offCount,
+        startWithOn: startWithOn,
+        interval: interval,
+        acceptRemainder: true,
+      );
 
   /// Every other LED (1 on, 1 off).
   const SpacingRule.everyOther()
@@ -414,7 +433,8 @@ class SpacingRule {
         onCount = 1,
         offCount = 1,
         startWithOn = true,
-        interval = null;
+        interval = null,
+        acceptRemainder = false;
 
   /// One on, two off pattern.
   const SpacingRule.oneOnTwoOff()
@@ -422,7 +442,8 @@ class SpacingRule {
         onCount = 1,
         offCount = 2,
         startWithOn = true,
-        interval = null;
+        interval = null,
+        acceptRemainder = false;
 
   /// Two on, one off pattern.
   const SpacingRule.twoOnOneOff()
@@ -430,7 +451,8 @@ class SpacingRule {
         onCount = 2,
         offCount = 1,
         startWithOn = true,
-        interval = null;
+        interval = null,
+        acceptRemainder = false;
 
   /// Equally spaced LEDs across the zone.
   const SpacingRule.equallySpaced(int count)
@@ -438,7 +460,8 @@ class SpacingRule {
         onCount = count,
         offCount = 0,
         startWithOn = true,
-        interval = null;
+        interval = null,
+        acceptRemainder = false;
 
   /// Every N pixels.
   const SpacingRule.everyNth(int n)
@@ -446,7 +469,8 @@ class SpacingRule {
         onCount = 1,
         offCount = n - 1,
         startWithOn = true,
-        interval = n;
+        interval = n,
+        acceptRemainder = false;
 
   /// Human-readable description.
   String get description {
@@ -473,6 +497,7 @@ class SpacingRule {
         'off_count': offCount,
         'start_with_on': startWithOn,
         'interval': interval,
+        if (acceptRemainder) 'accept_remainder': true,
       };
 }
 
