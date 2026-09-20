@@ -150,15 +150,24 @@ void main() {
 
   group('Step 3 — partial and healthy docs are not touched AT ALL', () {
     test('healedForRead returns the very same object', () {
-      int checked = 0;
+      int checked = 0, partial = 0;
       for (final home in kHomes.keys) {
         for (final ch in _load(home)) {
           if (_affected.containsKey((home, ch.channelIndex))) continue;
           expect(identical(ch.healedForRead(), ch), isTrue, reason: 'home $home ch${ch.channelIndex}');
           checked++;
+          if (ch.mappedPixelCount < ch.sourcePixelCount) partial++;
         }
       }
-      expect(checked, 8, reason: '6 partial + 2 healthy siblings');
+      expect([checked, partial], [8, 5], reason: '5 partial + 3 healthy siblings');
+    });
+
+    test('the 6th partial doc is ALSO a REBASE doc (home A, 11 of 46): re-based, still partial', () {
+      final stored = _load('A').firstWhere((c) => c.channelIndex == 1);
+      final healed = stored.healedForRead();
+      expect(healed.segments.single.startPixel, 0, reason: '§4: [33] → [0]');
+      expect([healed.mappedPixelCount, healed.sourcePixelCount], [11, 46],
+          reason: 'coverage is untouched — a partial map is not "completed" by the heal');
     });
 
     test('their in-memory segments equal their stored segments', () {
