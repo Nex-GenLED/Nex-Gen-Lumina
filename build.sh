@@ -15,7 +15,18 @@ set -euo pipefail
 TARGET="${1:-help}"
 
 build_android_release() {
-  # Pre-flight: refuse to rebuild the same versionCode that the last
+  # Pre-flight 0: the git-ignored release inputs (key.properties, the release
+  # keystore, google-services.json) must be byte-identical to the MAIN REPO's
+  # copies — docs/BUILD_LEDGER.md standing convention 3. Fails here, in a second,
+  # instead of after Flutter and Gradle have started.
+  #
+  # This is the EARLY check, not the enforcement: android/signing-inputs-guard.gradle
+  # runs the same comparison inside every release build, because releases are
+  # routinely cut with `flutter build appbundle` directly and never pass through
+  # this script. To fix a failure: bash scripts/signing_inputs.sh install
+  bash "$(dirname "$0")/scripts/signing_inputs.sh" verify
+
+  # Pre-flight 1: refuse to rebuild the same versionCode that the last
   # completed build used. Play Console rejects duplicate versionCodes,
   # and Android has no auto-bumper (codemagic.yaml's PROJECT_BUILD_NUMBER
   # rewrite only fires for iOS). Tyler hit this twice on 2026-05-18 →

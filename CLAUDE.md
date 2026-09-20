@@ -220,6 +220,14 @@ Or use the named targets in `build.sh`:
 > for crash symbolication. Keep these files — never commit them to source control
 > and never delete them after a release.
 
+> **Building an Android release from a fresh worktree:** the three git-ignored
+> inputs (`android/key.properties`, the release keystore, `android/app/google-services.json`)
+> must come from the **main repo**, never from another build worktree. Run
+> `bash scripts/signing_inputs.sh install` — do not `cp` them by hand. This is
+> enforced: `android/signing-inputs-guard.gradle` refuses any release build whose
+> inputs are missing or not byte-identical to the main repo's. There is no skip
+> flag. See `docs/BUILD_LEDGER.md`, standing convention 3.
+
 ### Code Generation (if needed)
 
 This project doesn't currently use code generation (no build_runner), but if freezed/json_serializable are added later:

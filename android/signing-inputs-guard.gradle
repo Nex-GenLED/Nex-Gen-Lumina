@@ -1,0 +1,158 @@
+// SIGNING-INPUT GUARD — the enforcement for docs/BUILD_LEDGER.md standing
+// convention 3. Applied from app/build.gradle.
+//
+// WHAT IT DOES. Before ANY release task of :app executes, the three git-ignored
+// build inputs in THIS checkout are compared, byte for byte, with the canonical
+// copies in the MAIN repo. Anything missing or different fails the build, loudly,
+// before a single task has run. Debug and profile builds are not affected.
+//
+//     android/key.properties
+//     android/app/<storeFile named in key.properties>     (the release keystore)
+//     android/app/google-services.json
+//
+// WHY IT LIVES IN GRADLE. Release builds are cut from throwaway worktrees, and the
+// inputs are git-ignored, so every worktree needs them copied in by hand. The
+// convention says: from the main repo, never from the previous build worktree —
+// so a stale or altered key cannot propagate build to build. As a rule to
+// remember it failed three times (+97, +101, +102): each time the inputs were
+// taken from the nearest worktree and only compared with main afterwards. They
+// matched each time, but "checked after the fact, happened to match" is not a
+// control. build.sh could not enforce it either — releases are cut with
+// `flutter build appbundle` directly, not through build.sh. Every Android release
+// build, however it is started, goes through this file.
+//
+// THERE IS NO SKIP FLAG, on purpose. A hurried session would use it.
+//
+// CANONICAL = the main working tree of this git repository — the first entry of
+// `git worktree list`. Nothing is hardcoded. In the main repo itself (and in a
+// fresh CI clone, which is its own main working tree) the inputs ARE the canonical
+// set, so only their presence is checked. A SEPARATE CLONE cannot discover the
+// canonical location; point it there explicitly — this still compares, it does
+// not bypass:
+//     LUMINA_SIGNING_CANONICAL_DIR=<path to the main checkout>
+//     (or -Plumina.signingCanonicalDir=<path>)
+//
+// CI: when CM_KEYSTORE_PATH is set, signing material comes from the CI secret
+// store (see signingConfigs.release), not from a copied file, so key.properties
+// and the keystore are out of scope; google-services.json is still checked.
+//
+// TO FIX A FAILURE:  bash scripts/signing_inputs.sh install
+// TO CHECK BY HAND:  bash scripts/signing_inputs.sh verify
+//                    (or `gradlew :app:verifySigningInputs` - but gradlew is itself
+//                    git-ignored and only exists once Flutter has built here once)
+
+def guardRepoRoot = rootProject.projectDir.parentFile
+
+def guardCanonicalRoot = {
+    def override = System.getenv('LUMINA_SIGNING_CANONICAL_DIR') ?:
+            (project.findProperty('lumina.signingCanonicalDir') as String)
+    if (override) {
+        def dir = new File(override)
+        if (!dir.isDirectory()) {
+            throw new GradleException("SIGNING-INPUT GUARD: LUMINA_SIGNING_CANONICAL_DIR / " +
+                    "-Plumina.signingCanonicalDir is not a directory: ${override}")
+        }
+        return dir
+    }
+    def out = new StringBuilder()
+    def err = new StringBuilder()
+    def proc
+    try {
+        proc = ['git', 'worktree', 'list', '--porcelain'].execute(null as List, guardRepoRoot)
+        proc.waitForProcessOutput(out, err)
+    } catch (IOException e) {
+        throw new GradleException("SIGNING-INPUT GUARD: could not run `git` to locate the main repo " +
+                "(${e.message}). Set LUMINA_SIGNING_CANONICAL_DIR to the main checkout.")
+    }
+    def first = out.readLines().find { it.startsWith('worktree ') }
+    if (proc.exitValue() != 0 || first == null) {
+        throw new GradleException("SIGNING-INPUT GUARD: `git worktree list` failed in ${guardRepoRoot} " +
+                "(${err.toString().trim()}). Not a git checkout? Set LUMINA_SIGNING_CANONICAL_DIR " +
+                "to the main checkout.")
+    }
+    return new File(first.substring('worktree '.length()).trim())
+}
+
+def guardVerify = {
+    File canonicalRoot = guardCanonicalRoot()
+    boolean isCanonical = canonicalRoot.canonicalFile == guardRepoRoot.canonicalFile
+    boolean ciSigning = System.getenv('CM_KEYSTORE_PATH') != null
+
+    // Paths relative to the checkout root.
+    def inputs = ['android/app/google-services.json']
+    if (!ciSigning) {
+        inputs.add(0, 'android/key.properties')
+        // The keystore that is ACTUALLY used: whatever key.properties names. Read it
+        // from the canonical copy, so a tampered local key.properties cannot redirect
+        // the comparison (and key.properties itself must match byte for byte anyway).
+        def props = new Properties()
+        def canonicalProps = new File(canonicalRoot, 'android/key.properties')
+        if (canonicalProps.isFile()) {
+            canonicalProps.withInputStream { props.load(it) }
+        }
+        def storeFile = props.getProperty('storeFile')
+        if (storeFile != null && !new File(storeFile).isAbsolute()) {
+            inputs.add(1, "android/app/${storeFile}".toString())
+        } else if (storeFile == null) {
+            inputs.add(1, 'android/app/<storeFile: not defined in the main repo key.properties>')
+        }
+        // An absolute storeFile is the same file for every checkout: nothing to compare.
+    }
+
+    def problems = []
+    def lines = []
+    inputs.each { String rel ->
+        def mine = new File(guardRepoRoot, rel)
+        def canon = new File(canonicalRoot, rel)
+        String verdict
+        if (!canon.isFile()) {
+            verdict = "MISSING IN THE MAIN REPO"
+            problems << rel
+        } else if (!mine.isFile()) {
+            verdict = "MISSING HERE"
+            problems << rel
+        } else if (isCanonical) {
+            verdict = "present (${mine.length()} B) - this checkout is the main repo"
+        } else if (Arrays.equals(mine.bytes, canon.bytes)) {
+            verdict = "IDENTICAL to the main repo (${mine.length()} B)"
+        } else {
+            verdict = "DIFFERS from the main repo (here ${mine.length()} B, main repo ${canon.length()} B)"
+            problems << rel
+        }
+        lines << "    ${rel.padRight(42)} ${verdict}".toString()
+    }
+
+    def header = "  this checkout : ${guardRepoRoot}\n  main repo     : ${canonicalRoot}" +
+            (isCanonical ? "   (same - inputs here ARE the canonical set)" : "") +
+            (ciSigning ? "\n  CM_KEYSTORE_PATH is set: key.properties + keystore come from CI, not checked" : "")
+
+    if (problems) {
+        def bar = '!' * 78
+        throw new GradleException("\n${bar}\n" +
+                "SIGNING-INPUT GUARD: RELEASE BUILD REFUSED - NOTHING WAS BUILT.\n" +
+                "The release build inputs in this checkout are not the canonical main-repo set.\n\n" +
+                "${header}\n\n${lines.join('\n')}\n\n" +
+                "Inputs that were not verified against the canonical set BEFORE the build make the\n" +
+                "artifact untrusted - even if they turn out to match afterwards. Do not copy them\n" +
+                "from another build worktree. Fix:\n\n" +
+                "    bash scripts/signing_inputs.sh install     (copies from the main repo, then verifies)\n\n" +
+                "Rule and rationale: docs/BUILD_LEDGER.md, standing convention 3.\n${bar}")
+    }
+    logger.lifecycle("SIGNING-INPUT GUARD: OK\n${header}\n${lines.join('\n')}")
+}
+
+// Runs once the task graph is known and BEFORE any task executes - so a refused
+// build compiles nothing - and also under --dry-run.
+gradle.taskGraph.whenReady { graph ->
+    def release = graph.allTasks.findAll { it.project == project && it.name.contains('Release') }
+    if (!release.isEmpty()) {
+        guardVerify()
+    }
+}
+
+tasks.register('verifySigningInputs') {
+    group = 'verification'
+    description = 'Checks the git-ignored release build inputs against the canonical main-repo copies ' +
+            '(docs/BUILD_LEDGER.md convention 3). Runs automatically before every release build.'
+    doLast { guardVerify() }
+}

@@ -86,3 +86,9 @@ dependencies {
 tasks.withType(com.android.build.gradle.internal.tasks.CheckAarMetadataTask).configureEach {
     it.enabled = false
 }
+
+// Release builds refuse to start unless key.properties, the release keystore and
+// google-services.json are byte-identical to the main repo's copies
+// (docs/BUILD_LEDGER.md standing convention 3). Do not remove: this is the
+// enforcement, not a convenience.
+apply from: rootProject.file('signing-inputs-guard.gradle')

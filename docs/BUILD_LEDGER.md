@@ -32,7 +32,10 @@ directly; nothing to prove.)
 **2. Verify release signing by IDENTITY — read the signer CN out of the
 artifact. Never by build exit code.** With `key.properties` or the keystore
 absent, Gradle **silently falls back to debug signing and reports success**; Play
-rejects it at upload, long after the build looked fine. Check:
+rejects it at upload, long after the build looked fine. (From 2026-09-20 the
+signing-input guard in convention 3 refuses a release build whose inputs are
+absent, so that particular path is closed. This check stays mandatory regardless:
+the guard verifies the *inputs*; only this verifies the *artifact*.) Check:
 
 ```
 jarsigner -verify -verbose:summary -certs <aab> | grep -iE "^\s*X.509|CN="
@@ -42,21 +45,77 @@ Expect `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC`. A `PKIX path building failed`
 warning alongside `jar verified` is **expected** for a self-signed release key
 and is not a signing failure.
 
-**3. A fresh build worktree needs three ignored inputs, copied from the MAIN
-repo — never from a prior build worktree.** They are gitignored
-(`.gitignore:105` and neighbours), so a new worktree has none of them and
-`bundleRelease` fails at `processReleaseGoogleServices`:
+**3. A fresh build worktree needs three ignored inputs, and they come from the
+MAIN repo — never from a prior build worktree. ENFORCED BY THE BUILD, not by
+memory (from 2026-09-20).** They are gitignored (`.gitignore:105` and
+neighbours), so a new worktree has none of them:
 
 ```
-android/app/google-services.json        712 B
-android/app/nex-gen-lumina.keystore    2776 B
-android/key.properties                  112 B
+android/key.properties                          112 B
+android/app/nex-gen-lumina.keystore            2776 B   (whatever `storeFile` in key.properties names)
+android/app/google-services.json                712 B
 ```
 
-Copying from the previous worktree is banned so a stale key cannot propagate
-build-to-build. Diff sizes against source after copying; the worktree
-`git status` must stay **empty** (all three are ignored, so they cannot leak into
-a commit).
+Install them with **`bash scripts/signing_inputs.sh install`** — it copies from
+the main repo, refuses any path that is not git-ignored, and verifies the result.
+That is the only sanctioned way to put them into a build worktree. The worktree
+`git status` must stay **empty**.
+
+*Why this matters.* The main repo's copies are the single source of truth for who
+signs a Lumina release and which Firebase project it talks to. A copy taken from
+another worktree is a copy of a copy: if one is ever stale, truncated, swapped
+during a key rotation, or tampered with, hand-to-hand copying carries it forward
+build after build and nothing notices — the build still succeeds, and the signer
+CN (convention 2) still reads correctly for any key issued under the same name.
+**So a release built from inputs that were not verified against the canonical set
+*before* the build is untrusted — even if they turn out to match afterwards.**
+"Checked after the fact and they happened to match" is luck recorded as a result,
+not a control: the artifact already exists by then, its versionCode is already
+consumed, and the check only ever happens if the session remembers it.
+
+*Why it is enforced rather than remembered.* As a rule to remember, this
+convention failed in **three of the last five Android builds — +97, +101, +102**
+(+99 and +100 complied). +97's deviation is recorded in its row below; +101's and
++102's in their release reports (`release-101-report-2026-09-19.md` §7,
+`release-102-report-2026-09-20.md` §8). Each time the inputs were taken from the
+nearest build worktree and compared with the main repo only afterwards. They
+matched each time. Nothing bad shipped; the safeguard simply was not there.
+
+*The enforcement* is **`android/signing-inputs-guard.gradle`**, applied from
+`android/app/build.gradle`. Once the task graph is known and **before any task
+runs**, every build whose graph contains a release task of `:app` compares the
+three inputs **byte for byte** with the main repo's copies and refuses to build —
+`SIGNING-INPUT GUARD: RELEASE BUILD REFUSED - NOTHING WAS BUILT` — if any is
+missing or differs. It is in Gradle because that is the only place every release
+build passes through: releases are cut with `flutter build appbundle` directly,
+not through `build.sh`, so a check that lived only in `build.sh` would not have
+fired for any of the three deviations. (`build.sh` runs the same comparison as an
+early pre-flight; the guard is the enforcement.) Specifically:
+
+- **Bytes, not sizes.** The old wording asked for a size diff. A keystore with one
+  flipped bit is the same 2776 B; the guard catches it, a size diff does not.
+- **"Main repo"** = the main working tree of this git repository, the first entry
+  of `git worktree list`. Nothing is hardcoded. In the main repo itself the inputs
+  *are* the canonical set, so only their presence is checked.
+- **There is no skip flag, deliberately.** `LUMINA_SIGNING_CANONICAL_DIR` (for a
+  separate clone, which cannot discover the main repo) names *where to compare
+  against*; it does not switch the comparison off.
+- **Absent inputs are refused too.** This closes the hazard convention 2
+  describes: a release build with no `key.properties` used to succeed.
+- When `CM_KEYSTORE_PATH` is set (CI signing from the secret store),
+  `key.properties` and the keystore are out of scope; `google-services.json` is
+  still checked.
+- Debug and profile builds are not affected.
+
+What the guard does **not** do: it proves the bytes used are the canonical bytes;
+it cannot know *where a matching copy came from*. That is the right control —
+provenance stops mattering once identity is established before the build — but it
+means convention 2 (read the signer out of the artifact) is still required:
+the guard checks the inputs, convention 2 checks the output.
+
+A ledger row records the guard's result as `Signing inputs: GUARD OK` (the three
+`IDENTICAL to the main repo` lines appear in the build log). A row that has to
+say "deviation" should no longer be possible.
 
 **4. The rule under all three:** *delivery is not content.* A successful deploy
 proves delivery, never content; a successful build proves neither. Verify the
