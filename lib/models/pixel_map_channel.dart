@@ -95,8 +95,63 @@ class PixelMapChannel {
 
   /// The "this channel needs a remap" signal: the strip changed length, OR the
   /// stored segments do not fit the strip.
+  ///
+  /// Evaluated on the STORED values, on purpose — see [healedForRead]. A doc
+  /// that is healed in memory is still stale in Firestore until its owner
+  /// saves, and this is the signal that says so.
+  ///
+  /// [storedStartPixelsAreOffset] is part of it: an offset range can happen to
+  /// FIT inside the strip (production: `start_pixel` 33, 11 px, 46-LED strip —
+  /// LEDs 33–43 instead of 0–10), which the fit check alone passes as healthy.
   bool needsRemapAgainst(int? liveCount) =>
-      isStaleAgainst(liveCount) || !segmentsFitChannel(liveCount);
+      isStaleAgainst(liveCount) ||
+      !segmentsFitChannel(liveCount) ||
+      storedStartPixelsAreOffset;
+
+  /// True when at least one stored `start_pixel` is not the channel-local value
+  /// implied by segment order + `pixel_count` — i.e. this doc was written by
+  /// the pre-+101 cumulative writer (or folded in from a legacy config) and
+  /// has not been re-saved since.
+  bool get storedStartPixelsAreOffset {
+    int start = 0;
+    for (final s in segments) {
+      if (s.startPixel != start) return true;
+      start += s.pixelCount;
+    }
+    return false;
+  }
+
+  /// HEAL-ON-READ. This channel as the app should USE it: `start_pixel`
+  /// re-derived channel-local. IN MEMORY ONLY — nothing here writes, and no
+  /// caller may write the result back on its own; persistence stays with the
+  /// owner's next ordinary save, where [splitConfigToPixelMapChannels]
+  /// re-derives the same values (the +101 heal-on-save path).
+  ///
+  /// WHY: +101 fixed the WRITER, but documents already in production keep
+  /// their cumulative `start_pixel` until someone saves — and app versions
+  /// older than +101 are still in the field writing new ones. Every consumer
+  /// reads `start_pixel` as channel-local, so on such a channel the editor's
+  /// map tools, the smart presets and the house preview addressed the wrong
+  /// LEDs or none (production dry-run 2026-09-19: 7 docs, 0 of N LEDs
+  /// reachable on five of them).
+  ///
+  /// THE CORRECTION is exactly the one that dry-run computed for every
+  /// affected document — and the one the write boundary already applies:
+  /// [rebaseSegmentsChannelLocal]. `start_pixel` is derived data (segments
+  /// are a gapless ordered run within a channel in every writer), so this is
+  /// the identity for a correct doc: [healedForRead] then returns `this`
+  /// untouched, which is what keeps partial-but-valid maps out of it entirely.
+  ///
+  /// WHAT IT DELIBERATELY DOES NOT DO — `pixel_count` is never altered. Three
+  /// production docs also map MORE LEDs than their strip has. No rule can say
+  /// what those roofs really look like (one appears to have two channels'
+  /// segments swapped), so the overshoot is left in the data and CLAMPED where
+  /// it is consumed (every per-pixel consumer already bounds to the live bus
+  /// length; `RooflineConfiguration.globalEndOf` does the same). Truncating it
+  /// here would be a guess, and heal-on-save would then persist that guess.
+  PixelMapChannel healedForRead() => storedStartPixelsAreOffset
+      ? copyWith(segments: rebaseSegmentsChannelLocal(segments))
+      : this;
 
   PixelMapChannel copyWith({
     String? controllerId,
@@ -260,7 +315,13 @@ RooflineConfiguration aggregatePixelMapChannelsToConfig(
   final sorted = [...channels]..sort((a, b) => a.channelIndex.compareTo(b.channelIndex));
   final segments = <RooflineSegment>[];
   for (final ch in sorted) {
-    segments.addAll(ch.segments);
+    // READ BOUNDARY — the one place a stored map becomes the app's working
+    // model (the live stream AND the editor's initialize both come through
+    // here). Heal in memory; see PixelMapChannel.healedForRead. The raw
+    // [channels] are left exactly as loaded: pixelMapStalenessProvider reads
+    // THOSE, so a healed-in-memory doc keeps reporting "needs a remap" until
+    // it is really re-saved.
+    segments.addAll(ch.healedForRead().segments);
   }
 
   DateTime created = sorted.first.createdAt;

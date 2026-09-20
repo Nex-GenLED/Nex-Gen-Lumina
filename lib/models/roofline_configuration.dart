@@ -269,8 +269,20 @@ class RooflineConfiguration {
       channelGlobalOffset(segment.channelIndex) + segment.startPixel;
 
   /// Whole-controller index of [segment]'s last LED (inclusive).
-  int globalEndOf(RooflineSegment segment) =>
-      channelGlobalOffset(segment.channelIndex) + segment.endPixel;
+  ///
+  /// Bounded to the segment's own channel when that channel's real length is
+  /// known. A map can describe more LEDs than its strip has (three production
+  /// docs do); unbounded, such a segment's whole-controller range runs on into
+  /// the NEXT channel's LEDs. The data is not changed — this is the same
+  /// clamp-at-consumption every per-pixel consumer already applies.
+  int globalEndOf(RooflineSegment segment) {
+    final offset = channelGlobalOffset(segment.channelIndex);
+    final end = offset + segment.endPixel;
+    final length = channelPixelCounts[segment.channelIndex];
+    if (length == null || length <= 0) return end;
+    final lastOfChannel = offset + length - 1;
+    return end > lastOfChannel ? lastOfChannel : end;
+  }
 
   /// Whole-controller LED count spanned by this map: one past the highest
   /// [globalEndOf]. Equals [totalPixelCount] for a fully-mapped home.
