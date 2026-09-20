@@ -164,6 +164,8 @@ class PatternComposer {
             .where((s) => zone.segmentIds!.contains(s.id))
             .map((s) => _PixelRange(
                 config.globalStartOf(s), config.globalEndOf(s)))
+            // A segment lying wholly past the end of its strip has no LEDs.
+            .where((r) => r.end >= r.start)
             .toList();
 
       case ZoneSelectorType.architectural:
@@ -172,6 +174,8 @@ class PatternComposer {
             .where((s) => _segmentMatchesRoles(s, zone.roles!))
             .map((s) => _PixelRange(
                 config.globalStartOf(s), config.globalEndOf(s)))
+            // A segment lying wholly past the end of its strip has no LEDs.
+            .where((r) => r.end >= r.start)
             .toList();
 
       case ZoneSelectorType.location:
@@ -181,6 +185,8 @@ class PatternComposer {
             .where((s) => _segmentMatchesLocation(s, location))
             .map((s) => _PixelRange(
                 config.globalStartOf(s), config.globalEndOf(s)))
+            // A segment lying wholly past the end of its strip has no LEDs.
+            .where((r) => r.end >= r.start)
             .toList();
 
       case ZoneSelectorType.level:
@@ -189,6 +195,8 @@ class PatternComposer {
             .where((s) => s.level == zone.level)
             .map((s) => _PixelRange(
                 config.globalStartOf(s), config.globalEndOf(s)))
+            // A segment lying wholly past the end of its strip has no LEDs.
+            .where((r) => r.end >= r.start)
             .toList();
 
       case ZoneSelectorType.custom:
