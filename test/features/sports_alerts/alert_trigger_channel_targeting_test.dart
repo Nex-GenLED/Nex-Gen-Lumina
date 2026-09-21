@@ -37,7 +37,13 @@ void main() {
   ];
 
   group('buildAnimationSteps — content unchanged + no hardcoded id', () {
-    test('touchdown: Strobe fx2 (2s) -> Wipe fx9 (5s) -> Running fx63 (8s), '
+    // RE-PINNED 2026-09-21. This used to assert [2, 9, 63] under the title
+    // "Strobe fx2 -> Wipe fx9 -> Running fx63" — and passed, because it matched
+    // the bug rather than the intent. On WLED 0.15.1 fx 9 is Rainbow and fx 63
+    // is Pride 2015; neither reads `col`, so a touchdown rendered 13 of its 15
+    // seconds as a rainbow. Wipe is fx 3, Running is fx 15. The catalog-backed
+    // guard lives in celebration_team_color_guard_test.dart.
+    test('touchdown: Breathe fx2 (2s) -> Wipe fx3 (5s) -> Running fx15 (8s), '
         'no seg carries an id', () {
       final steps =
           AlertTriggerService.buildAnimationSteps(AlertEventType.touchdown, team);
@@ -48,7 +54,7 @@ void main() {
       expect(steps[2].hold, const Duration(seconds: 8));
 
       final fx = steps.map((s) => (s.payload['seg'] as List).first['fx']).toList();
-      expect(fx, [2, 9, 63]);
+      expect(fx, [2, 3, 15]);
       expect(steps[0].payload['bri'], 255);
       expect(steps[0].payload['on'], true);
 
@@ -60,12 +66,13 @@ void main() {
       }
     });
 
-    test('soccerGoal: fx28 -> fx23 -> fx63 -> fx2, 20s total, all id-less', () {
+    // RE-PINNED 2026-09-21: stage 3 was fx 63 (Pride 2015, labelled "Running").
+    test('soccerGoal: fx28 -> fx23 -> fx15 -> fx2, 20s total, all id-less', () {
       final steps = AlertTriggerService.buildAnimationSteps(
           AlertEventType.soccerGoal, team);
       expect(steps.length, 4);
       expect(steps.map((s) => (s.payload['seg'] as List).first['fx']).toList(),
-          [28, 23, 63, 2]);
+          [28, 23, 15, 2]);
       final total = steps.fold<int>(0, (sum, s) => sum + s.hold.inSeconds);
       expect(total, 20);
       for (final step in steps) {

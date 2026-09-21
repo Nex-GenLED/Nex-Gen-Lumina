@@ -1,0 +1,532 @@
+Resolving dependencies...
+Downloading packages...
+  _flutterfire_internals 1.3.65 (1.3.77 available)
+  app_links 6.4.1 (7.2.1 available)
+  app_links_platform_interface 2.0.2 (2.0.4 available)
+  archive 4.0.7 (4.3.0 available)
+  async 2.13.0 (2.13.1 available)
+  cel 0.5.4+1 (0.6.0 available)
+  cli_util 0.4.2 (0.6.0 available)
+  clock 1.1.2 (1.1.3 available)
+  cloud_firestore 6.1.1 (6.10.0 available)
+  cloud_firestore_platform_interface 7.0.5 (8.0.7 available)
+  cloud_firestore_web 5.1.1 (5.7.3 available)
+  cloud_functions 6.0.5 (6.5.0 available)
+  cloud_functions_platform_interface 5.8.8 (6.0.7 available)
+  cloud_functions_web 5.1.1 (5.1.13 available)
+  connectivity_plus 6.1.5 (7.3.1 available)
+  cross_file 0.3.5+1 (0.3.5+5 available)
+  cupertino_icons 1.0.8 (1.0.9 available)
+  dbus 0.7.11 (0.8.0 available)
+  equatable 2.0.8 (3.0.0 available)
+  fake_cloud_firestore 4.1.0+1 (4.3.0 available)
+  fake_firebase_security_rules 0.5.4 (0.6.0 available)
+  ffi 2.1.5 (2.2.0 available)
+  file_selector_linux 0.9.4 (0.9.4+1 available)
+  file_selector_macos 0.9.5 (0.9.5+1 available)
+  file_selector_windows 0.9.3+5 (0.9.3+6 available)
+  firebase_auth 6.1.3 (6.7.0 available)
+  firebase_auth_platform_interface 8.1.5 (9.1.0 available)
+  firebase_auth_web 6.1.1 (6.3.0 available)
+  firebase_core 4.3.0 (4.15.0 available)
+  firebase_core_platform_interface 6.0.2 (8.1.1 available)
+  firebase_core_web 3.3.1 (3.12.0 available)
+  firebase_messaging 16.1.0 (16.7.0 available)
+  firebase_messaging_platform_interface 4.7.5 (4.10.0 available)
+  firebase_messaging_web 4.1.1 (4.2.5 available)
+  firebase_storage 13.0.5 (13.6.0 available)
+  firebase_storage_platform_interface 5.2.16 (6.0.7 available)
+  firebase_storage_web 3.11.1 (3.11.13 available)
+  flutter_blue_plus 2.1.0 (2.3.12 available)
+  flutter_blue_plus_android 8.1.0 (9.0.3 available)
+  flutter_blue_plus_darwin 8.1.0 (9.0.4 available)
+  flutter_blue_plus_linux 8.1.0 (9.0.3 available)
+  flutter_blue_plus_platform_interface 8.1.0 (9.0.3 available)
+  flutter_blue_plus_web 8.1.0 (9.0.3 available)
+  flutter_blue_plus_winrt 0.0.10 (0.0.20 available)
+  flutter_launcher_icons 0.13.1 (0.14.4 available)
+  flutter_lints 5.0.0 (6.0.0 available)
+  flutter_local_notifications 17.2.4 (22.3.1 available)
+  flutter_local_notifications_linux 4.0.1 (8.0.1 available)
+  flutter_local_notifications_platform_interface 7.2.0 (12.2.0 available)
+  flutter_native_splash 2.4.7 (2.4.8 available)
+  flutter_plugin_android_lifecycle 2.0.33 (2.0.35 available)
+  flutter_riverpod 2.6.1 (3.4.3 available)
+  flutter_secure_storage 9.2.4 (11.2.0 available)
+  flutter_secure_storage_linux 1.2.3 (3.0.3 available)
+  flutter_secure_storage_macos 3.1.3 (4.0.0 available)
+  flutter_secure_storage_platform_interface 1.1.2 (2.1.1 available)
+  flutter_secure_storage_web 1.2.1 (2.1.1 available)
+  flutter_secure_storage_windows 3.1.2 (4.2.2 available)
+  flutter_svg 2.2.4 (2.3.0 available)
+  flutter_timezone 4.1.1 (5.1.0 available)
+  geolocator 13.0.4 (14.0.3 available)
+  geolocator_android 4.6.2 (5.0.3 available)
+  geolocator_apple 2.3.13 (2.3.14 available)
+  geolocator_platform_interface 4.2.6 (4.3.0 available)
+  geolocator_web 4.1.3 (4.1.4 available)
+  go_router 16.3.0 (18.0.1 available)
+  google_fonts 6.3.3 (8.2.1 available)
+  google_maps 8.2.0 (8.3.0 available)
+  google_maps_flutter 2.14.0 (2.18.1 available)
+  google_maps_flutter_android 2.18.6 (2.19.13 available)
+  google_maps_flutter_ios 2.16.1 (2.18.6 available)
+  google_maps_flutter_platform_interface 2.14.1 (2.17.0 available)
+  google_maps_flutter_web 0.5.14+3 (0.6.3+1 available)
+  gtk 2.1.0 (2.2.0 available)
+  html 0.15.6 (0.15.7 available)
+  image 4.7.2 (4.10.1 available)
+  image_picker 1.2.1 (1.2.3 available)
+  image_picker_android 0.8.13+10 (0.8.13+23 available)
+  image_picker_ios 0.8.13+3 (0.8.13+7 available)
+  js 0.6.7 (0.7.2 available)
+  json_annotation 4.9.0 (4.12.0 available)
+  lints 5.1.1 (6.1.0 available)
+  logger 2.7.0 (2.8.0 available)
+  matcher 0.12.18 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.17.0 (1.19.0 available)
+  mime 2.0.0 (2.1.0 available)
+  multicast_dns 0.3.3 (0.3.3+1 available)
+  network_info_plus 7.0.0 (8.2.1 available)
+  network_info_plus_platform_interface 2.0.2 (3.1.0 available)
+  path_provider 2.1.5 (2.1.6 available)
+  path_provider_android 2.2.22 (2.3.1 available)
+  path_provider_foundation 2.5.1 (2.6.0 available)
+  path_provider_linux 2.2.1 (2.2.2 available)
+  path_provider_platform_interface 2.1.2 (2.1.3 available)
+  pdf 3.12.0 (3.13.1 available)
+  permission_handler 12.0.1 (13.0.2 available)
+  permission_handler_android 13.0.1 (14.1.0 available)
+  permission_handler_apple 9.4.7 (9.6.1 available)
+  permission_handler_html 0.1.3+5 (0.1.4+1 available)
+  permission_handler_platform_interface 4.3.0 (4.4.1 available)
+  permission_handler_windows 0.2.1 (0.2.2 available)
+  petitparser 7.0.1 (7.0.2 available)
+  platform 3.1.6 (3.2.0 available)
+  pointycastle 3.9.1 (4.0.0 available)
+  posix 6.0.3 (6.5.2 available)
+  printing 5.14.3 (5.15.1 available)
+  qr 3.0.2 (4.0.0 available)
+  riverpod 2.6.1 (3.4.3 available)
+  rx 0.4.0 (0.5.0 available)
+  sanitize_html 2.1.0 (2.2.0 available)
+  shared_preferences 2.5.4 (2.5.5 available)
+  shared_preferences_android 2.4.18 (2.4.28 available)
+  shared_preferences_foundation 2.5.6 (2.5.7 available)
+  shared_preferences_platform_interface 2.4.1 (2.4.2 available)
+  signature 5.5.0 (6.4.0 available)
+  source_span 1.10.1 (1.10.2 available)
+  speech_to_text 7.3.0 (7.5.0 available)
+  speech_to_text_platform_interface 2.3.0 (2.5.0 available)
+  speech_to_text_windows 1.0.0+beta.8 (1.0.1 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  stream_transform 2.1.1 (2.1.2 available)
+  syncfusion_flutter_core 24.2.9 (34.2.8 available)
+  syncfusion_flutter_signaturepad 24.2.9 (34.2.8 available)
+  test_api 0.7.9 (0.7.14 available)
+  timezone 0.9.4 (0.11.1 available)
+  url_launcher_android 6.3.28 (6.3.33 available)
+  url_launcher_ios 6.3.6 (6.4.2 available)
+  url_launcher_linux 3.2.2 (3.2.3 available)
+  url_launcher_macos 3.2.5 (3.2.6 available)
+  url_launcher_web 2.4.1 (2.4.3 available)
+  url_launcher_windows 3.1.5 (3.1.6 available)
+  uuid 4.5.2 (4.6.0 available)
+  vector_graphics 1.1.21 (1.2.3 available)
+  vector_graphics_compiler 1.2.0 (1.3.0 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 15.0.2 (15.3.0 available)
+  win32 5.15.0 (6.4.0 available)
+  xml 6.6.1 (7.0.1 available)
+  yaml 3.1.3 (3.1.4 available)
+Got dependencies!
+140 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Analyzing wt-gd-rainbow...                                      
+
+   info - Dangling library doc comment - lib\data\metro_builders.dart:1:1 - dangling_library_doc_comments
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:10:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:30:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:52:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:73:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:93:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:109:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:127:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:143:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:156:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:176:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:191:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:210:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:224:21 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:240:15 - library_private_types_in_public_api
+   info - Invalid use of a private type in a public API - lib\data\ncaa_conferences.dart:266:15 - library_private_types_in_public_api
+   info - Angle brackets will be interpreted as HTML - lib\features\ai\cloud_ai_processor.dart:358:11 - unintended_html_in_doc_comment
+   info - Don't use 'BuildContext's across async gaps - lib\features\ai\lumina_ai_screen.dart:256:11 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\features\ai\lumina_bottom_sheet.dart:596:11 - use_build_context_synchronously
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\features\ai\lumina_brain.dart:1:8 - unnecessary_import
+   info - Unnecessary constructor invocation - lib\features\ai\lumina_smart_scheduler.dart:371:22 - prefer_collection_literals
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\features\ai\scheduling_intent_handler.dart:1:8 - unnecessary_import
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\features\ai\scheduling_intent_handler.dart:4:8 - depend_on_referenced_packages
+   info - Unnecessary constructor invocation - lib\features\ai\user_variety_profile.dart:102:25 - prefer_collection_literals
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\features\autopilot\autopilot_schedule_generator.dart:23:8 - depend_on_referenced_packages
+   info - Angle brackets will be interpreted as HTML - lib\features\autopilot\game_day_autopilot_config.dart:274:55 - unintended_html_in_doc_comment
+   info - Angle brackets will be interpreted as HTML - lib\features\autopilot\game_day_autopilot_config.dart:274:62 - unintended_html_in_doc_comment
+   info - The parameter name 'sum' matches a visible type name - lib\features\autopilot\habit_learner.dart:180:37 - avoid_types_as_parameter_names
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\features\autopilot\services\autopilot_event_repository.dart:24:8 - depend_on_referenced_packages
+   info - Use interpolation to compose strings and values - lib\features\ble\device_setup_page.dart:586:27 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\ble\device_setup_page.dart:651:69 - prefer_interpolation_to_compose_strings
+   info - The private field _pushedSetup could be 'final' - lib\features\dashboard\wled_dashboard_page.dart:116:8 - prefer_final_fields
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\wled_dashboard_page.dart:146:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\wled_dashboard_page.dart:154:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\wled_dashboard_page.dart:1287:42 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\wled_dashboard_page.dart:1292:42 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\wled_dashboard_page.dart:1373:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\wled_dashboard_page.dart:1380:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\dashboard\wled_dashboard_page.dart:1388:38 - use_build_context_synchronously
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\features\demo\demo_profile_screen.dart:13:8 - depend_on_referenced_packages
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\demo\demo_profile_screen.dart:328:11 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\demo\demo_wled_repository.dart:118:23 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\demo\demo_wled_repository.dart:118:35 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\demo\demo_wled_repository.dart:118:49 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\design_models.dart:633:21 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\design_models.dart:633:32 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\design_models.dart:633:45 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\design_providers.dart:321:43 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\design_providers.dart:321:58 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\models\clarification_models.dart:181:55 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\models\composed_pattern.dart:93:39 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\models\composed_pattern.dart:93:50 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\models\composed_pattern.dart:93:63 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\models\composed_pattern.dart:207:48 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\models\composed_pattern.dart:305:39 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\models\composed_pattern.dart:352:9 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\models\design_intent.dart:383:41 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\models\design_intent.dart:383:48 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\models\design_intent.dart:383:57 - deprecated_member_use
+   info - 'alpha' is deprecated and shouldn't be used. Use (*.a * 255.0).round().clamp(0, 255) - lib\features\design\models\design_intent.dart:383:65 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\models\design_intent.dart:574:25 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\models\design_intent.dart:574:36 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\models\design_intent.dart:574:49 - deprecated_member_use
+   info - Unnecessary 'this.' qualifier - lib\features\design\models\design_intent.dart:611:9 - unnecessary_this
+   info - Use an initializing formal to assign a parameter to a field - lib\features\design\models\design_intent.dart:611:9 - prefer_initializing_formals
+   info - Unnecessary 'this.' qualifier - lib\features\design\models\design_intent.dart:620:9 - unnecessary_this
+   info - Use an initializing formal to assign a parameter to a field - lib\features\design\models\design_intent.dart:620:9 - prefer_initializing_formals
+   info - Unnecessary 'this.' qualifier - lib\features\design\models\design_intent.dart:630:9 - unnecessary_this
+   info - Use an initializing formal to assign a parameter to a field - lib\features\design\models\design_intent.dart:630:9 - prefer_initializing_formals
+   info - Unnecessary 'this.' qualifier - lib\features\design\models\design_intent.dart:631:9 - unnecessary_this
+   info - Use an initializing formal to assign a parameter to a field - lib\features\design\models\design_intent.dart:631:9 - prefer_initializing_formals
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\features\design\roofline_config_providers.dart:17:8 - depend_on_referenced_packages
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\features\design\roofline_setup_wizard.dart:19:8 - depend_on_referenced_packages
+   info - The private field _selectedChannels could be 'final' - lib\features\design\roofline_setup_wizard.dart:42:12 - prefer_final_fields
+   info - The private field _channelLedCounts could be 'final' - lib\features\design\roofline_setup_wizard.dart:44:17 - prefer_final_fields
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\design\segment_setup_screen.dart:77:24 - use_build_context_synchronously
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\design\segment_setup_screen.dart:648:15 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\services\clarification_service.dart:1017:26 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\services\clarification_service.dart:1017:37 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\services\clarification_service.dart:1017:50 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\services\constraint_solver.dart:477:32 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\services\constraint_solver.dart:478:32 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\services\constraint_solver.dart:479:32 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\services\nlu_service.dart:299:33 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\services\nlu_service.dart:588:15 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\services\nlu_service.dart:588:23 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\services\nlu_service.dart:589:12 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\services\nlu_service.dart:589:22 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\services\nlu_service.dart:590:12 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\services\nlu_service.dart:590:21 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\services\pattern_composer.dart:618:20 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\services\pattern_composer.dart:838:22 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:843:15 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:843:23 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:844:15 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:844:25 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:845:15 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:845:24 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:850:19 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:850:30 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\services\pattern_composer.dart:850:43 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\design\widgets\effect_selector.dart:155:23 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\design\widgets\effect_selector.dart:294:34 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\design\widgets\effect_selector.dart:294:45 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\design\widgets\effect_selector.dart:294:58 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\widgets\effect_selector.dart:424:36 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\design\widgets\effect_selector.dart:424:51 - deprecated_member_use
+   info - 'partialResults' is deprecated and shouldn't be used. Use SpeechListenOptions.partialResults instead - lib\features\design\widgets\voice_input_button.dart:102:9 - deprecated_member_use
+   info - 'cancelOnError' is deprecated and shouldn't be used. Use SpeechListenOptions.cancelOnError instead - lib\features\design\widgets\voice_input_button.dart:103:9 - deprecated_member_use
+   info - 'listenMode' is deprecated and shouldn't be used. Use SpeechListenOptions.listenMode instead - lib\features\design\widgets\voice_input_button.dart:104:9 - deprecated_member_use
+   info - Use interpolation to compose strings and values - lib\features\discovery\device_discovery.dart:226:40 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\discovery\device_discovery.dart:237:25 - prefer_interpolation_to_compose_strings
+   info - Don't use 'BuildContext's across async gaps - lib\features\discovery\discovery_page.dart:31:32 - use_build_context_synchronously
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\game_day\game_day_apply.dart:79:20 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\game_day\game_day_apply.dart:79:33 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\game_day\game_day_apply.dart:79:48 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\game_day\game_day_apply.dart:80:22 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\game_day\game_day_apply.dart:80:37 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\game_day\game_day_apply.dart:80:54 - deprecated_member_use
+   info - 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre - lib\features\game_day\game_day_screen.dart:1205:17 - deprecated_member_use
+   info - 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre - lib\features\game_day\game_day_screen.dart:1206:17 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor or activeTrackColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\game_day\game_day_screen.dart:1520:11 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\features\geofence\geofence_monitor.dart:133:9 - use_build_context_synchronously
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\geofence\geofence_monitor.dart:392:30 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\geofence\geofence_monitor.dart:392:37 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\geofence\geofence_monitor.dart:392:46 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\geofence\geofence_setup_screen.dart:240:13 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\installer\admin\dealer_management_screen.dart:113:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\installer\admin\dealer_management_screen.dart:141:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\installer\admin\installer_management_screen.dart:180:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\installer\admin\installer_management_screen.dart:207:28 - use_build_context_synchronously
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\installer\admin\installer_management_screen.dart:531:23 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\installer\screens\zone_configuration_screen.dart:376:17 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\installer\screens\zone_configuration_screen.dart:577:13 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\installer\screens\zone_configuration_screen.dart:665:17 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\neighborhood\neighborhood_models.dart:1300:40 - deprecated_member_use
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\features\neighborhood\neighborhood_sync_engine.dart:4:8 - unnecessary_import
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\neighborhood\neighborhood_sync_screen.dart:2253:23 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\neighborhood\widgets\game_day_setup_screen.dart:749:17 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\features\neighborhood\widgets\season_renewal_dialog.dart:268:22 - use_build_context_synchronously
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\neighborhood\widgets\sync_event_setup_screen.dart:567:13 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\neighborhood\widgets\sync_event_setup_screen.dart:681:13 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\neighborhood\widgets\sync_event_setup_screen.dart:1105:37 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\neighborhood\widgets\sync_event_setup_screen.dart:1108:39 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\patterns\canonical_palettes.dart:69:58 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\patterns\canonical_palettes.dart:69:71 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\patterns\canonical_palettes.dart:69:86 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\patterns\canonical_palettes.dart:75:59 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\patterns\canonical_palettes.dart:75:72 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\patterns\canonical_palettes.dart:75:87 - deprecated_member_use
+   info - Unnecessary braces in a string interpolation - lib\features\properties\properties_providers.dart:149:54 - unnecessary_brace_in_string_interps
+warning - Unused import: 'dart:ui' - lib\features\scenes\scene_providers.dart:1:8 - unused_import
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\schedule\calendar_entry.dart:296:26 - deprecated_member_use
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\features\schedule\calendar_providers.dart:27:8 - depend_on_referenced_packages
+   info - The import of 'package:nexgen_command/features/wled/device_channel.dart' is unnecessary because all of the used elements are also provided by the import of 'package:nexgen_command/features/wled/zone_providers.dart' - lib\features\schedule\day_timeline_providers.dart:19:8 - unnecessary_import
+   info - 'listenMode' is deprecated and shouldn't be used. Use SpeechListenOptions.listenMode instead - lib\features\schedule\my_schedule_page.dart:3019:9 - deprecated_member_use
+   info - 'partialResults' is deprecated and shouldn't be used. Use SpeechListenOptions.partialResults instead - lib\features\schedule\my_schedule_page.dart:3021:9 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeTrackColor instead. This feature was deprecated after v3.24.0-0.2.pre - lib\features\schedule\my_schedule_page.dart:3449:15 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeTrackColor instead. This feature was deprecated after v3.24.0-0.2.pre - lib\features\schedule\my_schedule_page.dart:4228:19 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeTrackColor instead. This feature was deprecated after v3.24.0-0.2.pre - lib\features\schedule\my_schedule_page.dart:4435:52 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeTrackColor instead. This feature was deprecated after v3.24.0-0.2.pre - lib\features\schedule\my_schedule_page.dart:4508:29 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\schedule\my_schedule_page.dart:4579:19 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeTrackColor instead. This feature was deprecated after v3.24.0-0.2.pre - lib\features\schedule\my_schedule_page.dart:4640:35 - deprecated_member_use
+warning - Unnecessary cast - lib\features\schedule\schedule_sync.dart:1159:19 - unnecessary_cast
+warning - Unnecessary cast - lib\features\schedule\sunrise_off_service.dart:252:19 - unnecessary_cast
+   info - The import of 'package:nexgen_command/features/wled/device_channel.dart' is unnecessary because all of the used elements are also provided by the import of 'package:nexgen_command/features/wled/zone_providers.dart' - lib\features\schedule\widgets\channel_scope_picker.dart:21:8 - unnecessary_import
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:399:27 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:408:27 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:421:27 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:430:27 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:1159:13 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:1166:13 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:1173:13 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:1547:19 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\edit_profile_screen.dart:1559:19 - deprecated_member_use
+   info - 'surfaceVariant' is deprecated and shouldn't be used. Use surfaceContainerHighest instead. This feature was deprecated after v3.18.0-0.1.pre - lib\features\site\help_center_screen.dart:30:25 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\features\site\referral_program_screen.dart:109:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\features\site\referral_program_screen.dart:112:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\site\referral_program_screen.dart:240:59 - use_build_context_synchronously
+   info - The import of 'package:flutter/cupertino.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\features\site\settings_page.dart:3:8 - unnecessary_import
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\site\settings_page.dart:208:23 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\site\settings_page.dart:217:48 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\features\site\settings_page.dart:422:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\features\site\settings_page.dart:425:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\features\site\settings_page.dart:800:11 - use_build_context_synchronously
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\site\settings_page.dart:1153:21 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\site\settings_page.dart:1266:23 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\features\site\settings_page.dart:1462:19 - deprecated_member_use
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:24:24 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:24:51 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:24:72 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:52:24 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:52:48 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:52:83 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:52:115 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:103:24 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:103:49 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:103:61 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_models.dart:103:86 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_providers.dart:128:31 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_providers.dart:134:33 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\site\site_providers.dart:213:31 - prefer_interpolation_to_compose_strings
+   info - The member 'alertStream' overrides an inherited member but isn't annotated with '@override' - lib\features\sports_alerts\services\score_monitor_service.dart:70:31 - annotate_overrides
+   info - The member 'checkScores' overrides an inherited member but isn't annotated with '@override' - lib\features\sports_alerts\services\score_monitor_service.dart:80:16 - annotate_overrides
+   info - The member 'reset' overrides an inherited member but isn't annotated with '@override' - lib\features\sports_alerts\services\score_monitor_service.dart:96:8 - annotate_overrides
+   info - Invalid regular expression syntax - lib\features\voice\voice_providers.dart:327:40 - valid_regexps
+warning - The receiver can't be null, so the null-aware operator '?.' is unnecessary - lib\features\wled\cloud_relay_repository.dart:131:14 - invalid_null_aware_operator
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\cloud_relay_repository.dart:348:16 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\cloud_relay_repository.dart:349:16 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\cloud_relay_repository.dart:350:16 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\cloud_relay_repository.dart:600:38 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\cloud_relay_repository.dart:600:49 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\cloud_relay_repository.dart:600:62 - deprecated_member_use
+warning - The method doesn't override an inherited method - lib\features\wled\cloud_relay_repository.dart:646:22 - override_on_non_overriding_member
+   info - The member 'savePreset' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\cloud_relay_repository.dart:654:16 - annotate_overrides
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:57:20 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:58:20 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:59:20 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:389:55 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:390:55 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:391:55 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:606:42 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:607:42 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:608:42 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:791:24 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:792:24 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\edit_pattern_screen.dart:793:24 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:140:30 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:140:37 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:140:46 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:160:33 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:160:40 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:160:49 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:175:25 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:176:25 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\editable_pattern_model.dart:177:25 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\wled\editable_pattern_model.dart:254:49 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\wled\editable_pattern_model.dart:255:42 - deprecated_member_use
+   info - Library names are not necessary - lib\features\wled\lumina_custom_effects.dart:44:9 - unnecessary_library_name
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\wled\pattern_category_detail.dart:569:44 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\wled\pattern_category_detail.dart:576:44 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\wled\pattern_category_detail.dart:595:44 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\wled\pattern_category_detail.dart:601:44 - use_build_context_synchronously
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_category_detail.dart:799:39 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_category_detail.dart:800:44 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_category_detail.dart:801:45 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_category_detail.dart:802:14 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_category_detail.dart:806:39 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_category_detail.dart:807:44 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_category_detail.dart:808:14 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\wled\pattern_grid_widgets.dart:233:40 - curly_braces_in_flow_control_structures
+warning - The '!' will have no effect because the receiver can't be null - lib\features\wled\pattern_grid_widgets.dart:366:50 - unnecessary_non_null_assertion
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:1501:35 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:1501:42 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:1501:51 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:1759:37 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:1759:44 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:1759:53 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:2107:34 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:2108:34 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_grid_widgets.dart:2109:34 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\features\wled\pattern_grid_widgets.dart:2311:23 - deprecated_member_use
+   info - Constructors for public widgets should have a named 'key' parameter - lib\features\wled\pattern_library_browser.dart:19:9 - use_key_in_widget_constructors
+   info - Constructors for public widgets should have a named 'key' parameter - lib\features\wled\pattern_library_browser.dart:257:9 - use_key_in_widget_constructors
+   info - The 'child' argument should be last in widget constructor invocations - lib\features\wled\pattern_library_browser.dart:321:19 - sort_child_properties_last
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\features\wled\pattern_library_browser.dart:646:7 - deprecated_member_use
+   info - Dangling library doc comment - lib\features\wled\pattern_library_pages.dart:1:1 - dangling_library_doc_comments
+   info - Use interpolation to compose strings and values - lib\features\wled\pattern_models.dart:65:24 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\features\wled\pattern_models.dart:65:46 - prefer_interpolation_to_compose_strings
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\wled\pattern_models.dart:92:49 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_models.dart:328:56 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_models.dart:328:63 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_models.dart:328:72 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\wled\pattern_models.dart:406:37 - deprecated_member_use
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\features\wled\pattern_repository.dart:1:8 - unnecessary_import
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_repository.dart:271:19 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_repository.dart:272:19 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_repository.dart:273:19 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_repository.dart:1004:31 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_repository.dart:1005:31 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_repository.dart:1006:31 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\features\wled\pattern_repository.dart:1394:35 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_theme_selection.dart:916:38 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_theme_selection.dart:916:49 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\pattern_theme_selection.dart:916:62 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\usage_tracking_extension.dart:193:19 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\usage_tracking_extension.dart:194:19 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\usage_tracking_extension.dart:195:19 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\wled_providers.dart:1704:28 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\wled_providers.dart:1704:35 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\wled_providers.dart:1704:44 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\wled_providers.dart:1921:20 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\wled_providers.dart:1922:20 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\wled_providers.dart:1923:20 - deprecated_member_use
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\features\wled\wled_service.dart:6:8 - unnecessary_import
+warning - The declaration 'PresetsRead._' isn't referenced - lib\features\wled\wled_service.dart:334:21 - unused_element
+   info - The private field _simSegNames could be 'final' - lib\features\wled\wled_service.dart:428:16 - prefer_final_fields
+   info - The member 'getState' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\wled_service.dart:631:33 - annotate_overrides
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:641:28 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:641:43 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:641:60 - deprecated_member_use
+   info - The member 'setState' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\wled_service.dart:769:16 - annotate_overrides
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:780:16 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:781:16 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:782:16 - deprecated_member_use
+   info - The member 'applyJson' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\wled_service.dart:957:16 - annotate_overrides
+   info - The member 'uploadLedMapJson' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\wled_service.dart:1261:16 - annotate_overrides
+   info - The member 'configureSyncReceiver' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\wled_service.dart:1305:16 - annotate_overrides
+   info - The member 'configureSyncSender' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\wled_service.dart:1318:16 - annotate_overrides
+warning - The method doesn't override an inherited method - lib\features\wled\wled_service.dart:1511:22 - override_on_non_overriding_member
+   info - The member 'savePreset' overrides an inherited member but isn't annotated with '@override' - lib\features\wled\wled_service.dart:1519:16 - annotate_overrides
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:1768:38 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:1768:49 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\features\wled\wled_service.dart:1768:62 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\wled\zone_configuration_page.dart:219:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\features\wled\zone_configuration_page.dart:224:30 - use_build_context_synchronously
+   info - Use interpolation to compose strings and values - lib\lumina_ai\lumina_ai_service.dart:147:7 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\lumina_ai\lumina_ai_service.dart:206:7 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\lumina_ai\lumina_ai_service.dart:377:9 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\lumina_ai\lumina_ai_service.dart:521:7 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\lumina_ai\lumina_ai_service.dart:638:30 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\lumina_ai\lumina_ai_service.dart:684:9 - prefer_interpolation_to_compose_strings
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\models\autopilot_override.dart:1:8 - depend_on_referenced_packages
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\models\custom_holiday.dart:68:59 - deprecated_member_use
+   info - The parameter name 'sum' matches a visible type name - lib\models\pixel_map_channel.dart:69:25 - avoid_types_as_parameter_names
+   info - The parameter name 'sum' matches a visible type name - lib\models\pixel_map_channel.dart:273:27 - avoid_types_as_parameter_names
+   info - The parameter name 'sum' matches a visible type name - lib\models\roofline_configuration.dart:74:25 - avoid_types_as_parameter_names
+   info - The parameter name 'sum' matches a visible type name - lib\models\roofline_configuration.dart:94:25 - avoid_types_as_parameter_names
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\models\segment_aware_pattern.dart:221:35 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\models\segment_aware_pattern.dart:222:35 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\models\segment_aware_pattern.dart:228:70 - deprecated_member_use
+   info - Angle brackets will be interpreted as HTML - lib\models\user_model.dart:242:67 - unintended_html_in_doc_comment
+   info - Dangling library doc comment - lib\nav.dart:1:1 - dangling_library_doc_comments
+   info - The file name 'CommercialHomeScreen.dart' isn't a lower_case_with_underscores identifier - lib\screens\commercial\CommercialHomeScreen.dart:1:1 - file_names
+   info - The file name 'FleetDashboardScreen.dart' isn't a lower_case_with_underscores identifier - lib\screens\commercial\fleet\FleetDashboardScreen.dart:1:1 - file_names
+   info - The file name 'BusinessProfileEditScreen.dart' isn't a lower_case_with_underscores identifier - lib\screens\commercial\profile\BusinessProfileEditScreen.dart:1:1 - file_names
+   info - The file name 'CommercialScheduleScreen.dart' isn't a lower_case_with_underscores identifier - lib\screens\commercial\schedule\CommercialScheduleScreen.dart:1:1 - file_names
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\services\autopilot_generation_service.dart:11:8 - depend_on_referenced_packages
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\services\autopilot_generation_service.dart:205:53 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\services\autopilot_generation_service.dart:373:39 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\services\autopilot_generation_service.dart:373:53 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\services\autopilot_generation_service.dart:373:69 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\services\autopilot_generation_service.dart:460:35 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\services\autopilot_generation_service.dart:460:42 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\services\autopilot_generation_service.dart:460:51 - deprecated_member_use
+   info - The imported package 'uuid' isn't a dependency of the importing package - lib\services\autopilot_scheduler.dart:2:8 - depend_on_referenced_packages
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:35:44 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:35:69 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:35:96 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:36:44 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:36:69 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:36:96 - deprecated_member_use
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:484:30 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:485:30 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\services\segment_pattern_generator.dart:486:30 - deprecated_member_use
+   info - Dangling library doc comment - lib\theme.dart:1:1 - dangling_library_doc_comments
+   info - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round().clamp(0, 255) - lib\utils\color_name_utils.dart:7:37 - deprecated_member_use
+   info - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round().clamp(0, 255) - lib\utils\color_name_utils.dart:7:48 - deprecated_member_use
+   info - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round().clamp(0, 255) - lib\utils\color_name_utils.dart:7:61 - deprecated_member_use
+   info - Use 'isEmpty' instead of 'length' to test whether the collection is empty - lib\utils\input_validation.dart:40:9 - prefer_is_empty
+   info - The variable name 'RA' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:26:14 - non_constant_identifier_names
+   info - The variable name 'Lquadrant' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:28:14 - non_constant_identifier_names
+   info - The variable name 'RAquadrant' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:29:14 - non_constant_identifier_names
+   info - The variable name 'UT' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:43:14 - non_constant_identifier_names
+   info - The variable name 'RA' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:72:14 - non_constant_identifier_names
+   info - The variable name 'Lquadrant' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:75:14 - non_constant_identifier_names
+   info - The variable name 'RAquadrant' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:76:14 - non_constant_identifier_names
+   info - The variable name 'UT' isn't a lowerCamelCase identifier - lib\utils\sun_utils.dart:90:14 - non_constant_identifier_names
+   info - The local variable '_intent' starts with an underscore - test\features\ai\cloud_ai_processor_normalize_test.dart:18:26 - no_leading_underscores_for_local_identifiers
+   info - The local variable '_intent' starts with an underscore - test\features\ai\scheduling_intent_handler_test.dart:38:20 - no_leading_underscores_for_local_identifiers
+   info - The local variable '_runApplyTest' starts with an underscore - test\features\design\apply_saved_design_test.dart:174:16 - no_leading_underscores_for_local_identifiers
+   info - The import of 'package:nexgen_command/features/wled/device_channel.dart' is unnecessary because all of the used elements are also provided by the import of 'package:nexgen_command/features/wled/zone_providers.dart' - test\features\design\design_edit_cancel_restore_test.dart:20:8 - unnecessary_import
+   info - The import of 'package:nexgen_command/features/wled/wled_hardware_config.dart' is unnecessary because all of the used elements are also provided by the import of 'package:nexgen_command/features/wled/wled_repository.dart' - test\features\design\design_edit_cancel_restore_test.dart:22:8 - unnecessary_import
+warning - Unused import: 'package:nexgen_command/features/wled/wled_models.dart' - test\features\design\design_edit_cancel_restore_test.dart:23:8 - unused_import
+   info - The local variable '_container' starts with an underscore - test\features\wled\apply_to_device_test.dart:143:21 - no_leading_underscores_for_local_identifiers
+warning - The '!' will have no effect because the receiver can't be null - test\features\wled\geometry_wire_pin_test.dart:206:40 - unnecessary_non_null_assertion
+warning - The '!' will have no effect because the receiver can't be null - test\features\wled\geometry_wire_pin_test.dart:242:18 - unnecessary_non_null_assertion
+   info - The local variable '_pumpWheel' starts with an underscore - test\features\wled\neon_color_wheel_test.dart:21:23 - no_leading_underscores_for_local_identifiers
+   info - The import of 'package:flutter/material.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter_test/flutter_test.dart' - test\features\wled\participation_reconciler_test.dart:10:8 - unnecessary_import
+   info - The local variable '_seg' starts with an underscore - test\features\wled\participation_reconciler_test.dart:19:19 - no_leading_underscores_for_local_identifiers
+warning - Unused import: 'package:nexgen_command/features/wled/wled_models.dart' - test\features\wled\poll_cadence_test.dart:7:8 - unused_import
+   info - The local variable '_container' starts with an underscore - test\features\wled\post_update_channels_test.dart:146:21 - no_leading_underscores_for_local_identifiers
+
+382 issues found. (ran in 107.0s)
+BASELINE_ANALYZE_EXIT=1

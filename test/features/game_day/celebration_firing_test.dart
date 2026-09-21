@@ -58,16 +58,21 @@ BackgroundGameDayAutopilotConfig _bg({int? celebrationEffectId}) =>
 
 void main() {
   // THE REQUIRED TEST. A touchdown with a chosen Pulse effect fires the 15s
-  // multi-stage sequence using Pulse at EVERY stage — not the old hardcoded
-  // Strobe → Wipe → Running.
+  // multi-stage sequence using Pulse at EVERY stage — not the hardcoded
+  // Breathe → Wipe → Running.
   group('a chosen effect replaces the motion at every stage', () {
     final legacy = AlertTriggerService.buildAnimationSteps(
         AlertEventType.touchdown, _team);
     final chosen = AlertTriggerService.buildAnimationSteps(
         AlertEventType.touchdown, _team, _pulse);
 
-    test('the legacy touchdown really is the 3-stage Strobe/Wipe/Running', () {
-      expect(legacy.map((s) => _segsOf(s).first['fx']), [2, 9, 63]);
+    // RE-PINNED 2026-09-21. Asserted [2, 9, 63] as "Strobe/Wipe/Running" and
+    // passed because it matched the bug: fx 9 is Rainbow and fx 63 is Pride
+    // 2015 on WLED 0.15.1, and neither reads the team colours. Wipe = fx 3,
+    // Running = fx 15; fx 2 is Breathe (unchanged — it already renders team
+    // colours).
+    test('the legacy touchdown really is the 3-stage Breathe/Wipe/Running', () {
+      expect(legacy.map((s) => _segsOf(s).first['fx']), [2, 3, 15]);
     });
 
     test('every stage now carries the chosen fx', () {
