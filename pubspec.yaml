@@ -39,6 +39,16 @@ dependencies:
   # pubspec.lock is the real pin; see
   # firestore-transaction-crash-investigation-2026-09-21.md.
   firebase_core: ^4.12.1
+  # PIGEON PAIR of firebase_core 4.12.x — do not widen without reading this.
+  # firebase_core's native decoder and its Dart encoder ship in DIFFERENT
+  # packages. Native 4.12.1 reads 15 CoreFirebaseOptions fields (index 14 =
+  # recaptchaSiteKey, no bounds check); platform_interface 8.1.0 REMOVED that
+  # field and sends 14. firebase_core 4.12.1 declares only ^8.0.0, so left alone
+  # the resolver floats this to 8.1.x — which shipped in +103/+104 and aborted
+  # iOS on every cold start (NSRangeException, index 14 beyond bounds [0 .. 13]).
+  # 8.1.x pairs with firebase_core >= 4.13.0; move BOTH or neither. See
+  # firebase-options-crash-investigation-2026-09-21.md.
+  firebase_core_platform_interface: '>=8.0.0 <8.1.0'
   firebase_auth: ^6.5.6
   cloud_firestore: ^6.7.1
   cloud_functions: ^6.3.5
