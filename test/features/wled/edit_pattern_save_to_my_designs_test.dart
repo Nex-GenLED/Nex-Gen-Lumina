@@ -6,7 +6,6 @@
 // the service — and that the device is never asked to store anything.
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,7 +14,6 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_service.dart';
-import 'package:nexgen_command/features/design/editable_pattern_design.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
