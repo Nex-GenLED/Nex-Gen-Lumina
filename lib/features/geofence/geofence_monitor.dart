@@ -5,8 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:nexgen_command/features/favorites/favorites_providers.dart'
-    show FavoritePattern;
+import 'package:nexgen_command/features/geofence/geofence_favorite_lookup.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
@@ -290,22 +289,15 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
       Map<String, dynamic>? payload;
       if (uid != null) {
         try {
-          final favs = await FirebaseFirestore.instance.collection('users').doc(uid).collection('favorites').where('name', isEqualTo: actionName).limit(1).get();
-          if (favs.docs.isNotEmpty) {
-            final data = favs.docs.first.data();
-            // Recover the stored WLED payload. Writers persist it as
-            // `wledPayload` (Shape A = jsonEncoded String, Shape B = raw Map);
-            // FavoritePattern.decodeWledPayload tolerates both. Defensively
-            // accept `pattern_data` (Map or jsonEncoded String) through the
-            // same decoder IF wledPayload is absent, so an unexpected shape
-            // can't crash the trigger. No pattern_name lookup and no query
-            // change — Shape C (no `name` field) stays excluded by design.
-            final raw = data['wledPayload'] ?? data['pattern_data'];
-            final decoded = FavoritePattern.decodeWledPayload(raw);
-            // Empty map = null/empty/unparseable → no usable payload; fall
-            // through to _applyFallback exactly as the old behaviour did.
-            if (decoded.isNotEmpty) payload = decoded;
-          }
+          // Keyed on the canonical `pattern_name` / `pattern_data`. This used
+          // to query the camelCase `name`, which no stored favorite has ever
+          // had, so every trigger fell through to _applyFallback. Null = no
+          // such favorite (or no usable payload) → fallback, as before.
+          payload = await lookupGeofenceFavoritePayload(
+            FirebaseFirestore.instance,
+            uid: uid,
+            actionName: actionName,
+          );
         } catch (e) {
           debugPrint('Favorites lookup failed: $e');
         }
