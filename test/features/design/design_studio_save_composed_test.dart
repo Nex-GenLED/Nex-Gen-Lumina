@@ -25,6 +25,8 @@ import 'package:nexgen_command/features/design/design_service.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
@@ -210,6 +212,10 @@ void main() {
           ),
           zoneSegmentsProvider.overrideWith(_FixedZoneSegmentsNotifier.new),
           composedPatternProvider.overrideWith((ref) => buildPattern()),
+          // No controller. saveComposedDesignProvider asks for the repository
+          // (to record the live brightness — see the last test); the real
+          // provider reads `user.email`, which _StubUser does not have.
+          wledRepositoryProvider.overrideWith((ref) => null),
         ],
       );
       addTearDown(container.dispose);
@@ -266,10 +272,70 @@ void main() {
       expect(designs.first.composedPattern, isNotNull);
       expect(designs.first.channels, hasLength(2));
     });
+
+    test('with no controller the saved design states NO brightness — it does '
+        'not claim the unchosen 200', () async {
+      await container.read(authStateProvider.future);
+      await container.read(zoneSegmentsProvider.future);
+      await container.read(saveComposedDesignProvider)();
+
+      final data = (await firestore.collection('users').doc('u1').collection('designs').get())
+          .docs
+          .first
+          .data();
+      expect(data['brightness_stated'], isFalse);
+      expect(CustomDesign.fromFirestoreData('x', data).appliedBrightness, isNull);
+    });
+
+    test('with the lights answering, the save records the level the design was '
+        'watched at — and it comes back as that', () async {
+      final live = ProviderContainer(
+        overrides: [
+          authStateProvider.overrideWith(
+            (ref) => Stream<User?>.value(_StubUser('u1')),
+          ),
+          designServiceProvider.overrideWith(
+            (ref) => DesignService(firestore: firestore),
+          ),
+          zoneSegmentsProvider.overrideWith(_FixedZoneSegmentsNotifier.new),
+          composedPatternProvider.overrideWith((ref) => buildPattern()),
+          wledRepositoryProvider.overrideWith((ref) => _NoopRepo()),
+          wledStateProvider.overrideWith(() => _LiveNotifier(64)),
+        ],
+      );
+      addTearDown(live.dispose);
+      await live.read(authStateProvider.future);
+      await live.read(zoneSegmentsProvider.future);
+      await live.read(saveComposedDesignProvider)();
+
+      final data = (await firestore.collection('users').doc('u1').collection('designs').get())
+          .docs
+          .first
+          .data();
+      expect(data['brightness'], 64, reason: 'was the constant 200');
+      expect(data['brightness_stated'], isTrue);
+      final back = CustomDesign.fromFirestoreData('x', data);
+      expect(back.isPositional, isTrue);
+      expect(back.appliedBrightness, 64);
+    });
   });
 }
 
 // ── Test fakes ──────────────────────────────────────────────────────────
+
+class _NoopRepo implements WledRepository {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// The lights as the app sees them: answering, at [brightness].
+class _LiveNotifier extends WledNotifier {
+  _LiveNotifier(this.brightness);
+  final int brightness;
+  @override
+  WledStateModel build() =>
+      WledStateModel.initial().copyWith(connected: true, brightness: brightness);
+}
 
 // User is sealed; subclassing for a scoped test fake is intentional.
 // ignore: subtype_of_sealed_class

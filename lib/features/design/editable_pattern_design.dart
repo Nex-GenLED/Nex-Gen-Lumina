@@ -109,6 +109,8 @@ CustomDesign customDesignFromEditablePattern({
     ownerId: ownerId,
     channels: channelDesigns,
     brightness: pattern.brightness.clamp(0, 255),
+    // The editor's own BRIGHTNESS slider — stated, so every apply restores it.
+    brightnessStated: true,
     tags: const [kPatternEditorDesignTag],
     // STATED, never inferred — see CustomDesign.perPixel. A one-colour Static
     // pattern is a single group per channel and would otherwise be classed an

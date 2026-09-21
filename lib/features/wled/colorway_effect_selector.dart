@@ -50,6 +50,31 @@ String composeColorwayLabel(LibraryNode paletteNode, LibraryNode? parentNode) {
   return '$parentLabel, $paletteName';
 }
 
+/// DESIGN-EDIT live preview: [payload] with the brightness of the design being
+/// edited instead of the catalog's.
+///
+/// `buildSelectorPayload` always states `bri`, and the preview never passed
+/// one — so opening a stored design in the tuner and touching any control
+/// drove the lights to `bri: 255`, whatever the design stores. "Save to design"
+/// then kept the stored level (it never writes brightness), leaving the lights
+/// showing a look the design would not come back as. The preview now follows
+/// [CustomDesign.appliedBrightness], the rule every apply path uses: the stored
+/// level when the design states one, otherwise no `bri` at all. Catalog mode
+/// ([design] null) is returned untouched.
+@visibleForTesting
+Map<String, dynamic> designEditPreviewPayload(
+  Map<String, dynamic> payload,
+  CustomDesign? design,
+) {
+  if (design == null) return payload;
+  final bri = design.appliedBrightness;
+  return <String, dynamic>{
+    for (final e in payload.entries)
+      if (e.key != 'bri') e.key: e.value,
+    if (bri != null) 'bri': bri,
+  };
+}
+
 /// A design chosen from the library in SELECTION mode — returned to the caller
 /// (e.g. the schedule "choose a pattern" flow) instead of being applied. Same
 /// shape the legacy schedule picker returned (`PatternSelection`): the caller
@@ -676,6 +701,8 @@ class _ColorwayEffectSelectorPageState
             rainbowPaletteOverride(
                 effectId: fxId, rainbowScope: _isRainbowPalette),
       ));
+
+      payload = designEditPreviewPayload(payload, widget.editingDesign);
 
       // Apply channel filter so all targeted segments receive the change
       final channels = ref.read(effectiveChannelIdsProvider);

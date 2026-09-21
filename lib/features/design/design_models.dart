@@ -8,9 +8,20 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 
 /// Tag on every design the Pattern Editor ("Edit Pattern" screen) saves.
-/// Provenance — and the one thing that reads it is
+/// Provenance — and the one thing that reads it is the legacy arm of
 /// [CustomDesign.statesBrightness].
 const String kPatternEditorDesignTag = 'pattern-editor';
+
+/// The master brightness the lights are showing right now, as a value a design
+/// may store — or null when the app is not actually hearing from a controller,
+/// in which case [brightness] is a stale or default number and must not be
+/// recorded as something the user saw.
+///
+/// The writers with no brightness control of their own (the paint editor, the
+/// AI Design Studio) save a look the user built while watching the lights at
+/// THIS level, so this is the brightness that look was made under.
+int? liveBrightnessToStore({required bool connected, required int brightness}) =>
+    connected ? brightness.clamp(1, 255) : null;
 
 /// Represents a complete custom design that can be saved and applied to WLED devices.
 class CustomDesign {
@@ -26,6 +37,21 @@ class CustomDesign {
 
   /// Global brightness (0-255)
   final int brightness;
+
+  /// Whether [brightness] is a level somebody actually set — so applying this
+  /// design must restore it — or just the model default.
+  ///
+  /// * `true`  — every writer states this from 2026-09-21 on. Stored as
+  ///   `brightness_stated`.
+  /// * `false` — the writer had no trustworthy level to record (saved with no
+  ///   controller connected), or the document carries no `brightness` at all.
+  ///   Applying leaves the controller's brightness alone.
+  /// * `null`  — NOT RECORDED: every document saved before the field existed.
+  ///   Nothing is backfilled; [statesBrightness] decides from what those
+  ///   documents are known to hold.
+  ///
+  /// Read [statesBrightness] / [appliedBrightness], never this directly.
+  final bool? brightnessStated;
 
   /// Searchable tags for organization
   final List<String> tags;
@@ -113,6 +139,7 @@ class CustomDesign {
     required this.ownerId,
     required this.channels,
     this.brightness = 200,
+    this.brightnessStated,
     this.tags = const [],
     this.rooflineConfigId,
     this.isSegmentAware = false,
@@ -132,6 +159,7 @@ class CustomDesign {
     String? ownerId,
     List<ChannelDesign>? channels,
     int? brightness,
+    bool? brightnessStated,
     List<String>? tags,
     String? rooflineConfigId,
     bool? isSegmentAware,
@@ -150,6 +178,7 @@ class CustomDesign {
       ownerId: ownerId ?? this.ownerId,
       channels: channels ?? this.channels,
       brightness: brightness ?? this.brightness,
+      brightnessStated: brightnessStated ?? this.brightnessStated,
       tags: tags ?? this.tags,
       rooflineConfigId: rooflineConfigId ?? this.rooflineConfigId,
       isSegmentAware: isSegmentAware ?? this.isSegmentAware,
@@ -213,6 +242,15 @@ class CustomDesign {
       parsedComposedPattern = Map<String, dynamic>.from(rawComposed);
     }
 
+    // The ABSENT case. A document with no usable `brightness` has nothing to
+    // restore: say so, rather than let the 200 below pass for a level anybody
+    // chose. A document that has one but predates `brightness_stated` stays
+    // null (not recorded) — see [statesBrightness]. Nothing is written back.
+    final rawBrightness = data['brightness'];
+    final bool? parsedBrightnessStated = rawBrightness is num
+        ? data['brightness_stated'] as bool?
+        : false;
+
     return CustomDesign(
       id: id,
       name: data['name'] as String? ?? 'Untitled',
@@ -224,7 +262,10 @@ class CustomDesign {
               ?.map((c) => ChannelDesign.fromJson(c as Map<String, dynamic>))
               .toList() ??
           [],
-      brightness: (data['brightness'] as int?) ?? 200,
+      // `num`, not `int`: a level that came back as a double used to throw
+      // here and take the whole document with it.
+      brightness: rawBrightness is num ? rawBrightness.toInt() : 200,
+      brightnessStated: parsedBrightnessStated,
       tags: (data['tags'] as List<dynamic>?)?.cast<String>() ?? [],
       rooflineConfigId: data['roofline_config_id'] as String?,
       isSegmentAware: data['is_segment_aware'] as bool? ?? false,
@@ -248,6 +289,10 @@ class CustomDesign {
       'owner_id': ownerId,
       'channels': channels.map((c) => c.toJson()).toList(),
       'brightness': brightness,
+      // Omitted while null so re-saving an older design through a writer that
+      // does not own brightness (rename, the tuner) records nothing it does
+      // not know — `.update()` merges by key and leaves the doc as it was.
+      if (brightnessStated != null) 'brightness_stated': brightnessStated,
       'tags': tags,
       if (rooflineConfigId != null) 'roofline_config_id': rooflineConfigId,
       'is_segment_aware': isSegmentAware,
@@ -268,18 +313,40 @@ class CustomDesign {
     };
   }
 
-  /// True when [brightness] was CHOSEN by the user, so applying this design
-  /// must restore it.
+  /// True when [brightness] is a level somebody set, so applying this design
+  /// must restore it — from EVERY door, whatever the lights are at now and
+  /// whichever screen saved it (decision of record 2026-09-21).
   ///
-  /// [brightness] defaults to 200 and most writers never set it — the paint
-  /// editor has no brightness control at all — so the per-pixel apply spine
-  /// leaves the controller's brightness alone rather than stamp an arbitrary
-  /// 200 over it. The Pattern Editor is different: it has a BRIGHTNESS slider,
-  /// drives the lights with it live, and stores its value. A Static pattern
-  /// saved dim must come back dim (the old "SAVE TO DEVICE" preset lost
-  /// brightness entirely). Keyed on the provenance tag rather than a new field
-  /// so no existing design changes behaviour.
-  bool get statesBrightness => tags.contains(kPatternEditorDesignTag);
+  /// This is the ONE rule. It used to be three: the per-pixel spine restored
+  /// brightness only for Pattern Editor designs; the effect payload always
+  /// stated it; and scene apply stamped it afterwards with a second write
+  /// regardless — so the same design came back at a different level depending
+  /// on which button applied it.
+  ///
+  /// [brightnessStated] answers it for anything saved from 2026-09-21 on. For
+  /// the older documents that never recorded it (`null`), this goes by what
+  /// each shape is known to hold — nothing is backfilled:
+  ///
+  /// * an EFFECT design — a real level. Its writers all captured one (Now
+  ///   Playing and the colour editor store the live brightness, the Pattern
+  ///   Editor its slider), and it has always been applied. Unchanged.
+  /// * a Pattern Editor design ([kPatternEditorDesignTag]) — its slider.
+  ///   Unchanged from the fix that introduced this getter.
+  /// * any other POSITIONAL design — the model's default 200, which nobody
+  ///   chose: the paint editor and the AI studio had no brightness to record.
+  ///   Left alone rather than stamped over the controller's level.
+  bool get statesBrightness =>
+      brightnessStated ??
+      (tags.contains(kPatternEditorDesignTag) || !isPositional);
+
+  /// The master `bri` to send when applying this design, or null to leave the
+  /// controller's brightness exactly as it is. Every apply path reads THIS.
+  ///
+  /// Floored at 1: a design always states `on: true`, and WLED treats `bri: 0`
+  /// as off — the effect payload used to send a stored 0 as-is while the spine
+  /// sent 1.
+  int? get appliedBrightness =>
+      statesBrightness ? brightness.clamp(1, 255) : null;
 
   /// Whether the channels hold an LED PICTURE (positional runs) that has to be
   /// sent per-pixel, rather than "up to three colours + an effect".
@@ -321,7 +388,8 @@ class CustomDesign {
         ],
       });
     }
-    return {'on': true, 'bri': brightness, 'seg': segments};
+    final bri = appliedBrightness;
+    return {'on': true, if (bri != null) 'bri': bri, 'seg': segments};
   }
 
   /// Converts this design to a WLED JSON API payload.
@@ -391,9 +459,12 @@ class CustomDesign {
       });
     }
 
+    // Same rule as the positional shape and the spine — [appliedBrightness].
+    // This payload is also what a schedule stores and what a scene sends.
+    final bri = appliedBrightness;
     return {
       'on': true,
-      'bri': brightness,
+      if (bri != null) 'bri': bri,
       'seg': segments,
     };
   }

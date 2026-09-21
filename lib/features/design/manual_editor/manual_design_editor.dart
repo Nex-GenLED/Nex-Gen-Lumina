@@ -18,6 +18,7 @@ import 'package:nexgen_command/features/design/smart_presets/smart_preset_models
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/wled/device_write_reporter.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/theme.dart';
@@ -348,13 +349,22 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
     return {for (final e in groups.entries) e.key: ledColorGroupsToSpans(e.value)};
   }
 
+  /// The brightness this editor's own writes state: the stored level of the
+  /// design being EDITED, so the lights show it as it will come back. A new
+  /// painting has none yet — null leaves the controller's level alone, and
+  /// [_save] records that level.
+  int? get _designBrightness => widget.initialDesign?.appliedBrightness;
+
   void _scheduleLivePreview() {
     _previewThrottle?.cancel();
     _previewThrottle = Timer(const Duration(milliseconds: 300), () async {
       // Was fire-and-forget with the result dropped: a controller that had
       // stopped answering looked exactly like one following along (F7).
       final ok = await applyBaseAndSpans(ref,
-          baseRgbw: _doc.baseColor, spansByChannel: _spans(), label: 'Design (preview)');
+          baseRgbw: _doc.baseColor,
+          spansByChannel: _spans(),
+          label: 'Design (preview)',
+          brightness: _designBrightness);
       if (mounted) _previewReporter.report(context, ok);
     });
   }
@@ -363,7 +373,10 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
     setState(() => _busy = true);
     try {
       final result = await applyBaseAndSpansDetailed(ref,
-          baseRgbw: _doc.baseColor, spansByChannel: _spans(), label: 'Custom Design');
+          baseRgbw: _doc.baseColor,
+          spansByChannel: _spans(),
+          label: 'Custom Design',
+          brightness: _designBrightness);
       final ok = result.isOk;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -453,6 +466,26 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
             ledCount: _doc.channelLength(e.key),
           ),
       ];
+      // BRIGHTNESS. This editor has no brightness control: the user paints
+      // while watching the lights at whatever level they are at, so THAT is
+      // the level the design is recorded at and comes back at. (It used to
+      // store the model's default 200, which no apply path could honour
+      // without overriding a level somebody had actually set.) An edit of a
+      // design that already states one keeps it — it was chosen elsewhere
+      // (the Pattern Editor's slider) and this editor previews with it. With
+      // no controller connected there is no level to record. (The repository
+      // is checked first so an editor with no controller never spins up the
+      // state notifier — and its poll timers — just to learn that.)
+      final wledState = ref.read(wledRepositoryProvider) == null
+          ? null
+          : ref.read(wledStateProvider);
+      final live = wledState == null
+          ? null
+          : liveBrightnessToStore(
+              connected: wledState.connected,
+              brightness: wledState.brightness);
+      final keepStored = existing != null && existing.statesBrightness;
+
       // copyWith on the loaded doc for an edit: every field the editor does
       // not own (tags, description, composedPattern, roofline/segment
       // metadata) round-trips untouched.
@@ -463,6 +496,8 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
               updatedAt: DateTime.now(),
               // Whatever it was when it was opened, it has now been painted.
               perPixel: true,
+              brightness: keepStored ? null : live,
+              brightnessStated: keepStored ? true : live != null,
             )
           : CustomDesign(
               id: '',
@@ -471,6 +506,8 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
               updatedAt: DateTime.now(),
               ownerId: uid,
               channels: channels,
+              brightness: live ?? 200,
+              brightnessStated: live != null,
               // STATED, not inferred: a painted design that is one colour (or
               // blank) is a single group per channel and is otherwise
               // indistinguishable from a captured solid — it used to be

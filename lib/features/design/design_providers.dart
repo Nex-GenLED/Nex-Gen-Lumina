@@ -610,7 +610,10 @@ final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String nam
       updatedAt: now,
       ownerId: user.uid,
       channels: channels,
+      // The whole design IS the running look, brightness included — stated, so
+      // it comes back at the level it was captured at.
       brightness: wledState.brightness,
+      brightnessStated: true,
     );
 
     final service = ref.read(designServiceProvider);
@@ -691,11 +694,20 @@ List<ChannelDesign> channelsFromComposedPattern(
 /// derived per-channel denormalization (so My Designs previews + legacy
 /// `toWledPayload` work) PLUS the full `composedPattern` map preserving the AI
 /// source-of-truth (`sourceIntent`/layers) for future re-edit.
+///
+/// [liveBrightness] — the level the lights are at as the design is SAVED
+/// ([liveBrightnessToStore]). The studio has no brightness control and nothing
+/// ever sets `ComposedPattern.brightness` (it is `GlobalSettings`' constant
+/// 200), so the level the user watched the design at is the only real one
+/// there is. Null — the in-memory build behind "Apply to Lights", or a save
+/// with no controller connected — states none, and applying leaves the
+/// controller's brightness alone, as the studio always has.
 CustomDesign customDesignFromComposedPattern({
   required ComposedPattern pattern,
   required List<WledSegment> segments,
   required String ownerId,
   String? name,
+  int? liveBrightness,
 }) {
   final now = DateTime.now();
   return CustomDesign(
@@ -706,7 +718,8 @@ CustomDesign customDesignFromComposedPattern({
     updatedAt: now,
     ownerId: ownerId,
     channels: channelsFromComposedPattern(pattern, segments),
-    brightness: pattern.brightness,
+    brightness: liveBrightness ?? pattern.brightness,
+    brightnessStated: liveBrightness != null,
     composedPattern: pattern.toJson(),
   );
 }
@@ -726,12 +739,22 @@ final saveComposedDesignProvider = Provider<Future<String?> Function({String? na
     if (user == null) return null;
 
     final segments = ref.read(zoneSegmentsProvider).valueOrNull ?? const <WledSegment>[];
+    // No repository = no controller = no level to record; checked first so an
+    // offline save never spins up the state notifier just to learn that.
+    final wledState = ref.read(wledRepositoryProvider) == null
+        ? null
+        : ref.read(wledStateProvider);
 
     final design = customDesignFromComposedPattern(
       pattern: pattern,
       segments: segments,
       ownerId: user.uid,
       name: name,
+      liveBrightness: wledState == null
+          ? null
+          : liveBrightnessToStore(
+              connected: wledState.connected,
+              brightness: wledState.brightness),
     );
 
     final service = ref.read(designServiceProvider);

@@ -238,10 +238,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
   });
 
-  // Brightness. The spine has never stated `bri`: most designs carry the
-  // model's default 200, which nobody chose (the paint editor has no brightness
-  // control). The Pattern Editor DOES have one, so the designs it saves — and
-  // only those — restore it. (Its old "SAVE TO DEVICE" preset lost it.)
+  // Brightness — the LEGACY arm of CustomDesign.statesBrightness: designs saved
+  // before `brightness_stated` existed. A painted one carries the model's
+  // default 200, which nobody chose, so the spine leaves the controller alone;
+  // a Pattern Editor one carries its slider and restores it. Designs saved
+  // since state their brightness whatever saved them — see
+  // brightness_restore_consistency_test.dart.
   group('master brightness', () {
     Future<_Repo> apply(WidgetTester tester, CustomDesign design) async {
       SharedPreferences.setMockInitialValues({});
