@@ -36,6 +36,19 @@ const int kDesignDefaultGrp = 1;
 /// No dark pixels between bands — "no spacing".
 const int kDesignDefaultSpc = 0;
 
+/// WLED palette 5, "Colors Only": an effect draws from the segment's OWN
+/// `col[0..2]` and nothing else.
+///
+/// The same #67 rule as grp/spc above — *unstated design state is inherited
+/// design state* — and the same failure. Every live pattern builder in the app
+/// states `pal: 5`; the saved-design payload did not state `pal` at all, so a
+/// design re-applied with whatever palette the previous look left behind. After
+/// any per-pixel apply that is `pal: 0`, under which a palette-driven effect
+/// uses only its first colour(s). Bench `.150`, 2026-09-21: a three-colour
+/// "Running" design saved over red/gold/WHITE came back red/gold — the white
+/// gone — with the device reporting `pal: 0` where the editor had shown `pal: 5`.
+const int kDesignColorsOnlyPalette = 5;
+
 /// Spread into a design seg that has no grouping/spacing of its own:
 /// `{...kDesignSpacingDefaults, 'fx': …}`. Place it FIRST so a builder that
 /// does own its spacing overrides the default rather than fighting it.

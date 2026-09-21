@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/favorites/favorite_payload_codec.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 
 /// Represents a single pattern usage event
@@ -262,14 +263,24 @@ class FavoritePattern {
     this.autoAdded = false,
   });
 
+  /// Tolerant by design — this feeds the dashboard's My Favorites grid, whose
+  /// error branch renders the EMPTY state, so one document this could not
+  /// parse blanked the whole grid without a word:
+  ///
+  /// * `pattern_data` is a jsonEncoded STRING on every production favorite
+  ///   (the habit learner copies it from the usage log, which encodes it for
+  ///   #84). This used to cast it `as Map?`, which throws on a String.
+  /// * `added_at` reads as null while its server timestamp is still pending in
+  ///   the local cache — i.e. on the first snapshot after ANY new favorite.
   factory FavoritePattern.fromJson(Map<String, dynamic> json) {
+    final name = json['pattern_name'];
     return FavoritePattern(
       id: json['id'] as String,
-      patternName: json['pattern_name'] as String,
-      addedAt: (json['added_at'] as Timestamp).toDate(),
+      patternName: name is String && name.isNotEmpty ? name : 'Favorite',
+      addedAt: (json['added_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
       lastUsed: (json['last_used'] as Timestamp?)?.toDate(),
       usageCount: (json['usage_count'] as num?)?.toInt() ?? 0,
-      patternData: (json['pattern_data'] as Map?)?.cast<String, dynamic>() ?? {},
+      patternData: decodeFavoritePayload(json['pattern_data']),
       autoAdded: (json['auto_added'] as bool?) ?? false,
     );
   }

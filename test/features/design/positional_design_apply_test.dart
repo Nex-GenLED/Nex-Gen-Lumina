@@ -237,4 +237,51 @@ void main() {
     // debounce — let it fire before the tree is torn down.
     await tester.pump(const Duration(milliseconds: 300));
   });
+
+  // Brightness. The spine has never stated `bri`: most designs carry the
+  // model's default 200, which nobody chose (the paint editor has no brightness
+  // control). The Pattern Editor DOES have one, so the designs it saves — and
+  // only those — restore it. (Its old "SAVE TO DEVICE" preset lost it.)
+  group('master brightness', () {
+    Future<_Repo> apply(WidgetTester tester, CustomDesign design) async {
+      SharedPreferences.setMockInitialValues({});
+      final repo = _Repo();
+      late WidgetRef ref;
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          wledRepositoryProvider.overrideWith((ref) => repo),
+          deviceChannelsProvider.overrideWithValue(const [
+            DeviceChannel(id: 0, name: 'Ch1', start: 0, stop: 128, gpioPin: 2),
+            DeviceChannel(id: 1, name: 'Ch2', start: 128, stop: 290, gpioPin: 3),
+          ]),
+          effectiveChannelIdsProvider.overrideWithValue(const [0, 1]),
+          wledStateProvider.overrideWith(() => _FakeWledNotifier()),
+        ],
+        child: Consumer(builder: (c, r, _) {
+          ref = r;
+          return const SizedBox();
+        }),
+      ));
+      expect(await applyPositionalDesignWith(ref.read, design),
+          DesignApplyResult.applied);
+      return repo;
+    }
+
+    testWidgets('a painted design leaves the brightness of the controller alone — '
+        'unchanged behaviour for every existing design', (tester) async {
+      final repo = await apply(tester, _painted(_doc()));
+      expect(repo.json.single.containsKey('bri'), isFalse);
+    });
+
+    testWidgets('a design the Pattern Editor saved restores the brightness the '
+        'user chose, in the SAME write as the base', (tester) async {
+      final design = _painted(_doc())
+          .copyWith(brightness: 90, tags: const [kPatternEditorDesignTag]);
+      expect(design.statesBrightness, isTrue);
+      final repo = await apply(tester, design);
+      expect(repo.json, hasLength(1), reason: 'no extra request, no visible step');
+      expect(repo.json.single['bri'], 90);
+      expect(repo.pixels.keys.toSet(), {0, 1});
+    });
+  });
 }

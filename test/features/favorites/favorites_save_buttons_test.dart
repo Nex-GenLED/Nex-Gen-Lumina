@@ -95,6 +95,9 @@ void main() {
       expect(fake.lastPatternName, 'Evening Glow');
       expect(fake.lastPatternData, isNotNull);
       expect(fake.lastPatternData!['seg'], isA<List>());
+      // What My Favorites POSTs to the controller when the card is tapped: a
+      // favorite that does not turn the lights on is not a favorite.
+      expect(fake.lastPatternData!['on'], isTrue);
       expect(find.text('Saved to Favorites'), findsOneWidget);
     });
 
@@ -141,7 +144,7 @@ void main() {
     const heart = FavoriteHeartButton(
       patternId: 'patt-1',
       patternName: 'Evening Glow',
-      patternData: {'seg': []},
+      patternDataBuilder: _heartPayload,
     );
 
     testWidgets('successful add is awaited and toggles via the notifier',
@@ -158,6 +161,8 @@ void main() {
 
       expect(fake.addCalls, 1);
       expect(fake.lastPatternId, 'patt-1');
+      // The payload is built at TAP time and handed to the notifier as-is.
+      expect(fake.lastPatternData, equals(await _heartPayload()));
       // No error SnackBar on the happy path.
       expect(find.byType(SnackBar), findsNothing);
     });
@@ -198,6 +203,35 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    const blocked = FavoriteHeartButton(
+      patternId: 'patt-1',
+      patternName: 'Evening Glow',
+      patternDataBuilder: _heartPayload,
+      unavailableMessage: 'Use SAVE instead.',
+    );
+
+    testWidgets('an unavailable pattern explains itself and writes nothing',
+        (tester) async {
+      final fake = await pumpAndResolveAuth(tester,
+          child: blocked, user: _StubUser('u1'));
+      await tester.tap(find.byType(FavoriteHeartButton));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.addCalls, 0);
+      expect(find.text('Use SAVE instead.'), findsOneWidget);
+    });
+
+    testWidgets('…but a heart that is already filled can still be removed',
+        (tester) async {
+      final fake = await pumpAndResolveAuth(tester,
+          child: blocked, user: _StubUser('u1'), favoritedIds: const {'patt-1'});
+      await tester.tap(find.byType(FavoriteHeartButton));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.removeCalls, 1);
+      expect(find.text('Use SAVE instead.'), findsNothing);
+    });
+
     testWidgets('signed-out tap prompts sign-in and never calls the notifier',
         (tester) async {
       final fake = await pumpAndResolveAuth(
@@ -218,6 +252,19 @@ void main() {
 }
 
 // ── Test fakes ──────────────────────────────────────────────────────────
+
+/// A WLED-state-shaped payload, as the heart's one real caller builds.
+Future<Map<String, dynamic>> _heartPayload() async => {
+      'on': true,
+      'seg': [
+        {
+          'fx': 0,
+          'col': [
+            [255, 0, 0, 0],
+          ],
+        },
+      ],
+    };
 
 /// Records add/remove calls in place of the real Firestore-backed notifier,
 /// optionally throwing to simulate a write failure (the real methods rethrow).

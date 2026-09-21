@@ -1,10 +1,8 @@
-import 'dart:convert';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/services/user_service.dart';
+import 'package:nexgen_command/features/favorites/favorite_doc.dart';
 
 /// Model representing a favorite pattern with usage metadata.
 ///
@@ -45,15 +43,27 @@ class FavoritePattern {
     this.direction,
   });
 
+  /// Reads the canonical snake_case document (see `favorite_doc.dart`) — the
+  /// only shape the live rule accepts and the only one in production. This
+  /// model used to read ONLY the camelCase shape, which no stored document has
+  /// ever had, so every favorite came back as "Unnamed Pattern" with no
+  /// payload. The camelCase keys remain as a fallback so nothing written by an
+  /// older build can ever read worse than it did.
   factory FavoritePattern.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final used = data[kFavoriteLastUsed] ?? data['lastUsed'] ?? data[kFavoriteAddedAt];
     return FavoritePattern(
       patternId: doc.id,
-      name: data['name'] as String? ?? 'Unnamed Pattern',
-      usageCount: data['usageCount'] as int? ?? 0,
-      lastUsed: (data['lastUsed'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      wledPayload: decodeWledPayload(data['wledPayload']),
-      autoAdded: data['autoAdded'] as bool? ?? false,
+      name: (data[kFavoritePatternName] ?? data['name']) as String? ??
+          'Unnamed Pattern',
+      usageCount:
+          ((data[kFavoriteUsageCount] ?? data['usageCount']) as num?)?.toInt() ??
+              0,
+      // Null while a server timestamp is still pending locally.
+      lastUsed: (used as Timestamp?)?.toDate() ?? DateTime.now(),
+      wledPayload:
+          decodeWledPayload(data[kFavoritePatternData] ?? data['wledPayload']),
+      autoAdded: (data[kFavoriteAutoAdded] ?? data['autoAdded']) as bool? ?? false,
       actionColorValues: (data['actionColorValues'] as List?)?.cast<int>(),
       backgroundColorValue: data['backgroundColorValue'] as int?,
       effectId: data['effectId'] as int?,
@@ -76,38 +86,8 @@ class FavoritePattern {
   /// Also used in production by [GeofenceMonitor] to recover a stored
   /// favorite's payload (Shape A String / Shape B Map) when applying a
   /// geofence trigger, so this is a shared decode utility — not test-only.
-  static Map<String, dynamic> decodeWledPayload(dynamic raw) {
-    if (raw is String) {
-      if (raw.isEmpty) return <String, dynamic>{};
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) return Map<String, dynamic>.from(decoded);
-      } catch (_) {
-        return <String, dynamic>{};
-      }
-      return <String, dynamic>{};
-    }
-    if (raw is Map) return Map<String, dynamic>.from(raw);
-    return <String, dynamic>{};
-  }
-
-  Map<String, dynamic> toFirestore() {
-    return {
-      'name': name,
-      'usageCount': usageCount,
-      'lastUsed': Timestamp.fromDate(lastUsed),
-      'wledPayload': wledPayload,
-      'autoAdded': autoAdded,
-      if (actionColorValues != null) 'actionColorValues': actionColorValues,
-      if (backgroundColorValue != null) 'backgroundColorValue': backgroundColorValue,
-      if (effectId != null) 'effectId': effectId,
-      if (speed != null) 'speed': speed,
-      if (intensity != null) 'intensity': intensity,
-      if (brightness != null) 'brightness': brightness,
-      if (colorGroupSize != null) 'colorGroupSize': colorGroupSize,
-      if (direction != null) 'direction': direction,
-    };
-  }
+  static Map<String, dynamic> decodeWledPayload(dynamic raw) =>
+      decodeFavoritePayload(raw);
 }
 
 /// Provider that streams the user's favorite patterns, sorted by usage count
@@ -117,7 +97,7 @@ final favoritesPatternsProvider = StreamProvider<List<FavoritePattern>>((ref) {
 
   return FirebaseFirestore.instance
       .collection('users/${user.uid}/favorites')
-      .orderBy('usageCount', descending: true)
+      .orderBy(kFavoriteUsageCount, descending: true)
       .limit(5)
       .snapshots()
       .map((snap) =>
@@ -145,7 +125,9 @@ final recentPatternsProvider = StreamProvider<List<FavoritePattern>>((ref) {
 
   return FirebaseFirestore.instance
       .collection('users/${user.uid}/favorites')
-      .orderBy('lastUsed', descending: true)
+      // `last_used` is absent until a favorite is first applied, and orderBy
+      // drops docs lacking the field — which is what "recently USED" means.
+      .orderBy(kFavoriteLastUsed, descending: true)
       .limit(5)
       .snapshots()
       .map((snap) =>
@@ -167,43 +149,41 @@ class FavoritesNotifier extends Notifier<void> {
       final docRef = FirebaseFirestore.instance
           .doc('users/${user.uid}/favorites/$patternId');
 
-      // Update existing document
-      await docRef.update({
-        'usageCount': FieldValue.increment(1),
-        'lastUsed': FieldValue.serverTimestamp(),
-      });
+      await docRef.update(buildFavoriteUsageData());
     } catch (e) {
       // Silently fail or log
       debugPrint('Failed to record favorite usage: $e');
     }
   }
 
-  /// Adds a new favorite to Firestore.
-  /// Updated to accept 'patternData' and 'autoAdded' to match WledDashboardPage
+  /// Adds a favorite at `favorites/{patternId}` (or refreshes its stored look
+  /// when it is already there).
+  ///
+  /// [patternData] must be the WLED payload to re-apply — it is what the
+  /// dashboard's My Favorites grid POSTs to the controller.
+  ///
+  /// The document is built by [writeFavorite], the one canonical shape. This
+  /// method used to write `{name, usageCount, lastUsed, wledPayload,
+  /// autoAdded}`, which the live rule rejects (a create must carry
+  /// `pattern_name` + `added_at`): every heart tap and every "Save to
+  /// Favorites" ended in "Failed to save favorite".
   Future<void> addFavorite({
     required String patternId,
     required String patternName,
     required Map<String, dynamic> patternData,
-    bool autoAdded = false, // FIXED: Added this parameter
+    bool autoAdded = false,
   }) async {
     final user = ref.read(authStateProvider).value;
     if (user == null) return;
 
     try {
-      final docRef = FirebaseFirestore.instance
-          .doc('users/${user.uid}/favorites/$patternId');
-
-      await docRef.set(UserService.sanitizeForFirestore({
-        'name': patternName,
-        'usageCount': 1,
-        'lastUsed': FieldValue.serverTimestamp(),
-        // #84 — jsonEncode to avoid native FSTUserDataReader rejecting
-        // nested arrays like `'col': [[r,g,b,w]]` (uncatchable SIGABRT).
-        // Mirrors the 8 other WLED-payload write paths; see
-        // user_service.dart:298-300 for the canonical comment.
-        'wledPayload': jsonEncode(patternData),
-        'autoAdded': autoAdded,
-      }), SetOptions(merge: true));
+      await writeFavorite(
+        FirebaseFirestore.instance
+            .doc('users/${user.uid}/favorites/$patternId'),
+        patternName: patternName,
+        payload: patternData,
+        autoAdded: autoAdded,
+      );
     } catch (e) {
       debugPrint('Failed to add favorite: $e');
       rethrow;
