@@ -24,6 +24,21 @@ class AlertAnimationStep {
   const AlertAnimationStep(this.payload, this.hold);
 }
 
+/// WLED palette 0 ("Default") — asserted on EVERY celebration stage.
+///
+/// Palette 0 is what makes a colour-reading effect draw from the segment's
+/// `col` slots, i.e. the team colours. A WLED segment KEEPS its palette when a
+/// payload omits `pal`, so a stage without it inherits whatever the look
+/// underneath was using — fired over a pattern on, say, Party, the celebration
+/// would render Party colours. Game Day's own base design asserts `pal: 0`, so
+/// this was latent there; asserting it here makes the celebration deterministic
+/// over ANY base. The revert path re-posts the captured `seg`, palette
+/// included, so the look underneath comes back unchanged.
+///
+/// This only helps effects that READ colour. It cannot rescue one that does
+/// not — see the effect-id note on [AlertTriggerService.buildAnimationSteps].
+const int _kTeamColorPalette = 0;
+
 /// Notification channel for sports score alerts.
 const _kAndroidChannel = AndroidNotificationDetails(
   'sports_alerts',
@@ -333,15 +348,30 @@ class AlertTriggerService {
   /// is a single NO-ID template (the player channel-filters it). Exposed for
   /// unit tests that lock the animation content + prove the channel fan-out.
   ///
-  /// Sequences (unchanged from the legacy per-event methods):
-  ///   - touchdown / goal      15s: Strobe fx2 (2s) → Wipe fx9 (5s) → Running fx63 (8s)
+  /// Sequences — effect names are WLED 0.15.1's (the SOP-pinned firmware) and
+  /// match `WledEffectsCatalog`:
+  ///   - touchdown / goal      15s: Breathe fx2 (2s) → Wipe fx3 (5s) → Running fx15 (8s)
   ///   - fieldGoal              8s: Breathe fx2
-  ///   - safety                 6s: Strobe Mega fx23
-  ///   - run                    6s: Theater Chase fx5
+  ///   - safety                 6s: Strobe fx23
+  ///   - run                    6s: Theater fx13
   ///   - quarterEndWinning     10s: slow Breathe fx2
   ///   - clutchBasket           5s: rapid Strobe fx23
-  ///   - soccerGoal            20s: Chase fx28 (6s) → Strobe fx23 (4s) → Running fx63 (6s) → Breathe fx2 (4s)
+  ///   - soccerGoal            20s: Chase fx28 (6s) → Strobe fx23 (4s) → Running fx15 (6s) → Breathe fx2 (4s)
+  ///   - win                   30s: Breathe fx2 (5s) → Wipe fx3 (10s) → Running fx15 (15s)
   ///   - turnover                  : no animation (Phase 2)
+  ///
+  /// EFFECT IDS ARE NOT INTERCHANGEABLE LABELS. This table shipped for six
+  /// months sending fx 9 as "Wipe", fx 63 as "Running" and fx 5 as "Theater
+  /// Chase". On WLED those are Rainbow, Pride 2015 and Random Colors, none of
+  /// which draw from `col` — so a touchdown spent 13 of its 15 seconds as a
+  /// rainbow with the team colours sitting unread in the payload. Pride 2015
+  /// reads no palette either, so no `pal` value could have rescued it.
+  ///
+  /// Every stage must therefore use an effect the catalog marks as
+  /// colour-reading (`WledEffect.usesUserColors`) and must assert
+  /// [_kTeamColorPalette]. Both are enforced by
+  /// test/features/sports_alerts/celebration_team_color_guard_test.dart — add a
+  /// stage that breaks either and that test fails.
   static List<AlertAnimationStep> buildAnimationSteps(
     AlertEventType eventType,
     TeamColors team, [
@@ -382,17 +412,17 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 2, 'sx': 240, 'ix': 255, 'col': colors},
+              {'fx': 2, 'sx': 240, 'ix': 255, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 2)),
           AlertAnimationStep({
             'seg': [
-              {'fx': 9, 'sx': 180, 'ix': 200, 'col': colors},
+              {'fx': 3, 'sx': 180, 'ix': 200, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 5)),
           AlertAnimationStep({
             'seg': [
-              {'fx': 63, 'sx': 128, 'ix': 200, 'col': colors},
+              {'fx': 15, 'sx': 128, 'ix': 200, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 8)),
         ];
@@ -403,7 +433,7 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 2, 'sx': 110, 'ix': 255, 'col': primaryOnly()},
+              {'fx': 2, 'sx': 110, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
             ],
           }, const Duration(seconds: 8)),
         ];
@@ -414,7 +444,7 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 23, 'sx': 255, 'ix': 255, 'col': primaryOnly()},
+              {'fx': 23, 'sx': 255, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
             ],
           }, const Duration(seconds: 6)),
         ];
@@ -425,7 +455,7 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 5, 'sx': 160, 'ix': 200, 'col': colors},
+              {'fx': 13, 'sx': 160, 'ix': 200, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 6)),
         ];
@@ -436,7 +466,7 @@ class AlertTriggerService {
             'on': true,
             'bri': 200,
             'seg': [
-              {'fx': 2, 'sx': 60, 'ix': 255, 'col': primaryOnly()},
+              {'fx': 2, 'sx': 60, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
             ],
           }, const Duration(seconds: 10)),
         ];
@@ -447,7 +477,7 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 23, 'sx': 240, 'ix': 255, 'col': primaryOnly()},
+              {'fx': 23, 'sx': 240, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
             ],
           }, const Duration(seconds: 5)),
         ];
@@ -458,24 +488,24 @@ class AlertTriggerService {
             'on': true,
             'bri': 180,
             'seg': [
-              {'fx': 28, 'sx': 100, 'ix': 200, 'col': colors},
+              {'fx': 28, 'sx': 100, 'ix': 200, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 6)),
           AlertAnimationStep({
             'bri': 255,
             'seg': [
-              {'fx': 23, 'sx': 200, 'ix': 255, 'col': colors},
+              {'fx': 23, 'sx': 200, 'ix': 255, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 4)),
           AlertAnimationStep({
             'seg': [
-              {'fx': 63, 'sx': 140, 'ix': 220, 'col': colors},
+              {'fx': 15, 'sx': 140, 'ix': 220, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 6)),
           AlertAnimationStep({
             'bri': 120,
             'seg': [
-              {'fx': 2, 'sx': 40, 'ix': 200, 'col': primaryOnly()},
+              {'fx': 2, 'sx': 40, 'ix': 200, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
             ],
           }, const Duration(seconds: 4)),
         ];
@@ -490,17 +520,17 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 2, 'sx': 255, 'ix': 255, 'col': colors},
+              {'fx': 2, 'sx': 255, 'ix': 255, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 5)),
           AlertAnimationStep({
             'seg': [
-              {'fx': 9, 'sx': 200, 'ix': 220, 'col': colors},
+              {'fx': 3, 'sx': 200, 'ix': 220, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 10)),
           AlertAnimationStep({
             'seg': [
-              {'fx': 63, 'sx': 150, 'ix': 200, 'col': colors},
+              {'fx': 15, 'sx': 150, 'ix': 200, 'pal': _kTeamColorPalette, 'col': colors},
             ],
           }, const Duration(seconds: 15)),
         ];
