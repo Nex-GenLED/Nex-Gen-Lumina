@@ -1,0 +1,27 @@
+{"group":"CONTROL no pick","label":"legacy stage 2 — fx 9 Rainbow","seg0":{"id":0,"fx":9,"sx":180,"ix":200,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true}}
+{"group":"PICK pal:0 (as converged)","label":"pick 28 Chase — stage 1, pal:0","seg0":{"id":0,"fx":28,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"PICK pal:5 (as previewed)","label":"pick 28 Chase — stage 1, pal:5","seg0":{"id":0,"fx":28,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":5}}
+{"group":"PICK pal:0 (as converged)","label":"pick 76 Meteor — stage 1, pal:0","seg0":{"id":0,"fx":76,"sx":40,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"PICK pal:5 (as previewed)","label":"pick 76 Meteor — stage 1, pal:5","seg0":{"id":0,"fx":76,"sx":40,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":5}}
+{"group":"PICK pal:0 (as converged)","label":"pick 91 Bouncing Balls — stage 1, pal:0","seg0":{"id":0,"fx":91,"sx":55,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"PICK pal:5 (as previewed)","label":"pick 91 Bouncing Balls — stage 1, pal:5","seg0":{"id":0,"fx":91,"sx":55,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":5}}
+{"group":"PICK pal:0 (as converged)","label":"pick 25 Strobe Mega — stage 1, pal:0","seg0":{"id":0,"fx":25,"sx":90,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"PICK pal:5 (as previewed)","label":"pick 25 Strobe Mega — stage 1, pal:5","seg0":{"id":0,"fx":25,"sx":90,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":5}}
+{"group":"PICK pal:0 (as converged)","label":"pick 113 Washing Machine — stage 1, pal:0","seg0":{"id":0,"fx":113,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"PICK pal:5 (as previewed)","label":"pick 113 Washing Machine — stage 1, pal:5","seg0":{"id":0,"fx":113,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":5}}
+{"group":"SIX pal:0 (as converged)","label":"pick 32 Chase Flash Rnd [generatesOwnColors] pal:0","seg0":{"id":0,"fx":32,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"SIX pal:4 (as previewed)","label":"pick 32 Chase Flash Rnd [generatesOwnColors] pal:4","seg0":{"id":0,"fx":32,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":4}}
+{"group":"SIX pal:0 (as converged)","label":"pick 29 Chase Random [generatesOwnColors] pal:0","seg0":{"id":0,"fx":29,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"SIX pal:4 (as previewed)","label":"pick 29 Chase Random [generatesOwnColors] pal:4","seg0":{"id":0,"fx":29,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":4}}
+{"group":"SIX pal:0 (as converged)","label":"pick 64 Juggle [usesPalette] pal:0","seg0":{"id":0,"fx":64,"sx":55,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"SIX pal:4 (as previewed)","label":"pick 64 Juggle [usesPalette] pal:4","seg0":{"id":0,"fx":64,"sx":55,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":4}}
+{"group":"SIX pal:0 (as converged)","label":"pick 42 Fireworks [usesPalette] pal:0","seg0":{"id":0,"fx":42,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"SIX pal:4 (as previewed)","label":"pick 42 Fireworks [usesPalette] pal:4","seg0":{"id":0,"fx":42,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":4}}
+{"group":"SIX pal:0 (as converged)","label":"pick 90 Fireworks 1D [usesPalette] pal:0","seg0":{"id":0,"fx":90,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"SIX pal:4 (as previewed)","label":"pick 90 Fireworks 1D [usesPalette] pal:4","seg0":{"id":0,"fx":90,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":4}}
+{"group":"SIX pal:0 (as converged)","label":"pick 89 Fireworks Starburst [usesPalette] pal:0","seg0":{"id":0,"fx":89,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"group":"SIX pal:4 (as previewed)","label":"pick 89 Fireworks Starburst [usesPalette] pal:4","seg0":{"id":0,"fx":89,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":4}}
+{"group":"PAL setup","label":"base look -> pal 11 on both segments","seg0":{"id":0,"pal":11}}
+{"group":"PAL absent (this branch alone)","label":"pick 28 Chase, pal OMITTED, over pal-11 base","seg0":{"id":0,"fx":28,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true}}
+{"group":"PAL 0 (as converged)","label":"pick 28 Chase, pal:0, over pal-11 base","seg0":{"id":0,"fx":28,"sx":60,"ix":128,"col":[[227,24,55,0],[255,184,28,0],[0,0,0,0]],"on":true,"pal":0}}
+{"dry":true,"steps":26,"estSeconds":140}

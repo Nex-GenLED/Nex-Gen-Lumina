@@ -1,0 +1,8 @@
+flutter test — fix/gameday-celebration-picker-wiring (base 73ae375), 2026-09-21, Flutter 3.41.2
+Full log (1.3 MB, mostly progress lines) not committed.
+
+final line : 11:06 +3187 ~14: All tests passed!
+exit       : exit=0
+[E] lines  : 0
+
+touched file, final tree: test/features/sports_alerts/foreground_celebration_test.dart + test/features/game_day/ -> +205: All tests passed!
