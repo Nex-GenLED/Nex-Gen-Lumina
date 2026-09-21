@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_category_detail.dart';
 import 'package:nexgen_command/models/smart_pattern.dart';
@@ -203,33 +204,40 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    const blocked = FavoriteHeartButton(
+    // The heart used to take an `unavailableMessage` and DECLINE (Static mode:
+    // "tap SAVE instead"). Static favorites now work, so the only refusal left
+    // is a builder that cannot build — and it says why.
+    const unbuildable = FavoriteHeartButton(
       patternId: 'patt-1',
       patternName: 'Evening Glow',
-      patternDataBuilder: _heartPayload,
-      unavailableMessage: 'Use SAVE instead.',
+      patternDataBuilder: _refusingPayload,
     );
 
-    testWidgets('an unavailable pattern explains itself and writes nothing',
+    testWidgets('a builder that cannot build shows ITS reason and writes nothing',
         (tester) async {
       final fake = await pumpAndResolveAuth(tester,
-          child: blocked, user: _StubUser('u1'));
+          child: unbuildable, user: _StubUser('u1'));
       await tester.tap(find.byType(FavoriteHeartButton));
       await tester.pump();
       await tester.pump();
       expect(fake.addCalls, 0);
-      expect(find.text('Use SAVE instead.'), findsOneWidget);
+      expect(find.text('Connect to your lights first.'), findsOneWidget);
+      expect(find.text('Failed to save favorite'), findsNothing,
+          reason: 'the specific reason replaces the generic failure');
+      expect(tester.takeException(), isNull);
     });
 
-    testWidgets('…but a heart that is already filled can still be removed',
+    testWidgets('…and a heart that is already filled can still be removed',
         (tester) async {
       final fake = await pumpAndResolveAuth(tester,
-          child: blocked, user: _StubUser('u1'), favoritedIds: const {'patt-1'});
+          child: unbuildable,
+          user: _StubUser('u1'),
+          favoritedIds: const {'patt-1'});
       await tester.tap(find.byType(FavoriteHeartButton));
       await tester.pump();
       await tester.pump();
       expect(fake.removeCalls, 1);
-      expect(find.text('Use SAVE instead.'), findsNothing);
+      expect(find.byType(SnackBar), findsNothing);
     });
 
     testWidgets('signed-out tap prompts sign-in and never calls the notifier',
@@ -252,6 +260,9 @@ void main() {
 }
 
 // ── Test fakes ──────────────────────────────────────────────────────────
+
+Future<Map<String, dynamic>> _refusingPayload() async =>
+    throw const FavoriteNotSavable('Connect to your lights first.');
 
 /// A WLED-state-shaped payload, as the heart's one real caller builds.
 Future<Map<String, dynamic>> _heartPayload() async => {

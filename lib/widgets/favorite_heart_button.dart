@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -12,19 +13,18 @@ class FavoriteHeartButton extends ConsumerWidget {
   final String patternId;
   final String patternName;
 
-  /// Builds the WLED payload to store, AT TAP TIME. It is what the dashboard's
-  /// My Favorites grid later POSTs to the controller, so it must be a real
-  /// `/json/state` body — and for a per-LED pattern that means knowing the
-  /// device's LED count, which is an async read. (This used to be a map passed
-  /// at build time, and its one caller passed the editor model's own JSON:
-  /// a "favorite" that WLED would have ignored key for key.)
+  /// Builds the payload to store, AT TAP TIME. It is what the dashboard's My
+  /// Favorites grid later re-applies (`applyFavoritePayloadWith`), so it must be
+  /// a real `/json/state` body — or, for a per-LED pattern, the per-pixel
+  /// favorite payload of `favorite_design_payload.dart`, which needs the
+  /// device's channel lengths. (This used to be a map passed at build time, and
+  /// its one caller passed the editor model's own JSON: a "favorite" that WLED
+  /// would have ignored key for key.)
+  ///
+  /// May throw [FavoriteNotSavable] when the pattern cannot be stored right
+  /// now (a per-LED pattern with no channel census, say); its message is shown
+  /// as-is instead of the generic failure.
   final Future<Map<String, dynamic>> Function() patternDataBuilder;
-
-  /// When set, this pattern cannot be kept as a favorite: tapping an EMPTY
-  /// heart shows this instead of writing. (A filled heart still un-favorites.)
-  /// For a pattern whose payload My Favorites could store but never re-apply —
-  /// see the Pattern Editor's Static mode.
-  final String? unavailableMessage;
   final double size;
   final Color activeColor;
 
@@ -33,7 +33,6 @@ class FavoriteHeartButton extends ConsumerWidget {
     required this.patternId,
     required this.patternName,
     required this.patternDataBuilder,
-    this.unavailableMessage,
     this.size = 24,
     this.activeColor = const Color(0xFFFF4081), // Pink/red default
   });
@@ -81,16 +80,6 @@ class FavoriteHeartButton extends ConsumerWidget {
       return;
     }
 
-    if (!currentlyFavorited && unavailableMessage != null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(unavailableMessage!),
-          duration: const Duration(seconds: 5),
-        ));
-      return;
-    }
-
     final notifier = ref.read(favoritesNotifierProvider.notifier);
     try {
       if (currentlyFavorited) {
@@ -101,6 +90,18 @@ class FavoriteHeartButton extends ConsumerWidget {
           patternName: patternName,
           patternData: await patternDataBuilder(),
         );
+      }
+    } on FavoriteNotSavable catch (e) {
+      // Nothing was written, and the builder knows why — say that, not
+      // "Failed to save favorite".
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 6),
+          ));
       }
     } catch (e) {
       // The heart is driven by favoritedPatternIdsProvider, so a failed write
