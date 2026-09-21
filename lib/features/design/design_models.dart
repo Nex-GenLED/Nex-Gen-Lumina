@@ -7,6 +7,11 @@ import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 
+/// Tag on every design the Pattern Editor ("Edit Pattern" screen) saves.
+/// Provenance — and the one thing that reads it is
+/// [CustomDesign.statesBrightness].
+const String kPatternEditorDesignTag = 'pattern-editor';
+
 /// Represents a complete custom design that can be saved and applied to WLED devices.
 class CustomDesign {
   final String id;
@@ -263,6 +268,19 @@ class CustomDesign {
     };
   }
 
+  /// True when [brightness] was CHOSEN by the user, so applying this design
+  /// must restore it.
+  ///
+  /// [brightness] defaults to 200 and most writers never set it — the paint
+  /// editor has no brightness control at all — so the per-pixel apply spine
+  /// leaves the controller's brightness alone rather than stamp an arbitrary
+  /// 200 over it. The Pattern Editor is different: it has a BRIGHTNESS slider,
+  /// drives the lights with it live, and stores its value. A Static pattern
+  /// saved dim must come back dim (the old "SAVE TO DEVICE" preset lost
+  /// brightness entirely). Keyed on the provenance tag rather than a new field
+  /// so no existing design changes behaviour.
+  bool get statesBrightness => tags.contains(kPatternEditorDesignTag);
+
   /// Whether the channels hold an LED PICTURE (positional runs) that has to be
   /// sent per-pixel, rather than "up to three colours + an effect".
   ///
@@ -354,6 +372,10 @@ class CustomDesign {
         'spc': channel.spacing,
         'id': channel.channelId,
         'col': colors,
+        // STATED, for the same reason grp/spc are — see
+        // [kDesignColorsOnlyPalette]. The chokepoint still swaps 5→4 for the
+        // few effects that ignore user colours under "Colors Only".
+        'pal': kDesignColorsOnlyPalette,
         'fx': fx,
         'sx': channel.speed,
         'ix': channel.intensity,

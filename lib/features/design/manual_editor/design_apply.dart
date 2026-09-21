@@ -93,16 +93,27 @@ Future<SpineWriteResult> applyBaseAndSpansDetailed(
   required List<int> baseRgbw,
   required Map<int, List<PixelSpan>> spansByChannel,
   String? label,
+  int? brightness,
 }) =>
     applyBaseAndSpansWith(ref.read,
-        baseRgbw: baseRgbw, spansByChannel: spansByChannel, label: label);
+        baseRgbw: baseRgbw,
+        spansByChannel: spansByChannel,
+        label: label,
+        brightness: brightness);
 
 /// The spine itself. See [applyBaseAndSpansDetailed].
+///
+/// [brightness] — master `bri`, stated ONLY when the caller has a brightness
+/// the user chose. Null (every caller but the Pattern Editor and the designs
+/// it saves) leaves the controller's brightness exactly as it is, which is
+/// what the spine has always done. It rides in the base write, so it lands
+/// with the base rather than as a visible step afterwards.
 Future<SpineWriteResult> applyBaseAndSpansWith(
   ProviderReader read, {
   required List<int> baseRgbw,
   required Map<int, List<PixelSpan>> spansByChannel,
   String? label,
+  int? brightness,
 }) async {
   final repo = read(wledRepositoryProvider);
   if (repo == null) return SpineWriteResult.noDevice;
@@ -114,6 +125,7 @@ Future<SpineWriteResult> applyBaseAndSpansWith(
 
   var basePayload = <String, dynamic>{
     'on': true,
+    if (brightness != null) 'bri': brightness.clamp(1, 255),
     'seg': [
       {
         'fx': 0,
@@ -178,6 +190,7 @@ Future<DesignApplyResult> applyPositionalDesignWith(
     baseRgbw: const [0, 0, 0, 0], // groups define the lit picture
     spansByChannel: spans,
     label: design.name,
+    brightness: design.statesBrightness ? design.brightness : null,
   );
   return result.isOk ? DesignApplyResult.applied : DesignApplyResult.error;
 }
