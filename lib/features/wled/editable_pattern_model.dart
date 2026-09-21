@@ -128,16 +128,23 @@ class EditablePattern {
     }
   }
 
+  /// Every action colour as the RGBW the device is sent (W forced to 0), in
+  /// layer order. The ONE derivation behind the Static `i` write and the
+  /// design that Save stores, so the two cannot drift.
+  List<List<int>> staticColorsRgbw() => [
+        for (final c in actionColors)
+          rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true),
+      ];
+
   /// Per-pixel payload for Static mode: sets every LED individually.
   Map<String, dynamic> _buildPerPixelPayload(int totalPixels) {
     // Build the 'i' array: [index, [R,G,B,W], index, [R,G,B,W], ...]
     final iArray = <dynamic>[];
+    final colors = staticColorsRgbw();
 
     for (int i = 0; i < totalPixels; i++) {
-      final colorIndex = (i ~/ colorGroupSize) % actionColors.length;
-      final c = actionColors[colorIndex];
       iArray.add(i);
-      iArray.add(rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true));
+      iArray.add(colors[(i ~/ colorGroupSize) % colors.length]);
     }
 
     return {
@@ -152,11 +159,21 @@ class EditablePattern {
     };
   }
 
-  /// Standard effect payload: sends up to 3 colors for the effect engine.
-  Map<String, dynamic> _buildEffectPayload() {
+  /// How many colour slots a WLED effect has (`seg.col[0..2]`). A firmware
+  /// fact, not an app choice: an ANIMATED pattern can never show more than
+  /// this many of its layers. Static is per-LED and has no such limit.
+  static const int maxEffectColors = 3;
+
+  /// True when this pattern has layers an animated effect cannot render.
+  bool get hasLayersBeyondEffectSlots =>
+      effectId != 0 && actionColors.length > maxEffectColors;
+
+  /// The `col` slots an animated effect is sent — what the lights are actually
+  /// showing. Public so the design that Save stores leads with exactly these.
+  List<List<int>> effectColorSlots() {
     // Build col array: up to 3 action colors
     final cols = actionColors
-        .take(3)
+        .take(maxEffectColors)
         .map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true))
         .toList();
     if (cols.isEmpty) {
@@ -178,6 +195,12 @@ class EditablePattern {
         forceZeroWhite: true,
       ));
     }
+    return cols;
+  }
+
+  /// Standard effect payload: sends up to 3 colors for the effect engine.
+  Map<String, dynamic> _buildEffectPayload() {
+    final cols = effectColorSlots();
 
     return {
       'on': true,
@@ -187,7 +210,7 @@ class EditablePattern {
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
-          'pal': 5, // "Colors Only" palette
+          'pal': kDesignColorsOnlyPalette, // "Colors Only" palette
           // #76 — GEOMETRY IS NOT OURS TO STATE. This used to emit
           // grp/spc/of plus `rev: direction == left` and
           // `mi: direction == centerOut`, so any pattern not authored "left"

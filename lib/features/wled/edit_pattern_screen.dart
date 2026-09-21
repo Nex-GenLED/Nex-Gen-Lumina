@@ -1,12 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/design_save_errors.dart';
+import 'package:nexgen_command/features/design/editable_pattern_design.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
-import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/widgets/hsv_wheel_picker.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -45,6 +52,16 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   double _sliderG = 0;
   double _sliderB = 0;
 
+  // The design this screen last saved, so a repeat Save updates it.
+  String? _savedDesignId;
+  String? _savedDesignName;
+  DateTime? _savedCreatedAt;
+  bool _saving = false;
+
+  // Live-apply serialisation (see _sendToWled).
+  bool _sending = false;
+  bool _resend = false;
+
   @override
   void initState() {
     super.initState();
@@ -79,21 +96,69 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     });
   }
 
-  Future<void> _sendToWled() async {
-    if (ref.read(demoModeProvider)) return;
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) return;
+  /// The channels the editor is lighting — what the user is looking at, and
+  /// therefore what Save stores. The effective set, or every device channel
+  /// when none is selected.
+  List<PatternEditorChannel> _targetChannels() {
+    final effective = ref.read(effectiveChannelIdsProvider).toSet();
+    return [
+      for (final c in ref.read(deviceChannelsProvider))
+        if (effective.isEmpty || effective.contains(c.id))
+          PatternEditorChannel(
+            id: c.id,
+            name: c.name,
+            ledCount: (c.stop - c.start).clamp(0, 100000),
+          ),
+    ];
+  }
 
-    final totalPixels = await repo.getTotalLedCount() ?? 150;
-    var payload = _pattern.toWledPayload(totalPixels);
-    final channels = ref.read(effectiveChannelIdsProvider);
-    if (channels.isEmpty) {
-      debugPrint('EditPattern apply: skip (U1 gate)');
-      return;
+  /// The pattern as ONE WLED payload. Right for an animated pattern (a few
+  /// hundred bytes). For Static it is the per-LED `i` write, which is only a
+  /// fallback — see [_sendToWled].
+  Future<Map<String, dynamic>> _currentWledPayload() async {
+    final repo = ref.read(wledRepositoryProvider);
+    final totalPixels = await repo?.getTotalLedCount() ?? 150;
+    return _pattern.toWledPayload(totalPixels);
+  }
+
+  /// STATIC goes through the chunked per-pixel spine, built from the SAME
+  /// design Save stores — so the lights show exactly what will be kept.
+  ///
+  /// It used to be one `applyJson` holding an `i` entry per LED, cloned onto
+  /// every targeted channel: 5.4 KB for one 290-LED channel, ~11 KB for two.
+  /// `applyJson` refuses anything over 4 KB (WLED itself rejects ~6 KB), and
+  /// the refusal was swallowed below — so on any install past ~215 LEDs the
+  /// Static preview silently never reached the lights. Bench-confirmed
+  /// 2026-09-21. (The only thing that ever lit them was the old "SAVE TO
+  /// DEVICE" POST, which had no size guard and no channel filter — segment 0
+  /// only, which is why channel 2 stayed dark.)
+  Future<bool> _sendStatic() async {
+    final channels = [
+      for (final c in _targetChannels())
+        if (c.ledCount > 0) c,
+    ];
+    if (channels.isEmpty) return false; // no census → caller falls back
+    final design = customDesignFromEditablePattern(
+      pattern: _pattern,
+      name: _pattern.name,
+      ownerId: '',
+      channels: channels,
+    );
+    final result = await applyBaseAndSpansDetailed(
+      ref,
+      baseRgbw: const [0, 0, 0, 0],
+      spansByChannel: customDesignToSpans(design),
+      brightness: _pattern.brightness,
+    );
+    if (!result.isOk) {
+      debugPrint('EditPattern static apply: $result');
+      return true; // handled (and failed) — do not retry down the legacy path
     }
-    payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-    final ok = await repo.applyJson(payload);
-    if (!ok || !mounted) return;
+    if (mounted) _syncPreview();
+    return true;
+  }
+
+  void _syncPreview() {
     // Drive the dashboard hero preview and Explore hero from the as-sent
     // pattern so navigating home shows the new look immediately, without
     // waiting for the next poll. Also arms poll-overwrite suppression so
@@ -109,59 +174,161 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     );
   }
 
-  /// Saves the current pattern as a WLED preset on the physical controller
-  /// (HTTP `psave`, not a firmware change). App-side persistence is handled
-  /// separately by the FavoriteHeartButton (writes to /favorites/, a read
-  /// surface). This intentionally does NOT write to Firestore: the old
-  /// /users/{uid}/patterns/ write had zero readers and produced a
-  /// false-success (#85 W2).
-  Future<void> _saveToDevice() async {
+  Future<void> _sendToWled() async {
+    if (ref.read(demoModeProvider)) return;
     final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('No device connected'),
-            backgroundColor: Colors.red.shade800,
-          ),
-        );
-      }
+    if (repo == null) return;
+
+    // One send at a time: a Static apply is several requests, and a drag on
+    // the colour wheel must not interleave two of them on the controller.
+    if (_sending) {
+      _resend = true;
+      return;
+    }
+    _sending = true;
+    try {
+      await _sendOnce(repo);
+    } finally {
+      _sending = false;
+    }
+    if (_resend && mounted) {
+      _resend = false;
+      _sendToWledDebounced();
+    }
+  }
+
+  Future<void> _sendOnce(WledRepository repo) async {
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isEmpty) {
+      debugPrint('EditPattern apply: skip (U1 gate)');
+      return;
+    }
+    // Read before any await: the screen can be disposed mid-send, and a dead
+    // `ref` throws.
+    final deviceChannels = ref.read(deviceChannelsProvider);
+    if (_pattern.effectId == 0 && await _sendStatic()) return;
+    if (!mounted) return;
+
+    var payload = await _currentWledPayload();
+    payload = applyChannelFilter(payload, channels, deviceChannels);
+    final ok = await repo.applyJson(payload);
+    if (!ok || !mounted) return;
+    _syncPreview();
+  }
+
+  /// SAVE — stores the pattern as a design in My Designs
+  /// (`/users/{uid}/designs`), through the same [DesignService.saveDesign]
+  /// every other design writer uses.
+  ///
+  /// This used to be "SAVE TO DEVICE": a WLED `psave` into a preset slot in
+  /// 100–200 hashed from the SOURCE CARD's id. Nothing in the app could list,
+  /// load or delete that range, so the pattern was unfindable the moment the
+  /// toast faded; a second variation of the same card overwrote the first; and
+  /// a Static pattern stored a black frozen shell, because a WLED preset cannot
+  /// hold per-pixel data (explore-palette-save-to-device-audit-2026-09-20).
+  /// No device-side preset is written any more — Firestore is the design
+  /// source of truth, exactly as for the paint editor.
+  ///
+  /// Same name as the last save from this screen → UPDATE that design (pressing
+  /// Save twice must not fork a copy). A different name → a NEW design, so
+  /// renaming is how a second variation is kept. New designs always get a fresh
+  /// auto-id and a name no other design is using.
+  Future<void> _saveToMyDesigns() async {
+    if (_saving) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    // Replace, don't queue: a second Save must not sit behind the first toast
+    // for four seconds looking like it did nothing.
+    void toast(SnackBar bar) => messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(bar);
+
+    final uid = ref.read(effectiveUserUidProvider);
+    if (uid == null) {
+      toast(SnackBar(
+        content: const Text('Sign in to save designs. Nothing was saved.'),
+        backgroundColor: Colors.red.shade800,
+      ));
       return;
     }
 
-    final updatedPattern = _pattern.copyWith(name: _nameController.text.trim());
+    final typed = _nameController.text.trim();
+    final baseName = typed.isNotEmpty ? typed : 'Custom Pattern';
+    final isUpdate = _savedDesignId != null && baseName == _savedDesignName;
+
+    setState(() => _saving = true);
+    // A one-shot fetch for the account being saved INTO. `designsStreamProvider`
+    // is cold unless some other screen happens to be watching it (so a
+    // `ref.read` of it sees nothing), and it follows the signed-in uid rather
+    // than the effective one. A name is a nicety: it must never block a save.
+    var taken = const <String>[];
+    if (!isUpdate) {
+      try {
+        final existing = await ref.read(designServiceProvider).getDesigns(uid);
+        taken = [for (final d in existing) d.name];
+      } catch (e) {
+        debugPrint('EditPattern save: could not list designs for naming: $e');
+      }
+    }
+    if (!mounted) return;
+    final name = isUpdate ? baseName : uniqueDesignName(baseName, taken);
+
+    final channels = _targetChannels();
+
+    final CustomDesign built;
+    try {
+      built = customDesignFromEditablePattern(
+        pattern: _pattern.copyWith(name: name),
+        name: name,
+        ownerId: uid,
+        channels: channels,
+      );
+    } on StateError {
+      setState(() => _saving = false);
+      toast(SnackBar(
+        content: const Text(
+            'Connect to your lights to save this pattern — it is stored LED '
+            'by LED, so the app needs your channel lengths. Nothing was saved.'),
+        backgroundColor: Colors.red.shade800,
+        duration: const Duration(seconds: 6),
+      ));
+      return;
+    }
+    final design = isUpdate
+        ? built.copyWith(id: _savedDesignId, createdAt: _savedCreatedAt)
+        : built;
 
     try {
-      final totalPixels = await repo.getTotalLedCount() ?? 150;
-      final presetId = presetIdForUserPattern(updatedPattern.id);
-      final ok = await repo.savePreset(
-        presetId: presetId,
-        state: updatedPattern.toWledPayload(totalPixels),
-        presetName: updatedPattern.name,
-      );
-
+      final id = await ref.read(designServiceProvider).saveDesign(uid, design);
+      _savedDesignId = id;
+      _savedDesignName = name;
+      _savedCreatedAt = design.createdAt;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        ok
-            ? SnackBar(
-                content: Text('Saved to device: ${updatedPattern.name}'),
-                backgroundColor: NexGenPalette.gunmetal,
-                duration: const Duration(seconds: 2),
-              )
-            : SnackBar(
-                content: const Text('Failed to save to device'),
-                backgroundColor: Colors.red.shade800,
-              ),
-      );
-    } catch (e) {
+      if (_nameController.text.trim() != name) _nameController.text = name;
+      toast(SnackBar(
+        content: Text(isUpdate
+            ? 'Updated "$name" in My Designs'
+            : 'Saved "$name" to My Designs'),
+        backgroundColor: NexGenPalette.gunmetal,
+        action: SnackBarAction(
+          label: 'VIEW',
+          textColor: NexGenPalette.cyan,
+          onPressed: () => router.push('/explore/library/my_designs',
+              extra: const {'name': 'My Designs'}),
+        ),
+      ));
+    } catch (e, st) {
+      // DesignService rethrows. A denied or failed write must LOOK failed.
+      debugPrint('EditPattern save failed: $e\n$st');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to save: $e'),
-            backgroundColor: Colors.red.shade800,
-          ),
-        );
+        toast(SnackBar(
+          content: Text(describeDesignSaveError(e, isEdit: isUpdate)),
+          backgroundColor: Colors.red.shade800,
+          duration: const Duration(seconds: 7),
+        ));
       }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -175,15 +342,24 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
-          TextButton(
-            onPressed: _saveToDevice,
-            child: Text(
-              'SAVE TO DEVICE',
-              style: TextStyle(
-                color: NexGenPalette.cyan,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
+          Tooltip(
+            message: 'Save to My Designs',
+            child: TextButton(
+              onPressed: _saving ? null : _saveToMyDesigns,
+              child: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(
+                      'SAVE',
+                      style: TextStyle(
+                        color: NexGenPalette.cyan,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -242,6 +418,12 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
           const SizedBox(height: 6),
           TextField(
             controller: _nameController,
+            // Keep the model's name in step with the field. It never was, so
+            // the favorite heart saved the SOURCE CARD's name whatever had
+            // been typed. Deliberately not `_updatePattern`: a rename is not
+            // a look, and must not re-send the pattern to the lights.
+            onChanged: (v) =>
+                setState(() => _pattern = _pattern.copyWith(name: v.trim())),
             style: const TextStyle(color: Colors.white, fontSize: 16),
             decoration: InputDecoration(
               filled: true,
@@ -591,6 +773,21 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
               fontSize: 12,
             ),
           ),
+          // A WLED effect has three colour slots, so an animated MODE shows
+          // — and saves as its look — only the first three layers. The screen
+          // used to offer 15 and say nothing. Static lights every LED
+          // individually and uses them all.
+          if (_pattern.hasLayersBeyondEffectSlots)
+            Padding(
+              key: const ValueKey('edit-pattern-effect-slot-hint'),
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Animated modes use the first '
+                '${EditablePattern.maxEffectColors} colors. Set MODE to '
+                '${WledEffectsCatalog.getName(0)} to use all ${colors.length}.',
+                style: const TextStyle(color: Colors.amber, fontSize: 12),
+              ),
+            ),
           const SizedBox(height: 8),
           // Color chips
           Wrap(
@@ -667,14 +864,17 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
               FavoriteHeartButton(
                 patternId: _pattern.id,
                 patternName: _pattern.name,
-                // The WLED payload to re-apply — what My Favorites POSTs to
-                // the controller. This passed the editor model's own JSON,
-                // which WLED would have ignored key for key.
-                patternDataBuilder: () async {
-                  final repo = ref.read(wledRepositoryProvider);
-                  return _pattern
-                      .toWledPayload(await repo?.getTotalLedCount() ?? 150);
-                },
+                patternDataBuilder: _currentWledPayload,
+                // A Static pattern is one entry per LED. The favorites rule
+                // would accept it, but My Favorites applies a favorite as ONE
+                // payload and the controller path caps that at 4 KB — a
+                // 290-LED Static favorite could be saved and never re-applied.
+                // Per-LED looks live in My Designs, which applies them through
+                // the chunked spine.
+                unavailableMessage: _pattern.effectId == 0
+                    ? 'This mode is stored LED by LED — tap SAVE to keep it '
+                        'in My Designs.'
+                    : null,
                 size: 28,
               ),
             ],

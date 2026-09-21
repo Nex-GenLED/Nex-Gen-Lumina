@@ -32,59 +32,6 @@ void main() {
     });
   });
 
-  group('presetIdForUserPattern', () {
-    test('returns value in reserved range for known IDs', () {
-      for (final id in [
-        'pattern_a',
-        'pattern_b',
-        'sunset_glow',
-        'warm_holiday',
-        'christmas_red_green',
-        'abc123',
-        '',
-        'a',
-      ]) {
-        final result = presetIdForUserPattern(id);
-        expect(result, greaterThanOrEqualTo(kUserPatternPresetRangeStart));
-        expect(result, lessThanOrEqualTo(kUserPatternPresetRangeEnd));
-      }
-    });
-
-    test('is deterministic — same ID returns same preset ID', () {
-      final first = presetIdForUserPattern('test_pattern');
-      final second = presetIdForUserPattern('test_pattern');
-      expect(first, equals(second));
-    });
-
-    test('different IDs generally return different preset IDs', () {
-      final ids = List.generate(50, (i) => 'pattern_$i');
-      final presets = ids.map(presetIdForUserPattern).toSet();
-      // Not asserting all unique (collisions allowed),
-      // just that we get a reasonable spread
-      expect(presets.length, greaterThan(20));
-    });
-
-    test('handles empty string', () {
-      final result = presetIdForUserPattern('');
-      expect(result, greaterThanOrEqualTo(kUserPatternPresetRangeStart));
-      expect(result, lessThanOrEqualTo(kUserPatternPresetRangeEnd));
-    });
-
-    test('handles very long IDs', () {
-      final longId = 'a' * 1000;
-      final result = presetIdForUserPattern(longId);
-      expect(result, greaterThanOrEqualTo(kUserPatternPresetRangeStart));
-      expect(result, lessThanOrEqualTo(kUserPatternPresetRangeEnd));
-    });
-
-    test('handles UUIDs', () {
-      const uuid = '550e8400-e29b-41d4-a716-446655440000';
-      final result = presetIdForUserPattern(uuid);
-      expect(result, greaterThanOrEqualTo(kUserPatternPresetRangeStart));
-      expect(result, lessThanOrEqualTo(kUserPatternPresetRangeEnd));
-    });
-  });
-
   group('Cross-allocator coordination', () {
     test('no overlap with hardcoded ScheduleItem range constants from schedule_sync.dart', () {
       // Sanity assertion: confirm the ScheduleItem
