@@ -38,7 +38,7 @@ class _ThrowingBatch implements WriteBatch {
   void set<T>(DocumentReference<T> document, T data, [SetOptions? options]) {}
 
   @override
-  void update(DocumentReference<Object?> document, Map<String, Object?> data) {}
+  void update<T>(DocumentReference<T> document, T data) {}
 }
 
 /// Reads work normally; only the batch commit explodes.
