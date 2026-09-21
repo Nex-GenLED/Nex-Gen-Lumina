@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:nexgen_command/features/geofence/geofence_favorite_lookup.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -36,7 +37,7 @@ class _GeofenceSetupScreenState extends State<GeofenceSetupScreen> {
   double _radiusMeters = 300; // default
   bool _onlyAtNight = true;
 
-  List<String> _actions = const ['Turn On Warm White', 'Start Party Mode', 'Relax', 'Turn Off'];
+  List<String> _actions = kGeofenceBuiltInActions;
   String? _selectedAction;
 
   bool _loading = true;
@@ -77,17 +78,18 @@ class _GeofenceSetupScreenState extends State<GeofenceSetupScreen> {
         if (lat != null && lng != null) _center = LatLng(lat.toDouble(), lng.toDouble());
       }
 
-      // 4) Try to load favorites list from Firestore, else defaults
+      // 4) Offer the user's favorites ahead of the built-in scenes. Read by the
+      // canonical `pattern_name` (this used to read `name`, which no stored
+      // favorite has ever had, so the list was always just the built-ins).
+      var favoriteNames = const <String>[];
       try {
         final favSnap = await _firestore.collection('users').doc(uid).collection('favorites').get();
-        final names = favSnap.docs.map((d) => (d.data()['name'] ?? '').toString()).where((e) => e.isNotEmpty).toList();
-        if (names.isNotEmpty) {
-          _actions = names;
-          _selectedAction ??= _actions.first;
-        }
+        favoriteNames = geofenceFavoriteNames(favSnap.docs.map((d) => d.data()));
       } catch (e) {
         debugPrint('Load favorites failed: $e');
       }
+      _actions = geofenceActionChoices(favoriteNames: favoriteNames, saved: _selectedAction);
+      if (favoriteNames.isNotEmpty) _selectedAction ??= _actions.first;
     } catch (e) {
       debugPrint('GeofenceSetup init failed: $e');
     } finally {
