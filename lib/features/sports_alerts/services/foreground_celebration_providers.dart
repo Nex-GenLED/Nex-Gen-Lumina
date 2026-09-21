@@ -156,6 +156,13 @@ List<CelebrationTeam> computeLiveCelebrationTeams({
           teamSlug: cfg.teamSlug,
           sport: cfg.sport,
           sensitivity: AlertSensitivity.allEvents,
+          // The Game Day screen's celebration picker. The coordinator receives
+          // ONLY this object, so a choice that stops here never reaches the
+          // lights — which is how the picker came to be a no-op on this path.
+          // Null stays null: an unchosen effect keeps the legacy sequences.
+          celebrationEffectId: cfg.celebrationEffectId,
+          celebrationSpeed: cfg.celebrationSpeed,
+          celebrationIntensity: cfg.celebrationIntensity,
         ),
   ];
 }

@@ -14,7 +14,9 @@
 //     poll (previous==null → cache only, no emit), diffs deltas per sport,
 //     dedups, and emits [ScoreAlertEvent]s on alertStream. Untouched.
 //   • REUSE the celebration DESIGN: AlertTriggerService.buildAnimationSteps +
-//     animationDuration — the team-color flash sequences and their timing.
+//     animationDuration — the team-color flash sequences and their timing —
+//     and the user's chosen celebration, contrast-resolved against the live
+//     look by resolveCelebration, exactly as handleAlertEvent does it.
 //   • REPLACE the delivery: the old direct-IP WledService('http://$ip') loop
 //     (LAN-only, inert) is gone. Delivery now goes through the modern apply
 //     chokepoint (wledRepositoryProvider) via [CelebrationDelivery] — LAN AND
@@ -32,6 +34,7 @@ import '../models/score_alert_config.dart';
 import '../models/score_alert_event.dart';
 import '../models/sport_type.dart';
 import 'alert_trigger_service.dart' show AlertAnimationStep, AlertTriggerService;
+import 'celebration_contrast.dart' show resolveCelebration;
 import 'score_monitor_service.dart';
 
 // ── Tunable constants ──────────────────────────────────────────────────────
@@ -57,10 +60,22 @@ class CelebrationTeam {
   final SportType sport;
   final AlertSensitivity sensitivity;
 
+  /// The celebration the user picked on the Game Day screen, carried from
+  /// GameDayAutopilotConfig. Null = nothing picked → the legacy per-event
+  /// sequences fire verbatim. Same three fields, same defaults and same null
+  /// semantics as ScoreAlertConfig, which is how the commercial and background
+  /// paths carry the choice (game_day_service.dart, unified_monitoring.dart).
+  final int? celebrationEffectId;
+  final int celebrationSpeed;
+  final int celebrationIntensity;
+
   const CelebrationTeam({
     required this.teamSlug,
     required this.sport,
     this.sensitivity = AlertSensitivity.majorOnly,
+    this.celebrationEffectId,
+    this.celebrationSpeed = 240,
+    this.celebrationIntensity = 240,
   });
 
   /// Adapt to the diff engine's config shape (reuses ScoreMonitorService as-is).
@@ -70,6 +85,9 @@ class CelebrationTeam {
         sport: sport,
         isEnabled: true,
         sensitivity: sensitivity,
+        celebrationEffectId: celebrationEffectId,
+        celebrationSpeed: celebrationSpeed,
+        celebrationIntensity: celebrationIntensity,
       );
 
   @override
@@ -77,10 +95,14 @@ class CelebrationTeam {
       other is CelebrationTeam &&
       teamSlug == other.teamSlug &&
       sport == other.sport &&
-      sensitivity == other.sensitivity;
+      sensitivity == other.sensitivity &&
+      celebrationEffectId == other.celebrationEffectId &&
+      celebrationSpeed == other.celebrationSpeed &&
+      celebrationIntensity == other.celebrationIntensity;
 
   @override
-  int get hashCode => Object.hash(teamSlug, sport, sensitivity);
+  int get hashCode => Object.hash(teamSlug, sport, sensitivity,
+      celebrationEffectId, celebrationSpeed, celebrationIntensity);
 }
 
 /// The delivery seam — capture current lights, play the flash, revert. Injected
@@ -120,6 +142,18 @@ class ForegroundCelebrationCoordinator {
   final Duration _minGap;
 
   List<CelebrationTeam> _liveTeams = const [];
+
+  /// Last-known team entry per slug — where [_runCelebration] reads the user's
+  /// celebration choice. Upserted by [syncLiveTeams] and deliberately NOT
+  /// pruned when a team leaves the live set: a celebration can legitimately
+  /// fire after that. The WIN is emitted on the transition into final — the
+  /// same moment the phase machine drops the team out of liveGame — and a
+  /// coalesced score runs up to a whole celebration later. Reading [_liveTeams]
+  /// instead would miss exactly those celebrations: the legacy sequence at
+  /// best, and with a throwing lookup nothing at all (the catch in
+  /// [_runCelebration] swallows it). Bounded by the teams the user follows.
+  final Map<String, CelebrationTeam> _knownTeams = {};
+
   bool _foreground = true;
   bool _disposed = false;
 
@@ -142,6 +176,12 @@ class ForegroundCelebrationCoordinator {
   void syncLiveTeams(List<CelebrationTeam> teams) {
     if (_disposed) return;
     _liveTeams = List.unmodifiable(teams);
+    // A picker change mid-game arrives here as a new entry for the same slug.
+    // It must NOT restart polling — _reconcile is a no-op while the timer runs,
+    // so the diff engine's baseline (and its no-replay guarantee) survives.
+    for (final t in teams) {
+      _knownTeams[t.teamSlug] = t;
+    }
     _reconcile();
   }
 
@@ -214,11 +254,47 @@ class ForegroundCelebrationCoordinator {
     try {
       final team = kTeamColors[event.teamSlug];
       if (team == null) return;
-      final steps = AlertTriggerService.buildAnimationSteps(event.eventType, team);
-      if (steps.isEmpty) return;
+
+      // GATE BEFORE CAPTURE. Whether an event type animates at all belongs to
+      // the timing table alone — a chosen celebration maps 1:1 over the legacy
+      // stages and can never add or remove one — so it is decided here, from
+      // the pure builder, before any device I/O. The steps used to be built up
+      // front and doubled as this gate; they now have to be built AFTER the
+      // capture (below), and letting the gate move with them would make a
+      // no-animation event (turnover) pay for a device read — a 5-45s relay
+      // round trip off-LAN — while holding the serialization lock, queueing a
+      // real score behind nothing.
+      if (AlertTriggerService.buildAnimationSteps(event.eventType, team)
+          .isEmpty) {
+        return;
+      }
 
       // Slice-2/5 prior-state discipline: capture → flash → revert.
+      //
+      // The capture has TWO readers now: the revert, as before, and the
+      // contrast check — the user's choice can only be resolved against what
+      // the house is showing at this moment. That is the whole reason the build
+      // moved below it. Same order as AlertTriggerService.handleAlertEvent
+      // (capture → resolve → build), the path commercial's choice takes.
       final captured = await _delivery.capture();
+
+      // Read the choice AFTER the capture so a pick saved during a slow relay
+      // read still counts. A null capture (unreadable state) resolves
+      // fail-open: the choice fires as picked, and the revert is skipped.
+      final choice = _knownTeams[event.teamSlug];
+      final resolution = resolveCelebration(
+        chosenEffectId: choice?.celebrationEffectId,
+        chosenSpeed: choice?.celebrationSpeed ?? 240,
+        chosenIntensity: choice?.celebrationIntensity ?? 240,
+        capturedState: captured,
+      );
+      if (resolution?.usedFallback ?? false) {
+        debugPrint('[Celebration] chosen celebration clashes with the current '
+            'look — using the safe fallback');
+      }
+
+      final steps = AlertTriggerService.buildAnimationSteps(
+          event.eventType, team, resolution);
       await _delivery.play(steps);
       if (captured != null && captured.isNotEmpty) {
         await _delivery.revert(captured);
@@ -246,6 +322,7 @@ class ForegroundCelebrationCoordinator {
     _alertSub?.cancel();
     _alertSub = null;
     _queued = null;
+    _knownTeams.clear();
     _monitor.reset();
   }
 }
