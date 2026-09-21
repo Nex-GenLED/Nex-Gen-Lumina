@@ -30,12 +30,20 @@ dependencies:
   google_fonts: ^6.1.0
   go_router: ^16.2.0
   provider: ^6.1.2
-  firebase_core: ^4.3.0
-  firebase_auth: '>=5.3.3'
-  cloud_firestore: '>=5.5.0'
-  cloud_functions: ^6.0.5
-  firebase_storage: ^13.0.5
-  firebase_messaging: ^16.1.0
+  # FlutterFire BoM of 2026-07-14. These six move TOGETHER (shared
+  # firebase_core_platform_interface) — never bump one alone.
+  # cloud_firestore floor is 6.7.0: first release with flutterfire#18421, the
+  # fix for the iOS EXC_BAD_ACCESS in the plugin's shared transactions map
+  # (flutterfire#18417). Do NOT land on 6.8.0 — it throws MissingPluginException
+  # after every Android runTransaction (flutterfire#18546, fixed in 6.9.0).
+  # pubspec.lock is the real pin; see
+  # firestore-transaction-crash-investigation-2026-09-21.md.
+  firebase_core: ^4.12.1
+  firebase_auth: ^6.5.6
+  cloud_firestore: ^6.7.1
+  cloud_functions: ^6.3.5
+  firebase_storage: ^13.4.5
+  firebase_messaging: ^16.4.3
   app_links: ^6.0.0
   encrypt: ^5.0.3
   flutter_secure_storage: ^9.2.2

@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/models/remote_command.dart';
 import 'package:nexgen_command/services/routing_diagnostics.dart';
+import 'package:nexgen_command/utils/async_lock.dart';
 
 /// WLED Repository implementation for remote (cloud relay) control.
 ///
@@ -63,6 +64,27 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
   /// per command (BRIDGE_LATENCY_AUDIT_2026-05.md §2).
   // ignore: unused_field
   static const _pollInterval = Duration(milliseconds: 500);
+
+  /// App-wide FIFO gate over the [_reconcileAfterWatchdog] transaction.
+  ///
+  /// Every timed-out command ends in a `runTransaction` exactly
+  /// [_commandTimeout] after dispatch, and nothing upstream limits how many
+  /// commands are in flight — so a burst of commands at a slow/offline bridge
+  /// becomes a burst of CONCURRENT transactions one timeout later (and iOS
+  /// fires every watchdog that expired during suspension at once on resume).
+  /// Concurrent transactions are what corrupted the cloud_firestore iOS
+  /// plugin's shared transactions map (flutterfire#18417, EXC_BAD_ACCESS). The
+  /// plugin fix (#18421, cloud_firestore >= 6.7.0) is the primary guard; this
+  /// keeps the app from leaning on the plugin's internal locking alone.
+  ///
+  /// Static, not per-instance: `wledRepositoryProvider` rebuilds the repository
+  /// on every connectivity/controller change, so reconciles that are in flight
+  /// together routinely belong to different instances.
+  ///
+  /// Cost: a queued reconcile waits for the ones ahead of it. That only delays
+  /// a result the caller has already been waiting [_commandTimeout] for, on a
+  /// path that is by definition already failing.
+  static final AsyncLock _reconcileLock = AsyncLock();
 
   CloudRelayRepository({
     required this.userId,
@@ -274,27 +296,30 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
     String commandId,
   ) async {
     try {
-      return await _firestore.runTransaction<RemoteCommand?>((tx) async {
-        final snap = await tx.get(docRef);
-        if (!snap.exists) return null;
-        final cmd = RemoteCommand.fromFirestore(snap);
+      // One reconcile transaction at a time, app-wide — see [_reconcileLock].
+      return await _reconcileLock.synchronized(
+        () => _firestore.runTransaction<RemoteCommand?>((tx) async {
+          final snap = await tx.get(docRef);
+          if (!snap.exists) return null;
+          final cmd = RemoteCommand.fromFirestore(snap);
 
-        // Late success — the listener missed it but the result is here.
-        if (_hasResult(cmd) || cmd.status == CommandStatus.completed) {
-          return cmd;
-        }
-        // Bridge explicitly failed — honor it; do not relabel as timeout.
-        if (cmd.status == CommandStatus.failed) {
+          // Late success — the listener missed it but the result is here.
+          if (_hasResult(cmd) || cmd.status == CommandStatus.completed) {
+            return cmd;
+          }
+          // Bridge explicitly failed — honor it; do not relabel as timeout.
+          if (cmd.status == CommandStatus.failed) {
+            return null;
+          }
+          // Genuine no-response: only NOW is 'timeout' correct, and only while
+          // the doc is still non-terminal and result-less.
+          if (cmd.status == CommandStatus.pending ||
+              cmd.status == CommandStatus.executing) {
+            tx.update(docRef, {'status': 'timeout'});
+          }
           return null;
-        }
-        // Genuine no-response: only NOW is 'timeout' correct, and only while
-        // the doc is still non-terminal and result-less.
-        if (cmd.status == CommandStatus.pending ||
-            cmd.status == CommandStatus.executing) {
-          tx.update(docRef, {'status': 'timeout'});
-        }
-        return null;
-      });
+        }),
+      );
     } catch (e) {
       // Transaction failure (offline, contention exhaustion) — fall back to
       // treating this as a timeout for the caller. We deliberately do NOT

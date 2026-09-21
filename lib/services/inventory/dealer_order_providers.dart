@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nexgen_command/models/inventory/dealer_order.dart';
 import 'package:nexgen_command/models/inventory/product_catalog_item.dart';
+import 'package:nexgen_command/utils/async_lock.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dealer Order Providers + Notifier
@@ -83,6 +84,23 @@ class DealerOrderNotifier {
   CollectionReference<Map<String, dynamic>> _skuInventory(String dealerCode) =>
       _db.collection('dealers').doc(dealerCode).collection('sku_inventory');
 
+  // Per-order FIFO mutex over every read-modify-write of an order doc. The
+  // order screen's Add/Update/Remove buttons have no in-flight gate (a row
+  // stays `isDirty` until the commit AND the stream re-delivery land), so a
+  // double-tap, or "Add" on several product cards in a row, used to launch
+  // concurrent transactions at ONE document — contention, retries, and the
+  // exact shape that corrupted the cloud_firestore iOS plugin's shared
+  // transactions map (flutterfire#18417). Same idiom, and the same honest
+  // scope, as `applyArrayTxn`: runTransaction still owns cross-device
+  // correctness; the lock just stops this isolate contending with itself.
+  // Instance-scoped is enough — the notifier is a provider singleton.
+  final Map<String, AsyncLock> _orderLocks = <String, AsyncLock>{};
+
+  Future<T> _orderTxn<T>(String orderId, TransactionHandler<T> body) =>
+      _orderLocks
+          .putIfAbsent(orderId, AsyncLock.new)
+          .synchronized(() => _db.runTransaction<T>(body));
+
   // ── Draft creation ────────────────────────────────────────────────
 
   /// Create a new draft order. Returns the new orderId.
@@ -149,7 +167,7 @@ class DealerOrderNotifier {
     required int requestedUnits,
   }) async {
     final docRef = _orders.doc(orderId);
-    await _db.runTransaction((tx) async {
+    await _orderTxn(orderId, (tx) async {
       final snap = await tx.get(docRef);
       if (!snap.exists) return;
       final order = DealerOrder.fromJson(snap.data()!);
@@ -197,7 +215,7 @@ class DealerOrderNotifier {
     required String sku,
   }) async {
     final docRef = _orders.doc(orderId);
-    await _db.runTransaction((tx) async {
+    await _orderTxn(orderId, (tx) async {
       final snap = await tx.get(docRef);
       if (!snap.exists) return;
       final order = DealerOrder.fromJson(snap.data()!);
@@ -274,7 +292,7 @@ class DealerOrderNotifier {
     String? shippingCarrier,
     required String approvedBy,
   }) async {
-    await _db.runTransaction((tx) async {
+    await _orderTxn(orderId, (tx) async {
       final docRef = _orders.doc(orderId);
       final snap = await tx.get(docRef);
       if (!snap.exists) return;
@@ -406,7 +424,7 @@ class DealerOrderNotifier {
     required String reason,
   }) async {
     final docRef = _orders.doc(orderId);
-    await _db.runTransaction((tx) async {
+    await _orderTxn(orderId, (tx) async {
       final snap = await tx.get(docRef);
       if (!snap.exists) return;
       final order = DealerOrder.fromJson(snap.data()!);

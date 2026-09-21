@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+// `hide Type`: cloud_firestore >= 6.3 exports a Pipelines `enum Type` that
+// shadows dart:core's Type, which FirestoreSerializationError.valueType needs.
+import 'package:cloud_firestore/cloud_firestore.dart' hide Type;
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_storage.dart';

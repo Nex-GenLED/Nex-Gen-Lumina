@@ -80,7 +80,10 @@ class _FakeMessaging implements FirebaseMessaging {
   });
 
   @override
-  Future<String?> getToken({String? vapidKey}) async {
+  Future<String?> getToken({
+    String? vapidKey,
+    String? serviceWorkerScriptPath,
+  }) async {
     getTokenCalls++;
     return token;
   }
