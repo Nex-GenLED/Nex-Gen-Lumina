@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/favorites/favorite_doc.dart';
 import 'package:nexgen_command/models/commercial/brand_color.dart';
 import 'package:nexgen_command/models/commercial/brand_custom_design.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
@@ -23,10 +24,9 @@ import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 /// CUSTOMER's uid even though the active auth session may be the
 /// installer's anonymous session by the time generation runs.
 ///
-/// Field shape matches what FavoritesNotifier.addFavorite writes (name,
-/// usageCount, lastUsed, wledPayload, autoAdded) so the existing
-/// favorites streams (favoritesPatternsProvider et al.) can read these
-/// designs without any changes.
+/// Documents are built by `writeFavorite` (favorite_doc.dart) — the same
+/// canonical shape every favorites writer uses and every favorites reader
+/// expects.
 ///
 /// Naming convention (no folder/grouping infrastructure exists in
 /// FavoritesNotifier — see Conflict A architectural directive — so brand
@@ -84,13 +84,19 @@ class BrandDesignGenerator {
 
     for (final d in designs) {
       try {
-        await favoritesCol.doc(d.patternId).set({
-          'name': d.name,
-          'usageCount': 1,
-          'lastUsed': FieldValue.serverTimestamp(),
-          'wledPayload': d.payload,
-          'autoAdded': true,
-        }, SetOptions(merge: true));
+        // The ONE canonical favorites document (favorite_doc.dart). This used
+        // to hand-write `{name, usageCount, lastUsed, wledPayload, autoAdded}`
+        // — a shape the live rule rejects (a create must carry `pattern_name`
+        // + `added_at`), with the payload's arrays-of-arrays un-encoded (#84).
+        // NOTE the rule is owner-only: from an installer's session this write
+        // is still denied, exactly as before. That is a rules decision, not a
+        // shape problem, and is deliberately not made here.
+        await writeFavorite(
+          favoritesCol.doc(d.patternId),
+          patternName: d.name,
+          payload: d.payload,
+          autoAdded: true,
+        );
       } catch (e) {
         // One failure shouldn't take down the rest. Log and continue.
         debugPrint(

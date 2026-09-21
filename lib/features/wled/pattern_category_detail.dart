@@ -563,7 +563,9 @@ class _PatternControlCardState extends ConsumerState<PatternControlCard> with Ti
                     await ref.read(favoritesNotifierProvider.notifier).addFavorite(
                           patternId: _current.id,
                           patternName: _current.name,
-                          patternData: _current.toJson(),
+                          // The payload this screen applies (adds `on: true`)
+                          // — a favorite must light the house when tapped.
+                          patternData: _payloadFromCurrent(),
                         );
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(

@@ -667,7 +667,14 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
               FavoriteHeartButton(
                 patternId: _pattern.id,
                 patternName: _pattern.name,
-                patternData: _pattern.toJson(),
+                // The WLED payload to re-apply — what My Favorites POSTs to
+                // the controller. This passed the editor model's own JSON,
+                // which WLED would have ignored key for key.
+                patternDataBuilder: () async {
+                  final repo = ref.read(wledRepositoryProvider);
+                  return _pattern
+                      .toWledPayload(await repo?.getTotalLedCount() ?? 150);
+                },
                 size: 28,
               ),
             ],

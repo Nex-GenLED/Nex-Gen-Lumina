@@ -11,7 +11,20 @@ import 'package:nexgen_command/theme.dart';
 class FavoriteHeartButton extends ConsumerWidget {
   final String patternId;
   final String patternName;
-  final Map<String, dynamic> patternData;
+
+  /// Builds the WLED payload to store, AT TAP TIME. It is what the dashboard's
+  /// My Favorites grid later POSTs to the controller, so it must be a real
+  /// `/json/state` body — and for a per-LED pattern that means knowing the
+  /// device's LED count, which is an async read. (This used to be a map passed
+  /// at build time, and its one caller passed the editor model's own JSON:
+  /// a "favorite" that WLED would have ignored key for key.)
+  final Future<Map<String, dynamic>> Function() patternDataBuilder;
+
+  /// When set, this pattern cannot be kept as a favorite: tapping an EMPTY
+  /// heart shows this instead of writing. (A filled heart still un-favorites.)
+  /// For a pattern whose payload My Favorites could store but never re-apply —
+  /// see the Pattern Editor's Static mode.
+  final String? unavailableMessage;
   final double size;
   final Color activeColor;
 
@@ -19,7 +32,8 @@ class FavoriteHeartButton extends ConsumerWidget {
     super.key,
     required this.patternId,
     required this.patternName,
-    required this.patternData,
+    required this.patternDataBuilder,
+    this.unavailableMessage,
     this.size = 24,
     this.activeColor = const Color(0xFFFF4081), // Pink/red default
   });
@@ -67,6 +81,16 @@ class FavoriteHeartButton extends ConsumerWidget {
       return;
     }
 
+    if (!currentlyFavorited && unavailableMessage != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(unavailableMessage!),
+          duration: const Duration(seconds: 5),
+        ));
+      return;
+    }
+
     final notifier = ref.read(favoritesNotifierProvider.notifier);
     try {
       if (currentlyFavorited) {
@@ -75,7 +99,7 @@ class FavoriteHeartButton extends ConsumerWidget {
         await notifier.addFavorite(
           patternId: patternId,
           patternName: patternName,
-          patternData: patternData,
+          patternData: await patternDataBuilder(),
         );
       }
     } catch (e) {
