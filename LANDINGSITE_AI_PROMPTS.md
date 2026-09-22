@@ -148,10 +148,6 @@ Features to compare:
    - Lumina: ✅ Cryptographically secure tokens
    - Others: ⚠️ Base64 encoded (easily reversible)
 
-7. Open Source Security Docs
-   - Lumina: ✅ Full disclosure on GitHub
-   - Others: ❌ Proprietary, no visibility
-
 Style: Modern table with alternating row colors
 Highlight Lumina column with cyan background
 Include footnotes with links to SECURITY.md for proof
@@ -332,7 +328,6 @@ A: No. We've never experienced a data breach. Our security measures include:
 
 Q10: "Where can I see your full security documentation?"
 A: We believe in transparency. Our full security implementation is documented at:
-   - GitHub: [link to SECURITY.md]
    - This website: [link to Security page]
    - Contact: security@nex-genled.com for technical questions
 
@@ -368,11 +363,6 @@ Badge 4: Privacy First
 Badge 5: 90-Day Retention
 - Icon: Calendar with trash can
 - Hover text: "Analytics auto-deleted after 90 days"
-
-Badge 6: Open Source Security
-- Icon: GitHub logo with lock
-- Hover text: "Security documentation publicly available"
-- Link: https://github.com/nex-genled/lumina-security
 
 Style: Monochrome icons (white/cyan on dark background)
 Size: 60px x 60px each
@@ -433,7 +423,7 @@ Thanks for trusting us with your home lighting,
 
 The Nex-Gen Team
 
-P.S. - We're committed to transparency. All our security measures are documented publicly on GitHub. Because you deserve to know exactly how we protect you.
+P.S. - We're committed to transparency. Because you deserve to know exactly how we protect you.
 
 [View Security Docs] [Update Preferences] [Contact Support]
 
@@ -521,7 +511,6 @@ Section 4: "Security Documentation"
 "We believe enterprise clients deserve full transparency. Download our complete security whitepaper:"
 
 [Download Security Whitepaper (PDF)] - Links to PDF version of SECURITY.md
-[View on GitHub] - Links to public SECURITY.md
 [Schedule Security Review] - Books meeting with security team
 
 Section 5: Testimonials (placeholder)
@@ -575,19 +564,15 @@ Include hover effect to show encryption key concept
 
 Section 3: "Transparency is Our Policy"
 
-"Don't just take our word for it. Our security measures are fully documented and publicly available."
+"Don't just take our word for it. Our security measures are fully documented."
 
-Three cards:
+Two cards:
 
-Card 1: Open Source Docs
-- "Every security feature documented on GitHub"
-- [View on GitHub]
-
-Card 2: Third-Party Audits
+Card 1: Third-Party Audits
 - "Quarterly security rule reviews"
 - [View Latest Audit Report]
 
-Card 3: Compliance Certifications
+Card 2: Compliance Certifications
 - "GDPR & CCPA compliant"
 - [Download Compliance Docs]
 
@@ -670,9 +655,6 @@ Prevent abuse and runaway costs with automatic rate limiting. Your users (and th
 
 🗑️ 90-Day Auto-Retention
 GDPR & CCPA compliant data retention. We don't hoard user data - it's automatically deleted after 90 days.
-
-🔓 Open Source Security
-Full transparency. Our security implementation is documented publicly on GitHub.
 
 Why does this matter for commercial IoT?
 
