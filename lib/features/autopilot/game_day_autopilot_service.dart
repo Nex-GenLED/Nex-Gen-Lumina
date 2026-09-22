@@ -13,7 +13,7 @@
 // Design selection priority:
 //   1. User-saved design for this team
 //   2. Auto-select from UserVarietyProfile (static → Solid, motion → Chase,
-//      dynamic → Pulse/Twinkle)
+//      dynamic → Fade, a slow crossfade of the team's two colours)
 //   3. Fallback: Solid in team primary color
 
 import 'dart:async';
@@ -27,6 +27,7 @@ import '../sports_alerts/models/game_event.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
+import '../wled/wled_effects_catalog.dart' show WledEffectsCatalog;
 import 'game_day_autopilot_config.dart';
 import 'team_design_catalog.dart';
 
@@ -437,10 +438,20 @@ class GameDayAutopilotService {
       debugPrint('[GameDayAutopilot] Design branch: AUTO-SELECT '
           '(style=$styleCategory) for ${config.teamSlug}');
 
+      // EFFECT IDS ARE NOT LABELS. `dynamic` shipped as fx 63 captioned
+      // "Twinkle"; on WLED 0.15.1 that is Pride 2015 — a hue-rotating rainbow
+      // that reads neither `col[]` nor the palette, so the house showed every
+      // colour but the team's. Fade (12) is the whole strip crossfading
+      // primary ↔ secondary from `col[]`, verified against the firmware's own
+      // effect list and by live observation (see team_design_catalog.dart).
       final (effectId, effectName, speed) = switch (styleCategory) {
         _StyleCategory.static_ => (0, 'Solid', 128),      // Solid
         _StyleCategory.motion  => (28, 'Chase', 180),      // Chase
-        _StyleCategory.dynamic => (63, 'Twinkle', 150),    // Twinkle
+        _StyleCategory.dynamic => (
+            kBaseDesignFadeEffectId,
+            'Fade',
+            kBaseDesignFadeSpeed,
+          ),
       };
 
       return DesignSelection(
@@ -870,7 +881,11 @@ class GameDayAutopilotService {
               'fx': effectId,
               'sx': speed,
               'ix': intensity,
-              'pal': 0,
+              // The palette that makes THIS effect play `col[]` — 0 for a
+              // colour-reading effect, "Colors Only" for a palette-reading
+              // one. A hard-coded 0 here is what let fx 63 look like a team
+              // design in the code while rendering a rainbow on the house.
+              'pal': WledEffectsCatalog.setColorsPaletteFor(effectId),
               'col': colorSlots,
             },
           ];

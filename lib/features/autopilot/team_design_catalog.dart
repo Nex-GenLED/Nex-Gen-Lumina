@@ -9,15 +9,42 @@
 //   2. Solid Secondary   — alternate team color as main
 //   3. Chase Primary→Secondary — motion, team-branded
 //   4. Breathe Primary   — subtle pulsing atmosphere
-//   5. Twinkle (both)    — celebratory sparkle
+//   5. Fade (both)       — slow full-strip crossfade primary ↔ secondary
 //   6. Candy Cane Stripe — alternating primary/secondary bands
 //
 // Each design is returned as a fully-built WLED payload ready to
 // hand to WledRepository.applyJson().
+//
+// EFFECT IDS ARE NOT LABELS. Design 5 shipped as fx 63 captioned "Twinkle";
+// on WLED 0.15.1 fx 63 is Pride 2015, a hue-rotating rainbow that reads
+// neither `col[]` nor the palette (bench 2026-09-21: 55 % of lit pixels in
+// hues the team does not have, 162 colours per frame). Every id here must be
+// checked against the firmware's own `/json/eff`, and
+// base_design_team_colors_guard_test.dart pins that each design plays the
+// team's own colours.
 
 import 'dart:ui' show Color;
 
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
+import 'package:nexgen_command/features/wled/effect_speed_profiles.dart'
+    show getSpeedProfile;
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart'
+    show WledEffectsCatalog;
+
+/// The Game Day base design's "dynamic" look: WLED fx 12, Fade — the whole
+/// strip crossfades between the team's primary and secondary, reading
+/// `col[]` directly. Verified against the bench controller's own `/json/eff`
+/// (WLED 0.15.1) and by live observation on 2026-09-21. Shared by the
+/// rotation catalog (design 5) and GameDayAutopilotService's style switch.
+const int kBaseDesignFadeEffectId = 12;
+
+/// Fade's speed for the base design: the catalog's own "Fade pace" default
+/// (`getSpeedProfile(12).rawDefault`), which the profile labels 'Very Slow'.
+/// Measured on the bench: a 4.4 s primary → secondary → primary round trip
+/// (the effect's slowest, sx 5, is 6.6 s; the top of the 'Slow' band, 68,
+/// is 3.6 s).
+final int kBaseDesignFadeSpeed =
+    getSpeedProfile(kBaseDesignFadeEffectId).rawDefault;
 
 /// A single team-themed design in the rotation catalog.
 class TeamDesign {
@@ -112,18 +139,23 @@ class TeamDesignCatalog {
           brightness: brightness,
         ),
       ),
-      // 5. Twinkle (WLED fx 63 = Twinkle)
+      // 5. Fade (WLED fx 12 = Fade): the whole strip crossfades primary ↔
+      // secondary, reading `col[]` directly (bench 2026-09-21: uniform strip,
+      // 0 % foreign hues, one colour per frame). Speed is the catalog's own
+      // "Fade pace" default — its 'Very Slow' band — a 4.4 s round trip on
+      // the bench; the effect's slowest setting (sx 5) is 6.6 s. Was fx 63
+      // "Twinkle" = Pride 2015, a rainbow.
       TeamDesign(
-        name: '$teamName Twinkle',
-        effectId: 63,
-        speed: 150,
-        intensity: 200,
+        name: '$teamName Fade',
+        effectId: kBaseDesignFadeEffectId,
+        speed: kBaseDesignFadeSpeed,
+        intensity: 128,
         colorGroupSize: 1,
         wledPayload: _buildPayload(
-          effectId: 63,
+          effectId: kBaseDesignFadeEffectId,
           colors: [p, s],
-          speed: 150,
-          intensity: 200,
+          speed: kBaseDesignFadeSpeed,
+          intensity: 128,
           brightness: brightness,
         ),
       ),
@@ -207,7 +239,11 @@ class TeamDesignCatalog {
           // pattern's spacing.
           'grp': colorGroupSize,
           'spc': kDesignDefaultSpc,
-          'pal': 0,
+          // The palette that makes THIS effect play `col[]`: 0 for a
+          // colour-reading effect (every design here), "Colors Only" for a
+          // palette-reading one. Never a bare literal — fx 63 sat under a
+          // hard-coded 0 for six months looking like a Twinkle.
+          'pal': WledEffectsCatalog.setColorsPaletteFor(effectId),
           'col': colors,
         }
       ],

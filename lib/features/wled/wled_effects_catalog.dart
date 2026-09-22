@@ -793,7 +793,18 @@ class WledEffectsCatalog {
   /// Deliberately NOT [paletteForEffect]: that returns 4 for a palette-reading
   /// effect, and on the bench pal 4 dropped the design's primary colour
   /// entirely for all four celebration effects (see [kSetColorsOnlyPalette]).
-  static int celebrationPaletteFor(int id) =>
+  static int celebrationPaletteFor(int id) => setColorsPaletteFor(id);
+
+  /// The `pal` that makes effect [id] play the segment's OWN `col[]` — the
+  /// one rule behind both a fired celebration and a Game Day base design:
+  /// `0` for a colour-reading effect (it reads `col[]` directly; Fade, Meteor,
+  /// Chase… bench-verified), [kSetColorsOnlyPalette] for a palette-reading
+  /// one (under `0` it would draw the firmware's default palette).
+  ///
+  /// A palette-reading effect sent through `normalizeWledPayload` must also be
+  /// in [kColorsOnlyVerifiedEffects] or its 5 is rewritten to 4 on the wire —
+  /// the guard tests for celebrations AND base designs enforce that pairing.
+  static int setColorsPaletteFor(int id) =>
       overridesUserColors(id) ? kSetColorsOnlyPalette : 0;
 
   /// Get effects grouped by color behavior (for UI display).
