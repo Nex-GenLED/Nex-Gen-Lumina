@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/autopilot/team_priority_repopulate.dart';
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
 import 'package:nexgen_command/features/neighborhood/providers/sync_event_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
@@ -150,6 +151,12 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     // stays mounted across tab switches, making it the natural
     // keep-alive site alongside the four existing watches above.
     ref.watch(calendarEntryLeaseManagerProvider);
+    // Reordering the Game Day team hierarchy must actually repopulate the
+    // calendar. The hierarchy is editable from BOTH the Game Day screen and
+    // Edit Profile, so the wiring lives on the service callback rather than on
+    // either widget, and is kept alive here for the same reason the lease
+    // manager is — the shell outlives both surfaces.
+    ref.watch(gameDayPriorityRepopulateProvider);
 
     final isSimpleMode = ref.watch(simpleModeProvider);
     final luminaState = ref.watch(luminaSheetProvider);

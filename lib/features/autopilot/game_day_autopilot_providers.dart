@@ -40,6 +40,7 @@ import 'autopilot_providers.dart';
 import 'game_day_autopilot_config.dart';
 import 'game_day_autopilot_service.dart';
 import 'game_day_background_persistence.dart';
+import 'game_day_refresh_result.dart';
 import 'team_priority.dart';
 import '../wled/participation_denormalizer.dart';
 
@@ -1104,20 +1105,56 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   /// keeps firing daily, but the 7-day gate inside this method ensures the
   /// heavy regen only runs weekly). Can also be called manually from the
   /// Game Day screen — pass `force: true` to bypass the gate.
-  Future<void> refreshAllCalendars({bool force = false}) async {
-    if (!_shouldRegenerateGameDay(force: force)) return;
+  ///
+  /// Returns what the run actually did. It used to return `void`, which is
+  /// why the Game Day screen reported "Schedule refreshed!" after a total
+  /// failure — the loop already knew better and the knowledge had nowhere to
+  /// go. See [GameDayRefreshResult].
+  Future<GameDayRefreshResult> refreshAllCalendars({bool force = false}) async {
+    if (!_shouldRegenerateGameDay(force: force)) {
+      return const GameDayRefreshResult.skippedByGate();
+    }
     final configs = ref.read(enabledAutopilotConfigsProvider);
-    await _doPopulateCalendars(configs);
+    return _doPopulateCalendars(configs);
   }
+
+  /// Is a populate running right now?
+  ///
+  /// THE GUARD. There was no re-entrancy protection here at all: two presses
+  /// of the refresh button started two concurrent clear-and-repopulate cycles
+  /// over the same `calendar_entries` map, each one clearing rows the other
+  /// had just written. It survived only because the button was dim, duplicated
+  /// per team, and rarely pressed twice. Consolidating to ONE prominent button
+  /// makes a double-tap the expected input, so the guard lands with it.
+  ///
+  /// A plain bool, not a lock: the correct response to "already running" is to
+  /// REFUSE and say so, not to queue a second full ESPN-fetch-and-rewrite
+  /// behind the first. Queueing would make the double-tap cost twice as much
+  /// instead of nothing.
+  ///
+  /// Not persisted and not in `state`: it describes one in-progress call, and
+  /// a rebuild must not resurrect it. Cleared in a `finally` so a throw
+  /// anywhere in the populate cannot wedge refresh off for the session.
+  bool _populateInFlight = false;
+
+  /// Whether a populate is currently running, for the UI's button state.
+  bool get isRefreshing => _populateInFlight;
 
   /// Shared implementation of "clear all future autopilot rows, then write
   /// fresh entries for every enabled team." Used by both
   /// [_populateCalendarInBackground] (post-toggle, with optional splice)
   /// and [refreshAllCalendars] (post-gate, stream-only). Per-team failures
   /// are isolated — one team's exception does not skip its siblings.
-  Future<void> _doPopulateCalendars(
+  Future<GameDayRefreshResult> _doPopulateCalendars(
     List<GameDayAutopilotConfig> enabledConfigs,
   ) async {
+    if (_populateInFlight) {
+      debugPrint('[GameDayAutopilot] populate already in flight — refusing '
+          're-entry (a second concurrent clear+rewrite would race the first '
+          'over the same calendar_entries map)');
+      return const GameDayRefreshResult.alreadyRunning();
+    }
+    _populateInFlight = true;
     // POLLING PAUSE FOR THE WHOLE POPULATE (audit/SYNC_PACING_FIX_STATUS.md
     // §2a). This clears entries and writes new ones in a loop; each write can
     // arm the 800ms debounce that ends in a `syncAll`, so the poller would
@@ -1137,7 +1174,7 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     // latency (audit/SYNC_PACING_FIX_STATUS.md §2a).
     schedules.beginSyncBatch();
     try {
-      await _doPopulateCalendarsInner(enabledConfigs);
+      return await _doPopulateCalendarsInner(enabledConfigs);
     } finally {
       // Order matters: close the batch FIRST so the single owed sync is armed
       // while polling is still paused, then release the poller. syncAll pauses
@@ -1145,10 +1182,14 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       // before the resume keeps the quiet period unbroken.
       schedules.endSyncBatch();
       poller.resumePolling();
+      // Released here, in the SAME finally as the poller: any exit path that
+      // restores polling must also release the guard, or refresh stays dead
+      // for the rest of the session.
+      _populateInFlight = false;
     }
   }
 
-  Future<void> _doPopulateCalendarsInner(
+  Future<GameDayRefreshResult> _doPopulateCalendarsInner(
     List<GameDayAutopilotConfig> enabledConfigs,
   ) async {
     // #63 E5 teardown edge: clear runs UNCONDITIONALLY before the empty-
@@ -1162,7 +1203,9 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       debugPrint('[GameDayAutopilot] No enabled configs to populate '
           '(post-clear, e.g. last team disabled)');
       await _writeGameDayLastGenerated();
-      return;
+      return const GameDayRefreshResult(
+        outcome: GameDayRefreshOutcome.noTeams,
+      );
     }
 
     debugPrint(
@@ -1193,14 +1236,21 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
 
     for (final config in ordered) {
       try {
-        final count = await service.populateCalendarForTeam(config);
-        totalEntries += count;
-        debugPrint('[GameDayAutopilot] Wrote $count entries '
-            'for ${config.teamSlug}');
+        final r = await service.populateCalendarForTeam(config);
+        totalEntries += r.entriesWritten;
+        // A fetch failure no longer hides inside a zero. `populateCalendar-
+        // ForTeam` reports the fault itself, so an unreachable ESPN counts
+        // here exactly like a thrown exception does — which is what makes
+        // "every team failed" reportable instead of looking like a quiet week.
+        if (r.failed) {
+          failedTeams.add(config.teamName);
+        }
+        debugPrint('[GameDayAutopilot] Wrote ${r.entriesWritten} entries '
+            'for ${config.teamSlug}${r.failed ? " (FAILED)" : ""}');
       } catch (e) {
         debugPrint('[GameDayAutopilot] Failed to populate '
             '${config.teamSlug}: $e');
-        failedTeams.add(config.teamSlug);
+        failedTeams.add(config.teamName);
       }
     }
 
@@ -1209,6 +1259,12 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         'failed teams = ${failedTeams.isEmpty ? "none" : failedTeams.join(",")}');
 
     await _writeGameDayLastGenerated();
+
+    return GameDayRefreshResult.fromPopulate(
+      teamsAttempted: ordered.length,
+      entriesWritten: totalEntries,
+      failedTeams: failedTeams,
+    );
   }
 
   /// Honors the weekly refresh cadence. Returns true if a regeneration

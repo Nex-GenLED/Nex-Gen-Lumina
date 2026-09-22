@@ -17,6 +17,7 @@ import '../../widgets/glass_app_bar.dart';
 import '../../widgets/section_header.dart';
 import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
+import '../autopilot/game_day_refresh_result.dart';
 import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/models/game_state.dart';
@@ -120,6 +121,11 @@ class GameDayScreen extends ConsumerWidget {
                   // Profile, three taps away from the feature it governs, so
                   // in practice nobody knew the order meant anything.
                   const _TeamPrioritySection(),
+                  // ONE refresh, for all teams — because that is what it has
+                  // always done. Placed OUTSIDE _TeamPrioritySection on
+                  // purpose: that section renders nothing below two teams, and
+                  // a single-team user still needs to be able to refresh.
+                  const _RefreshAllSchedulesButton(),
                 ] else
                   _buildEmptyTeamsState(),
 
@@ -1077,40 +1083,13 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
               ],
             ),
           ),
-          const Divider(height: 16, color: NexGenPalette.line),
-
-          // 7. Refresh schedule button
-          Center(
-            child: TextButton.icon(
-              onPressed: () async {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Refreshing game schedule...'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-                // Manual Refresh — bypass the 7-day weekly gate (#63 E5
-                // Sub-Change D). Background timer + post-launch refresh
-                // stay force:false so the gate fires as intended for
-                // implicit refreshes.
-                await ref
-                    .read(gameDayAutopilotNotifierProvider.notifier)
-                    .refreshAllCalendars(force: true);
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Schedule refreshed!'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Refresh Schedule'),
-              style: TextButton.styleFrom(
-                foregroundColor: NexGenPalette.cyan,
-              ),
-            ),
-          ),
+          // NO per-card refresh button. There used to be one here, in every
+          // team card, and every copy of it called the SAME
+          // `refreshAllCalendars(force: true)` — ignoring the `config` it sat
+          // under. N teams rendered N identical global buttons, so a user who
+          // reasonably pressed each one ran the whole clear-and-repopulate of
+          // every team N times. It now lives once, beside the hierarchy it
+          // applies: see [_RefreshAllSchedulesButton].
         ],
       ),
     );
@@ -2566,5 +2545,103 @@ class _TeamPrioritySectionState extends ConsumerState<_TeamPrioritySection> {
     }
     // Let the stream take over again now that it carries this order.
     if (mounted) setState(() => _pending = null);
+  }
+}
+
+/// The one refresh control on this screen.
+///
+/// REPLACES N IDENTICAL BUTTONS. Every team card used to carry its own
+/// "Refresh Schedule", and all of them were the same closure calling
+/// `refreshAllCalendars(force: true)` — the enclosing team's `config` was in
+/// scope and never read. A four-team account showed four buttons for one
+/// operation, and a user who pressed each of them in turn ran four complete
+/// clear-and-repopulate cycles over all four teams.
+///
+/// It sits beside the priority list because the hierarchy is what the populate
+/// consumes: `_doPopulateCalendarsInner` reads the order at write time to
+/// decide which team owns a shared night. Refreshing and reordering are the
+/// same subject, so they are in the same place.
+class _RefreshAllSchedulesButton extends ConsumerStatefulWidget {
+  const _RefreshAllSchedulesButton();
+
+  @override
+  ConsumerState<_RefreshAllSchedulesButton> createState() =>
+      _RefreshAllSchedulesButtonState();
+}
+
+class _RefreshAllSchedulesButtonState
+    extends ConsumerState<_RefreshAllSchedulesButton> {
+  /// Local press state, so the button disables itself the instant it is
+  /// tapped.
+  ///
+  /// This is the FIRST of two guards and it is not the important one. It
+  /// stops the obvious double-tap; the authoritative refusal lives in
+  /// `GameDayAutopilotNotifier._populateInFlight`, which also covers the
+  /// refresh a reorder kicks off in the background, where there is no button
+  /// to grey out.
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final busy = _pressed;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Center(
+        child: TextButton.icon(
+          onPressed: busy ? null : _refresh,
+          icon: busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(NexGenPalette.cyan),
+                  ),
+                )
+              : const Icon(Icons.refresh_rounded, size: 18),
+          label: Text(busy ? 'Refreshing…' : 'Refresh all schedules'),
+          style: TextButton.styleFrom(
+            foregroundColor: NexGenPalette.cyan,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _pressed = true);
+    GameDayRefreshResult result;
+    try {
+      // Manual Refresh — bypass the 7-day weekly gate (#63 E5 Sub-Change D).
+      // Background timer + post-launch refresh stay force:false so the gate
+      // fires as intended for implicit refreshes.
+      result = await ref
+          .read(gameDayAutopilotNotifierProvider.notifier)
+          .refreshAllCalendars(force: true);
+    } catch (e) {
+      debugPrint('[GameDay] refresh all failed: $e');
+      // An exception that escapes the notifier is a real failure and must not
+      // be reported as anything else. The populate isolates per-team errors
+      // internally, so reaching here means the run itself broke.
+      result = const GameDayRefreshResult(
+        outcome: GameDayRefreshOutcome.failed,
+        teamsAttempted: 1,
+        failedTeams: <String>['your teams'],
+      );
+    } finally {
+      if (mounted) setState(() => _pressed = false);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(result.userMessage),
+          duration:
+              Duration(seconds: result.isProblem ? 5 : 3),
+          backgroundColor: result.isProblem ? NexGenPalette.amber : null,
+        ),
+      );
   }
 }
