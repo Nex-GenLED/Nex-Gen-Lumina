@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_save_errors.dart';
 import 'package:nexgen_command/features/design/editable_pattern_design.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
+import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_providers.dart';
@@ -119,6 +120,27 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     final repo = ref.read(wledRepositoryProvider);
     final totalPixels = await repo?.getTotalLedCount() ?? 150;
     return _pattern.toWledPayload(totalPixels);
+  }
+
+  /// What the heart stores. Animated: the one WLED payload, as ever. STATIC:
+  /// the per-pixel favorite — the SAME design [_saveToMyDesigns] would store
+  /// and [_sendStatic] is showing on the lights, so My Favorites re-applies it
+  /// through the chunked spine instead of as one message `applyJson` refuses
+  /// past 4 KB. (The heart used to decline in Static and point at SAVE.)
+  Future<Map<String, dynamic>> _favoritePayload() async {
+    if (_pattern.effectId != 0) return _currentWledPayload();
+    try {
+      return buildPerPixelFavoritePayload(customDesignFromEditablePattern(
+        pattern: _pattern,
+        name: _pattern.name,
+        ownerId: '',
+        channels: _targetChannels(),
+      ));
+    } on StateError {
+      throw const FavoriteNotSavable(
+          'Connect to your lights to favorite this pattern — it is stored LED '
+          'by LED, so the app needs your channel lengths. Nothing was saved.');
+    }
   }
 
   /// STATIC goes through the chunked per-pixel spine, built from the SAME
@@ -864,17 +886,7 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
               FavoriteHeartButton(
                 patternId: _pattern.id,
                 patternName: _pattern.name,
-                patternDataBuilder: _currentWledPayload,
-                // A Static pattern is one entry per LED. The favorites rule
-                // would accept it, but My Favorites applies a favorite as ONE
-                // payload and the controller path caps that at 4 KB — a
-                // 290-LED Static favorite could be saved and never re-applied.
-                // Per-LED looks live in My Designs, which applies them through
-                // the chunked spine.
-                unavailableMessage: _pattern.effectId == 0
-                    ? 'This mode is stored LED by LED — tap SAVE to keep it '
-                        'in My Designs.'
-                    : null,
+                patternDataBuilder: _favoritePayload,
                 size: 28,
               ),
             ],

@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:nexgen_command/features/favorites/favorite_apply.dart';
+import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
 import 'package:nexgen_command/features/geofence/geofence_favorite_lookup.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -76,6 +78,24 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
   /// applying across a stream error / re-subscribe.
   @visibleForTesting
   GeofenceConfig? get configForTest => _config;
+
+  /// Test seams for the trigger chain. Production resolves the uid from
+  /// FirebaseAuth, looks the favorite up in the default Firestore, and posts
+  /// the arrival notification through [NotificationsService]; a test sets
+  /// these so the REAL enter-transition → lookup → apply chain runs against a
+  /// fake Firestore (or a bench controller) with no Firebase app and no
+  /// platform plugins. Each is consulted only when set.
+  @visibleForTesting
+  String? uidForTest;
+  @visibleForTesting
+  FirebaseFirestore? firestoreForTest;
+  @visibleForTesting
+  Future<void> Function(String actionName) welcomeHomeNotifier =
+      NotificationsService.showWelcomeHome;
+
+  /// Feeds one position through the real enter-transition logic.
+  @visibleForTesting
+  Future<void> onPositionForTest(Position pos) => _onPosition(pos);
 
   @override
   GeofenceState build() {
@@ -285,7 +305,7 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
         debugPrint('No WLED repository available');
         return;
       }
-      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final uid = uidForTest ?? FirebaseAuth.instance.currentUser?.uid;
       Map<String, dynamic>? payload;
       if (uid != null) {
         try {
@@ -294,7 +314,7 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
           // had, so every trigger fell through to _applyFallback. Null = no
           // such favorite (or no usable payload) → fallback, as before.
           payload = await lookupGeofenceFavoritePayload(
-            FirebaseFirestore.instance,
+            firestoreForTest ?? FirebaseFirestore.instance,
             uid: uid,
             actionName: actionName,
           );
@@ -304,30 +324,65 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
       }
 
       if (payload != null) {
-        // Route the recovered favorite through the multi-bus chokepoint so
-        // EVERY effective channel lights (not just bus 0) and the dashboard +
-        // roofline preview + Now Playing chip reflect the action that just
-        // fired (e.g. "Welcome Home"). applyToDevice is raw-vs-prefiltered
-        // safe, so saved-scene (id-bearing) payloads pass straight through.
-        final applied = await ref
-            .read(wledStateProvider.notifier)
-            .applyToDevice(payload, labelHint: actionName);
-        if (!applied) {
-          // Cold-start net (mirrors _applyColorFallback's !ok branch).
-          // applyToDevice's U1 gate returns false when no effective channels
-          // are resolved yet — likely on a cold background geofence wake
-          // before the hardware/channel map loads. Bare applyJson hits the
-          // device directly without the channel gate so we still light
-          // SOMETHING rather than silently no-op'ing.
-          await repo.applyJson(payload);
-        }
+        await _applyFavorite(payload, actionName, repo);
       } else {
         await _applyFallback(actionName, repo);
       }
-      await NotificationsService.showWelcomeHome(actionName);
+      await welcomeHomeNotifier(actionName);
     } catch (e) {
       debugPrint('Trigger action failed: $e');
     }
+  }
+
+  /// Lights a favorite recovered by name.
+  ///
+  /// A PER-PIXEL (Static) favorite — one carrying a `lumina_design`, see
+  /// favorite_design_payload.dart — goes through [applyFavoritePayloadWith],
+  /// the chunked spine My Designs and the dashboard's My Favorites use. Sent
+  /// as ONE message it is refused by size (a 290-LED picture is ~16 KB against
+  /// applyJson's 4 KB ceiling) at BOTH of the attempts below, so the lights
+  /// showed nothing while the Welcome Home notification still fired.
+  ///
+  /// Every other favorite takes exactly the path it always has: the multi-bus
+  /// chokepoint, so EVERY effective channel lights (not just bus 0) and the
+  /// dashboard + roofline preview + Now Playing chip reflect the action that
+  /// just fired (applyToDevice is raw-vs-prefiltered safe, so saved-scene
+  /// id-bearing payloads pass straight through), then the bare cold-start
+  /// net. [applyFavoritePayloadWith] would also send such a favorite as one
+  /// channel-filtered message, but without that label fan-out and without the
+  /// net — so it is not used for them.
+  ///
+  /// Returns whether the controller accepted the favorite. The arrival
+  /// notification does not depend on it (unchanged: it has always reported
+  /// the trigger, not a confirmed frame).
+  Future<bool> _applyFavorite(
+    Map<String, dynamic> payload,
+    String actionName,
+    WledRepository repo,
+  ) async {
+    if (perPixelDesignOfFavorite(payload) != null) {
+      final outcome = await applyFavoritePayloadWith(ref.read, payload);
+      if (!outcome.isApplied) {
+        // No cold-start net here, on purpose: without the channel map
+        // (noChannels) there is nothing to paint with, and posting the stored
+        // payload raw is exactly the refused-by-size write this replaces.
+        debugPrint('Geofence: per-pixel favorite "$actionName" not applied '
+            '(${outcome.status.name})');
+      }
+      return outcome.isApplied;
+    }
+
+    final applied = await ref
+        .read(wledStateProvider.notifier)
+        .applyToDevice(payload, labelHint: actionName);
+    if (applied) return true;
+    // Cold-start net (mirrors _applyColorFallback's !ok branch).
+    // applyToDevice's U1 gate returns false when no effective channels
+    // are resolved yet — likely on a cold background geofence wake
+    // before the hardware/channel map loads. Bare applyJson hits the
+    // device directly without the channel gate so we still light
+    // SOMETHING rather than silently no-op'ing.
+    return repo.applyJson(payload);
   }
 
   Future<void> _applyFallback(String actionName, WledRepository repo) async {

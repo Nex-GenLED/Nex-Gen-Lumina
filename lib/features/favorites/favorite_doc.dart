@@ -21,6 +21,12 @@
 /// auto_added    bool
 /// last_used     timestamp  optional; set once the favorite is used
 /// ```
+///
+/// A PER-PIXEL (Static) favorite needs no extra field: its picture rides
+/// inside `pattern_data`, as a `CustomDesign` under `lumina_design` — see
+/// `favorite_design_payload.dart`. Anything that re-applies a favorite must go
+/// through `applyFavoritePayloadWith`, which sends that through the chunked
+/// spine; a raw `applyJson` of it is refused by size.
 library;
 
 import 'dart:convert';

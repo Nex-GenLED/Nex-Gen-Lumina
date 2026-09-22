@@ -47,6 +47,7 @@ import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
+import 'package:nexgen_command/features/favorites/favorite_apply.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
 import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session.dart';
 import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session_providers.dart';
@@ -1334,14 +1335,19 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                 if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No controller connected')));
                 return;
               }
-              var payload = favorite.patternData;
-              final channels = ref.read(effectiveChannelIdsProvider);
-              if (channels.isEmpty) {
+              // ONE routine decides how a favorite reaches the lights: a
+              // per-pixel (Static) favorite goes through the chunked spine My
+              // Designs uses, everything else is one channel-filtered
+              // applyJson. This used to inline the latter for every favorite,
+              // and applyJson refuses anything over 4 KB.
+              final outcome =
+                  await applyFavoritePayloadWith(ref.read, favorite.patternData);
+              if (outcome.status == FavoriteApplyStatus.noChannels) {
                 debugPrint('Favorites apply: skip (U1 gate)');
                 return;
               }
-              payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-              final success = await repo.applyJson(payload);
+              final payload = outcome.payload;
+              final success = outcome.isApplied;
               if (!mounted) return;
               if (success) {
                 try {
