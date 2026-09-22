@@ -1,6 +1,6 @@
 # Static / per-pixel favorites — Report (2026-09-21)
 
-**Branch:** `feat/static-per-pixel-favorites` — local only, **not pushed, not tagged, version not bumped.**
+**Branch:** `feat/static-per-pixel-favorites` — **rebased 2026-09-21 evening onto `origin/release/store-submission-consolidated` @ `e9c20d8`** (was `64fa5af`; 12 behind / 4 ahead, zero file overlap, `git merge-tree` conflict-free, rebased tip tree `793b88c` identical to the dry run, `range-diff` all `=`). Version not bumped. Merge status: see the top of §0.
 **Base:** `origin/release/store-submission-consolidated` @ **`64fa5af`** (`chore(release): bump to 2.5.10+103`), fetched at start. Confirmed to contain this week's Save-to-Device / favorites fix: `fix/save-to-my-designs-and-favorites` (`aaa4ac1`) is an ancestor, via merge `c2b013a`. Isolated worktree; `main` and the shared checkout were not touched. The branch's auto-set upstream (it pointed at the consolidated remote) was unset so a bare `git push` from it cannot land there.
 **Firestore:** production project, live ruleset **`f7b0658e`** — byte-identical to `firestore.rules` at this tip (compared, §5). **The rules were not changed.**
 
@@ -9,6 +9,9 @@
 | `6999f4d` | `feat(favorites)` — a per-pixel favorite: stored as a My Designs design, applied through the chunked spine |
 | `1ac9eea` | `feat(pattern-editor)` — the heart works in Static; My Favorites applies through the one favorite applier |
 | `cfcbf09` | `test(hardware)` — Static favorite round trip, T27–T29 (RUN_HW-gated) |
+| *(rebased as `635902b` · `cb6765f` · `c8bac6d` · `60f3c9d` — same patches)* | |
+| `6c2e9d1` | `fix(geofence)` — a Static favorite as the Welcome Home action reaches the lights (the §3 open item); real-monitor unit test |
+| `b7539e8` | `test(hardware)` — Welcome Home firing a Static favorite against the bench, T30–T31 (RUN_HW-gated) |
 
 Every commit used explicit pathspecs. Each stands on its own: `6999f4d` was checked out separately (analyzer clean on the favorites tree, 44/44 tests); the tip is the full-suite run in §6.
 
@@ -18,9 +21,33 @@ Every commit used explicit pathspecs. Each stands on its own: `6999f4d` was chec
 
 ---
 
-## 0. Read this first: the bench round trip was NOT run
+## 0. Read this first: the bench round trip was RUN — twice — and PASSED
 
-**Step 3's bench verification is not done. Nothing in this report is HW evidence.**
+**Status (2026-09-21 evening, controller `192.168.1.150`, WLED 0.15.1 vid 2507300, 290 LEDs).** Everything in this box is **HW** or **DATA** evidence; the original §0 text is kept underneath as history.
+
+| Phase | Run 1 — `5d2b1b4` (pre-rebase, +103 spine) | Run 2 — rebased tip with the geofence fix (`b7539e8` content) |
+|---|---|---|
+| T27 export — old single message / new payload sent raw | 10,891 B → refused · 16,164 B → refused · frame changed **0/290** | 10,891 B → refused · **16,189 B** → refused · **0/290** |
+| T28 export — Static painted, hearted | **290/290 lit, 288/288 neighbour pairs differ**; exact red/gold/white cycle restarting at LED 128 (97/97/96); doc `pattern_data` 16,164 B, 128+162 groups, bri 180 | same frame; doc **16,189 B** — the +25 B is `brightness_stated:true`, written by consolidated's `customDesignFromEditablePattern` |
+| Firestore leg (client ID tokens, throwaway uids) | **22/22**; ruleset `f7b0658e` ≡ branch rules; grid query returned it (18,449 B on the wire); cleanup residue 0; real-favorites fingerprint identical (14 docs / 10 users, `4b0037c1c504ed9f`) | **22/22**; same ruleset; 18,476 B on the wire; residue 0; fingerprint identical |
+| T29 import — scramble (bri 90) → apply from My Favorites | applied frame vs editor's live frame **0/290 differ**; vs scramble 290/290; **3 requests** (base · per-pixel 2,372 B · 3,019 B); device `bri` 90→**180**. Second pass identical; after apply `on=true fx=[0,0] frz=[true,true]` | **0/290**; 290/290; 3 requests (2,372 / 3,019 B); `bri` **180** |
+| T30 geofence — arrival fires the Static favorite (real monitor, real enter-transition, real lookup, real applier) | — (fix not yet written) | frame vs editor's live frame **0/290 differ**; vs scramble 290/290; `on=true bri=180 fx=[0,0] frz=[true,true]`; **3 requests**; notification once, `Kansas City Chiefs` |
+| T31 geofence — an effect favorite through the same trigger (the unchanged path) | — | `on=true bri=96 fx=[15,15] frz=[false,false]`, both segments the favorite's colours; **1 request**, not per-pixel; notification once |
+| Controller after every teardown | independent WS frame 0/290 vs baseline ×3; `/json/state` 96/96 fields identical; `cfg.json` and `presets.json` md5 identical; uptime +430 s, no reboot | 0/290 ×2; 96/96; md5 identical; uptime +132 s, no reboot |
+
+Only `/json/state` was ever written (no `psave`, no `pdel`, no `/json/cfg`): `presets.json` is still the same 16,585 B with its 7 pre-existing corrupt `0xFF` bytes at the same offsets.
+
+**The rebase changed the brightness spine underneath this branch** (`fix/brightness-restore-consistency`, merged as `e9c20d8`: `customDesignFromEditablePattern` now writes `brightness_stated:true`, the spine reads `appliedBrightness`). Run 2 is the live proof that a Static favorite still applies at **180** through My Favorites (T29) and through the geofence (T30) on that spine — not a code reading.
+
+**Post-apply `frz=[true,true]`** is inherent to a per-pixel paint (WLED freezes a segment written through `i`), identical to a My Designs positional apply; not introduced here.
+
+Raw evidence (frames, states, wire logs, probe logs): the bench session's scratchpad `bench/` directory (`rt/` = run 1, `rt2/` = run 2).
+
+---
+
+### 0.1 History — written before the runs
+
+**(Superseded by the box above.)** Step 3's bench verification was not done when this section was first written; the text is kept so the plan it describes stays readable.
 
 The machine was not on the bench's network at any point in this session. It was tethered to a phone (`172.20.10.5`, the iPhone-hotspot subnet, over the USB Ethernet adapter) with Wi-Fi disconnected. `192.168.1.150` and the bridge at `.96` both timed out (ping 100 % loss; `curl` connect timeout). The Wi-Fi networks in range were a grocery store and a hotel at 12:12, and a completely different residential set at 12:34 — the machine was in transit. The home SSID was never visible, so there was nothing to join. The exact-pixel check reads the 290-LED frame buffer over the controller's LAN WebSocket, which the cloud relay does not carry, so there was no remote way to do it either.
 
@@ -114,9 +141,17 @@ The class is *"a favorite's stored payload is sent as one message."* Enumerated 
 | My Favorites card gradient / usage analytics | read `seg[0].col`, `fx` | **Unchanged and working** — that is what the summary `seg` is for |
 | Now Playing name match, AI intent classifier, variety profile | read the *name* only | Not in the class |
 | Explore "Recent Patterns" | — | Not favorites at all (usage events → `GradientPattern`); checked because the provider shares a name |
-| **Geofence trigger** (`geofence_monitor.dart`) | applies `pattern_data` via `applyToDevice` → raw `applyJson` | **OPEN — deliberately not touched. See below.** |
+| **Geofence trigger** (`geofence_monitor.dart`) | applied `pattern_data` via `applyToDevice` → raw `applyJson` | **FIXED on this branch after the rebase (`6c2e9d1`)** — a per-pixel favorite goes through `applyFavoritePayloadWith`; every other favorite keeps `applyToDevice` + the cold-start net, byte-for-byte (unit-tested against the pre-change call; T31 on hardware). See §3.1. |
 
-**Geofence is the one member I did not fix, and you should know why.** It is **dormant at this tip**: it looks favorites up by a camelCase `name` field that no document has, so it finds none and no Static favorite can reach it today. But a parallel session (`fix/geofence-favorites-lookup`) has **uncommitted edits in `geofence_monitor.dart`, `geofence_setup_screen.dart` and `favorites_providers.dart`** that revive exactly that lookup. Editing those files from here would have collided with live work in another window, so I stayed out of all three.
+### 3.1 Geofence — fixed after the rebase
+
+`fix/geofence-favorites-lookup` (`89065d7`) had already landed in consolidated (+104) by the time this branch was rebased, which made the trigger live: a Static favorite chosen as the Welcome Home action would have been refused by size at both attempts while the notification still fired. `6c2e9d1` adds `_applyFavorite` to the monitor: `perPixelDesignOfFavorite(payload) != null` → `applyFavoritePayloadWith(ref.read, payload)`; otherwise the exact pre-change sequence (`applyToDevice(payload, labelHint: actionName)`, then the bare `applyJson` net). Reasons for the split rather than routing everything through the applier: `applyToDevice` carries the preview + Now Playing label fan-out and the U1-gate net that the applier does not, and the brief was *no behaviour change for non-per-pixel favorites* — the unit test proves the effect-favorite write is identical to a direct `applyToDevice` call, and T31 shows it on hardware.
+
+Deliberately **not** changed: the notification still reports the trigger, not a confirmed frame (as it always has, for every fallback too); and on a cold start with no channel map a per-pixel favorite is logged as `noChannels` and nothing is posted — there is no honest single-message fallback for a picture.
+
+Test seams added to `GeofenceMonitor` (`@visibleForTesting`): `uidForTest`, `firestoreForTest`, `welcomeHomeNotifier`, `onPositionForTest`. They replace auth, the Firestore instance, the notification plugin and the position stream — none of which decides what reaches the lights — so the real config parse, enter-transition, lookup and apply run in `geofence_static_favorite_trigger_test.dart` (fake Firestore, documents from the real writer, a recorder controller that enforces the 4 KB rule) and in `geofence_static_favorite_live_test.dart` (the document real Firestore returned, the bench controller).
+
+**Geofence was the one member I did not fix in the first pass, and you should know why.** It is **dormant at this tip**: it looks favorites up by a camelCase `name` field that no document has, so it finds none and no Static favorite can reach it today. But a parallel session (`fix/geofence-favorites-lookup`) has **uncommitted edits in `geofence_monitor.dart`, `geofence_setup_screen.dart` and `favorites_providers.dart`** that revive exactly that lookup. Editing those files from here would have collided with live work in another window, so I stayed out of all three.
 
 When that branch lands, a Static favorite picked as a geofence action would be refused by size at both of its `applyJson` attempts — **the lights would do nothing and the "Welcome Home" notification would still fire.** The fix is one call: `applyFavoritePayloadWith(ref.read, payload)` in place of `applyToDevice` + the bare `applyJson` fallback. It takes a `ProviderReader` for exactly this reason. **This must be resolved at convergence, whichever branch merges second.**
 
@@ -198,6 +233,16 @@ Rows 12–20 are the "nothing was loosened" half: the rule file is unchanged and
 
 The baseline was **measured**, in a throwaway detached worktree at `64fa5af` — not carried over from last week's report, whose tip this is not.
 
+**After the rebase + geofence fix (measured the same way, detached worktrees):**
+
+| | Baseline `e9c20d8` (consolidated) | Rebased tip `b7539e8` | Δ |
+|---|---|---|---|
+| `flutter analyze` errors / warnings / infos | 0 / 12 / 370 (382) | **0 / 12 / 370 (382)** | **issue set identical** — diffed line by line, positions stripped: nothing only-in-baseline, nothing only-in-tip |
+| `flutter test` passed | 3,301 | **3,330** | +29 |
+| skipped | 27 | **34** | +7 — the `RUN_HW`-gated hardware tests |
+| failed | 0 | **0** | — |
+
+
 Added: `favorite_design_payload_test` 10 · `favorite_apply_test` 9 · `edit_pattern_static_favorite_test` 4 (pumps the real screen). `favorites_save_buttons_test`: the two tests that asserted the decline are replaced by two asserting its successor (a builder that cannot build shows *its* reason and writes nothing; a filled heart still un-fills) — net 0. Skipped +5 = the hardware file's five gated tests.
 
 ---
@@ -206,17 +251,17 @@ Added: `favorite_design_payload_test` 10 · `favorite_apply_test` 9 · `edit_pat
 
 | Item | State |
 |---|---|
-| **Bench** | **Never reached. Nothing was written to it** — no state, no preset, no cfg. There is nothing to restore. |
+| **Bench** | **Run twice** (§0). Only `/json/state` writes; look restored after every teardown, verified by independent frame + state reads; `cfg.json` / `presets.json` byte-identical. |
 | **Production Firestore — real data** | **Unchanged.** Every real `favorites` document fingerprinted (path + updateTime) before and after: **11 docs / 8 users, sha256 `3c9a6b1631f91948` — identical.** |
 | **Production Firestore — throwaway data** | Two Auth users (`zz_rules_probe_staticfav_{owner,other}_0921`), two favorites. Both favorites were deleted by their owner inside the probe; cleanup removed the two Auth users. **Residue sweep: 0.** No `users/{uid}` doc was ever created, so `assignReferralCode` never fired; nothing triggers on `favorites` (re-checked: the only reference in `functions/` is the account-purge sweep). |
 | **Rules** | Not deployed, not edited. Live `f7b0658e` before and after. |
 | **Worktrees** | The branch worktree is clean. The throwaway detached worktree used for the measured baseline (`wt-baseline` @ `64fa5af`) was removed at the end of the session. One scratch test written to measure payload sizes was deleted before any commit. |
-| **Git** | 3 commits + this report, local only. Nothing pushed, tagged or bumped. |
+| **Git** | Rebased onto `e9c20d8`; + `6c2e9d1` (geofence fix + unit test), `b7539e8` (geofence bench test), and this report update. Not tagged, not bumped. |
 
 **Parallel sessions to reconcile at convergence:**
 
-- **`fix/geofence-favorites-lookup`** — see §3. Overlapping *files*: none with this branch (I stayed out of all three of theirs). Overlapping *behaviour*: their trigger must call `applyFavoritePayloadWith`.
-- **`fix/brightness-restore-consistency`** (at `64fa5af`) — I did not read its contents. If it changes how `statesBrightness` or the spine's `brightness` argument work, a Static favorite inherits that, since it restores brightness through exactly that path. Worth one look when both are in.
+- **`fix/geofence-favorites-lookup`** — landed first (+104); resolved here by `6c2e9d1` (§3.1).
+- **`fix/brightness-restore-consistency`** — landed first (`e9c20d8`). It does change the spine (`appliedBrightness`, `brightness_stated`); a Static favorite inherits it, and run 2 (§0) is the live proof it still restores 180.
 
 **Found, not fixed — outside this change:** `lib/features/autopilot/learning_providers.dart:295` casts the usage log's `wled` field `as Map<String, dynamic>?`. The writer has always stored it as a **`jsonEncode`d string** (`user_service.dart:338`). That cast throws on any usage event carrying a payload — the same String-vs-Map break last week's pass found in both favorites readers — and would blank whatever streams from that provider (Explore's "Recent Patterns" is the likely casualty). **Read from the code, not demonstrated at runtime.** It is independent of this branch (payload size is irrelevant to it), which is why I left it.
 
@@ -224,15 +269,15 @@ Added: `favorite_design_payload_test` 10 · `favorite_apply_test` 9 · `edit_pat
 
 ## 8. Decisions waiting on you
 
-1. **Run the bench phases** (§0) before this converges. That is the missing third of Step 3, and I would not merge without it.
-2. **Geofence** (§3) — who adopts the applier: this branch after theirs lands, or theirs after this one.
+1. ~~Run the bench phases~~ — done twice (§0).
+2. ~~Geofence~~ — done on this branch (§3.1).
 3. **One heart, one id** is now slightly more visible. A Static Chiefs and an Animated Chiefs are the *same* favorite (keyed by source-card id), so favoriting one replaces the other's stored look. Unchanged from last week, and the rule handles it (row 5) — but Static used to be unreachable, so nobody could hit it. SAVE remains the home for keeping variations side by side.
 4. **Static favorites can't be scheduled or used for Game Day** — same firmware fact as Static designs (a WLED preset cannot hold a pixel buffer). Nothing offers a favorite as a schedule source today; flagging it before something does.
 
 ## 9. For project memory
 
 - A **per-pixel favorite** stores a `CustomDesign` under `lumina_design` **inside** `pattern_data`; the doc shape and rule are unchanged. It rides inside the payload because the payload travels: usage log → habit learner → auto-favorite, and geofence.
-- **Anything that re-applies a favorite must call `applyFavoritePayloadWith`.** A raw `applyJson` of a Static favorite is refused by size (16 KB vs 4 KB). Geofence does not yet — dormant at `64fa5af`, live once `fix/geofence-favorites-lookup` lands.
+- **Anything that re-applies a favorite must call `applyFavoritePayloadWith`.** A raw `applyJson` of a Static favorite is refused by size (16 KB vs 4 KB). Geofence does, as of `6c2e9d1` (per-pixel only; effect favorites keep `applyToDevice` for its label fan-out and cold-start net).
 - The bench's channels (128 / 162) each fit one 224-LED chunk: on this bench "chunked" means base + one paint per channel (3 requests). An intra-channel split needs a channel > 224 LEDs and can only be shown in a unit test here.
-- **T27–T29 were written but never run** — the machine was off the bench LAN all session.
+- **T27–T29 ran twice and passed** (at `5d2b1b4` and at the rebased tip); **T30–T31** (geofence) passed at the rebased tip. Frame-buffer evidence, not HTTP 200s.
 - `learning_providers.dart:295` casts the usage log's string `wled` field as a Map (unfixed, undemonstrated).
