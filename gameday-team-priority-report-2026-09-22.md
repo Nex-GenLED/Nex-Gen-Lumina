@@ -49,21 +49,21 @@ Simulated against the read-only production snapshot taken for the audit (20 Game
 | Had a list entry dropped (legacy free text, no config) | 1 |
 | Had configs appended because the profile array had drifted | 6 |
 
-The nine where the winner changes, healed order versus what the loop used to obey:
+The nine where the winner changes, healed order versus what the loop used to obey. Accounts are referred to by label; the eight customer accounts are A-H, in the same order, and the ninth is the App Store reviewer demo account rather than a customer.
 
 | Account | Enabled teams | Healed #1 | Old #1 (doc-id) |
 |---|---|---|---|
-| `RGPinapl…` | 7 | `nfl_chiefs` | `mlb_royals` |
-| `j8eXTfcs…` | 2 | `mlb_royals` | `mlb_royals` (order below it changes) |
-| `NmDukd5r…` | 2 | `mlb_royals` | `mlb_royals` (order below it changes) |
-| `reviewer…` | 2 | `nfl_chiefs` | `mlb_royals` |
-| `Pqptfawp…` | 1 | `mlb_royals` | `fifa_mexico` |
-| `r0iBwg8b…` | 0 | `nfl_chiefs` | `mlb_royals` |
-| `IARQUnn9…` | 0 | `nfl_seahawks` | `mlb_mariners` |
-| `YcSGiwes…` | 0 | `nhl_blues` | `mls_sporting_kc` |
-| `CeDVdKfK…` | 0 | `ncaa_central_michigan` | (same #1, #2/#3 swap) |
+| A | 7 | `nfl_chiefs` | `mlb_royals` |
+| B | 2 | `mlb_royals` | `mlb_royals` (order below it changes) |
+| C | 2 | `mlb_royals` | `mlb_royals` (order below it changes) |
+| Reviewer demo | 2 | `nfl_chiefs` | `mlb_royals` |
+| D | 1 | `mlb_royals` | `fifa_mexico` |
+| E | 0 | `nfl_chiefs` | `mlb_royals` |
+| F | 0 | `nfl_seahawks` | `mlb_mariners` |
+| G | 0 | `nhl_blues` | `mls_sporting_kc` |
+| H | 0 | `ncaa_central_michigan` | (same #1, #2/#3 swap) |
 
-The reviewer account is the sharpest case: it has Chiefs and Royals both enabled, ranks Chiefs first, and the loop ran Royals first. That is the production shape the bench reproduces.
+The reviewer demo account is the sharpest case: it has Chiefs and Royals both enabled, ranks Chiefs first, and the loop ran Royals first. That is the production shape the bench reproduces.
 
 ---
 
