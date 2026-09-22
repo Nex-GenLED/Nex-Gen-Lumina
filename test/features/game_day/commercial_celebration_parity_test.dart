@@ -103,7 +103,10 @@ void main() {
 
     test('a distinct effect passes through unmodified, as residential does',
         () {
-      final cfg = _asAlertConfig(_profile(celebrationEffectId: 79));
+      // A pick the picker actually offers (Meteor). An id outside
+      // celebrationPickIds resolves to null since the 2026-09-21 withdrawal
+      // of Bouncing Balls — see celebration_contrast_test.dart.
+      final cfg = _asAlertConfig(_profile(celebrationEffectId: 76));
       final r = resolveCelebration(
         chosenEffectId: cfg.celebrationEffectId,
         chosenSpeed: cfg.celebrationSpeed,
@@ -115,7 +118,7 @@ void main() {
         },
       );
       expect(r!.usedFallback, isFalse);
-      expect(r.effectId, 79);
+      expect(r.effectId, 76);
       expect(r.speed, 200);
     });
 

@@ -951,6 +951,13 @@ class WledEffectsCatalog {
   /// looks first, then the chase family, the ball physics, the strobes, and
   /// the fireworks. Order is presentation order in the picker — do not sort.
   ///
+  /// WITHDRAWN 2026-09-21: Bouncing Balls (91). It rebooted the bench
+  /// controller (WLED 0.15.1, ESP32, 290 LEDs) mid-celebration during bench
+  /// testing, a few seconds in, at a stage re-POST of the same effect. Do not
+  /// re-add it without a hardware root cause. A config that still holds 91 is
+  /// treated as "no pick" by `resolveCelebration` (the legacy sequence fires)
+  /// and the picker reseeds it on the first entry.
+  ///
   /// Every id here is a 1D, non-audio effect present on the pinned firmware
   /// (WLED 0.15.1); `celebration_picker_test.dart` asserts that against
   /// [standardEffects] so a catalog edit cannot silently strand an entry.
@@ -964,7 +971,6 @@ class WledEffectsCatalog {
     76,  // Meteor
     113, // Washing Machine
     27,  // Android
-    91,  // Bouncing Balls
     37,  // Chase 2
     54,  // Chase 3
     32,  // Chase Flash Rnd

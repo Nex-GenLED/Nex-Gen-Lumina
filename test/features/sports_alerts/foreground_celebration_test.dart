@@ -23,6 +23,7 @@ import 'package:nexgen_command/features/sports_alerts/services/espn_api_service.
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_coordinator.dart';
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/services/score_monitor_service.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 
 // ── Fakes ──────────────────────────────────────────────────────────────────
 
@@ -267,7 +268,7 @@ void main() {
 
     test('different picks put different effects on the wire', () async {
       final seen = <int>{};
-      for (final fx in [28, 76, 91, 25]) {
+      for (final fx in [28, 76, 113, 25]) {
         final d = _FakeDelivery()..captureReturn = look(0);
         final c = build(_FakeMonitor(), d);
         c.syncLiveTeams([picked(fx)]);
@@ -280,6 +281,31 @@ void main() {
         seen.add(fx);
       }
       expect(seen, hasLength(4));
+    });
+
+    // Bouncing Balls (91) was withdrawn from the picker on 2026-09-21 after it
+    // rebooted the bench controller mid-celebration. A config saved before
+    // the withdrawal still holds 91; it must fire as "no pick", never as 91.
+    test('a stored pick the picker no longer offers (91) fires the LEGACY '
+        'sequence — nothing withdrawn reaches the lights', () async {
+      expect(WledEffectsCatalog.celebrationPickIds.contains(91), isFalse);
+
+      final d = _FakeDelivery()..captureReturn = look(0);
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(91)]); // stale config: Bouncing Balls
+      c.handleAlert(_event(anySlug));
+      await _settle();
+
+      expect(segsOf(d.plays.single).map((s) => s['fx']),
+          everyElement(isNot(91)));
+      final legacy = AlertTriggerService.buildAnimationSteps(
+          AlertEventType.touchdown, teamColors);
+      expect(d.plays.single.map((s) => s.payload).toList(),
+          legacy.map((s) => s.payload).toList(),
+          reason: 'a withdrawn id is "no pick": the legacy sequence, verbatim');
+      expect(d.log, ['capture', 'play(3)', 'revert']);
     });
 
     test('a pick the house is ALREADY showing → the white-strobe fallback',
@@ -356,14 +382,14 @@ void main() {
       final c = build(_FakeMonitor(), d);
       addTearDown(c.dispose);
 
-      c.syncLiveTeams([picked(91)]); // Bouncing Balls
+      c.syncLiveTeams([picked(27)]); // Android
       // Final whistle: the phase machine drops the team out of liveGame at the
       // same moment the diff engine emits the win.
       c.syncLiveTeams(const []);
       c.handleAlert(_event(anySlug, type: AlertEventType.win));
       await _settle();
 
-      expect(segsOf(d.plays.single).map((s) => s['fx']), everyElement(91));
+      expect(segsOf(d.plays.single).map((s) => s['fx']), everyElement(27));
     });
 
     test('a pick changed mid-game applies to the NEXT celebration and does '
