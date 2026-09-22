@@ -34,6 +34,10 @@ import '../wled/zone_providers.dart';
 import 'game_day_apply.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
+import '../autopilot/team_priority.dart';
+import '../site/user_profile_providers.dart';
+import '../sports_alerts/services/team_registration_service.dart';
+import '../../widgets/team_priority_list.dart';
 
 // ---------------------------------------------------------------------------
 // Sport emoji helper
@@ -111,6 +115,11 @@ class GameDayScreen extends ConsumerWidget {
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _TeamCard(entry: entry),
                       )),
+                  // The hierarchy, on the screen that uses it. It has always
+                  // existed and has always been editable — but only in Edit
+                  // Profile, three taps away from the feature it governs, so
+                  // in practice nobody knew the order meant anything.
+                  const _TeamPrioritySection(),
                 ] else
                   _buildEmptyTeamsState(),
 
@@ -2448,4 +2457,114 @@ class _GlassAppBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _GlassAppBarDelegate oldDelegate) =>
       child != oldDelegate.child || topPadding != oldDelegate.topPadding;
+}
+
+
+// ===========================================================================
+// Team priority — the hierarchy, on the screen it governs
+// ===========================================================================
+
+/// Drag-to-reorder hierarchy for the user's Game Day teams.
+///
+/// Renders the SAME control as Edit Profile ([TeamPriorityList]) and persists
+/// through the SAME write ([TeamRegistrationService.setTeamPriority]), so the
+/// two surfaces cannot show or store different orders.
+///
+/// Unlike Edit Profile — a form with a Save button — this writes immediately.
+/// A user dragging their #1 team here is making a direct statement about what
+/// should light the house tonight, and there is no Save button on this screen
+/// for them to look for.
+class _TeamPrioritySection extends ConsumerStatefulWidget {
+  const _TeamPrioritySection();
+
+  @override
+  ConsumerState<_TeamPrioritySection> createState() =>
+      _TeamPrioritySectionState();
+}
+
+class _TeamPrioritySectionState extends ConsumerState<_TeamPrioritySection> {
+  /// Optimistic order held while the Firestore write round-trips, so the row
+  /// the user just dragged does not snap back for a frame.
+  List<TeamPriorityEntry>? _pending;
+
+  @override
+  Widget build(BuildContext context) {
+    // Heal-on-read. Watching this here is what makes opening Game Day the
+    // moment an account's slug ordering gets written — no bulk backfill, and
+    // nothing happens for an account that never opens the feature.
+    ref.watch(gameDayTeamPriorityHealProvider);
+
+    final slugPriority = ref.watch(gameDayTeamPriorityProvider);
+    final profile = ref.watch(currentUserProfileProvider).valueOrNull;
+    final names = (profile?.sportsTeamPriority.isNotEmpty ?? false)
+        ? profile!.sportsTeamPriority
+        : (profile?.sportsTeams ?? const <String>[]);
+
+    final entries = _pending ??
+        buildPriorityEntries(
+          slugPriority: slugPriority,
+          profileNames: names,
+        );
+
+    // One team cannot contend with itself; the control would be a drag handle
+    // that does nothing.
+    if (entries.length < 2) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        const SectionHeader(
+          title: 'Team Priority',
+          icon: Icons.low_priority,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Drag to reorder. When two of your teams play at the same time, '
+          'the top team lights the house and its score alerts are the ones '
+          'that fire.',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: NexGenPalette.textMedium),
+        ),
+        const SizedBox(height: 8),
+        TeamPriorityList(
+          entries: entries,
+          onReorderEntries: (reordered) {
+            setState(() => _pending = reordered);
+            unawaited(_persist(reordered));
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _persist(List<TeamPriorityEntry> entries) async {
+    final uid = ref.read(currentUserProfileProvider).valueOrNull?.id;
+    if (uid == null || uid.isEmpty) {
+      if (mounted) setState(() => _pending = null);
+      return;
+    }
+    try {
+      await ref
+          .read(teamRegistrationServiceProvider)
+          .setTeamPriority(uid: uid, entries: entries);
+    } catch (e) {
+      debugPrint('[GameDay] team priority write failed: $e');
+      if (mounted) {
+        // Drop the optimistic order so the UI falls back to what is actually
+        // stored, rather than showing an order the arbiter will not honour.
+        setState(() => _pending = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't save the new team order. Try again."),
+          ),
+        );
+      }
+      return;
+    }
+    // Let the stream take over again now that it carries this order.
+    if (mounted) setState(() => _pending = null);
+  }
 }

@@ -8,7 +8,6 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/house_photo_uploader.dart';
-import 'package:nexgen_command/data/sports_teams.dart';
 import 'package:nexgen_command/widgets/address_autocomplete.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
 import 'package:nexgen_command/utils/time_format.dart';
@@ -21,6 +20,8 @@ import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
 import 'package:nexgen_command/features/sports_alerts/services/team_registration_service.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
+import 'package:nexgen_command/features/autopilot/team_priority.dart';
+import 'package:nexgen_command/widgets/team_priority_list.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   const EditProfileScreen({super.key});
@@ -118,6 +119,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   List<String> _preferredEffectStyles = ['static', 'animated'];
   List<CustomHoliday> _customHolidays = [];
   List<String> _sportsTeamPriority = [];
+  /// Slug twin of [_sportsTeamPriority], kept in step by the same reorder
+  /// callback and written by the same Save. Two fields, one gesture — see
+  /// team_priority.dart.
+  List<String> _gameDayTeamPriority = [];
   bool _weeklySchedulePreviewEnabled = true;
 
   // Display preferences
@@ -173,6 +178,18 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       } else if (_sportsTeamPriority.isEmpty && m.sportsTeams.isNotEmpty) {
         // Initialize priority from teams list if not set
         _sportsTeamPriority = List.from(m.sportsTeams);
+      }
+      if (_gameDayTeamPriority.isEmpty) {
+        // Seed from the stored slug field, or derive it from the names the
+        // user has arranged when the account predates that field. Same
+        // derivation the Game Day screen's heal-on-read uses, so opening
+        // either screen first produces the same order.
+        _gameDayTeamPriority = m.gameDayTeamPriority.isNotEmpty
+            ? List.from(m.gameDayTeamPriority)
+            : alignPriorityLists(buildPriorityEntries(
+                slugPriority: const [],
+                profileNames: _sportsTeamPriority,
+              )).slugs;
       }
       _weeklySchedulePreviewEnabled = m.weeklySchedulePreviewEnabled;
       _timeFormat = m.timeFormat;
@@ -238,6 +255,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         preferredEffectStyles: _preferredEffectStyles,
         customHolidays: _customHolidays,
         sportsTeamPriority: _sportsTeamPriority,
+        gameDayTeamPriority: _gameDayTeamPriority,
         weeklySchedulePreviewEnabled: _weeklySchedulePreviewEnabled,
         timeFormat: _timeFormat,
       );
@@ -610,7 +628,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 onRemoveHoliday: (id) => setState(() => _customHolidays = _customHolidays.where((h) => h.id != id).toList()),
                 sportsTeams: _sportsTeams,
                 sportsTeamPriority: _sportsTeamPriority,
-                onTeamPriorityChanged: (v) => setState(() => _sportsTeamPriority = v),
+                gameDayTeamPriority: _gameDayTeamPriority,
+                // ONE gesture, BOTH fields. Deriving them separately is how
+                // the two screens would come to disagree about the #1 team.
+                onTeamPriorityChanged: (entries) {
+                  final aligned = alignPriorityLists(entries);
+                  setState(() {
+                    _sportsTeamPriority = aligned.names;
+                    _gameDayTeamPriority = aligned.slugs;
+                  });
+                },
                 weeklyPreviewEnabled: _weeklySchedulePreviewEnabled,
                 onWeeklyPreviewChanged: (v) => setState(() => _weeklySchedulePreviewEnabled = v),
               ),
@@ -1233,7 +1260,10 @@ class _AutopilotCard extends StatelessWidget {
   final void Function(String id) onRemoveHoliday;
   final List<String> sportsTeams;
   final List<String> sportsTeamPriority;
-  final ValueChanged<List<String>> onTeamPriorityChanged;
+  final List<String> gameDayTeamPriority;
+  /// Receives the FULL reordered row list; the host derives both stored
+  /// fields from it so the two can never disagree about order.
+  final ValueChanged<List<TeamPriorityEntry>> onTeamPriorityChanged;
   final bool weeklyPreviewEnabled;
   final ValueChanged<bool> onWeeklyPreviewChanged;
 
@@ -1249,6 +1279,7 @@ class _AutopilotCard extends StatelessWidget {
     required this.onRemoveHoliday,
     required this.sportsTeams,
     required this.sportsTeamPriority,
+    required this.gameDayTeamPriority,
     required this.onTeamPriorityChanged,
     required this.weeklyPreviewEnabled,
     required this.onWeeklyPreviewChanged,
@@ -1392,9 +1423,14 @@ class _AutopilotCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(color: NexGenPalette.textMedium),
               ),
               const SizedBox(height: 8),
-              _TeamPriorityList(
-                teams: sportsTeamPriority.isNotEmpty ? sportsTeamPriority : sportsTeams,
-                onReorder: onTeamPriorityChanged,
+              TeamPriorityList(
+                entries: buildPriorityEntries(
+                  slugPriority: gameDayTeamPriority,
+                  profileNames: sportsTeamPriority.isNotEmpty
+                      ? sportsTeamPriority
+                      : sportsTeams,
+                ),
+                onReorderEntries: onTeamPriorityChanged,
               ),
             ],
 
@@ -1613,153 +1649,3 @@ class _AddHolidaySheetState extends State<_AddHolidaySheet> {
   }
 }
 
-/// Reorderable list for team priority. Each row shows the team's gradient
-/// color avatar + full display name (matching the chip styling used in the
-/// Interests card) plus a numbered priority circle and drag handle.
-///
-/// The single styling means users see one consistent representation of each
-/// team across the profile screen — but the priority list keeps the
-/// drag-to-reorder behavior that autopilot/game-day rely on for tie-breaking
-/// when multiple teams play on the same day.
-class _TeamPriorityList extends StatelessWidget {
-  final List<String> teams;
-  final ValueChanged<List<String>> onReorder;
-
-  const _TeamPriorityList({required this.teams, required this.onReorder});
-
-  @override
-  Widget build(BuildContext context) {
-    return ReorderableListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: teams.length,
-      onReorder: (oldIndex, newIndex) {
-        final reordered = List<String>.from(teams);
-        if (newIndex > oldIndex) newIndex--;
-        final item = reordered.removeAt(oldIndex);
-        reordered.insert(newIndex, item);
-        onReorder(reordered);
-      },
-      itemBuilder: (context, index) {
-        final teamName = teams[index];
-        final team = SportsTeamsDatabase.getByName(teamName);
-        final colors = team?.colors ?? const [Colors.grey, Colors.grey];
-        final displayName = team?.displayName ?? teamName;
-
-        return ListTile(
-          key: ValueKey(teamName),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          leading: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.drag_handle, color: Colors.grey),
-              const SizedBox(width: 8),
-              // Numbered priority circle — keeps the order index visible
-              // and highlights the primary team in cyan.
-              Container(
-                width: 24,
-                height: 24,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: index == 0
-                      ? NexGenPalette.cyan
-                      : Colors.grey.withValues(alpha: 0.3),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  '${index + 1}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: index == 0 ? Colors.black : Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              // Team color gradient avatar — matches the TeamChip styling
-              // used in the Interests card so the user sees one consistent
-              // visual representation of the team.
-              _TeamGradientAvatar(colors: colors),
-            ],
-          ),
-          title: Text(
-            displayName,
-            style: const TextStyle(fontWeight: FontWeight.w500),
-          ),
-          subtitle: team?.league != null
-              ? Text(
-                  team!.league,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: NexGenPalette.textMedium,
-                  ),
-                )
-              : null,
-          trailing: index == 0
-              ? Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: NexGenPalette.cyan.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'Primary',
-                    style: TextStyle(
-                        fontSize: 11, color: NexGenPalette.cyan),
-                  ),
-                )
-              : null,
-        );
-      },
-    );
-  }
-}
-
-/// Small circular gradient avatar showing a team's primary/secondary colors —
-/// inline duplicate of `_TeamColorIcon` from team_autocomplete.dart so the
-/// priority list row renders the same visual without exporting the private
-/// widget.
-class _TeamGradientAvatar extends StatelessWidget {
-  static const double _size = 24;
-  final List<Color> colors;
-
-  const _TeamGradientAvatar({required this.colors});
-
-  @override
-  Widget build(BuildContext context) {
-    if (colors.isEmpty) {
-      return Container(
-        width: _size,
-        height: _size,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          color: Colors.grey,
-        ),
-      );
-    }
-    if (colors.length == 1) {
-      return Container(
-        width: _size,
-        height: _size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: colors.first,
-        ),
-      );
-    }
-    return Container(
-      width: _size,
-      height: _size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          colors: colors.take(2).toList(),
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: Colors.white24, width: 1),
-      ),
-    );
-  }
-}

@@ -194,8 +194,25 @@ class UserModel {
   final DateTime? gameDayLastGenerated;
   /// User-added custom holidays (birthdays, anniversaries, etc.)
   final List<CustomHoliday> customHolidays;
-  /// Ordered list of sports teams by preference (first = highest priority)
+  /// Ordered list of sports teams by preference (first = highest priority),
+  /// as DISPLAY NAMES ("Kansas City Chiefs").
+  ///
+  /// Consumed by the Edit Profile reorder list, the Interests card, the
+  /// installer handoff and `gameDayTeamsProvider`'s membership filter, none of
+  /// which know about slugs. Kept as-is; [gameDayTeamPriority] is the slug
+  /// twin the Game Day arbiter reads.
   final List<String> sportsTeamPriority;
+  /// The SAME ordering as [sportsTeamPriority], expressed as Game Day team
+  /// slugs ("nfl_chiefs") — `game_day_team_priority`.
+  ///
+  /// This is what [GameDayPriorityResolver] ranks against, because a config
+  /// document's id is its slug. The two lists are written together by every
+  /// reorder path (see `team_priority.dart`) so they cannot disagree about
+  /// order; this one simply omits rows that match no catalogue team.
+  ///
+  /// Empty on accounts that have not yet opened Game Day since the hierarchy
+  /// shipped — it is populated lazily, heal-on-read, per user.
+  final List<String> gameDayTeamPriority;
   /// Whether to receive weekly schedule preview notifications (Sunday evenings)
   final bool weeklySchedulePreviewEnabled;
   /// Whether autopilot should auto-detect game days and start monitoring
@@ -349,6 +366,7 @@ class UserModel {
     this.gameDayLastGenerated,
     this.customHolidays = const [],
     List<String>? sportsTeamPriority,
+    List<String>? gameDayTeamPriority,
     this.weeklySchedulePreviewEnabled = true,
     this.autoDetectGameDays = true,
     this.preGameLighting = true,
@@ -407,7 +425,8 @@ class UserModel {
         preferredEffectStyles = InputValidation.validateStringList(preferredEffectStyles) .isEmpty
             ? const ['static', 'animated']
             : InputValidation.validateStringList(preferredEffectStyles),
-        sportsTeamPriority = InputValidation.validateStringList(sportsTeamPriority);
+        sportsTeamPriority = InputValidation.validateStringList(sportsTeamPriority),
+        gameDayTeamPriority = InputValidation.validateStringList(gameDayTeamPriority);
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
@@ -479,6 +498,10 @@ class UserModel {
               .toList() ??
           const [],
       sportsTeamPriority: (json['sports_team_priority'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      gameDayTeamPriority: (json['game_day_team_priority'] as List?)
               ?.map((e) => e.toString())
               .toList() ??
           const [],
@@ -626,6 +649,7 @@ class UserModel {
         'game_day_last_generated': Timestamp.fromDate(gameDayLastGenerated!),
       'custom_holidays': customHolidays.map((e) => e.toJson()).toList(),
       'sports_team_priority': sportsTeamPriority,
+      'game_day_team_priority': gameDayTeamPriority,
       'weekly_schedule_preview_enabled': weeklySchedulePreviewEnabled,
       'auto_detect_game_days': autoDetectGameDays,
       'pre_game_lighting': preGameLighting,
@@ -720,6 +744,7 @@ class UserModel {
     DateTime? gameDayLastGenerated,
     List<CustomHoliday>? customHolidays,
     List<String>? sportsTeamPriority,
+    List<String>? gameDayTeamPriority,
     bool? weeklySchedulePreviewEnabled,
     bool? autoDetectGameDays,
     bool? preGameLighting,
@@ -807,6 +832,7 @@ class UserModel {
       gameDayLastGenerated: gameDayLastGenerated ?? this.gameDayLastGenerated,
       customHolidays: customHolidays ?? this.customHolidays,
       sportsTeamPriority: sportsTeamPriority ?? this.sportsTeamPriority,
+      gameDayTeamPriority: gameDayTeamPriority ?? this.gameDayTeamPriority,
       weeklySchedulePreviewEnabled: weeklySchedulePreviewEnabled ?? this.weeklySchedulePreviewEnabled,
       autoDetectGameDays: autoDetectGameDays ?? this.autoDetectGameDays,
       preGameLighting: preGameLighting ?? this.preGameLighting,

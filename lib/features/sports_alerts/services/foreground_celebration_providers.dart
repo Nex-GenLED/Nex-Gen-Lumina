@@ -134,9 +134,22 @@ List<CelebrationTeam> computeLiveCelebrationTeams({
   // Union the live team slugs from both phase machines. A Set collapses a team
   // that is live in BOTH machines to a single slug, so the emission below can
   // never yield two entries for it (no double-poll, no stacked celebration).
+  //
+  // ── ONLY THE TEAM THAT HOLDS THE HOUSE CELEBRATES (2026-09-22) ────────────
+  // `ownsLights`, not `isActive`. A DEFERRED autopilot session is a team the
+  // user follows whose game is running while a higher-priority team's game
+  // owns the lights. Its scores must not interrupt the team the user ranked
+  // first — a Royals run-scored flash on top of a live Chiefs drive is the
+  // same wrong-team problem as the base design, one layer up. The deferred
+  // session stays tracked, and the moment it takes over (hand-off flips
+  // `deferred` to false) this derivation picks it up and its alerts begin.
+  //
+  // Ephemeral sessions are NOT filtered: that machine has no deferral concept
+  // because it only exists when the user explicitly said "light it up for
+  // this game now", which is a direct instruction about what is current.
   final liveSlugs = <String>{
     for (final s in sessions.values)
-      if (s.phase == AutopilotSessionPhase.liveGame) s.teamSlug,
+      if (s.phase == AutopilotSessionPhase.liveGame && s.ownsLights) s.teamSlug,
     for (final e in ephemeralSessions)
       if (e.phase == EphemeralSessionPhase.liveGame) e.teamSlug,
   };
