@@ -164,3 +164,17 @@ int alternatingBandIndex(int index, int ledsPerColor, int colorCount) {
   if (n == 1) return 0;
   return (index < 0 ? 0 : index) ~/ w % n;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stored form (ChannelDesign.solid_layout)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A [SolidLayout] as the snake_case name a saved design stores.
+String solidLayoutToJson(SolidLayout layout) =>
+    layout == SolidLayout.alternating ? 'alternating' : 'blocks';
+
+/// Inverse of [solidLayoutToJson]. Absent or unrecognised reads as
+/// [SolidLayout.blocks] — the only layout `toWledPayload` could emit before
+/// the field existed, so every design saved earlier fires exactly as it did.
+SolidLayout solidLayoutFromJson(Object? value) =>
+    value == 'alternating' ? SolidLayout.alternating : SolidLayout.blocks;
