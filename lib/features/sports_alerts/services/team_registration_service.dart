@@ -20,6 +20,20 @@ import '../../autopilot/game_day_autopilot_config.dart';
 import '../../autopilot/team_priority.dart';
 import '../data/team_colors.dart';
 
+/// Why [TeamRegistrationService.onTeamsChanged] fired.
+///
+/// A listener that repopulates the Game Day calendar must react to exactly one
+/// of these. Adding a team already triggers its own populate at the call site;
+/// reordering triggers nothing at all, which is the gap this enum closes.
+enum TeamsChangedReason {
+  /// A team was added or removed. The team SET changed.
+  membership,
+
+  /// The user rearranged the hierarchy. The set is identical; only the order
+  /// — and therefore which team owns a shared night — changed.
+  priorityReordered,
+}
+
 class TeamRegistrationService {
   TeamRegistrationService({
     FirebaseFirestore? firestore,
@@ -28,11 +42,19 @@ class TeamRegistrationService {
 
   final FirebaseFirestore _firestore;
 
-  /// Cache-invalidation seam. Step 4 wires this from
-  /// [patternRepositoryProvider] so adding/removing a team rebuilds the
-  /// Explore "My Teams" folder without a profile-stream round-trip.
-  /// Null in Step 1 (no caller yet); the service still works.
-  void Function()? onTeamsChanged;
+  /// Change notification for everything downstream of a team write.
+  ///
+  /// Originally a cache-invalidation seam for the Explore "My Teams" folder,
+  /// and it still serves that. It now also carries a [TeamsChangedReason],
+  /// because the Game Day screen needs to repopulate the calendar when the
+  /// PRIORITY ORDER changes and must NOT repopulate when a team is merely
+  /// added — `GameDayAutopilotNotifier.toggleAutopilot` already kicks off its
+  /// own populate right after `addTeam`, so a reason-blind listener would run
+  /// two concurrent clear-and-rewrite cycles over one calendar.
+  ///
+  /// Distinguishing the reason here, at the one place that knows which write
+  /// just happened, is what lets a single listener be correct for all of them.
+  void Function(TeamsChangedReason reason)? onTeamsChanged;
 
   /// Add a team for [uid]. Writes BOTH:
   ///   • /users/{uid}/game_day_autopilot/{teamSlug}  (enabled:false)
@@ -88,7 +110,7 @@ class TeamRegistrationService {
 
     await _appendTeamToProfile(uid, team.teamName, teamSlug);
 
-    onTeamsChanged?.call();
+    onTeamsChanged?.call(TeamsChangedReason.membership);
   }
 
   /// Remove a team for [uid]. Inverts [addTeam]:
@@ -125,7 +147,7 @@ class TeamRegistrationService {
       debugPrint('[TeamRegistrationService] delete config $teamSlug failed: $e');
     }
 
-    onTeamsChanged?.call();
+    onTeamsChanged?.call(TeamsChangedReason.membership);
   }
 
   /// Strip a team from the profile arrays ONLY, with no config to delete.
@@ -146,7 +168,7 @@ class TeamRegistrationService {
       throw StateError('TeamRegistrationService.removeTeamByNameOnly: empty uid');
     }
     await _stripTeamFromProfile(uid, teamName);
-    onTeamsChanged?.call();
+    onTeamsChanged?.call(TeamsChangedReason.membership);
   }
 
   /// Bridge free-text team input (installer handoff, chat, etc.) to a
@@ -210,7 +232,8 @@ class TeamRegistrationService {
       'game_day_team_priority': aligned.slugs,
       'updated_at': Timestamp.fromDate(DateTime.now()),
     }, SetOptions(merge: true));
-    onTeamsChanged?.call();
+    // The ONLY fire site that means "who wins tonight just changed".
+    onTeamsChanged?.call(TeamsChangedReason.priorityReordered);
   }
 
   /// Persist a healed slug ordering WITHOUT touching the display-name array.

@@ -517,14 +517,22 @@ class GameDayAutopilotService {
   /// into the calendar at once. Re-runs weekly via the refresh-cadence gate
   /// in [GameDayAutopilotController]. Safe to call repeatedly — writes are
   /// idempotent (same dateKey overwrites previous autopilot entry).
-  /// Returns the number of entries written, or 0 on failure.
-  Future<int> populateCalendarForTeam(
+  ///
+  /// RETURNS `(entriesWritten, failed)` — and the second field is the point.
+  /// This used to return a bare `int` where 0 meant BOTH "ESPN was
+  /// unreachable" and "your team simply isn't playing this week". The caller
+  /// could not tell those apart, so a refresh in which every team's fetch
+  /// failed was indistinguishable from a quiet week, and the Game Day screen
+  /// reported success for both. `failed` is true only for an actual fault —
+  /// a fetch that threw, a missing write callback, or a write that came back
+  /// false. An empty week is `(0, false)`: nothing to do is not a failure.
+  Future<({int entriesWritten, bool failed})> populateCalendarForTeam(
     GameDayAutopilotConfig config, {
     int lookaheadDays = 7,
   }) async {
     if (onWriteCalendarEntries == null) {
       debugPrint('[GameDayAutopilot] populateCalendar: no write callback');
-      return 0;
+      return (entriesWritten: 0, failed: true);
     }
 
     final now = DateTime.now();
@@ -540,13 +548,18 @@ class GameDayAutopilotService {
       );
     } catch (e) {
       debugPrint('[GameDayAutopilot] populateCalendar fetch failed: $e');
-      return 0;
+      // A FAULT: we asked ESPN and it did not answer. The team may well have
+      // games this week; we simply do not know.
+      return (entriesWritten: 0, failed: true);
     }
 
     if (games.isEmpty) {
       debugPrint('[GameDayAutopilot] populateCalendar: no games found for '
           '${config.teamName} season $season');
-      return 0;
+      // NOT a fault: the fetch succeeded and the season is genuinely empty
+      // (off-season, or a team between schedules). Reporting this as a
+      // failure would tell a user in February that the app is broken.
+      return (entriesWritten: 0, failed: false);
     }
 
     // Build design catalog once for rotation
@@ -614,18 +627,20 @@ class GameDayAutopilotService {
     if (entries.isEmpty) {
       debugPrint('[GameDayAutopilot] populateCalendar: no entries after '
           'filter for ${config.teamName}');
-      return 0;
+      // NOT a fault: a quiet week, or every game filtered out by the daylight
+      // rule / until-date bound. The user asked for exactly this behaviour.
+      return (entriesWritten: 0, failed: false);
     }
 
     final ok = await onWriteCalendarEntries!(entries);
     if (ok) {
       debugPrint('[GameDayAutopilot] populateCalendar: wrote '
           '${entries.length} entries for ${config.teamName}');
-      return entries.length;
+      return (entriesWritten: entries.length, failed: false);
     }
     debugPrint('[GameDayAutopilot] populateCalendar: write failed for '
         '${config.teamName}');
-    return 0;
+    return (entriesWritten: 0, failed: true);
   }
 
   /// Test seam: force a session's post-game countdown to have elapsed.

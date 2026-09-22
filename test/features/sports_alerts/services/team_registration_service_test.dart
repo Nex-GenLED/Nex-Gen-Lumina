@@ -129,11 +129,15 @@ void main() {
       expect(doc.data()!['saved_design_name'], 'My Custom Design');
     });
 
-    test('fires onTeamsChanged callback on success', () async {
-      var fired = 0;
-      svc.onTeamsChanged = () => fired++;
+    test('fires onTeamsChanged callback on success, tagged as a MEMBERSHIP '
+        'change', () async {
+      final fired = <TeamsChangedReason>[];
+      svc.onTeamsChanged = fired.add;
       await svc.addTeam(uid: uid, teamSlug: 'nfl_chiefs');
-      expect(fired, 1);
+      // The reason matters: the Game Day repopulate listener acts only on
+      // priorityReordered, because toggleAutopilot already populates after an
+      // add. Tagging this as a reorder would double-fire against it.
+      expect(fired, [TeamsChangedReason.membership]);
     });
   });
 
@@ -216,16 +220,17 @@ void main() {
       );
     });
 
-    test('fires onTeamsChanged callback on success', () async {
+    test('fires onTeamsChanged callback on success, tagged as a MEMBERSHIP '
+        'change', () async {
       await svc.addTeam(uid: uid, teamSlug: 'nfl_chiefs');
-      var fired = 0;
-      svc.onTeamsChanged = () => fired++;
+      final fired = <TeamsChangedReason>[];
+      svc.onTeamsChanged = fired.add;
       await svc.removeTeam(
         uid: uid,
         teamSlug: 'nfl_chiefs',
         teamName: 'Kansas City Chiefs',
       );
-      expect(fired, 1);
+      expect(fired, [TeamsChangedReason.membership]);
     });
   });
 }
