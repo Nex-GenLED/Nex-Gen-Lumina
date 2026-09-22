@@ -744,6 +744,58 @@ class WledEffectsCatalog {
   ///   default — preserves prior behavior for anything not in the catalog).
   static int paletteForEffect(int id) => overridesUserColors(id) ? 4 : 5;
 
+  /// WLED palette 5, "* Colors Only": the segment's own `col[0]`/`col[1]`
+  /// (and `col[2]` when it is not black) as discrete palette entries, nothing
+  /// built in. This is what a CELEBRATION sends for a palette-reading pick.
+  ///
+  /// Chosen empirically on the bench controller (WLED 0.15.1, 2026-09-21),
+  /// not from memory: every candidate in the firmware's own `/json/pal` list
+  /// that samples the segment colours (2 "Color 1", 3 "Colors 1&2", 4 "Color
+  /// Gradient", 5 "Colors Only") was applied to Juggle (64), Fireworks (42),
+  /// Fireworks 1D (90) and Fireworks Starburst (89) with a two-colour design
+  /// plus the black third slot a celebration carries, and every lit pixel of
+  /// eight full frames was classified against the design's hues:
+  ///   • pal 0 (what fired before): Juggle 53 % and Starburst 20 % of lit
+  ///     pixels were hues the design does not contain (the default palette).
+  ///   • pal 2: the primary only — the secondary never appears.
+  ///   • pal 4: the gradient runs black → secondary → primary, so the primary
+  ///     is the last stop and is never sampled (0 % on all four effects).
+  ///   • pal 3: both colours, but 17–49 % of pixels are blends between them.
+  ///   • pal 5: 0 % foreign hues on all four, both colours present, 6–26 %
+  ///     blends — the residual is the linear interpolation the controller
+  ///     applies at palette-entry boundaries (`light.pal-mode` 0) plus each
+  ///     effect's own fade, never a hue the design does not contain.
+  static const int kSetColorsOnlyPalette = 5;
+
+  /// Palette-reading effects for which "Colors Only" (5) is bench-verified to
+  /// render ONLY the segment's own colours, both of them, on WLED 0.15.1 —
+  /// the four measured for [kSetColorsOnlyPalette]. `normalizeWledPayload`'s
+  /// palette guard (pal 5 → 4 on every `overridesColors` effect) must leave
+  /// these alone: that guard exists for palette SWEEPS (Rainbow, Colorwaves,
+  /// Aurora, Plasma, the Noise family), which pal 5 collapses into a strobe.
+  /// These are particle / dot effects that sample the palette per particle,
+  /// and on the bench the guard's pal 4 dropped their primary colour entirely
+  /// (Juggle through the real path: 0 % of lit pixels in the primary).
+  ///
+  /// Add an effect here ONLY with a full-frame bench measurement behind it.
+  /// `celebration_team_color_guard_test.dart` requires every palette-reading
+  /// entry of [celebrationPickIds] to be in this set.
+  static const Set<int> kColorsOnlyVerifiedEffects = {64, 42, 90, 89};
+
+  /// The `pal` a chosen celebration stage sends for effect [id].
+  ///
+  /// A colour-reading pick (`usesUserColors`) keeps the legacy stages' `pal:0`
+  /// — under it those effects read `col[]` directly, bench-verified 100 % in
+  /// team colours (Meteor, Android, Chase). A palette-reading pick gets
+  /// [kSetColorsOnlyPalette], because `pal:0` hands such an effect the
+  /// firmware's default palette instead of the design's colours.
+  ///
+  /// Deliberately NOT [paletteForEffect]: that returns 4 for a palette-reading
+  /// effect, and on the bench pal 4 dropped the design's primary colour
+  /// entirely for all four celebration effects (see [kSetColorsOnlyPalette]).
+  static int celebrationPaletteFor(int id) =>
+      overridesUserColors(id) ? kSetColorsOnlyPalette : 0;
+
   /// Get effects grouped by color behavior (for UI display).
   static Map<ColorBehavior, List<WledEffect>> get effectsByColorBehavior {
     final result = <ColorBehavior, List<WledEffect>>{};
@@ -958,6 +1010,13 @@ class WledEffectsCatalog {
   /// treated as "no pick" by `resolveCelebration` (the legacy sequence fires)
   /// and the picker reseeds it on the first entry.
   ///
+  /// WITHDRAWN 2026-09-21: Chase Flash Rnd (32) and Chase Random (29). Both
+  /// generate their own colours (`color_wheel` on a random hue) and no palette
+  /// makes them play the colours the user picked — which is the whole point of
+  /// a design card. Same stale-config handling as 91. The palette-reading
+  /// picks that remain (Juggle, the three Fireworks) are made to draw from the
+  /// set colours by [kSetColorsOnlyPalette] instead — see [celebrationPaletteFor].
+  ///
   /// Every id here is a 1D, non-audio effect present on the pinned firmware
   /// (WLED 0.15.1); `celebration_picker_test.dart` asserts that against
   /// [standardEffects] so a catalog edit cannot silently strand an entry.
@@ -973,8 +1032,6 @@ class WledEffectsCatalog {
     27,  // Android
     37,  // Chase 2
     54,  // Chase 3
-    32,  // Chase Flash Rnd
-    29,  // Chase Random
     64,  // Juggle
     48,  // Rolling Balls
     57,  // Lightning

@@ -631,8 +631,19 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
     //   - deliberate non-5 palette choices (holiday cards' pal:3/6/12) → untouched
     //   - pal absent → untouched (caller/WLED default preserved)
     // The pal index policy itself lives in WledEffectsCatalog.paletteForEffect.
+    //
+    // EXEMPT: WledEffectsCatalog.kColorsOnlyVerifiedEffects — particle / dot
+    // effects (Juggle, the Fireworks family) that were bench-measured on
+    // 2026-09-21 to render ONLY the segment's colours under pal:5, and for
+    // which this rewrite's pal:4 dropped the primary colour entirely (the
+    // gradient runs black → secondary → primary, and the primary is the last
+    // stop). The sweep rationale above does not apply to them; the celebration
+    // path relies on pal:5 reaching the wire for them.
     final fx = s['fx'];
-    if (fx is int && s['pal'] == 5 && WledEffectsCatalog.overridesUserColors(fx)) {
+    if (fx is int &&
+        s['pal'] == 5 &&
+        WledEffectsCatalog.overridesUserColors(fx) &&
+        !WledEffectsCatalog.kColorsOnlyVerifiedEffects.contains(fx)) {
       s['pal'] = 4; // "Color Gradient" — sweep a gradient of the user's colors
     }
 

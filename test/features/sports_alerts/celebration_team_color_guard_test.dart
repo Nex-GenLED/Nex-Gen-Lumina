@@ -130,6 +130,46 @@ void main() {
       }
     });
 
+    // Bench-chosen 2026-09-21 on WLED 0.15.1 (see kSetColorsOnlyPalette's doc):
+    // a palette-reading pick under pal 0 draws from the firmware's DEFAULT
+    // palette, so it is sent "Colors Only" (5) — the segment's own col[] as the
+    // palette. A colour-reading pick reads col[] directly under pal 0.
+    test('a chosen palette-reading pick asserts "Colors Only" (5) on every '
+        'stage; every colour-reading pick keeps pal 0', () {
+      expect(WledEffectsCatalog.kSetColorsOnlyPalette, 5);
+      for (final id in WledEffectsCatalog.celebrationPickIds) {
+        final expectedPal = WledEffectsCatalog.usesUserColors(id) ? 0 : 5;
+        expect(WledEffectsCatalog.celebrationPaletteFor(id), expectedPal);
+        final chosen =
+            CelebrationResolution(effectId: id, speed: 200, intensity: 180);
+        for (final type in AlertEventType.values) {
+          final steps =
+              AlertTriggerService.buildAnimationSteps(type, _team, chosen);
+          for (final step in steps) {
+            for (final seg in _segsOf(step)) {
+              expect(seg, containsPair('pal', expectedPal),
+                  reason: 'fx $id, ${type.name}');
+            }
+          }
+        }
+      }
+      // The four this was measured on.
+      for (final id in [64, 42, 90, 89]) {
+        expect(WledEffectsCatalog.celebrationPickIds, contains(id));
+        expect(WledEffectsCatalog.celebrationPaletteFor(id), 5, reason: '$id');
+      }
+      // BENCH BEFORE YOU ADD: every palette-reading pick must be in the set
+      // the normalizer's palette guard exempts, or its pal 5 is rewritten to
+      // 4 on the way to the controller and the primary colour vanishes.
+      for (final id in WledEffectsCatalog.celebrationPickIds) {
+        if (!WledEffectsCatalog.usesUserColors(id)) {
+          expect(WledEffectsCatalog.kColorsOnlyVerifiedEffects, contains(id),
+              reason: 'fx $id is palette-reading but not bench-verified '
+                  'under pal 5 — measure it before offering it');
+        }
+      }
+    });
+
     test('it survives applyChannelFilter onto every targeted channel', () {
       // What is asserted on the template is only useful if it reaches the wire.
       final steps = AlertTriggerService.buildAnimationSteps(

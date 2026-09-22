@@ -349,4 +349,56 @@ Run D is a new entry for §5: the catalog marks Washing Machine `usesSelectedCol
 - **§5 palette decision** — unchanged, and now seven: 32 Chase Flash Rnd, 29 Chase Random, 64 Juggle, 42 Fireworks, 90 Fireworks 1D, 89 Fireworks Starburst (all `overridesColors` → preview `pal:4`, fire `pal:0`), plus **113 Washing Machine** by measurement (preview `pal:5`, fire `pal:0`). Nothing changed here.
 - The debug-only dead revert (A.2) — pre-existing, worth its own fix.
 - The WLED-side root cause of the fx 91 reboot — explicitly out of scope.
+
+---
+
+## Addendum 2 — 2026-09-21 (late): the palette decision, resolved for six of seven
+
+Tyler's rule: **nothing in a design card may generate its own palette — a card plays the colours the user picked.** Applied to the six picks flagged in A.5. **Washing Machine (113) is deliberately NOT part of this and stays open.**
+
+### B.1 Withdrawn — Chase Flash Rnd (32), Chase Random (29)
+
+Both colour themselves from a random hue (`color_wheel` on WLED 0.15.1) and no palette makes them read `col[]`. Removed from `celebrationPickIds` (16 → 14) by the same mechanism as Bouncing Balls: `resolveCelebration` returns null for any id not in the list, so a stale stored 32/29 fires the legacy sequence. Bench, through the real path with a Bills design: stale 32 → fx 2 → 3 → 15 on the wire, 0 % foreign hues, fx 32 never seen; stale 29 → the same. New pins: the two ids are absent, and nothing offered is catalogued `generatesOwnColors`.
+
+### B.2 Re-paletted — Juggle (64), Fireworks (42), Fireworks 1D (90), Fireworks Starburst (89)
+
+These are `usesPalette`: under `pal:0` WLED hands them its **default** palette, not `col[]`. The fix sends `WledEffectsCatalog.celebrationPaletteFor(fx)` on every chosen stage: **`pal:5` "Colors Only"** for a palette-reading pick, the legacy `pal:0` for a colour-reading one.
+
+**How 5 was chosen — measured, not recalled.** The controller's own `/json/pal` lists the palettes that sample the segment's colours: 2 "Color 1", 3 "Colors 1&2", 4 "Color Gradient", 5 "Colors Only" (`/json/palx` shows their construction: `c1` / `c1,c1,c2,c2` / `c3,c2,c1` / `c1×5,c2×5,c3×5,c1`; `light.pal-mode` = 0, linear blend). Each was applied to all four effects with a two-colour design (Bills: blue `0,51,141`, red `198,12,48`) **plus the black third slot a celebration always carries**, and every lit pixel of eight full 290-LED frames was classified against the design's post-gamma hues (236° / 359°): *match* (±12° of a set colour), *blend* (on the short arc between the two), *extraneous* (anything else).
+
+| fx | pal 0 (before) | pal 2 | pal 3 | pal 4 | **pal 5** |
+|---|---|---|---|---|---|
+| 64 Juggle | **53 % extraneous** | primary only (red 0 %) | 0 % extr., 27 % blend | 0 % extr., **blue 0 %** | **0 % extr., blue 36 % / red 58 %, 6 % blend** |
+| 42 Fireworks | 4 % (all dim) | 0.8 % | 0 % extr., 49 % blend | 0 % extr., blue 0 % | **0 % extr., 26 % blend** |
+| 90 Fireworks 1D | 0 % | 0 % | 0 % | 0 % extr., blue 0 % | **0 % extr., 7 % blend** |
+| 89 Starburst | **20 % extraneous** | 0 % extr., 32 % blend | 0 % extr., 17 % blend | 0 % extr., **blue 0 %** | **0 % extr., 15 % blend** |
+
+A first pass without the explicit black third slot was discarded: WLED kept the third colour of the look underneath (pure green), and palettes 4 and 5 both use that slot — a confound, not a result.
+
+**Why not 4.** `paletteForEffect` — the catalog's "single source of truth" — returns 4 for these effects, and so does the picker's live preview. On the bench pal 4 dropped the design's **primary** colour entirely for all four: the gradient is `c3 → c2 → c1`, black → secondary → primary, so the primary is the last stop and is never sampled. Pal 5 puts both colours in as discrete entries; the residual "blend" is the controller's linear interpolation at entry boundaries plus each effect's own fade, never a hue the design does not contain.
+
+**The layer the unit tests could not see.** The first bench run through the real path carried **`pal:4`** on the wire although the builder had set 5: `normalizeWledPayload`'s palette guard — written for sweeps like Rainbow, which `pal:5` collapses into a strobe — rewrites 5 → 4 for every `overridesColors` effect, and the fake delivery in the tests never crosses it. Juggle through the real path under that rewrite: 0 % extraneous, **0 % of the primary**, 14.8 s. Fix: `WledEffectsCatalog.kColorsOnlyVerifiedEffects = {64, 42, 90, 89}` — particle / dot effects bench-measured to render only the segment's colours under 5 — and the guard leaves them alone. `celebration_team_color_guard_test` now requires every palette-reading pick to be in that set (bench before you add), and `foreground_celebration_test` asserts `pal:5` survives `normalizeWledPayload` for each of the four.
+
+### B.3 Bench, through the real path, on the final build (`13e8625`)
+
+Real coordinator → real `WledCelebrationDelivery` → real `WledService` → the controller; independent 4 Hz reader with full-frame classification; Bills design; controller idle across two reads and no other process on this machine before each run.
+
+| Run | Pick | On the wire | Held | Full-frame result (48 frames after the transition) |
+|---|---|---|---|---|
+| stale 32 | legacy 2 → 3 → 15 | pal 0 | 15 s | 0 % extraneous; **fx 32 never on the wire** |
+| stale 29 | legacy 2 → 3 → 15 | pal 0 | 15 s | 0 % extraneous; **fx 29 never on the wire** |
+| Juggle 64 | fx 64, sx 55, ix 128, **pal 5** | | 14.8 s | **0 % extraneous**; blue 41.6 % / red 54.8 %; 3.6 % blend |
+| Fireworks 42 | fx 42, sx 60, ix 128, **pal 5** | | 14.9 s | **0 % extraneous**; red 55.6 %, blue sparks read as fades over the red background (44 % blend, all between the two set colours) |
+| Fireworks 1D 90 | fx 90, sx 60, ix 128, **pal 5** | | 15.0 s | **0 % extraneous**; red 91.4 % / blue 3.6 %; 4.7 % blend |
+| Starburst 89 | fx 89, sx 60, ix 128, **pal 5** | | 15.1 s | **0 % extraneous**; red 76.8 % / blue 5.0 %; 16 % blend |
+
+No run rebooted or stalled the controller (uptime continuous, 5,016 s → 6,507 s across the session). `presets.json` (`8c53e9fe88f65c3c`, raw) and `cfg` (`e1feef2eb74dc2b3`) unchanged throughout. Every run restored to the pre-run look, 0 diffs.
+
+Gate on `13e8625`: `flutter analyze` 382, identical set to base; `flutter test` **3350 / 34 skipped / 0 failed**.
+
+### B.4 Still owed
+
+- **Washing Machine (113)** — catalogued `usesSelectedColors`, renders 65 % off-design under `pal:0` (A.4). Not touched, by instruction.
+- **Preview ≠ fired for the four**: the picker preview still sends `paletteForEffect` = 4 (primary missing on the bench); the celebration now fires 5. Aligning the preview is a `paletteForEffect` decision with Explore-wide reach — not made here.
+- The debug-only dead revert (A.2) — pre-existing.
 6. Pre-existing, unchanged, noticed in passing — **by reading, not tested:** the score monitor only polls while a team is in `liveGame`, so a `win` appears to be emitted only if its poll sees `final` before the phase machine's does; and a score already queued still fires if the user switches celebrations off mid-queue.

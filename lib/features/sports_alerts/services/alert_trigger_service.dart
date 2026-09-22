@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../../models/autopilot_override.dart';
 import '../../../services/autopilot_scheduler.dart';
+import '../../wled/wled_effects_catalog.dart' show WledEffectsCatalog;
 import '../../wled/wled_payload_utils.dart' show applyChannelFilter;
 import '../../wled/wled_service.dart';
 import '../../wled/zone_providers.dart'
@@ -314,6 +315,12 @@ class AlertTriggerService {
   /// A fallback celebration also overrides `col` to white: it was substituted
   /// precisely because the motion clashed, and team colours are the one axis
   /// left to distinguish it (see [kFallbackCelebrationColor]).
+  ///
+  /// `pal` is [WledEffectsCatalog.celebrationPaletteFor] the chosen effect:
+  /// a colour-reading pick keeps the legacy stage's `pal:0`, a palette-reading
+  /// pick (Juggle, the Fireworks family) gets "Colors Only" so it draws from
+  /// the design's own `col[]` rather than the firmware's default palette.
+  /// Bench-chosen, not guessed — the constant's doc has the numbers.
   static Map<String, dynamic> _applyCelebrationToStage(
     Map<String, dynamic> payload,
     CelebrationResolution celebration,
@@ -331,6 +338,8 @@ class AlertTriggerService {
               'fx': celebration.effectId,
               'sx': celebration.speed,
               'ix': celebration.intensity,
+              'pal': WledEffectsCatalog.celebrationPaletteFor(
+                  celebration.effectId),
               if (celebration.usedFallback)
                 'col': [
                   List<int>.from(kFallbackCelebrationColor),

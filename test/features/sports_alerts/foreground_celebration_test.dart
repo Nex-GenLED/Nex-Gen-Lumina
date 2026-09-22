@@ -24,6 +24,8 @@ import 'package:nexgen_command/features/sports_alerts/services/foreground_celebr
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/services/score_monitor_service.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart'
+    show normalizeWledPayload;
 
 // ── Fakes ──────────────────────────────────────────────────────────────────
 
@@ -286,26 +288,85 @@ void main() {
     // Bouncing Balls (91) was withdrawn from the picker on 2026-09-21 after it
     // rebooted the bench controller mid-celebration. A config saved before
     // the withdrawal still holds 91; it must fire as "no pick", never as 91.
-    test('a stored pick the picker no longer offers (91) fires the LEGACY '
-        'sequence — nothing withdrawn reaches the lights', () async {
-      expect(WledEffectsCatalog.celebrationPickIds.contains(91), isFalse);
-
-      final d = _FakeDelivery()..captureReturn = look(0);
-      final c = build(_FakeMonitor(), d);
-      addTearDown(c.dispose);
-
-      c.syncLiveTeams([picked(91)]); // stale config: Bouncing Balls
-      c.handleAlert(_event(anySlug));
-      await _settle();
-
-      expect(segsOf(d.plays.single).map((s) => s['fx']),
-          everyElement(isNot(91)));
+    test('a stored pick the picker no longer offers (91, 32, 29) fires the '
+        'LEGACY sequence — nothing withdrawn reaches the lights', () async {
       final legacy = AlertTriggerService.buildAnimationSteps(
           AlertEventType.touchdown, teamColors);
-      expect(d.plays.single.map((s) => s.payload).toList(),
-          legacy.map((s) => s.payload).toList(),
-          reason: 'a withdrawn id is "no pick": the legacy sequence, verbatim');
-      expect(d.log, ['capture', 'play(3)', 'revert']);
+      // 91 Bouncing Balls, 32 Chase Flash Rnd, 29 Chase Random.
+      for (final stale in [91, 32, 29]) {
+        expect(WledEffectsCatalog.celebrationPickIds.contains(stale), isFalse);
+
+        final d = _FakeDelivery()..captureReturn = look(0);
+        final c = build(_FakeMonitor(), d);
+
+        c.syncLiveTeams([picked(stale)]); // stale config
+        c.handleAlert(_event(anySlug));
+        await _settle();
+        c.dispose();
+
+        expect(segsOf(d.plays.single).map((s) => s['fx']),
+            everyElement(isNot(stale)),
+            reason: 'fx $stale must never reach the wire');
+        expect(d.plays.single.map((s) => s.payload).toList(),
+            legacy.map((s) => s.payload).toList(),
+            reason: 'fx $stale: a withdrawn id is "no pick" — the legacy '
+                'sequence, verbatim');
+        expect(d.log, ['capture', 'play(3)', 'revert']);
+      }
+    });
+
+    // Bench-chosen 2026-09-21 (WLED 0.15.1): under pal:0 a palette-reading
+    // effect draws from the firmware's DEFAULT palette (Juggle 53 %, Fireworks
+    // Starburst 20 % of lit pixels off-design); under "Colors Only" (5) all
+    // four draw only from the design's own col[]. Colour-reading picks stay on
+    // pal:0, where they read col[] directly (Meteor, Android, Chase verified).
+    test('a palette-reading pick sends "Colors Only" (5) on every stage; a '
+        'colour-reading pick keeps pal 0', () async {
+      for (final fx in [64, 42, 90, 89]) {
+        expect(WledEffectsCatalog.usesUserColors(fx), isFalse, reason: '$fx');
+        final d = _FakeDelivery()..captureReturn = look(0);
+        final c = build(_FakeMonitor(), d);
+        c.syncLiveTeams([picked(fx)]);
+        c.handleAlert(_event(anySlug));
+        await _settle();
+        c.dispose();
+
+        final segs = segsOf(d.plays.single);
+        expect(segs.map((s) => s['fx']), everyElement(fx));
+        expect(segs.map((s) => s['pal']),
+            everyElement(WledEffectsCatalog.kSetColorsOnlyPalette),
+            reason: 'fx $fx must draw from the design colours, not the '
+                'default palette');
+        expect(segs.map((s) => s['col']),
+            everyElement([
+              AlertTriggerService.colorToRgbw(teamColors.primary),
+              AlertTriggerService.colorToRgbw(teamColors.secondary),
+              [0, 0, 0, 0],
+            ]),
+            reason: 'the palette is built from these — they must be on the '
+                'wire with it');
+        // The layer the fake delivery skips: WledService.applyJson runs the
+        // shared normalizer, whose palette guard rewrites pal 5 → 4 on every
+        // overridesColors effect EXCEPT the bench-verified set. It did rewrite
+        // once, on the bench, and the design's primary colour vanished.
+        for (final step in d.plays.single) {
+          final norm = normalizeWledPayload(step.payload);
+          for (final seg in (norm['seg'] as List).cast<Map>()) {
+            expect(seg['pal'], WledEffectsCatalog.kSetColorsOnlyPalette,
+                reason: 'fx $fx: pal 5 must survive normalizeWledPayload');
+          }
+        }
+      }
+      for (final fx in [76, 27, 28]) {
+        final d = _FakeDelivery()..captureReturn = look(0);
+        final c = build(_FakeMonitor(), d);
+        c.syncLiveTeams([picked(fx)]);
+        c.handleAlert(_event(anySlug));
+        await _settle();
+        c.dispose();
+        expect(segsOf(d.plays.single).map((s) => s['pal']), everyElement(0),
+            reason: 'fx $fx reads col[] under pal 0 — bench-verified');
+      }
     });
 
     test('a pick the house is ALREADY showing → the white-strobe fallback',

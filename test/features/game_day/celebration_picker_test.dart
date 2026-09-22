@@ -39,8 +39,6 @@ const List<String> kCuratedNames = [
   'Android',
   'Chase 2',
   'Chase 3',
-  'Chase Flash Rnd',
-  'Chase Random',
   'Juggle',
   'Rolling Balls',
   'Lightning',
@@ -210,7 +208,7 @@ Future<void> _pumpCelebration(
 
 void main() {
   group('P2 — the curated list resolves against the real catalog', () {
-    test('all 16 names resolve to an id, in the order given', () {
+    test('all 14 names resolve to an id, in the order given', () {
       final resolved =
           WledEffectsCatalog.celebrationPicks.map((e) => e.name).toList();
       expect(resolved, kCuratedNames,
@@ -247,6 +245,25 @@ void main() {
               'mid-celebration on the pinned firmware. Re-adding it needs a '
               'hardware root cause first.');
       expect(kCuratedNames.contains('Bouncing Balls'), isFalse);
+    });
+
+    test('Chase Flash Rnd (32) and Chase Random (29) are withdrawn — they '
+        'generate their own colours', () {
+      for (final id in [32, 29]) {
+        expect(WledEffectsCatalog.celebrationPickIds.contains(id), isFalse,
+            reason: 'withdrawn 2026-09-21: fx $id colours itself from a '
+                'random hue and no palette makes it play the colours the '
+                'user picked, which is the point of a design card');
+      }
+      expect(kCuratedNames.contains('Chase Flash Rnd'), isFalse);
+      expect(kCuratedNames.contains('Chase Random'), isFalse);
+    });
+
+    test('nothing offered generates its own colours', () {
+      for (final e in WledEffectsCatalog.celebrationPicks) {
+        expect(e.colorBehavior, isNot(ColorBehavior.generatesOwnColors),
+            reason: '${e.name} (${e.id}) would ignore the design colours');
+      }
     });
   });
 

@@ -337,6 +337,23 @@ void main() {
       expect(seg0({'seg': [{'fx': 9, 'pal': 0}]})['pal'], equals(0));
     });
 
+    // Bench-measured 2026-09-21 (WLED 0.15.1): for these particle / dot
+    // effects pal:5 renders ONLY the segment's colours, both of them, while the
+    // guard's pal:4 drops the primary entirely (Juggle through the real path:
+    // 0 % of lit pixels in the primary). The celebration path sends pal:5 for
+    // them and relies on it reaching the wire.
+    test('bench-verified particle effects keep pal:5 (Juggle, Fireworks ×3)',
+        () {
+      for (final fx in WledEffectsCatalog.kColorsOnlyVerifiedEffects) {
+        expect(WledEffectsCatalog.overridesUserColors(fx), isTrue,
+            reason: 'fx $fx is the class the guard targets');
+        expect(seg0({'seg': [{'fx': fx, 'pal': 5, 'col': [[0, 51, 141, 0]]}]})['pal'],
+            equals(5),
+            reason: 'fx $fx: pal:5 is bench-verified — must not be rewritten');
+      }
+      expect(WledEffectsCatalog.kColorsOnlyVerifiedEffects, {64, 42, 90, 89});
+    });
+
     test('absent pal is left absent (no synthesis)', () {
       final s = seg0({'seg': [{'fx': 9, 'col': [[255, 0, 0, 0]]}]});
       expect(s.containsKey('pal'), isFalse);
