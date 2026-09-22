@@ -22,6 +22,7 @@
 //      the strip) over a structural proxy (does a key exist).
 
 import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
+import 'package:nexgen_command/features/wled/wled_cfg_gamma.dart';
 
 /// One assertion outcome. [evidence] is the readback proof (for a pass) or the
 /// expected-vs-actual (for a fail) — printed verbatim so a green claim always
@@ -524,4 +525,240 @@ List<CheckResult> checkFireTestSplit({
     ));
   }
   return out;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Timer-table RESTORE, EXACT comparison, PRE-FLIGHT dirty detection, and the
+// durable run ledger — added 2026-09-22 after a harness run left two armed
+// timer slots and a wiped gamma value on the live controller and every later
+// check called it clean. Root cause and the five stacked failures are in the
+// memory note "harness restore CANNOT clear timer slots"; the rules below are
+// verified-by-source against WLED v0.15.1 cfg.cpp.
+// ───────────────────────────────────────────────────────────────────────────
+
+/// WLED general timer slots (0-7). Slots 8/9 are sunrise/sunset and are
+/// addressed on the wire by `hour:255`, never by array index.
+const int kWledGeneralTimerSlots = 8;
+
+/// The row that CLEARS a general slot. deserializeConfig merges `timers.ins`
+/// by array index and never clears a slot the body does not mention;
+/// serializeConfig drops a slot from readback only when macro, hour AND min
+/// are all 0. So "not mentioning" a slot keeps it, and only this row empties it.
+const Map<String, dynamic> kEmptyTimerRow = <String, dynamic>{
+  'en': 0,
+  'hour': 0,
+  'min': 0,
+  'macro': 0,
+  'dow': 0,
+};
+
+/// A sunrise/sunset row as WLED serializes it (`hour == 255`).
+bool isSolarTimerRow(Map<String, dynamic> t) =>
+    (t['hour'] is num) && (t['hour'] as num).toInt() == 255;
+
+/// One readback row in a canonical string form so two tables can be compared
+/// field-for-field. `en` is normalised to 0/1; `start`/`end` (absent on solar
+/// rows) default to 0/0 on both sides.
+String canonicalTimerRow(Map<String, dynamic> t) {
+  int f(String k) => (t[k] is num) ? (t[k] as num).toInt() : 0;
+  final en = (t['en'] == true || t['en'] == 1) ? 1 : 0;
+  int sub(Object? m, String k) =>
+      (m is Map && m[k] is num) ? (m[k] as num).toInt() : 0;
+  final start = t['start'], end = t['end'];
+  return 'en=$en hour=${f('hour')} min=${f('min')} macro=${f('macro')} '
+      'dow=${f('dow')} start=${sub(start, 'mon')}/${sub(start, 'day')} '
+      'end=${sub(end, 'mon')}/${sub(end, 'day')}';
+}
+
+/// EXACT comparison of two compacted readbacks. Returns null when [actual] is
+/// row-for-row identical to [expected] (same rows, same multiplicity, same
+/// order); otherwise a human-readable description of every difference.
+///
+/// This replaces `timersInsLanded` for restore verification. That comparator
+/// is a CONTAINMENT check ("every row I sent is present") with a special
+/// "cleared schedule" branch for an empty send — right for "did my schedule
+/// land", wrong for "is the table back to what it was": a survivor row passes
+/// containment, and a solar-only capture takes the special branch.
+String? timerTableDiff(
+  List<Map<String, dynamic>> expected,
+  List<Map<String, dynamic>> actual,
+) {
+  final e = expected.map(canonicalTimerRow).toList();
+  final a = actual.map(canonicalTimerRow).toList();
+  final missing = <String>[];
+  final remaining = List<String>.of(a);
+  for (final row in e) {
+    if (!remaining.remove(row)) missing.add(row);
+  }
+  final extra = remaining; // whatever expected did not account for
+  final parts = <String>[];
+  if (missing.isNotEmpty) parts.add('MISSING ${missing.length}: $missing');
+  if (extra.isNotEmpty) parts.add('EXTRA ${extra.length}: $extra');
+  if (parts.isEmpty && e.length == a.length) {
+    for (var i = 0; i < e.length; i++) {
+      if (e[i] != a[i]) {
+        parts.add('same rows, DIFFERENT ORDER (first at index $i)');
+        break;
+      }
+    }
+  }
+  return parts.isEmpty ? null : parts.join('; ');
+}
+
+/// The `timers.ins` body that restores [captured].
+///
+/// Writes ALL [kWledGeneralTimerSlots] general indices: the captured general
+/// rows re-packed from index 0, then [kEmptyTimerRow] for the rest. That is
+/// the only shape that (a) clears every slot a run could have dirtied and
+/// (b) re-asserts every captured row, whatever slot it originally lived in —
+/// the compacted readback does not expose slot numbers, so re-posting only
+/// the captured rows at their readback indices could duplicate a row that
+/// really lived in slot 3.
+///
+/// Solar rows (hour 255) are deliberately NOT re-posted. The harness never
+/// writes slots 8/9, and a lone re-posted 255 row always lands in slot 8
+/// (sunrise) even if it came from slot 9 (sunset). [timerTableDiff] still
+/// checks them afterwards, so a disturbed solar row is caught, not hidden.
+///
+/// Limitation, by design: general rows come back re-packed from slot 0. The
+/// app rewrites all ten slots on every schedule sync, so slot numbers carry
+/// no meaning it relies on; the readback (which is what everything reads) is
+/// identical.
+List<Map<String, dynamic>> buildTimerRestoreIns(
+    List<Map<String, dynamic>> captured) {
+  final general = captured.where((t) => !isSolarTimerRow(t)).toList();
+  return [
+    for (var i = 0; i < kWledGeneralTimerSlots; i++)
+      i < general.length
+          ? Map<String, dynamic>.from(general[i])
+          : Map<String, dynamic>.from(kEmptyTimerRow),
+  ];
+}
+
+/// `light.gc` from a raw cfg, or null when absent/unreadable.
+Map<String, dynamic>? gammaFromCfg(Map<String, dynamic>? cfg) {
+  final light = cfg?['light'];
+  final gc = (light is Map) ? light['gc'] : null;
+  return (gc is Map) ? gc.cast<String, dynamic>() : null;
+}
+
+/// Colour gamma is ON iff `gc.col > 1` (WLED's "exponent-or-1" flag). A cfg
+/// POST without `light.gc` resets it to 1 — the wipe this harness used to
+/// inflict on every restore.
+bool gammaColIntact(Map<String, dynamic>? gc) {
+  final col = gc?['col'];
+  return col is num && col > 1.0;
+}
+
+/// Every `/json/cfg` body the harness sends goes through the app's own gamma
+/// chokepoint, so a timers-only write can no longer wipe `light.gc.col`. A
+/// body that already states `light.gc` passes through unchanged.
+Map<String, dynamic> prepareCfgPayload(Map<String, dynamic> payload) =>
+    normalizeWledCfgPayload(payload);
+
+/// Rows the harness itself writes. Any of these on the controller at run start
+/// is residue from a run that never restored. (fire-test's scratch has no fixed
+/// signature — its minute is computed at run time — which is what the inflight
+/// ledger is for.)
+const List<Map<String, int>> kHarnessSignatureRows = [
+  {'hour': 3, 'min': 33, 'macro': 1, 'dow': 2}, // cfg-truth scratch
+  {'hour': 3, 'min': 15, 'macro': 1, 'dow': 17}, // sync-sim fixture ON
+  {'hour': 4, 'min': 20, 'macro': 2, 'dow': 17}, // sync-sim fixture OFF
+];
+
+bool isHarnessSignatureRow(Map<String, dynamic> t) {
+  int f(String k) => (t[k] is num) ? (t[k] as num).toInt() : -1;
+  return kHarnessSignatureRows.any((sig) =>
+      f('hour') == sig['hour'] &&
+      f('min') == sig['min'] &&
+      f('macro') == sig['macro'] &&
+      f('dow') == sig['dow']);
+}
+
+/// PRE-FLIGHT: reasons the controller is NOT in a state a run may start from.
+/// Empty = clean. Each reason is one line, written for a human reading the
+/// refusal. A killed process skips every `finally`, so the NEXT run has to be
+/// the thing that notices — this is that check.
+List<String> detectDirtyState({
+  required List<Map<String, dynamic>> timers,
+  required Map<String, dynamic>? gc,
+  required bool inflightLedgerPresent,
+}) {
+  final reasons = <String>[];
+  if (inflightLedgerPresent) {
+    reasons.add('an inflight run ledger exists — the previous mutating run '
+        'did not reach a verified restore (killed, crashed, or restore FAILED)');
+  }
+  if (!gammaColIntact(gc)) {
+    reasons.add('light.gc = $gc — colour gamma is WIPED (col must be > 1; '
+        'the NGL standard is ${kNglLightGammaConfig['col']})');
+  }
+  final sigs = timers.where(isHarnessSignatureRow).map(canonicalTimerRow);
+  for (final s in sigs) {
+    reasons.add('harness scratch/fixture row still armed: $s');
+  }
+  return reasons;
+}
+
+/// The durable record of one mutating run. Written to bench/state/inflight.json
+/// BEFORE the first write and removed only after a VERIFIED restore, so a run
+/// that dies mid-way leaves exactly what the next run needs to (a) refuse to
+/// start and (b) put the controller back (`bench recover`).
+class RunLedger {
+  final String runId;
+  final String command;
+  final String ip;
+  final String startedAt;
+  final List<Map<String, dynamic>> capturedTimers;
+  final Map<String, dynamic>? capturedGamma;
+  final bool? capturedOn;
+  final Set<int> dirtiedSlots;
+  String status; // inflight | restored | restore-failed
+
+  RunLedger({
+    required this.runId,
+    required this.command,
+    required this.ip,
+    required this.startedAt,
+    required this.capturedTimers,
+    required this.capturedGamma,
+    required this.capturedOn,
+    Set<int>? dirtiedSlots,
+    this.status = 'inflight',
+  }) : dirtiedSlots = dirtiedSlots ?? <int>{};
+
+  Map<String, dynamic> toJson() => {
+        'runId': runId,
+        'command': command,
+        'ip': ip,
+        'startedAt': startedAt,
+        'status': status,
+        'capturedTimers': capturedTimers,
+        'capturedGamma': capturedGamma,
+        'capturedOn': capturedOn,
+        'dirtiedSlots': (dirtiedSlots.toList()..sort()),
+      };
+
+  static RunLedger? fromJson(Map<String, dynamic> j) {
+    final timers = j['capturedTimers'];
+    if (timers is! List) return null;
+    final gc = j['capturedGamma'];
+    return RunLedger(
+      runId: '${j['runId'] ?? ''}',
+      command: '${j['command'] ?? ''}',
+      ip: '${j['ip'] ?? ''}',
+      startedAt: '${j['startedAt'] ?? ''}',
+      status: '${j['status'] ?? 'inflight'}',
+      capturedTimers: timers
+          .whereType<Map>()
+          .map((e) => e.cast<String, dynamic>())
+          .toList(),
+      capturedGamma: gc is Map ? gc.cast<String, dynamic>() : null,
+      capturedOn: j['capturedOn'] is bool ? j['capturedOn'] as bool : null,
+      dirtiedSlots: {
+        for (final s in (j['dirtiedSlots'] is List ? j['dirtiedSlots'] : []))
+          if (s is num) s.toInt(),
+      },
+    );
+  }
 }

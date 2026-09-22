@@ -4,16 +4,34 @@
 // buildChannelPowerPayload, deviceChannelsFromConfig — all extracted to
 // Flutter-free files so this runs under `dart run` with no dart:ui).
 //
-// Usage:  dart run bench/bin/bench.dart <command> [--ip 192.168.1.150]
+// Usage:  dart run bench/bin/bench.dart <command> [--ip 192.168.1.150] [--force]
 //   probe | snapshot | cfg-truth | sync-sim | preset-verify | fire-test |
-//   channel-power | restore | all
+//   channel-power | restore | recover | all
 //
-// Exit 0 = all assertions passed, 1 = any failed (CI- / session-gateable).
+// Exit 0 = all assertions passed, 1 = any failed (CI- / session-gateable),
+// 3 = PRE-FLIGHT REFUSED (the controller still carries residue of an earlier
+// run; nothing was written — run `recover`).
 //
-// SAFETY: every mutating command captures state first and restores after.
-// Scratch writes touch ONLY the last timer slots and preset ids 245-249; NEVER
-// the lease slots (26/28/41), system presets (1-5), or live schedule slots
-// (10-25) without a snapshot first.
+// SAFETY: every mutating command captures state first and restores after, and
+// (since 2026-09-22) the restore is SLOT-AWARE and EXACT:
+//  - the restore body writes all 8 general timer indices (captured rows
+//    re-packed, empties for the rest) — WLED merges timers.ins by index and a
+//    slot only clears when macro/hour/min are all 0, so re-posting captured
+//    rows alone could never remove a scratch row;
+//  - every cfg POST carries light.gc (a timers-only body wipes colour gamma);
+//  - restore is verified by EXACT table comparison, and a failed restore ABORTS
+//    the suite (no later command may capture a dirty table as its baseline);
+//  - a durable ledger (bench/state/) records the capture BEFORE the first write
+//    and every check result AS IT HAPPENS, so a killed process (which skips
+//    every `finally`) leaves the next run enough to refuse and to recover.
+// Scratch writes touch ONLY general timer slots 0-1 and preset ids 245-249;
+// NEVER the lease slots (26/28/41), system presets (1-5), or live schedule
+// slots (10-25) without a snapshot first.
+//
+// TIMEOUTS: fire-test waits ~3 min for the timer minute plus 90 s. NEVER run
+// it (or `all`) under a foreground tool/shell timeout shorter than ~6 minutes —
+// a timeout kill skips the restore and leaves an ARMED scratch timer that fires
+// on its own (2026-09-22). Run it in the background with output to a file.
 
 import 'dart:convert';
 import 'dart:io';
@@ -33,9 +51,46 @@ late WledClient client;
 final List<CheckResult> _results = [];
 final String _benchDir = _resolveBenchDir();
 
+/// Durable run state (gitignored, but NOT transient — deleting it silences the
+/// pre-flight guard; see README).
+String get _stateDir => '$_benchDir/state';
+String get _inflightPath => '$_stateDir/inflight.json';
+String get _runLogPath => '$_stateDir/runs.jsonl';
+final String _runId = DateTime.now().toIso8601String();
+
+/// Set by a FAILED restore. `all` stops before its next step; the process
+/// exits 1 with the ledger left inflight so the next run refuses to start.
+bool _aborted = false;
+
+/// Append one JSON line to bench/state/runs.jsonl and flush. This is the
+/// outcome record that survives the process dying: a FAIL that existed only in
+/// a truncated stdout buffer was how 2026-09-22 went unnoticed.
+void _durable(Map<String, dynamic> event) {
+  try {
+    Directory(_stateDir).createSync(recursive: true);
+    File(_runLogPath).writeAsStringSync(
+      '${jsonEncode({
+            'run': _runId,
+            'at': DateTime.now().toIso8601String(),
+            ...event,
+          })}\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  } catch (e) {
+    stderr.writeln('  ⚠ could not write run log: $e');
+  }
+}
+
 void _record(CheckResult r) {
   _results.add(r);
   stdout.writeln('  ${r.render()}');
+  _durable({
+    'event': 'check',
+    'name': r.name,
+    'pass': r.pass,
+    'evidence': r.evidence,
+  });
 }
 
 void _log(String m) => stdout.writeln(m);
@@ -136,31 +191,228 @@ Future<String?> cmdSnapshot() async {
   return path;
 }
 
-/// Read the current timer ins (for capture/restore brackets).
-Future<List<Map<String, dynamic>>> _captureTimers() async {
-  final cfg = await client.getCfg();
-  return cfg == null ? const [] : timerInsFrom(cfg);
+// ─────────────────────────────────────────────────────────────────────────
+// Mutation bracket: capture → inflight ledger → (writes) → EXACT restore
+// ─────────────────────────────────────────────────────────────────────────
+
+void _writeInflight(RunLedger l) {
+  Directory(_stateDir).createSync(recursive: true);
+  File(_inflightPath).writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(l.toJson())}\n',
+      flush: true);
 }
 
-Future<void> _restoreTimers(List<Map<String, dynamic>> ins,
-    {String label = 'restore timers'}) async {
-  final ok = await client.postCfg({
-    'timers': {'ins': ins}
+RunLedger? _readInflight() {
+  final f = File(_inflightPath);
+  if (!f.existsSync()) return null;
+  return RunLedger.fromJson(_loadJsonFile(_inflightPath, const {}));
+}
+
+void _clearInflight() {
+  final f = File(_inflightPath);
+  if (f.existsSync()) f.deleteSync();
+}
+
+/// Capture the timer table, gamma and master power, and write the inflight
+/// ledger BEFORE anything is written. Returns null (and records a FAIL) when
+/// the capture is unreadable — a restore from an empty capture would post
+/// eight empties over a real schedule, so an unreadable capture must never
+/// become a baseline.
+Future<RunLedger?> _beginMutation(String command,
+    {Set<int> slots = const {}}) async {
+  final cfg = await client.getCfg();
+  final state = await client.getState();
+  if (cfg == null) {
+    _record(CheckResult('$command: capture before writing', false,
+        'cfg unreadable — refusing to mutate without a baseline'));
+    return null;
+  }
+  final ledger = RunLedger(
+    runId: _runId,
+    command: command,
+    ip: client.base,
+    startedAt: DateTime.now().toIso8601String(),
+    capturedTimers: timerInsFrom(cfg),
+    capturedGamma: gammaFromCfg(cfg),
+    capturedOn: state?['on'] is bool ? state!['on'] as bool : null,
+    dirtiedSlots: {...slots},
+  );
+  _writeInflight(ledger);
+  _durable({
+    'event': 'mutation-begin',
+    'command': command,
+    'capturedTimers': ledger.capturedTimers,
+    'capturedGamma': ledger.capturedGamma,
+    'capturedOn': ledger.capturedOn,
+    'slots': (ledger.dirtiedSlots.toList()..sort()),
   });
+  return ledger;
+}
+
+void _markDirtied(RunLedger l, Iterable<int> slots) {
+  l.dirtiedSlots.addAll(slots);
+  _writeInflight(l);
+}
+
+/// Restore [l.capturedTimers] EXACTLY. Posts all 8 general indices (see
+/// buildTimerRestoreIns) with light.gc carried by the client, then verifies
+/// with timerTableDiff (exact) + gammaColIntact through the patient poll.
+/// On success the inflight ledger is cleared; on failure it is kept (status
+/// restore-failed) and the suite is marked aborted.
+Future<bool> _restoreTimers(RunLedger l, {required String label}) async {
+  final body = buildTimerRestoreIns(l.capturedTimers);
+  final ok = await client.postCfg({
+    'timers': {'ins': body}
+  });
+  String? lastDiff;
+  var gammaOk = false;
+  var rows = 0;
   final v = await client.patientVerify(
     confirm: () async {
       final cfg = await client.getCfg();
-      return cfg != null && timersInsLanded(ins, timerInsFrom(cfg));
+      if (cfg == null) return false;
+      final back = timerInsFrom(cfg);
+      rows = back.length;
+      lastDiff = timerTableDiff(l.capturedTimers, back);
+      gammaOk = gammaColIntact(gammaFromCfg(cfg));
+      return lastDiff == null && gammaOk;
     },
-    onPoll: (s) => _log('    …restoring, controller recovering (${s}s)'),
+    onPoll: (s) => _log('    …restoring, re-reading (${s}s)'),
   );
-  _record(CheckResult(label, v.confirmed,
-      'post=$ok, verified=${v.confirmed} (${v.stallSeconds}s)'));
+  final gc = l.capturedGamma;
+  _record(CheckResult(
+    label,
+    v.confirmed,
+    v.confirmed
+        ? 'EXACT: $rows row(s) identical to capture, gamma col intact, '
+            'slots ${(l.dirtiedSlots.toList()..sort())} cleared (${v.stallSeconds}s)'
+        : 'post=$ok, NOT RESTORED after ${v.stallSeconds}s — '
+            '${lastDiff ?? 'table matches'}; gamma ${gammaOk ? 'intact' : 'WIPED'} '
+            '(captured gc=$gc)',
+  ));
+  if (v.confirmed) {
+    l.status = 'restored';
+    _clearInflight();
+  } else {
+    l.status = 'restore-failed';
+    _writeInflight(l);
+    _aborted = true;
+    _log('  ✗ restore FAILED — ledger kept at $_inflightPath; the suite will '
+        'not continue. Run `bench recover`.');
+  }
+  _durable({
+    'event': 'restore',
+    'label': label,
+    'verified': v.confirmed,
+    'diff': lastDiff,
+    'gammaIntact': gammaOk,
+  });
+  return v.confirmed;
+}
+
+/// PRE-FLIGHT. Read the timer table + gamma; refuse (loudly, exit 3, nothing
+/// written) when residue of an unrestored run is present. `--force` proceeds
+/// anyway and says so. `recover` is the only command that skips this.
+Future<bool> _preflight(String command, {bool force = false}) async {
+  final cfg = await client.getCfg();
+  if (cfg == null) {
+    _record(const CheckResult(
+        'pre-flight: controller readable', false, 'cfg unreadable'));
+    return false;
+  }
+  final timers = timerInsFrom(cfg);
+  final gc = gammaFromCfg(cfg);
+  final inflight = _readInflight();
+  final reasons = detectDirtyState(
+    timers: timers,
+    gc: gc,
+    inflightLedgerPresent: inflight != null,
+  );
+  if (reasons.isEmpty) {
+    _record(CheckResult('pre-flight: controller clean', true,
+        '${timers.length} timer row(s), gc=$gc, no inflight ledger'));
+    return true;
+  }
+  _log('');
+  _log('╔══════════════════════════════════════════════════════════════════╗');
+  _log('║  PRE-FLIGHT REFUSED — residue of an UNRESTORED run on ${client.base}');
+  _log('╚══════════════════════════════════════════════════════════════════╝');
+  for (final r in reasons) {
+    _log('  • $r');
+  }
+  _log('  timer table now:');
+  for (final t in timers) {
+    _log('    ${canonicalTimerRow(t)}');
+  }
+  if (inflight != null) {
+    _log('  inflight ledger: run ${inflight.runId} command=${inflight.command} '
+        'status=${inflight.status} captured ${inflight.capturedTimers.length} '
+        'row(s), gc=${inflight.capturedGamma}, on=${inflight.capturedOn}, '
+        'slots=${(inflight.dirtiedSlots.toList()..sort())}');
+  }
+  _record(CheckResult('pre-flight: no residue from an earlier run', false,
+      reasons.join(' | ')));
+  _durable({'event': 'preflight-refused', 'command': command, 'reasons': reasons});
+  if (force) {
+    _log('  --force given: PROCEEDING ANYWAY. The capture this run takes will '
+        'include the residue, and its restore will re-assert it.');
+    return true;
+  }
+  _log('  REFUSING to run "$command". Nothing was written. '
+      'Run `dart run bench/bin/bench.dart recover --ip <ip>` first.');
+  return false;
+}
+
+/// `recover`: put the controller back after a run that never restored.
+/// With an inflight ledger: restore its capture (timers, gamma, master power).
+/// Without one: scrub the harness's own signature rows and re-assert gamma,
+/// leaving every other row exactly as it is. Both paths verify EXACTLY.
+Future<void> cmdRecover() async {
+  _log('▶ recover');
+  final inflight = _readInflight();
+  if (inflight != null) {
+    _log('  inflight ledger from run ${inflight.runId} (${inflight.command}, '
+        'status ${inflight.status}) — restoring its capture: '
+        '${inflight.capturedTimers.length} row(s), gc=${inflight.capturedGamma}');
+    final ok = await _restoreTimers(inflight,
+        label: 'recover: restore from inflight ledger');
+    if (ok && inflight.capturedOn != null) {
+      await client.postState({'on': inflight.capturedOn});
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      final got = (await client.getState())?['on'];
+      _record(CheckResult('recover: master power restored',
+          got == inflight.capturedOn,
+          'wanted on=${inflight.capturedOn}, readback on=$got'));
+    }
+    return;
+  }
+  final cfg = await client.getCfg();
+  if (cfg == null) {
+    _record(const CheckResult('recover', false, 'cfg unreadable'));
+    return;
+  }
+  final now = timerInsFrom(cfg);
+  final sigs = now.where(isHarnessSignatureRow).toList();
+  final keep = now.where((t) => !isHarnessSignatureRow(t)).toList();
+  _log('  no inflight ledger — signature scrub: ${sigs.length} harness row(s) '
+      'to remove, ${keep.length} row(s) to keep; gamma re-asserted');
+  final synthetic = RunLedger(
+    runId: _runId,
+    command: 'recover',
+    ip: client.base,
+    startedAt: DateTime.now().toIso8601String(),
+    capturedTimers: keep,
+    capturedGamma: gammaFromCfg(cfg),
+    capturedOn: null,
+    dirtiedSlots: {for (var i = 0; i < kWledGeneralTimerSlots; i++) i},
+  );
+  await _restoreTimers(synthetic, label: 'recover: signature scrub + gamma');
 }
 
 Future<void> cmdCfgTruth() async {
   _log('▶ cfg-truth (en int/bool polarity — permanent regression guard)');
-  final captured = await _captureTimers();
+  final ledger = await _beginMutation('cfg-truth', slots: {0});
+  if (ledger == null) return;
   try {
     // Scratch timer occupies the LAST general slot (index 7); a real dow, a
     // benign macro. We write en as INT then as BOOL and read back the stored en.
@@ -225,14 +477,15 @@ Future<void> cmdCfgTruth() async {
       storedForBoolWrite: storedBool,
     ));
   } finally {
-    await _restoreTimers(captured, label: 'cfg-truth restore');
+    await _restoreTimers(ledger, label: 'cfg-truth restore');
   }
 }
 
 Future<void> cmdSyncSim() async {
   _log(
       '▶ sync-sim (REAL buildCfgPayload → post → patient verify → timersInsLanded)');
-  final captured = await _captureTimers();
+  final ledger = await _beginMutation('sync-sim');
+  if (ledger == null) return;
   var postCount = 0;
   try {
     // Fixture schedule: ON 3:15am / OFF 4:20am, Mon+Fri. Uses the app's REAL
@@ -252,6 +505,7 @@ Future<void> cmdSyncSim() async {
     _log('  built ${sentIns.length} real timers via buildCfgPayload: '
         '${sentIns.map((t) => '${t['hour']}:${t['min']}/m${t['macro']}/d${t['dow']}').join(', ')}');
 
+    _markDirtied(ledger, [for (var i = 0; i < sentIns.length; i++) i]);
     final ok = await client.postCfg(payload);
     postCount++;
     final v = await client.patientVerify(
@@ -265,7 +519,7 @@ Future<void> cmdSyncSim() async {
     _record(CheckResult('sync-sim landed (timersInsLanded)', v.confirmed,
         'post2xx=$ok, landed=${v.confirmed}, stall=${v.stallSeconds}s, posts=$postCount'));
   } finally {
-    await _restoreTimers(captured, label: 'sync-sim restore');
+    await _restoreTimers(ledger, label: 'sync-sim restore');
   }
 }
 
@@ -353,7 +607,8 @@ Future<void> _functionalPresetGuard(
 
 Future<void> cmdFireTest() async {
   _log('▶ fire-test (scratch timer ~2 min ahead, master off, await power-on)');
-  final captured = await _captureTimers();
+  final ledger = await _beginMutation('fire-test', slots: {0});
+  if (ledger == null) return;
   try {
     // Compute "today" dow per the CONTROLLER clock where possible; WLED 0.15.1
     // does not expose wall time over JSON, so we use local time and the app's
@@ -444,14 +699,23 @@ Future<void> cmdFireTest() async {
         '  scratch timer armed for ${target.hour}:${target.minute.toString().padLeft(2, '0')} '
         '(dow bit $dowBit); master off; ps=$psBefore; waiting for fire…');
 
-    // Wait until ~65s past the target minute.
-    final fireDeadline = DateTime(
-            target.year, target.month, target.day, target.hour, target.minute)
+    // Wait until ~90s past the target minute. The target is in CONTROLLER
+    // time (that is the clock the timer fires on), but the wait has to be
+    // measured on the HOST clock: comparing a controller-time deadline against
+    // DateTime.now() skipped the wait entirely on a controller whose clock was
+    // unsynced (1970), so the test reported "never fired" without waiting —
+    // found 2026-09-22 on the spare while proving the kill/recover path.
+    final targetMinute = DateTime(
+        target.year, target.month, target.day, target.hour, target.minute);
+    final hostStart = DateTime.now();
+    final fireDeadline = hostStart
+        .add(targetMinute.difference(now))
         .add(const Duration(seconds: 90));
     while (DateTime.now().isBefore(fireDeadline)) {
       await Future<void>.delayed(const Duration(seconds: 10));
-      _log(
-          '    …waiting (${DateTime.now().difference(now).inSeconds}s elapsed)');
+      _log('    …waiting (${DateTime.now().difference(hostStart).inSeconds}s '
+          'elapsed, deadline in '
+          '${fireDeadline.difference(DateTime.now()).inSeconds}s)');
     }
     // AUDIT FIX — the single conflated assertion is split in two. The old check
     // (`state.on == true`) failed IDENTICALLY when the timer never fired
@@ -468,8 +732,9 @@ Future<void> cmdFireTest() async {
       _record(r);
     }
   } finally {
-    await client.postState({'on': false});
-    await _restoreTimers(captured, label: 'fire-test restore');
+    // Master power goes back to what it was, not blindly off.
+    await client.postState({'on': ledger.capturedOn ?? false});
+    await _restoreTimers(ledger, label: 'fire-test restore');
   }
 }
 
@@ -622,7 +887,17 @@ Future<void> cmdRestore() async {
   final ins = (snap['timers'] as List)
       .map((e) => (e as Map).cast<String, dynamic>())
       .toList();
-  await _restoreTimers(ins,
+  final synthetic = RunLedger(
+    runId: _runId,
+    command: 'restore',
+    ip: client.base,
+    startedAt: DateTime.now().toIso8601String(),
+    capturedTimers: ins,
+    capturedGamma: null,
+    capturedOn: null,
+    dirtiedSlots: {for (var i = 0; i < kWledGeneralTimerSlots; i++) i},
+  );
+  await _restoreTimers(synthetic,
       label: 'restore timers from ${snaps.last.path.split('/').last}');
   final state = snap['state'];
   if (state is Map && state['on'] is bool) {
@@ -638,15 +913,28 @@ Future<void> cmdRestore() async {
 }
 
 Future<void> cmdAll() async {
-  _log('══ bench all — inaugural run ${DateTime.now().toIso8601String()} ══');
-  await cmdProbe();
-  await cmdSnapshot();
-  await cmdCfgTruth();
-  await cmdPresetVerify();
-  await cmdSyncSim();
-  await cmdFireTest();
-  await cmdChannelPower();
-  await cmdRestore();
+  _log('══ bench all — run ${DateTime.now().toIso8601String()} ══');
+  final steps = <(String, Future<void> Function())>[
+    ('probe', cmdProbe),
+    ('snapshot', cmdSnapshot),
+    ('cfg-truth', cmdCfgTruth),
+    ('preset-verify', cmdPresetVerify),
+    ('sync-sim', cmdSyncSim),
+    ('fire-test', cmdFireTest),
+    ('channel-power', cmdChannelPower),
+    ('restore', cmdRestore),
+  ];
+  for (final (name, step) in steps) {
+    if (_aborted) {
+      // A later command would CAPTURE the dirty table as its baseline and
+      // restore it faithfully — that is how 2026-09-22 compounded.
+      _log('══ suite ABORTED before "$name": a restore failed and the '
+          'controller is NOT clean. Run `bench recover`. ══');
+      _durable({'event': 'suite-aborted', 'before': name});
+      return;
+    }
+    await step();
+  }
 }
 
 Future<void> main(List<String> args) async {
@@ -661,8 +949,15 @@ Future<void> main(List<String> args) async {
   _log('bench → $ip');
 
   final cmd = args.first;
+  final force = args.contains('--force');
+  _durable({'event': 'run-start', 'command': cmd, 'ip': ip, 'args': args});
+  var refused = false;
   try {
-    switch (cmd) {
+    // PRE-FLIGHT for everything except the repair command itself.
+    if (cmd != 'recover' && !await _preflight(cmd, force: force)) {
+      refused = true;
+    } else {
+      switch (cmd) {
       case 'probe':
         await cmdProbe(update: args.contains('--update'));
         break;
@@ -687,6 +982,9 @@ Future<void> main(List<String> args) async {
       case 'restore':
         await cmdRestore();
         break;
+      case 'recover':
+        await cmdRecover();
+        break;
       case 'fanout-verify':
         await cmdFanoutVerify(args);
         break;
@@ -697,6 +995,7 @@ Future<void> main(List<String> args) async {
         stderr.writeln('unknown command: $cmd');
         client.close();
         exit(2);
+      }
     }
   } finally {
     client.close();
@@ -712,7 +1011,22 @@ Future<void> main(List<String> args) async {
       _log('  ✗ ${f.name}: ${f.evidence}');
     }
   }
-  exit(failed.isEmpty ? 0 : 1);
+  if (_aborted) {
+    _log('CONTROLLER NOT CLEAN: a restore failed. Inflight ledger kept at '
+        '$_inflightPath. Run `bench recover`.');
+  }
+  final code = refused ? 3 : (failed.isEmpty ? 0 : 1);
+  _durable({
+    'event': 'run-end',
+    'command': cmd,
+    'passed': _results.length - failed.length,
+    'total': _results.length,
+    'failed': [for (final f in failed) f.name],
+    'aborted': _aborted,
+    'refused': refused,
+    'exit': code,
+  });
+  exit(code);
 }
 
 // ───────────────────────────────────────────────────────────────────────────

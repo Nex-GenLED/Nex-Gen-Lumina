@@ -5,6 +5,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
+import 'package:nexgen_command/features/wled/wled_cfg_gamma.dart';
 
 import '../../bench/src/bench_core.dart';
 
@@ -355,6 +356,236 @@ void main() {
       expect(dowBitForMondayZeroIndex(0), 1); // Mon
       expect(dowBitForMondayZeroIndex(4), 16); // Fri
       expect(dowBitForMondayZeroIndex(6), 64); // Sun
+    });
+  });
+
+  // ── 2026-09-22: restore fix — slot-aware restore, exact compare, pre-flight ──
+  // Fixtures are the COMPACTED readback shape (what /json/cfg actually returns).
+  const solar = {'en': 1, 'hour': 255, 'min': 0, 'macro': 2, 'dow': 127};
+  const rowA = {
+    'en': 1, 'hour': 19, 'min': 0, 'macro': 10, 'dow': 127,
+    'start': {'mon': 1, 'day': 1}, 'end': {'mon': 12, 'day': 31},
+  };
+  const rowB = {
+    'en': 1, 'hour': 7, 'min': 0, 'macro': 2, 'dow': 127,
+    'start': {'mon': 1, 'day': 1}, 'end': {'mon': 12, 'day': 31},
+  };
+  const fixtureOn = {'en': 1, 'hour': 3, 'min': 15, 'macro': 1, 'dow': 17};
+  const fixtureOff = {'en': 1, 'hour': 4, 'min': 20, 'macro': 2, 'dow': 17};
+  const scratchFire = {'en': 1, 'hour': 13, 'min': 55, 'macro': 1, 'dow': 2};
+
+  group('buildTimerRestoreIns (slot-aware restore body)', () {
+    test('solar-only capture → 8 empty general rows, solar NOT re-posted', () {
+      final body = buildTimerRestoreIns([solar]);
+      expect(body, hasLength(kWledGeneralTimerSlots));
+      expect(body.every((r) => r.toString() == kEmptyTimerRow.toString()),
+          isTrue,
+          reason: 'this is the 2026-09-22 shape: a solar-only capture used to '
+              'produce a body that mentioned NO general slot, so the fixture '
+              'rows in slots 0/1 survived');
+      expect(body.any((r) => r['hour'] == 255), isFalse);
+    });
+
+    test('general rows are re-packed from index 0 with start/end intact, '
+        'empties fill the rest', () {
+      final body = buildTimerRestoreIns([solar, rowA, rowB]);
+      expect(body[0], rowA);
+      expect(body[1], rowB);
+      expect(body[0]['start'], {'mon': 1, 'day': 1});
+      for (var i = 2; i < 8; i++) {
+        expect(body[i], kEmptyTimerRow, reason: 'slot $i must be cleared');
+      }
+    });
+
+    test('empty capture → 8 empties (clears everything a run dirtied)', () {
+      expect(buildTimerRestoreIns(const []),
+          List.filled(kWledGeneralTimerSlots, kEmptyTimerRow));
+    });
+
+    test('kEmptyTimerRow is the WLED clear shape: macro, hour, min all 0', () {
+      // serializeConfig skips a slot iff macro==0 && hour==0 && min==0 —
+      // anything else stays visible (and hour 255 would jump to slot 8).
+      expect(kEmptyTimerRow['macro'], 0);
+      expect(kEmptyTimerRow['hour'], 0);
+      expect(kEmptyTimerRow['min'], 0);
+      expect(kEmptyTimerRow['en'], 0);
+    });
+  });
+
+  group('timerTableDiff (EXACT restore verification)', () {
+    test('identical tables → null', () {
+      expect(timerTableDiff([rowA, solar], [rowA, solar]), isNull);
+    });
+
+    test('a surviving fixture row is EXTRA — containment would have passed', () {
+      // The 2026-09-22 failure shape: capture [solar], readback [fixture×2, solar].
+      final d = timerTableDiff([solar], [fixtureOn, fixtureOff, solar]);
+      expect(d, isNotNull);
+      expect(d, contains('EXTRA 2'));
+      expect(d, contains('hour=3 min=15'));
+    });
+
+    test('a captured row that did not come back is MISSING', () {
+      final d = timerTableDiff([rowA, rowB, solar], [rowA, solar]);
+      expect(d, contains('MISSING 1'));
+      expect(d, contains('hour=7'));
+    });
+
+    test('same rows, different order → reported (ordered comparison)', () {
+      final d = timerTableDiff([rowA, rowB], [rowB, rowA]);
+      expect(d, contains('DIFFERENT ORDER'));
+    });
+
+    test('en bool/int and absent start/end are canonicalised on both sides', () {
+      final a = {'en': true, 'hour': 5, 'min': 0, 'macro': 1, 'dow': 1};
+      final b = {'en': 1, 'hour': 5, 'min': 0, 'macro': 1, 'dow': 1};
+      expect(timerTableDiff([a], [b]), isNull);
+      expect(canonicalTimerRow(solar), contains('start=0/0 end=0/0'));
+    });
+
+    test('empty expected vs non-empty actual → EXTRA (no special branch)', () {
+      final d = timerTableDiff(const [], [scratchFire]);
+      expect(d, contains('EXTRA 1'));
+    });
+  });
+
+  group('prepareCfgPayload (gamma carried on every harness cfg POST)', () {
+    test('timers-only body gains the NGL light.gc', () {
+      final out = prepareCfgPayload({
+        'timers': {'ins': [kEmptyTimerRow]}
+      });
+      expect(out['light'], {'gc': kNglLightGammaConfig});
+      expect(kNglLightGammaConfig['col'], 2.8);
+      expect((out['timers'] as Map)['ins'], [kEmptyTimerRow]);
+    });
+
+    test('an explicit light.gc passes through unchanged', () {
+      final out = prepareCfgPayload({
+        'light': {'gc': {'bri': 1, 'col': 2.2, 'val': 2.2}},
+      });
+      expect((out['light'] as Map)['gc'], {'bri': 1, 'col': 2.2, 'val': 2.2});
+    });
+  });
+
+  group('gamma helpers', () {
+    test('gammaColIntact: col 2.8 → true, col 1 (the wipe) → false, absent → false',
+        () {
+      expect(gammaColIntact({'bri': 1, 'col': 2.8, 'val': 2.8}), isTrue);
+      expect(gammaColIntact({'bri': 1, 'col': 1, 'val': 2.8}), isFalse);
+      expect(gammaColIntact(null), isFalse);
+    });
+
+    test('gammaFromCfg reads light.gc, null when absent', () {
+      expect(gammaFromCfg({'light': {'gc': {'col': 2.8}}}), {'col': 2.8});
+      expect(gammaFromCfg({'light': {}}), isNull);
+      expect(gammaFromCfg(null), isNull);
+    });
+  });
+
+  group('detectDirtyState (pre-flight)', () {
+    const cleanGc = {'bri': 1, 'col': 2.8, 'val': 2.8};
+    const wipedGc = {'bri': 1, 'col': 1, 'val': 2.8};
+
+    test('clean controller → no reasons', () {
+      expect(
+          detectDirtyState(
+              timers: [rowA, rowB, solar],
+              gc: cleanGc,
+              inflightLedgerPresent: false),
+          isEmpty);
+    });
+
+    test('wiped gamma → refused', () {
+      final r = detectDirtyState(
+          timers: [solar], gc: wipedGc, inflightLedgerPresent: false);
+      expect(r, hasLength(1));
+      expect(r.single, contains('WIPED'));
+    });
+
+    test('sync-sim fixture rows → refused, one reason per row', () {
+      final r = detectDirtyState(
+          timers: [fixtureOn, fixtureOff, solar],
+          gc: cleanGc,
+          inflightLedgerPresent: false);
+      expect(r, hasLength(2));
+      expect(r.every((x) => x.contains('harness scratch/fixture row')), isTrue);
+    });
+
+    test('cfg-truth scratch (3:33 m1 d2) → refused', () {
+      final r = detectDirtyState(
+          timers: [{'en': 1, 'hour': 3, 'min': 33, 'macro': 1, 'dow': 2}],
+          gc: cleanGc,
+          inflightLedgerPresent: false);
+      expect(r, hasLength(1));
+    });
+
+    test('inflight ledger alone → refused (the killed-process case)', () {
+      // fire-test's scratch has no fixed signature; the ledger is what
+      // catches it after a process dies mid-wait.
+      final r = detectDirtyState(
+          timers: [scratchFire, solar],
+          gc: cleanGc,
+          inflightLedgerPresent: true);
+      expect(r, hasLength(1));
+      expect(r.single, contains('inflight'));
+    });
+
+    test('the real 2026-09-22 table → THREE reasons (ledger + gamma + fixture)',
+        () {
+      final r = detectDirtyState(
+          timers: [scratchFire, fixtureOff, solar],
+          gc: wipedGc,
+          inflightLedgerPresent: true);
+      expect(r, hasLength(3));
+    });
+
+    test('a genuine schedule with macro 1 is NOT a signature', () {
+      // A user "Turn On 3:15 Mon+Fri" would collide with the fixture ON row —
+      // accepted: that exact row is the fixture, and recover keeps everything
+      // else. A different minute is not flagged.
+      expect(isHarnessSignatureRow({'hour': 3, 'min': 16, 'macro': 1, 'dow': 17}),
+          isFalse);
+      expect(isHarnessSignatureRow(solar), isFalse);
+      expect(isHarnessSignatureRow(scratchFire), isFalse);
+    });
+  });
+
+  group('RunLedger (durable inflight record)', () {
+    test('round-trips through json with timers, gamma, power and slots', () {
+      final l = RunLedger(
+        runId: 'r1',
+        command: 'fire-test',
+        ip: 'http://192.168.1.150',
+        startedAt: '2026-09-22T13:52:00',
+        capturedTimers: [solar],
+        capturedGamma: const {'bri': 1, 'col': 2.8, 'val': 2.8},
+        capturedOn: true,
+        dirtiedSlots: {0},
+      );
+      final back = RunLedger.fromJson(l.toJson())!;
+      expect(back.command, 'fire-test');
+      expect(back.capturedTimers, [solar]);
+      expect(back.capturedGamma, {'bri': 1, 'col': 2.8, 'val': 2.8});
+      expect(back.capturedOn, isTrue);
+      expect(back.dirtiedSlots, {0});
+      expect(back.status, 'inflight');
+    });
+
+    test('a ledger without a timers list is rejected (never restore from junk)',
+        () {
+      expect(RunLedger.fromJson({'command': 'x'}), isNull);
+    });
+
+    test('restoring a ledger capture clears the dirtied slots and nothing else',
+        () {
+      final l = RunLedger(
+        runId: 'r1', command: 'sync-sim', ip: '', startedAt: '',
+        capturedTimers: [rowA, solar],
+        capturedGamma: null, capturedOn: null, dirtiedSlots: {0, 1},
+      );
+      final body = buildTimerRestoreIns(l.capturedTimers);
+      expect(body[0], rowA);
+      expect(body.sublist(1), List.filled(7, kEmptyTimerRow));
     });
   });
 }
