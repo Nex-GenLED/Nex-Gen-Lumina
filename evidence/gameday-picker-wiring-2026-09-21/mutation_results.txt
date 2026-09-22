@@ -1,0 +1,41 @@
+MUTATION TESTING — test/features/sports_alerts/foreground_celebration_test.dart
+2026-09-21. Each mutation applied to the working source, the one test file run,
+the source restored from a copy and byte-compared (diff -q) to the pre-mutation
+file. Lines below are the failing tests as reported by `flutter test` ([E]).
+
+NOTE: run before the `pal`-inherits assertion was added to test 2, so the file
+had 26 tests at this point as it does now (the assertion went into an existing
+test, it did not add one).
+
+Unmutated: +26: All tests passed!
+
+##### M1: original bug — third argument dropped
+      (buildAnimationSteps(event.eventType, team, resolution) -> (…, team))
+  [E] a pick replaces fx/sx/ix on EVERY stage; timing and colours stay
+  [E] different picks put different effects on the wire
+  [E] a pick the house is ALREADY showing → the white-strobe fallback
+  [E] the pick is resolved against THIS celebration's capture, not a stale one
+  [E] unreadable state → fail-open: the pick fires, no revert
+  [E] a WIN still honours the pick after the team leaves the live set
+  [E] a pick changed mid-game applies to the NEXT celebration and does not restart polling
+  +19 -7: Some tests failed.
+
+##### M2: naive reorder — empty-steps gate moved BELOW capture()
+  [E] a no-animation event never touches the device, pick or no pick
+  +25 -1: Some tests failed.
+
+##### M3: naive lookup — choice read from _liveTeams.firstWhere(...)
+  [E] celebration delivery: a score fires capture, play, then revert with the captured state   (pre-existing test)
+  [E] celebration delivery: no revert when capture returns null (can't read state)             (pre-existing test)
+  [E] coalescing: scores during a celebration collapse to ONE follow-up (no strobe)            (pre-existing test)
+  [E] a WIN still honours the pick after the team leaves the live set
+  +22 -4: Some tests failed.
+  (The three pre-existing failures are the point: the miss THROWS, the catch in
+  _runCelebration swallows it, and nothing plays at all.)
+
+##### M4: provider stops carrying the pick
+      (celebrationEffectId: cfg.celebrationEffectId removed from computeLiveCelebrationTeams)
+  [E] config gating: the celebration pick rides along, from either phase machine
+  +25 -1: Some tests failed.
+
+Restored: coordinator + providers identical to pre-mutation copies.

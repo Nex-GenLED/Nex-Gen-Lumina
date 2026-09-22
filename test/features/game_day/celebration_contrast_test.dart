@@ -165,6 +165,18 @@ void main() {
       expect(_resolve(null, null), isNull);
     });
 
+    // Bouncing Balls (91) was withdrawn from the picker on 2026-09-21 after it
+    // rebooted a controller mid-celebration. A config that still holds it — or
+    // any id the picker does not offer — must resolve to "no pick", so the
+    // legacy sequence fires and the withdrawn effect never reaches the wire.
+    test('an id the picker no longer offers → null, the legacy path', () {
+      expect(WledEffectsCatalog.celebrationPickIds.contains(91), isFalse);
+      expect(_resolve(91, _stateList(0)), isNull);
+      expect(_resolve(91, null), isNull, reason: 'fail-open does not apply: '
+          'the id is refused before the captured state is consulted');
+      expect(_resolve(9999, _stateList(0)), isNull);
+    });
+
     test('the fallback is one fixed thing, never a second user choice', () {
       final a = _resolve(_strobeA, _stateList(_strobeA))!;
       final b = _resolve(_strobeB, _stateList(_strobeB))!;

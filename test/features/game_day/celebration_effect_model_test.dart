@@ -157,7 +157,7 @@ void main() {
     //
     // This group used to assert every pick satisfied `isCelebrationEffect`,
     // because the list WAS that predicate applied to the catalog. The list is
-    // now a hand-curated 17 (`WledEffectsCatalog.celebrationPickIds`) that
+    // now a hand-curated 16 (`WledEffectsCatalog.celebrationPickIds`) that
     // deliberately includes chase- and game-motion effects the predicate
     // rejects, so the assertion no longer describes the product.
     //

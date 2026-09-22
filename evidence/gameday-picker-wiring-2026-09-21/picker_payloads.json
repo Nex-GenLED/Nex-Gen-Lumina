@@ -1,0 +1,3820 @@
+{
+ "payloads": [
+  {
+   "pick": null,
+   "pickName": "(no pick — legacy)",
+   "colorBehavior": null,
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 2,
+   "fxName": "Breathe",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 2,
+      "sx": 240,
+      "ix": 255,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 2,
+      "sx": 240,
+      "ix": 255,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": null,
+   "pickName": "(no pick — legacy)",
+   "colorBehavior": null,
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 9,
+   "fxName": "Rainbow",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 9,
+      "sx": 180,
+      "ix": 200,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 9,
+      "sx": 180,
+      "ix": 200,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": null,
+   "pickName": "(no pick — legacy)",
+   "colorBehavior": null,
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 63,
+   "fxName": "Pride 2015",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 63,
+      "sx": 128,
+      "ix": 200,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 63,
+      "sx": 128,
+      "ix": 200,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 28,
+   "pickName": "Chase",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 28,
+   "fxName": "Chase",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 28,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 28,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 28,
+   "pickName": "Chase",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 28,
+   "fxName": "Chase",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 28,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 28,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 28,
+   "pickName": "Chase",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 28,
+   "fxName": "Chase",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 28,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 28,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 76,
+   "pickName": "Meteor",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 76,
+   "fxName": "Meteor",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 76,
+      "sx": 40,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 76,
+      "sx": 40,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 76,
+   "pickName": "Meteor",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 76,
+   "fxName": "Meteor",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 76,
+      "sx": 40,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 76,
+      "sx": 40,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 76,
+   "pickName": "Meteor",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 76,
+   "fxName": "Meteor",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 76,
+      "sx": 40,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 76,
+      "sx": 40,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 113,
+   "pickName": "Washing Machine",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 113,
+   "fxName": "Washing Machine",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 113,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 113,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 113,
+   "pickName": "Washing Machine",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 113,
+   "fxName": "Washing Machine",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 113,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 113,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 113,
+   "pickName": "Washing Machine",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 113,
+   "fxName": "Washing Machine",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 113,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 113,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 27,
+   "pickName": "Android",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 27,
+   "fxName": "Android",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 27,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 27,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 27,
+   "pickName": "Android",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 27,
+   "fxName": "Android",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 27,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 27,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 27,
+   "pickName": "Android",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 27,
+   "fxName": "Android",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 27,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 27,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 91,
+   "pickName": "Bouncing Balls",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 91,
+   "fxName": "Bouncing Balls",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 91,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 91,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 91,
+   "pickName": "Bouncing Balls",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 91,
+   "fxName": "Bouncing Balls",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 91,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 91,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 91,
+   "pickName": "Bouncing Balls",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 91,
+   "fxName": "Bouncing Balls",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 91,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 91,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 37,
+   "pickName": "Chase 2",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 37,
+   "fxName": "Chase 2",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 37,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 37,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 37,
+   "pickName": "Chase 2",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 37,
+   "fxName": "Chase 2",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 37,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 37,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 37,
+   "pickName": "Chase 2",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 37,
+   "fxName": "Chase 2",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 37,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 37,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 54,
+   "pickName": "Chase 3",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 54,
+   "fxName": "Chase 3",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 54,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 54,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 54,
+   "pickName": "Chase 3",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 54,
+   "fxName": "Chase 3",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 54,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 54,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 54,
+   "pickName": "Chase 3",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 54,
+   "fxName": "Chase 3",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 54,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 54,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 32,
+   "pickName": "Chase Flash Rnd",
+   "colorBehavior": "generatesOwnColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 32,
+   "fxName": "Chase Flash Rnd",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 32,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 32,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 32,
+   "pickName": "Chase Flash Rnd",
+   "colorBehavior": "generatesOwnColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 32,
+   "fxName": "Chase Flash Rnd",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 32,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 32,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 32,
+   "pickName": "Chase Flash Rnd",
+   "colorBehavior": "generatesOwnColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 32,
+   "fxName": "Chase Flash Rnd",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 32,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 32,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 29,
+   "pickName": "Chase Random",
+   "colorBehavior": "generatesOwnColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 29,
+   "fxName": "Chase Random",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 29,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 29,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 29,
+   "pickName": "Chase Random",
+   "colorBehavior": "generatesOwnColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 29,
+   "fxName": "Chase Random",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 29,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 29,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 29,
+   "pickName": "Chase Random",
+   "colorBehavior": "generatesOwnColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 29,
+   "fxName": "Chase Random",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 29,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 29,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 64,
+   "pickName": "Juggle",
+   "colorBehavior": "usesPalette",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 64,
+   "fxName": "Juggle",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 64,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 64,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 64,
+   "pickName": "Juggle",
+   "colorBehavior": "usesPalette",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 64,
+   "fxName": "Juggle",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 64,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 64,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 64,
+   "pickName": "Juggle",
+   "colorBehavior": "usesPalette",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 64,
+   "fxName": "Juggle",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 64,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 64,
+      "sx": 55,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 48,
+   "pickName": "Rolling Balls",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 48,
+   "fxName": "Rolling Balls",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 48,
+      "sx": 128,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 48,
+      "sx": 128,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 48,
+   "pickName": "Rolling Balls",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 48,
+   "fxName": "Rolling Balls",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 48,
+      "sx": 128,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 48,
+      "sx": 128,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 48,
+   "pickName": "Rolling Balls",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 48,
+   "fxName": "Rolling Balls",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 48,
+      "sx": 128,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 48,
+      "sx": 128,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 57,
+   "pickName": "Lightning",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 57,
+   "fxName": "Lightning",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 57,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 57,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 57,
+   "pickName": "Lightning",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 57,
+   "fxName": "Lightning",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 57,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 57,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 57,
+   "pickName": "Lightning",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 57,
+   "fxName": "Lightning",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 57,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 57,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 23,
+   "pickName": "Strobe",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 23,
+   "fxName": "Strobe",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 23,
+      "sx": 80,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 23,
+      "sx": 80,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 23,
+   "pickName": "Strobe",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 23,
+   "fxName": "Strobe",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 23,
+      "sx": 80,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 23,
+      "sx": 80,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 23,
+   "pickName": "Strobe",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 23,
+   "fxName": "Strobe",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 23,
+      "sx": 80,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 23,
+      "sx": 80,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 25,
+   "pickName": "Strobe Mega",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 25,
+   "fxName": "Strobe Mega",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 25,
+      "sx": 90,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 25,
+      "sx": 90,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 25,
+   "pickName": "Strobe Mega",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 25,
+   "fxName": "Strobe Mega",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 25,
+      "sx": 90,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 25,
+      "sx": 90,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 25,
+   "pickName": "Strobe Mega",
+   "colorBehavior": "usesSelectedColors",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 25,
+   "fxName": "Strobe Mega",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 25,
+      "sx": 90,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 25,
+      "sx": 90,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 42,
+   "pickName": "Fireworks",
+   "colorBehavior": "usesPalette",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 42,
+   "fxName": "Fireworks",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 42,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 42,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 42,
+   "pickName": "Fireworks",
+   "colorBehavior": "usesPalette",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 42,
+   "fxName": "Fireworks",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 42,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 42,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 42,
+   "pickName": "Fireworks",
+   "colorBehavior": "usesPalette",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 42,
+   "fxName": "Fireworks",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 42,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 42,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 90,
+   "pickName": "Fireworks 1D",
+   "colorBehavior": "usesPalette",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 90,
+   "fxName": "Fireworks 1D",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 90,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 90,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 90,
+   "pickName": "Fireworks 1D",
+   "colorBehavior": "usesPalette",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 90,
+   "fxName": "Fireworks 1D",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 90,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 90,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 90,
+   "pickName": "Fireworks 1D",
+   "colorBehavior": "usesPalette",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 90,
+   "fxName": "Fireworks 1D",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 90,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 90,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 89,
+   "pickName": "Fireworks Starburst",
+   "colorBehavior": "usesPalette",
+   "stage": 1,
+   "holdSeconds": 2,
+   "fx": 89,
+   "fxName": "Fireworks Starburst",
+   "wire": {
+    "on": true,
+    "bri": 255,
+    "seg": [
+     {
+      "id": 0,
+      "fx": 89,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 89,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 89,
+   "pickName": "Fireworks Starburst",
+   "colorBehavior": "usesPalette",
+   "stage": 2,
+   "holdSeconds": 5,
+   "fx": 89,
+   "fxName": "Fireworks Starburst",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 89,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 89,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  },
+  {
+   "pick": 89,
+   "pickName": "Fireworks Starburst",
+   "colorBehavior": "usesPalette",
+   "stage": 3,
+   "holdSeconds": 8,
+   "fx": 89,
+   "fxName": "Fireworks Starburst",
+   "wire": {
+    "seg": [
+     {
+      "id": 0,
+      "fx": 89,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     },
+     {
+      "id": 1,
+      "fx": 89,
+      "sx": 60,
+      "ix": 128,
+      "col": [
+       [
+        227,
+        24,
+        55,
+        0
+       ],
+       [
+        255,
+        184,
+        28,
+        0
+       ],
+       [
+        0,
+        0,
+        0,
+        0
+       ]
+      ],
+      "on": true
+     }
+    ]
+   }
+  }
+ ],
+ "baseFx": [
+  0,
+  2,
+  28,
+  52,
+  63
+ ],
+ "matrix": [
+  {
+   "pick": 28,
+   "name": "Chase",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "FALLBACK(fx 23)",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 76,
+   "name": "Meteor",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 113,
+   "name": "Washing Machine",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 27,
+   "name": "Android",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 91,
+   "name": "Bouncing Balls",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 37,
+   "name": "Chase 2",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 54,
+   "name": "Chase 3",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 32,
+   "name": "Chase Flash Rnd",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 29,
+   "name": "Chase Random",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 64,
+   "name": "Juggle",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 48,
+   "name": "Rolling Balls",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 57,
+   "name": "Lightning",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 23,
+   "name": "Strobe",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 25,
+   "name": "Strobe Mega",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 42,
+   "name": "Fireworks",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 90,
+   "name": "Fireworks 1D",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  },
+  {
+   "pick": 89,
+   "name": "Fireworks Starburst",
+   "base0": "as-picked",
+   "base2": "as-picked",
+   "base28": "as-picked",
+   "base52": "as-picked",
+   "base63": "as-picked"
+  }
+ ]
+}

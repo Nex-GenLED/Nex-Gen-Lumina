@@ -17,11 +17,13 @@ import 'package:nexgen_command/features/sports_alerts/models/score_alert_config.
 import 'package:nexgen_command/features/sports_alerts/models/score_alert_event.dart';
 import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
 import 'package:nexgen_command/features/sports_alerts/services/alert_trigger_service.dart'
-    show AlertAnimationStep;
+    show AlertAnimationStep, AlertTriggerService;
+import 'package:nexgen_command/features/sports_alerts/services/celebration_contrast.dart';
 import 'package:nexgen_command/features/sports_alerts/services/espn_api_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_coordinator.dart';
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/services/score_monitor_service.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 
 // ── Fakes ──────────────────────────────────────────────────────────────────
 
@@ -54,16 +56,25 @@ class _FakeDelivery implements CelebrationDelivery {
   int captureCount = 0, playCount = 0, revertCount = 0;
   Completer<void>? blockPlay;
 
+  /// Every play() call's steps, in order — what actually went to the lights.
+  final List<List<AlertAnimationStep>> plays = [];
+
+  /// When non-empty, successive capture() calls drain this instead of
+  /// returning [captureReturn] — the house looks different each time.
+  final List<Map<String, dynamic>?> captureQueue = [];
+
   @override
   Future<Map<String, dynamic>?> capture() async {
     captureCount++;
     log.add('capture');
+    if (captureQueue.isNotEmpty) return captureQueue.removeAt(0);
     return captureReturn;
   }
 
   @override
   Future<void> play(List<AlertAnimationStep> steps) async {
     playCount++;
+    plays.add(steps);
     log.add('play(${steps.length})');
     if (blockPlay != null) await blockPlay!.future;
   }
@@ -177,6 +188,253 @@ void main() {
       expect(d.captureCount, 2);
       expect(d.revertCount, 2);
       expect(c.isCelebrating, isFalse);
+    });
+  });
+
+  // The Game Day screen's celebration picker. Before this group existed the
+  // coordinator called buildAnimationSteps(type, team) with no third argument:
+  // the pick was saved, previewed, and then discarded at the last call.
+  group('celebration picker — the chosen effect reaches the lights', () {
+    final teamColors = kTeamColors[anySlug]!;
+
+    /// A house showing effect [fx] — what capture() reads.
+    Map<String, dynamic> look(int fx) => {
+          'on': true,
+          'bri': 120,
+          'seg': [
+            {'fx': fx, 'col': [[1, 2, 3, 0]]}
+          ],
+        };
+
+    /// The single no-id template seg of every stage in one play() call.
+    List<Map<String, dynamic>> segsOf(List<AlertAnimationStep> steps) => [
+          for (final s in steps)
+            ((s.payload['seg'] as List).single as Map).cast<String, dynamic>(),
+        ];
+
+    CelebrationTeam picked(int? fx, {int sx = 200, int ix = 180}) =>
+        CelebrationTeam(
+          teamSlug: anySlug,
+          sport: anySport,
+          celebrationEffectId: fx,
+          celebrationSpeed: sx,
+          celebrationIntensity: ix,
+        );
+
+    test('no pick → the legacy sequence, byte for byte (inert for the fleet)',
+        () async {
+      final d = _FakeDelivery()..captureReturn = look(0);
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(null)]);
+      c.handleAlert(_event(anySlug));
+      await _settle();
+
+      final legacy = AlertTriggerService.buildAnimationSteps(
+          AlertEventType.touchdown, teamColors);
+      expect(d.plays.single.map((s) => s.payload).toList(),
+          legacy.map((s) => s.payload).toList());
+    });
+
+    test('a pick replaces fx/sx/ix on EVERY stage; timing and colours stay',
+        () async {
+      final d = _FakeDelivery()..captureReturn = look(0);
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(76, sx: 200, ix: 180)]); // Meteor
+      c.handleAlert(_event(anySlug));
+      await _settle();
+
+      final legacy = AlertTriggerService.buildAnimationSteps(
+          AlertEventType.touchdown, teamColors);
+      final played = d.plays.single;
+      expect(played.map((s) => s.hold), legacy.map((s) => s.hold),
+          reason: 'the timing table is not the user\'s to change');
+      final segs = segsOf(played);
+      expect(segs.map((s) => s['fx']), everyElement(76));
+      expect(segs.map((s) => s['sx']), everyElement(200));
+      expect(segs.map((s) => s['ix']), everyElement(180));
+      expect(segs.map((s) => s['col']), segsOf(legacy).map((s) => s['col']),
+          reason: 'a pick changes the motion, never the team colours');
+      expect(segs.map((s) => s['pal']), segsOf(legacy).map((s) => s['pal']),
+          reason: 'a pick inherits the stage\'s palette assertion, whatever '
+              'the timing table says it is');
+      // Still capture → play → revert, and the revert still gets the capture.
+      expect(d.log, ['capture', 'play(3)', 'revert']);
+      expect(d.revertedWith, d.captureReturn);
+    });
+
+    test('different picks put different effects on the wire', () async {
+      final seen = <int>{};
+      for (final fx in [28, 76, 113, 25]) {
+        final d = _FakeDelivery()..captureReturn = look(0);
+        final c = build(_FakeMonitor(), d);
+        c.syncLiveTeams([picked(fx)]);
+        c.handleAlert(_event(anySlug));
+        await _settle();
+        c.dispose();
+
+        final fxOnWire = segsOf(d.plays.single).map((s) => s['fx']).toSet();
+        expect(fxOnWire, {fx});
+        seen.add(fx);
+      }
+      expect(seen, hasLength(4));
+    });
+
+    // Bouncing Balls (91) was withdrawn from the picker on 2026-09-21 after it
+    // rebooted the bench controller mid-celebration. A config saved before
+    // the withdrawal still holds 91; it must fire as "no pick", never as 91.
+    test('a stored pick the picker no longer offers (91) fires the LEGACY '
+        'sequence — nothing withdrawn reaches the lights', () async {
+      expect(WledEffectsCatalog.celebrationPickIds.contains(91), isFalse);
+
+      final d = _FakeDelivery()..captureReturn = look(0);
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(91)]); // stale config: Bouncing Balls
+      c.handleAlert(_event(anySlug));
+      await _settle();
+
+      expect(segsOf(d.plays.single).map((s) => s['fx']),
+          everyElement(isNot(91)));
+      final legacy = AlertTriggerService.buildAnimationSteps(
+          AlertEventType.touchdown, teamColors);
+      expect(d.plays.single.map((s) => s.payload).toList(),
+          legacy.map((s) => s.payload).toList(),
+          reason: 'a withdrawn id is "no pick": the legacy sequence, verbatim');
+      expect(d.log, ['capture', 'play(3)', 'revert']);
+    });
+
+    test('a pick the house is ALREADY showing → the white-strobe fallback',
+        () async {
+      final d = _FakeDelivery()..captureReturn = look(28); // base is Chase
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(28)]); // and the user picked Chase
+      c.handleAlert(_event(anySlug));
+      await _settle();
+
+      final segs = segsOf(d.plays.single);
+      expect(segs.map((s) => s['fx']),
+          everyElement(kFallbackCelebrationEffectId));
+      expect(segs.map((s) => (s['col'] as List).first),
+          everyElement(kFallbackCelebrationColor));
+      expect(d.revertedWith, d.captureReturn,
+          reason: 'the contrast check reads the capture, it must not eat it');
+    });
+
+    test('the pick is resolved against THIS celebration\'s capture, not a '
+        'stale one', () async {
+      final d = _FakeDelivery()
+        ..captureQueue.addAll([look(0), look(76)]); // house changes between
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+      c.syncLiveTeams([picked(76)]);
+
+      c.handleAlert(_event(anySlug));
+      await _settle();
+      c.handleAlert(_event(anySlug));
+      await _settle();
+
+      expect(segsOf(d.plays[0]).map((s) => s['fx']), everyElement(76),
+          reason: 'Meteor over Solid is distinct — fires as picked');
+      expect(segsOf(d.plays[1]).map((s) => s['fx']),
+          everyElement(kFallbackCelebrationEffectId),
+          reason: 'Meteor over Meteor is invisible — falls back');
+    });
+
+    test('unreadable state → fail-open: the pick fires, no revert', () async {
+      final d = _FakeDelivery()..captureReturn = null;
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(76)]);
+      c.handleAlert(_event(anySlug));
+      await _settle();
+
+      expect(segsOf(d.plays.single).map((s) => s['fx']), everyElement(76));
+      expect(d.revertCount, 0);
+    });
+
+    test('a no-animation event never touches the device, pick or no pick',
+        () async {
+      for (final team in [picked(null), picked(76)]) {
+        final d = _FakeDelivery();
+        final c = build(_FakeMonitor(), d);
+        c.syncLiveTeams([team]);
+        c.handleAlert(_event(anySlug, type: AlertEventType.turnover));
+        await _settle();
+
+        expect(d.log, isEmpty,
+            reason: 'the empty-steps gate must stay AHEAD of capture()');
+        expect(c.isCelebrating, isFalse);
+        c.dispose();
+      }
+    });
+
+    test('a WIN still honours the pick after the team leaves the live set',
+        () async {
+      final d = _FakeDelivery()..captureReturn = look(0);
+      final c = build(_FakeMonitor(), d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(27)]); // Android
+      // Final whistle: the phase machine drops the team out of liveGame at the
+      // same moment the diff engine emits the win.
+      c.syncLiveTeams(const []);
+      c.handleAlert(_event(anySlug, type: AlertEventType.win));
+      await _settle();
+
+      expect(segsOf(d.plays.single).map((s) => s['fx']), everyElement(27));
+    });
+
+    test('a pick changed mid-game applies to the NEXT celebration and does '
+        'not restart polling', () async {
+      final m = _FakeMonitor();
+      final d = _FakeDelivery()..captureReturn = look(0);
+      final c = build(m, d);
+      addTearDown(c.dispose);
+
+      c.syncLiveTeams([picked(76)]);
+      await _settle();
+      expect(m.checkCalls, hasLength(1));
+
+      final block = Completer<void>();
+      d.blockPlay = block;
+      c.handleAlert(_event(anySlug)); // celebration #1, Meteor, held mid-play
+      await _settle();
+      c.handleAlert(_event(anySlug)); // coalesced follow-up
+
+      c.syncLiveTeams([picked(25)]); // user switches to Strobe Mega
+      await _settle();
+      expect(m.checkCalls, hasLength(1),
+          reason: 'a re-baseline here would replay or swallow a score');
+      expect(m.resetCount, 0);
+
+      d.blockPlay = null;
+      block.complete();
+      await _settle();
+
+      expect(segsOf(d.plays[0]).map((s) => s['fx']), everyElement(76));
+      expect(segsOf(d.plays[1]).map((s) => s['fx']), everyElement(25));
+    });
+
+    test('CelebrationTeam: the pick is part of identity and of the alert '
+        'config', () {
+      expect(picked(76), picked(76));
+      expect(picked(76), isNot(picked(25)));
+      expect(picked(76, sx: 1), isNot(picked(76, sx: 2)));
+      expect(picked(76).hashCode, picked(76).hashCode);
+
+      final cfg = picked(76, sx: 200, ix: 180).toAlertConfig();
+      expect(cfg.celebrationEffectId, 76);
+      expect(cfg.celebrationSpeed, 200);
+      expect(cfg.celebrationIntensity, 180);
+      expect(picked(null).toAlertConfig().celebrationEffectId, isNull);
     });
   });
 
@@ -332,6 +590,39 @@ void main() {
         configs: [cfg('a')],
       );
       expect(teams, isEmpty);
+    });
+
+    test('the celebration pick rides along, from either phase machine', () {
+      final chosen = cfg('a').copyWith(
+        celebrationEffectId: 76,
+        celebrationSpeed: 200,
+        celebrationIntensity: 180,
+      );
+      for (final teams in [
+        computeLiveCelebrationTeams(
+          sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+          ephemeralSessions: const [],
+          configs: [chosen],
+        ),
+        computeLiveCelebrationTeams(
+          sessions: const {},
+          ephemeralSessions: [ephemeral('a', EphemeralSessionPhase.liveGame)],
+          configs: [chosen],
+        ),
+      ]) {
+        expect(teams.single.celebrationEffectId, 76);
+        expect(teams.single.celebrationSpeed, 200);
+        expect(teams.single.celebrationIntensity, 180);
+      }
+    });
+
+    test('no pick stays null — never defaulted into a choice', () {
+      final teams = computeLiveCelebrationTeams(
+        sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+        ephemeralSessions: const [],
+        configs: [cfg('a')],
+      );
+      expect(teams.single.celebrationEffectId, isNull);
     });
   });
 

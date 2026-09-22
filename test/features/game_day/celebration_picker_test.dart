@@ -37,7 +37,6 @@ const List<String> kCuratedNames = [
   'Meteor',
   'Washing Machine',
   'Android',
-  'Bouncing Balls',
   'Chase 2',
   'Chase 3',
   'Chase Flash Rnd',
@@ -211,7 +210,7 @@ Future<void> _pumpCelebration(
 
 void main() {
   group('P2 — the curated list resolves against the real catalog', () {
-    test('all 17 names resolve to an id, in the order given', () {
+    test('all 16 names resolve to an id, in the order given', () {
       final resolved =
           WledEffectsCatalog.celebrationPicks.map((e) => e.name).toList();
       expect(resolved, kCuratedNames,
@@ -240,6 +239,14 @@ void main() {
 
     test('Solid is not offered — it is the absence of a celebration', () {
       expect(WledEffectsCatalog.celebrationPickIds.contains(0), isFalse);
+    });
+
+    test('Bouncing Balls (91) is withdrawn — it rebooted a controller', () {
+      expect(WledEffectsCatalog.celebrationPickIds.contains(91), isFalse,
+          reason: 'withdrawn 2026-09-21: fx 91 rebooted the bench controller '
+              'mid-celebration on the pinned firmware. Re-adding it needs a '
+              'hardware root cause first.');
+      expect(kCuratedNames.contains('Bouncing Balls'), isFalse);
     });
   });
 

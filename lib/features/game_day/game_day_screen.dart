@@ -710,6 +710,10 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
   static String _celebrationLabel(GameDayAutopilotConfig config) {
     final id = config.celebrationEffectId;
     if (id == null) return 'Default';
+    // A stored id the picker no longer offers fires as "no pick"
+    // (resolveCelebration), so it is labelled as such rather than by a name
+    // the user can no longer choose.
+    if (!WledEffectsCatalog.celebrationPickIds.contains(id)) return 'Default';
     return WledEffectsCatalog.getById(id)?.name ?? 'Effect $id';
   }
 

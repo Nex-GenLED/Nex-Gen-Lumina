@@ -112,6 +112,8 @@ int? currentEffectId(Map<String, dynamic>? state) {
 /// Returns null when [chosenEffectId] is null — the user has picked nothing, so
 /// the caller keeps the legacy hardcoded per-event sequences verbatim. That is
 /// what makes this change inert for every config in the fleet that predates it.
+/// Also null when the id is not in [WledEffectsCatalog.celebrationPickIds]: a
+/// pick withdrawn from the list after it was saved fires as "no pick".
 ///
 /// "TOO SIMILAR" is [WledEffectsCatalog.effectsTooSimilar]:
 ///   • the same effect id; OR
@@ -130,6 +132,16 @@ CelebrationResolution? resolveCelebration({
   required Map<String, dynamic>? capturedState,
 }) {
   if (chosenEffectId == null) return null; // legacy path
+
+  // A stored id the picker no longer offers is treated exactly like no pick.
+  // An entry can be withdrawn after configs were saved with it — Bouncing
+  // Balls (91) was, on 2026-09-21, after it rebooted a controller
+  // mid-celebration — and nothing taken off the list may reach the lights
+  // through a stale config. The picker reseeds such a config on its first
+  // entry; until the user re-saves, the legacy sequence fires.
+  if (!WledEffectsCatalog.celebrationPickIds.contains(chosenEffectId)) {
+    return null;
+  }
 
   final chosen = CelebrationResolution(
     effectId: chosenEffectId,
