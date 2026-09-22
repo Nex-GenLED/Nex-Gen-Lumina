@@ -294,6 +294,7 @@ That establishes that **what the app sends changes with the pick**. It does **no
 3. **Merge order:** this branch must not ship without `60282a3` (§3.1). Verified to apply cleanly on `c2b013a`.
 4. **The white-strobe fallback goes live with this change** (§2.3). Default pick (Chase) × base design #3 (Chase) → white strobes. Working as designed; flagging so it is a known behaviour and not a bug report.
 5. **Commercial's celebration path is dead code** (§1.3). Out of scope here; the colour-fix report's statement that it is reachable today should be corrected wherever it has been repeated.
+6. Pre-existing, unchanged, noticed in passing — **by reading, not tested:** the score monitor only polls while a team is in `liveGame`, so a `win` appears to be emitted only if its poll sees `final` before the phase machine's does; and a score already queued still fires if the user switches celebrations off mid-queue.
 
 ---
 
@@ -401,4 +402,49 @@ Gate on `13e8625`: `flutter analyze` 382, identical set to base; `flutter test` 
 - **Washing Machine (113)** — catalogued `usesSelectedColors`, renders 65 % off-design under `pal:0` (A.4). Not touched, by instruction.
 - **Preview ≠ fired for the four**: the picker preview still sends `paletteForEffect` = 4 (primary missing on the bench); the celebration now fires 5. Aligning the preview is a `paletteForEffect` decision with Explore-wide reach — not made here.
 - The debug-only dead revert (A.2) — pre-existing.
-6. Pre-existing, unchanged, noticed in passing — **by reading, not tested:** the score monitor only polls while a team is in `liveGame`, so a `win` appears to be emitted only if its poll sees `final` before the phase machine's does; and a score already queued still fires if the user switches celebrations off mid-queue.
+
+---
+
+## Addendum 3 — 2026-09-21 (late): the BASE design — fx 63 "Twinkle" was Pride 2015
+
+The sibling of the celebration bug, on the look the house shows when no celebration is playing. Both base-design builders sent **fx 63 captioned "Twinkle"**: `TeamDesignCatalog` design 5 and `GameDayAutopilotService.selectDesign`'s `dynamic` style (`game_day_autopilot_service.dart:443`), each over a hard-coded `pal:0`. On the pinned firmware fx 63 is **Pride 2015** — the controller's own `/json/eff` says so — a hue-rotating rainbow that reads neither `col[]` nor the palette.
+
+### C.1 The effect — from the controller, not the labels
+
+`/json/eff` on `.150` (WLED 0.15.1): 63 "Pride 2015", **12 "Fade"**, 56 "Tri Fade", 2 "Breathe". Each candidate was applied with a Bills design (blue `0,51,141`, red `198,12,48`, black third slot) and observed live for 20 s at 5 frames/s, every lit pixel of every full 290-LED frame classified against the design's hues:
+
+| fx | pal | sx | one colour per frame? | crossfade reach (0 = blue, 1 = red) | extraneous | period |
+|---|---|---|---|---|---|---|
+| **12 Fade** | **0** | 40 | **yes** (1 distinct colour) | **0.01 → 0.99** | **0 %** | **4.39 s** |
+| 12 Fade | 5 | 40 | no (19 colours) | 0.50 → 1.00 (half the sweep) | 0 % | 4.37 s |
+| 12 Fade | 0 | 5 | yes | 0.01 → 0.98 | 0 % | 6.55 s |
+| 12 Fade | 0 | 68 | yes | 0.01 → 0.97 | 0 % | 3.64 s |
+| 56 Tri Fade | 0 | 40 | yes | 0.00 → 0.28 (sits on blue, dips to black) | 0 % | — |
+| 2 Breathe | 0 | 40 | yes | 0.01 → 0.88 | 0 % | 4.38 s |
+| **63 (control)** | 0 | 150 | **no (162 colours)** | — | **54.7 % (34.4 % bright)** | 1.3 s |
+
+**Fade (12) at pal 0** is the whole strip crossfading between the two team colours and nothing else. Pal 5 is wrong for it (halves the sweep, adds per-pixel variation) — the palette rule is per effect, not "5 everywhere". Fade is catalogued `blendsSelectedColors` (colour-reading), so the normalizer's pal 5 → 4 guard never touches it and **`kColorsOnlyVerifiedEffects` is unchanged**.
+
+**Speed.** The speed catalog's Fade profile (`effect_speed_profiles.dart`) has `rawDefault` 40, which its own labels put in the 'Very Slow' band (slider ≈ 0.16; 'Slow' runs to raw 68). The base design uses that profile default, not a literal: **4.4 s per primary → secondary → primary round trip** on the bench. The effect's floor (sx 5) is 6.6 s; the top of 'Slow' (68) is 3.6 s.
+
+### C.2 The change — `cd11b90`
+
+- `TeamDesignCatalog` design 5: fx 12 "Fade", `kBaseDesignFadeSpeed` (= the profile default), `pal` from `WledEffectsCatalog.setColorsPaletteFor(fx)`.
+- `selectDesign` `dynamic`: `(kBaseDesignFadeEffectId, 'Fade', kBaseDesignFadeSpeed)`; `_buildWledPayload` takes `pal` from the same rule. `celebrationPaletteFor` now delegates to `setColorsPaletteFor` — one rule for both paths.
+- `base_design_team_colors_guard_test.dart` (7 tests): every design either builder can produce is catalogued, never `generatesOwnColors`, never 63, palette-reading only if bench-verified, `pal` equals the rule **and survives `normalizeWledPayload`**, both team colours on the wire, captions name the effect actually sent, and the Fade is slow by the profile's own labels.
+
+Gate on `cd11b90`: `flutter analyze` 382, identical set to base; `flutter test` **3357 / 34 skipped / 0 failed** (+7).
+
+### C.3 Bench, through the real path
+
+`selectDesign` → `applyDesignForTest` (the real `_applyDesign` gate) → `onApplyPayload` → `WledService.applyJson` → the controller. Bills, `dynamic` style, no celebration. Independent 4 Hz reader with full-frame classification; controller idle across two reads and no other process before the run.
+
+- **Wire:** `fx 12, sx 40, ix 180, pal 0, col [[0,51,141,0],[198,12,48,0],[0,0,0,0]]` on segments 0 and 1 — exactly what the builder set; the normalizer added only the black third slot and `grp`/`spc`.
+- **Live, 29.9 s, 99 frames:** every frame a single uniform colour; **0 % extraneous in every frame**; blue share sweeping 0 % → 100 %; pure-blue peaks every **4.37 s** (5 gaps).
+- No reboot (uptime continuous, 8,371 s → 8,650 s). `presets.json` / `cfg` hashes unchanged. Restored to the pre-run look, 0 diffs.
+
+**Found on the way, not this bug:** the service emits ONE no-id segment and relies on the applyJson chokepoint's participation cache to fan it out per channel. With that cache cold (`null`, documented as pass-through) the first run reached **segment 0 only**; the second run, with the cache warmed as the app's resolver does, lit both buses. Pre-existing behaviour of the Game Day apply path on a cold cache; noted for follow-up.
+
+### C.4 Exposure today
+
+Dormant for all 51 Game Day users, on this morning's audit of prod (not re-queried tonight): the `dynamic` branch needs a profile `preferred_effect_styles` scoring dynamic strictly above motion and static — 0 of 51 users (all 26 with the field are `[static, animated]`) — and the catalog's design 5 only reaches hardware through the background worker behind `kSportsBackgroundServiceEnabled = false`; calendar entries persist only a name and the lease manager fires Solid. Founder/bench config is `design_mode: saved`. No stored 63 anywhere; no server-side selection.
