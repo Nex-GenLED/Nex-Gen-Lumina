@@ -767,6 +767,21 @@ class WledEffectsCatalog {
   ///     effect's own fade, never a hue the design does not contain.
   static const int kSetColorsOnlyPalette = 5;
 
+  /// Palette-reading effects for which "Colors Only" (5) is bench-verified to
+  /// render ONLY the segment's own colours, both of them, on WLED 0.15.1 —
+  /// the four measured for [kSetColorsOnlyPalette]. `normalizeWledPayload`'s
+  /// palette guard (pal 5 → 4 on every `overridesColors` effect) must leave
+  /// these alone: that guard exists for palette SWEEPS (Rainbow, Colorwaves,
+  /// Aurora, Plasma, the Noise family), which pal 5 collapses into a strobe.
+  /// These are particle / dot effects that sample the palette per particle,
+  /// and on the bench the guard's pal 4 dropped their primary colour entirely
+  /// (Juggle through the real path: 0 % of lit pixels in the primary).
+  ///
+  /// Add an effect here ONLY with a full-frame bench measurement behind it.
+  /// `celebration_team_color_guard_test.dart` requires every palette-reading
+  /// entry of [celebrationPickIds] to be in this set.
+  static const Set<int> kColorsOnlyVerifiedEffects = {64, 42, 90, 89};
+
   /// The `pal` a chosen celebration stage sends for effect [id].
   ///
   /// A colour-reading pick (`usesUserColors`) keeps the legacy stages' `pal:0`

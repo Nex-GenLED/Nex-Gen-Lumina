@@ -158,6 +158,16 @@ void main() {
         expect(WledEffectsCatalog.celebrationPickIds, contains(id));
         expect(WledEffectsCatalog.celebrationPaletteFor(id), 5, reason: '$id');
       }
+      // BENCH BEFORE YOU ADD: every palette-reading pick must be in the set
+      // the normalizer's palette guard exempts, or its pal 5 is rewritten to
+      // 4 on the way to the controller and the primary colour vanishes.
+      for (final id in WledEffectsCatalog.celebrationPickIds) {
+        if (!WledEffectsCatalog.usesUserColors(id)) {
+          expect(WledEffectsCatalog.kColorsOnlyVerifiedEffects, contains(id),
+              reason: 'fx $id is palette-reading but not bench-verified '
+                  'under pal 5 — measure it before offering it');
+        }
+      }
     });
 
     test('it survives applyChannelFilter onto every targeted channel', () {

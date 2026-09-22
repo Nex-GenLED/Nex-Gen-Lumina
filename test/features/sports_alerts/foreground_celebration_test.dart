@@ -24,6 +24,8 @@ import 'package:nexgen_command/features/sports_alerts/services/foreground_celebr
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/services/score_monitor_service.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart'
+    show normalizeWledPayload;
 
 // ── Fakes ──────────────────────────────────────────────────────────────────
 
@@ -343,6 +345,17 @@ void main() {
             ]),
             reason: 'the palette is built from these — they must be on the '
                 'wire with it');
+        // The layer the fake delivery skips: WledService.applyJson runs the
+        // shared normalizer, whose palette guard rewrites pal 5 → 4 on every
+        // overridesColors effect EXCEPT the bench-verified set. It did rewrite
+        // once, on the bench, and the design's primary colour vanished.
+        for (final step in d.plays.single) {
+          final norm = normalizeWledPayload(step.payload);
+          for (final seg in (norm['seg'] as List).cast<Map>()) {
+            expect(seg['pal'], WledEffectsCatalog.kSetColorsOnlyPalette,
+                reason: 'fx $fx: pal 5 must survive normalizeWledPayload');
+          }
+        }
       }
       for (final fx in [76, 27, 28]) {
         final d = _FakeDelivery()..captureReturn = look(0);
