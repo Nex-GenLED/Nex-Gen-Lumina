@@ -113,6 +113,9 @@ Future<void> applySavedDesign(
   ref.read(wledStateProvider.notifier).applyPreviewSync(
         colors: previewColors,
         effectId: effectId,
+        // The as-sent `pal`: fx 83 + 5 is a Blocks design, fx 83 + 0 / fx 84
+        // an Alternating one, and the Home hero draws them differently.
+        paletteId: design.isPositional ? null : _wirePaletteIdFromPayload(payload),
         effectName: design.name,
         speed: firstChannel.speed,
         intensity: firstChannel.intensity,
@@ -151,15 +154,21 @@ List<Color> _previewColorsFromDesign(CustomDesign design) {
 }
 
 /// Extract the effect id from the first seg of the as-built (post-filter)
-/// payload, since CustomDesign.toWledPayload substitutes fx=83 for
-/// multi-color solid (design_models.dart:185-187). The dashboard preview
-/// uses the substituted fx so it animates whatever the device animates.
-/// fx=83 → "Solid Pattern" via WledEffectsCatalog (verified against
-/// device /json/effects; #82 resolved).
+/// payload, since CustomDesign.toWledPayload substitutes fx 83 (Blocks) or
+/// fx 84 (Alternating) for a multi-colour Solid (design_models.dart). The
+/// dashboard preview uses the substituted fx so it animates whatever the
+/// device animates. fx=83 → "Solid Pattern" via WledEffectsCatalog (verified
+/// against device /json/effects; #82 resolved).
 int? _wireEffectIdFromPayload(Map<String, dynamic> payload) {
   // firstDesignSeg, not seg[0]: applyChannelFilter emits the #67 full
   // partition, so a design scoped away from channel 0 leads with the
   // exclusion `{id:0, on:false}` — which has no fx at all.
   final fx = firstDesignSeg(payload['seg'])?['fx'];
   return fx is int ? fx : null;
+}
+
+/// The `pal` on the same seg, for the same reason.
+int? _wirePaletteIdFromPayload(Map<String, dynamic> payload) {
+  final pal = firstDesignSeg(payload['seg'])?['pal'];
+  return pal is int ? pal : null;
 }

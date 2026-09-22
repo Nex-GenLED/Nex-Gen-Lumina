@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
+import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
 
@@ -424,29 +425,39 @@ class CustomDesign {
         colors.add([255, 255, 255, 0]);
       }
 
-      // When effect 0 (Solid) is used with multiple colors, substitute effect 83
-      // (Solid Pattern) which distributes colors in repeating blocks. Solid only
-      // shows the first color, losing the rest of the palette.
-      final fx = (channel.effectId == 0 && channel.colorGroups.length > 1)
-          ? 83
-          : channel.effectId;
+      // Solid (fx 0) shows col[0] only, so a multi-colour Solid goes out in
+      // the design's stored LAYOUT, through the same helper the tuner previews
+      // and sends with (solid_palette_blocks.dart): Blocks → fx 83 + pal 5,
+      // the positional thirds; Alternating → fx 84 ix:0 (three colours) or
+      // fx 83 pal:0 sx:0 ix:0 (two), bands of `grp` LEDs. This used to be an
+      // unconditional fx 83, which is why a design saved as Alternating fired
+      // as Blocks from every door (My Designs, schedules, scenes, Game Day).
+      final solid = channel.effectId == 0 && colors.length > 1
+          ? solidLayoutFields(
+              layout: channel.solidLayout,
+              colorCount: colors.length,
+              ledsPerColor: channel.grouping,
+            )
+          : null;
 
       segments.add({
         // #88 — grp/spc are always ASSERTED, never omitted: a saved design must
         // not inherit the spacing of whatever ran before it. They now come
         // from the channel (defaults 1 / 0 for every older design) instead of
         // being pinned to the defaults, which erased a saved "1 On 4 Off".
-        'grp': channel.grouping,
+        'grp': solid?.grp ?? channel.grouping,
         'spc': channel.spacing,
         'id': channel.channelId,
         'col': colors,
         // STATED, for the same reason grp/spc are — see
         // [kDesignColorsOnlyPalette]. The chokepoint still swaps 5→4 for the
-        // few effects that ignore user colours under "Colors Only".
-        'pal': kDesignColorsOnlyPalette,
-        'fx': fx,
-        'sx': channel.speed,
-        'ix': channel.intensity,
+        // few effects that ignore user colours under "Colors Only". A
+        // two-colour Alternating pins pal:0 instead (fx 83 reads col[0]/col[1]
+        // directly under it; pal 5 would map them positionally).
+        'pal': solid?.pal ?? kDesignColorsOnlyPalette,
+        'fx': solid?.fx ?? channel.effectId,
+        'sx': solid?.sx ?? channel.speed,
+        'ix': solid?.ix ?? channel.intensity,
         // #4 (firmware-free half): emit 'rev' ONLY when the design explicitly
         // reverses this channel. reverse defaults false, so always writing it
         // forced rev:false on every apply — clobbering the device's manual
@@ -532,6 +543,18 @@ class ChannelDesign {
   /// WLED `spc` — dark LEDs between bands ("M off"). 0 = no spacing.
   final int spacing;
 
+  /// How a multi-colour Solid lays out on the strip: contiguous Blocks
+  /// (fx 83 + pal 5, positional thirds) or Alternating bands of [grouping]
+  /// LEDs (fx 84, or fx 83 + pal 0 for two colours). Only consulted when
+  /// [effectId] is 0 with more than one colour — see `solidLayoutFields`.
+  ///
+  /// Until 2026-09-22 a design had nowhere to keep this: the tuner dropped its
+  /// Blocks | Alternating chip on save and [CustomDesign.toWledPayload]
+  /// substituted Blocks unconditionally, so a design saved as Alternating
+  /// fired as Blocks from every door. Defaults to Blocks — what every existing
+  /// design has always fired as — so nothing already saved changes.
+  final SolidLayout solidLayout;
+
   const ChannelDesign({
     required this.channelId,
     required this.channelName,
@@ -544,6 +567,7 @@ class ChannelDesign {
     this.ledCount = 0,
     this.grouping = kDesignDefaultGrp,
     this.spacing = kDesignDefaultSpc,
+    this.solidLayout = SolidLayout.blocks,
   });
 
   ChannelDesign copyWith({
@@ -558,6 +582,7 @@ class ChannelDesign {
     int? ledCount,
     int? grouping,
     int? spacing,
+    SolidLayout? solidLayout,
   }) {
     return ChannelDesign(
       channelId: channelId ?? this.channelId,
@@ -571,6 +596,7 @@ class ChannelDesign {
       ledCount: ledCount ?? this.ledCount,
       grouping: grouping ?? this.grouping,
       spacing: spacing ?? this.spacing,
+      solidLayout: solidLayout ?? this.solidLayout,
     );
   }
 
@@ -595,6 +621,8 @@ class ChannelDesign {
           .clamp(1, 255),
       spacing: ((json['spacing'] as num?)?.toInt() ?? kDesignDefaultSpc)
           .clamp(0, 255),
+      // Absent on every design saved before the field existed → Blocks.
+      solidLayout: solidLayoutFromJson(json['solid_layout']),
     );
   }
 
@@ -611,6 +639,7 @@ class ChannelDesign {
       'led_count': ledCount,
       'grouping': grouping,
       'spacing': spacing,
+      'solid_layout': solidLayoutToJson(solidLayout),
     };
   }
 

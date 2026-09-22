@@ -705,6 +705,11 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                         child: AnimatedRooflineOverlay(
                           previewColors: state.displayColors,
                           previewEffectId: state.effectId,
+                          // The live `pal` is what tells fx 83 + pal 5 (a Blocks
+                          // design: thirds on the house) from fx 83 + pal 0 /
+                          // fx 84 (Alternating). Without it the hero drew every
+                          // solid look as alternating bands.
+                          previewPaletteId: state.paletteId,
                           previewSpeed: state.speed,
                           brightness: state.brightness,
                           forceOn: state.isOn,

@@ -56,10 +56,18 @@ class AnimatedRooflineOverlay extends ConsumerStatefulWidget {
   /// Number of dark (off) LEDs after each lit group.
   final int spacing;
 
+  /// Optional override palette id for preview mode. Paired with
+  /// [previewEffectId] it is what lets the painter draw fx 83 + pal 5 as
+  /// contiguous blocks and fx 83 + pal 0 / fx 84 as alternating bands
+  /// (`RooflineLightPainter.solidLedColor`). Null in preview mode means
+  /// pal 0 — the cycle rendering every caller had before.
+  final int? previewPaletteId;
+
   const AnimatedRooflineOverlay({
     super.key,
     this.previewColors,
     this.previewEffectId,
+    this.previewPaletteId,
     this.previewSpeed,
     this.mask,
     this.forceOn,
@@ -109,6 +117,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     // Determine effective values (preview overrides live state)
     List<Color> effectiveColors;
     int effectiveEffectId;
+    int effectivePaletteId;
     int effectiveSpeed;
     int effectiveBrightness;
     bool isOn;
@@ -117,6 +126,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     if (widget.previewColors != null) {
       effectiveColors = widget.previewColors!;
       effectiveEffectId = widget.previewEffectId ?? 0;
+      effectivePaletteId = widget.previewPaletteId ?? 0;
       final rawSpeed = widget.previewSpeed ?? 128;
       effectiveSpeed = (rawSpeed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? 255;
@@ -124,6 +134,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     } else {
       effectiveColors = wledState.displayColors;
       effectiveEffectId = wledState.effectId;
+      effectivePaletteId = wledState.paletteId;
       effectiveSpeed = (wledState.speed * 0.5).round().clamp(0, 150);
       effectiveBrightness = widget.brightness ?? wledState.brightness;
       isOn = widget.forceOn ?? wledState.isOn;
@@ -183,6 +194,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             backgroundColor: widget.backgroundColor,
             colorGroupSize: widget.colorGroupSize,
             spacing: widget.spacing,
+            paletteId: effectivePaletteId,
             reverse: effectiveReverse,
             segmentPaths: segmentPaths,
           ),

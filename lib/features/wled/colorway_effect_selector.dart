@@ -226,9 +226,14 @@ class _ColorwayEffectSelectorPageState
   /// them from a design would otherwise leak that design's settings into the
   /// next catalog palette the user opens. Restored on cancel and on save.
   SelectorState? _providerSnapshot;
+
+  /// The Blocks | Alternating chip, snapshotted with [_providerSnapshot]. It
+  /// is not a [SelectorState] field (the layout RESOLVES to fx/pal/sx/ix/grp
+  /// before a payload exists), so it rides alongside.
+  SolidLayout? _providerSnapshotLayout;
   bool _snapshotRestored = false;
 
-  /// The seven notifiers, captured while `ref` is LIVE.
+  /// The ten notifiers, captured while `ref` is LIVE.
   ///
   /// `_restoreProviderSnapshot` runs from [dispose], where flutter_riverpod
   /// forbids `ref` — reaching them via `ref.read(p.notifier)` there throws
@@ -250,6 +255,7 @@ class _ColorwayEffectSelectorPageState
       ref.read(selectorBreathingProvider.notifier),
       ref.read(selectorMotionTypeProvider.notifier),
       ref.read(selectorColorBehaviorProvider.notifier),
+      ref.read(selectorSolidLayoutProvider.notifier),
     ];
   }
 
@@ -300,6 +306,7 @@ class _ColorwayEffectSelectorPageState
     if (widget.isDesignEdit) {
       _captureSelectorNotifiers();
       _providerSnapshot = _readSelectorState();
+      _providerSnapshotLayout = ref.read(selectorSolidLayoutProvider);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.isDesignEdit) {
@@ -327,6 +334,10 @@ class _ColorwayEffectSelectorPageState
       ref.read(selectorBreathingProvider.notifier).state = false;
       ref.read(selectorMotionTypeProvider.notifier).state = null;
       ref.read(selectorColorBehaviorProvider.notifier).state = null;
+      // Seeded like the nine above. It used to be the one provider left
+      // alone here, so a catalog card opened on whatever chip the last visit
+      // (or the last design edit) had left.
+      ref.read(selectorSolidLayoutProvider.notifier).state = SolidLayout.blocks;
     });
   }
 
@@ -341,9 +352,9 @@ class _ColorwayEffectSelectorPageState
         brightness: widget.editingDesign?.brightness ?? 255,
       );
 
-  /// Write a [SelectorState] into the seven providers. Never pushes to the
-  /// controller — see the note at the seed call site.
-  void _writeSelectorState(SelectorState s) {
+  /// Write a [SelectorState] and the Solid [layout] into the ten providers.
+  /// Never pushes to the controller — see the note at the seed call site.
+  void _writeSelectorState(SelectorState s, {required SolidLayout layout}) {
     // Through the CAPTURED notifiers — never `ref` — because this also runs
     // from dispose. See [_selectorNotifiers].
     final n = _selectorNotifiers;
@@ -360,6 +371,7 @@ class _ColorwayEffectSelectorPageState
     n[6].state = false;
     n[7].state = null;
     n[8].state = null;
+    n[9].state = layout;
   }
 
   /// Seed from the design's OWN channel fields rather than from
@@ -372,17 +384,22 @@ class _ColorwayEffectSelectorPageState
   /// is a rendering of it.
   void _seedFromDesign(CustomDesign design) {
     final ch = design.channels.where((c) => c.included).firstOrNull;
-    _writeSelectorState(SelectorState(
-      effectId: ch?.effectId ?? 0,
-      speed: ch?.speed ?? 128,
-      intensity: ch?.intensity ?? 128,
-      // Were not passed at all → the tuner opened every design at grp 1 /
-      // spc 0 whatever it had been saved with (followup N3b).
-      grouping: ch?.grouping ?? kDesignDefaultGrp,
-      spacing: ch?.spacing ?? kDesignDefaultSpc,
-      colors: _paletteColsRgbw(),
-      brightness: design.brightness,
-    ));
+    _writeSelectorState(
+      SelectorState(
+        effectId: ch?.effectId ?? 0,
+        speed: ch?.speed ?? 128,
+        intensity: ch?.intensity ?? 128,
+        // Were not passed at all → the tuner opened every design at grp 1 /
+        // spc 0 whatever it had been saved with (followup N3b).
+        grouping: ch?.grouping ?? kDesignDefaultGrp,
+        spacing: ch?.spacing ?? kDesignDefaultSpc,
+        colors: _paletteColsRgbw(),
+        brightness: design.brightness,
+      ),
+      // The chip used to be left wherever the previous visit put it, which
+      // had nothing to do with what this design fires as.
+      layout: ch?.solidLayout ?? SolidLayout.blocks,
+    );
   }
 
   /// Restore the shared providers to their pre-entry values. Idempotent.
@@ -412,11 +429,26 @@ class _ColorwayEffectSelectorPageState
       // There is nothing left to restore in that case, so swallow it rather
       // than surface an unhandled error from a teardown path.
       try {
-        _writeSelectorState(snap);
+        _writeSelectorState(snap,
+            layout: _providerSnapshotLayout ?? SolidLayout.blocks);
       } catch (e) {
         debugPrint('Selector snapshot restore skipped (container gone): $e');
       }
     });
+  }
+
+  /// The `pal` the as-sent payload carries on its first design seg (the #67
+  /// exclusion segs have no `fx`), for the dashboard hero's local preview.
+  static int? _wirePal(Map<String, dynamic> payload) {
+    final segs = payload['seg'];
+    if (segs is! List) return null;
+    for (final s in segs) {
+      if (s is Map && s.containsKey('fx')) {
+        final pal = s['pal'];
+        return pal is num ? pal.toInt() : null;
+      }
+    }
+    return null;
   }
 
   /// The palette's colours as RGBW `col` entries — the same derivation the
@@ -436,14 +468,22 @@ class _ColorwayEffectSelectorPageState
   /// design writer uses, carrying the ORIGINAL id so `saveDesign` routes to
   /// update and never to create.
   ///
-  /// fx / speed / intensity and the layout (`grp` / `spc`) are written.
-  /// Colours are not: the tuner has no colour editor, it renders whatever the
-  /// node supplies. (`grp` / `spc` used to be dropped here because
-  /// `ChannelDesign` had no field for them.)
+  /// fx / speed / intensity, the spacing (`grp` / `spc`) and — when Solid is
+  /// being substituted for this palette — the Blocks | Alternating layout are
+  /// written. Colours are not: the tuner has no colour editor, it renders
+  /// whatever the node supplies. (`grp` / `spc` used to be dropped here
+  /// because `ChannelDesign` had no field for them; the layout was dropped
+  /// for the same reason, so a design saved as Alternating fired as Blocks.)
   Future<void> _saveToDesign() async {
     final design = widget.editingDesign;
     if (design == null) return;
     final state = _readSelectorState();
+    // Only when the chip is live for this design; otherwise keep what the
+    // channel stores rather than stamping an unrelated effect with the chip's
+    // current (irrelevant) value.
+    final layout = _activeSolidFields() != null
+        ? ref.read(selectorSolidLayoutProvider)
+        : null;
     final updated = design.copyWith(
       channels: [
         for (final ch in design.channels)
@@ -454,6 +494,7 @@ class _ColorwayEffectSelectorPageState
                   intensity: state.intensity,
                   grouping: state.grouping,
                   spacing: state.spacing,
+                  solidLayout: layout,
                 )
               : ch,
       ],
@@ -743,6 +784,8 @@ class _ColorwayEffectSelectorPageState
 
     final currentState = ref.read(wledStateProvider);
     bool appliedToDevice = false;
+    // The `pal` the as-sent payload carries, for the local preview below.
+    int? sentPal;
 
     // Try to send to device
     final repo = ref.read(wledRepositoryProvider);
@@ -775,6 +818,7 @@ class _ColorwayEffectSelectorPageState
             rainbowPaletteOverride(
                 effectId: fxId, rainbowScope: _isRainbowPalette),
       ));
+      sentPal = _wirePal(payload);
 
       // SELECTION MODE (e.g. the schedule picker) — the SAVE exit. The live
       // preview HAS been applying to the lights on each adjustment; committing
@@ -868,6 +912,9 @@ class _ColorwayEffectSelectorPageState
     ref.read(wledStateProvider.notifier).applyPreviewSync(
       colors: previewColors,
       effectId: fxId,
+      // The as-sent `pal`, so the Home hero draws Blocks / Alternating right
+      // away instead of with the previous look's palette until the next poll.
+      paletteId: sentPal,
       speed: speed,
       intensity: intensity,
       effectName: '${widget.paletteNode.name} - $effectName',
@@ -935,8 +982,8 @@ class _ColorwayEffectSelectorPageState
         ? (breathing ? 100 : 0)
         : speed;
 
-    // Watched here so the effect tiles and the dot row rebuild when the
-    // Blocks/Alternating toggle changes (the helpers below use ref.read).
+    // Watched here so the effect tiles, the dot row AND the hero rebuild when
+    // the Blocks/Alternating toggle changes (the helpers below use ref.read).
     ref.watch(selectorSolidLayoutProvider);
 
     final effect = WledEffectsCatalog.getById(effectId);
@@ -1084,21 +1131,20 @@ class _ColorwayEffectSelectorPageState
 
         // ---- Standard effect controls ----
         if (!_isBrightnessGradient) ...[
-          // Color layout selector (conditional)
-          // Hidden in DESIGN-EDIT: `grp`/`spc` have no field on ChannelDesign,
-          // so a change here could not be saved and `toWledPayload` would
-          // re-assert the #88 defaults on the next apply. Offering a control
-          // whose value is silently discarded is worse than not offering it.
-          // See audit/DESIGN_CARD_P4.md for the model gap this reflects.
-          if (showColorLayout && !widget.isDesignEdit)
+          // Color layout selector (conditional). Shown in DESIGN-EDIT too,
+          // since 2026-09-22: it was hidden there while `ChannelDesign` had no
+          // field for `grp`/`spc` (a change could not be saved), but spacing
+          // has persisted since followup N3b and the Blocks | Alternating
+          // layout now has its own field — `_saveToDesign` writes all three.
+          if (showColorLayout)
             SliverToBoxAdapter(child: _buildColorLayoutSelector(colorGroup)),
           if (widget.isDesignEdit)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Text(
-                  'Editing a saved design: effect, speed and intensity are '
-                  'saved back. Colours and pixel layout are not editable here.',
+                  'Editing a saved design: effect, speed, intensity, spacing '
+                  'and layout are saved back. Colours are not editable here.',
                   style: TextStyle(
                       color: NexGenPalette.textMedium, fontSize: 11),
                 ),
@@ -1550,6 +1596,24 @@ class _ColorwayEffectSelectorPageState
     );
     final hasCustomImage = houseImageUrl != null && houseImageUrl.isNotEmpty;
 
+    // What the hero draws: the fx / pal that reach the WIRE, not the catalog
+    // id. [effectId] arrives as the gradient's real fx (83, or 2 breathing) or
+    // the raw catalog id; Solid with a multi-colour palette goes out as fx 83
+    // + pal 5 (Blocks) or fx 84 / fx 83 + pal 0 (Alternating), and the painter
+    // tells those apart by `pal`. Passing the raw 0 with no palette, as this
+    // did until 2026-09-22, drew every layout as alternating bands whatever
+    // the chips said. A brightness gradient is fx 83 + pal 5 with its steps as
+    // col[], which the device lays out positionally too — so it draws as
+    // blocks now, as it renders.
+    final heroFx =
+        _isBrightnessGradient ? effectId : _effectiveEffectId(effectId);
+    final heroPal = _isBrightnessGradient
+        ? WledEffectsCatalog.paletteForEffect(heroFx)
+        : (_activeSolidFields()?.pal ??
+            rainbowPaletteOverride(
+                effectId: heroFx, rainbowScope: _isRainbowPalette) ??
+            WledEffectsCatalog.paletteForEffect(heroFx));
+
     return Container(
       height: 140,
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1597,7 +1661,8 @@ class _ColorwayEffectSelectorPageState
                     previewColors: _isBrightnessGradient
                         ? _gradientColorsForPreset(ref.watch(selectorGradientPresetProvider))
                         : _paletteColors,
-                    previewEffectId: effectId,
+                    previewEffectId: heroFx,
+                    previewPaletteId: heroPal,
                     previewSpeed: speed,
                     forceOn: true,
                     targetAspectRatio: constraints.maxWidth / constraints.maxHeight,

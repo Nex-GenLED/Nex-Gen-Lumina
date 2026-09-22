@@ -1557,12 +1557,17 @@ class WledNotifier extends Notifier<WledStateModel> {
     String? effectName,
     int colorGroupSize = 1,
     int spacing = 0,
+    // The as-sent `pal`, when the caller knows it. The dashboard hero tells a
+    // Blocks look (fx 83 + pal 5) from an Alternating one (fx 83 + pal 0) by
+    // it; null keeps the previous value until the next poll corrects it.
+    int? paletteId,
   }) {
     state = state.copyWith(
       isOn: true,
       colorSequence: colors,
       color: colors.isNotEmpty ? colors.first : Colors.white,
       effectId: effectId,
+      paletteId: paletteId,
       speed: speed,
       intensity: intensity,
       brightness: brightness,
@@ -1589,6 +1594,7 @@ class WledNotifier extends Notifier<WledStateModel> {
     int brightness = 255,
     int colorGroupSize = 1,
     int spacing = 0,
+    int? paletteId,
   }) {
     applyLocalPreview(
       colors: colors,
@@ -1599,6 +1605,7 @@ class WledNotifier extends Notifier<WledStateModel> {
       effectName: effectName,
       colorGroupSize: colorGroupSize,
       spacing: spacing,
+      paletteId: paletteId,
     );
   }
 

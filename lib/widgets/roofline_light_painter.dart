@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
+import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/models/roofline_mask.dart';
 import 'package:nexgen_command/widgets/roofline_projection.dart';
 
@@ -107,6 +108,14 @@ class RooflineLightPainter extends CustomPainter {
   /// With colorGroupSize=1 and spacing=2: ● ○ ○ ● ○ ○ ...
   final int spacing;
 
+  /// WLED `pal` of the look being drawn. The solid branch needs it because the
+  /// two Solid-family layouts share an effect id: fx 83 + a non-zero palette
+  /// lays the colours out POSITIONALLY (N contiguous blocks — "Colors Only"
+  /// mapped along the segment), while fx 83 + pal 0 and fx 84 cycle `col[]`
+  /// bulb-group by bulb-group. See [solidLedColor]. Callers that do not know
+  /// the palette leave 0, which keeps the cycle rendering they always had.
+  final int paletteId;
+
   /// Whether the animation direction is reversed (WLED seg.rev).
   final bool reverse;
 
@@ -140,6 +149,7 @@ class RooflineLightPainter extends CustomPainter {
     this.backgroundColor = const Color(0xFF000000),
     this.colorGroupSize = 1,
     this.spacing = 0,
+    this.paletteId = 0,
     this.reverse = false,
     this.segmentPaths,
     this.realIndexMode = false,
@@ -366,6 +376,33 @@ class RooflineLightPainter extends CustomPainter {
     return colors[colorIndex];
   }
 
+  /// Whether the solid branch paints [colorCount] colours as N contiguous
+  /// positional blocks — the device truth for fx 83 + a palette on WLED 0.15.1
+  /// (solid_palette_blocks.dart) — rather than as the repeating `grp` cycle.
+  ///
+  /// fx 84 and fx 83 + pal 0 are the Alternating layout and keep the cycle,
+  /// which IS the device's `grp` expansion for them. Plain fx 0 with several
+  /// colours keeps the cycle too: no apply path sends that shape (every one
+  /// substitutes 83), and the Edit Pattern preview relies on it as the
+  /// picture of the per-pixel write it makes.
+  bool solidPaintsBlocks(int colorCount) =>
+      effectId == 83 && paletteId != 0 && colorCount > 1;
+
+  /// The colour LED [index] of [count] shows in the solid branch.
+  ///
+  /// This is the ONE rule the hero preview draws with — the place the tuner's
+  /// Blocks | Alternating choice and the dashboard's live `pal` reach the
+  /// roofline. Until 2026-09-22 this branch cycled `(i ~/ grp) % N` for every
+  /// solid look, so a Blocks design (fx 83 + pal 5, thirds on the house) was
+  /// drawn alternating on both surfaces, whatever the chips said.
+  Color solidLedColor(int index, int count, List<Color> colors) {
+    if (solidPaintsBlocks(colors.length)) {
+      final slots = colors.length.clamp(1, 3);
+      return colors[solidPaletteBlockIndex(index, count, slots)];
+    }
+    return _getColorForLed(index, colors);
+  }
+
   /// Draw a single LED pixel with 3-pass rendering: fascia wash, tight halo,
   /// and pixel node with emitter lens.
   void _drawLedDot(Canvas canvas, Offset pos, Color color, double brightness, {double radius = 3.0, bool showHalo = true}) {
@@ -515,15 +552,16 @@ class RooflineLightPainter extends CustomPainter {
     });
   }
 
-  /// Paint solid color along the roofline path. Cycles colors via
-  /// [_getColorForLed] so brightness-gradient patterns (multiple
-  /// progressively-dim colors with `grp` band width) render the gradient
-  /// across the strip instead of flat color1.
+  /// Paint solid color along the roofline path. Colour per LED comes from
+  /// [solidLedColor]: positional blocks for fx 83 + a palette, the `grp`
+  /// cycle for everything else. (Brightness-gradient presets go out as
+  /// fx 83 + pal 5 with their steps as `col[]`, so they draw as blocks too —
+  /// which is what the device does with them.)
   void _paintSolidPath(Canvas canvas, Path path, List<Offset> positions, List<Color> colors, double brightness) {
     final cycle = colorGroupSize + spacing;
     for (int i = 0; i < positions.length; i++) {
       if (spacing > 0 && cycle > 0 && (i % cycle) >= colorGroupSize) continue;
-      _drawLedDot(canvas, positions[i], _getColorForLed(i, colors), brightness);
+      _drawLedDot(canvas, positions[i], solidLedColor(i, positions.length, colors), brightness);
     }
   }
 
@@ -836,6 +874,7 @@ class RooflineLightPainter extends CustomPainter {
         oldDelegate.backgroundColor != backgroundColor ||
         oldDelegate.colorGroupSize != colorGroupSize ||
         oldDelegate.spacing != spacing ||
+        oldDelegate.paletteId != paletteId ||
         oldDelegate.reverse != reverse ||
         oldDelegate.segmentPaths != segmentPaths ||
         oldDelegate.realIndexMode != realIndexMode;
