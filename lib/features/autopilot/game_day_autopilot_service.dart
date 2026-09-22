@@ -29,6 +29,8 @@ import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
 import '../wled/wled_effects_catalog.dart' show WledEffectsCatalog;
 import 'game_day_autopilot_config.dart';
+import 'game_day_priority_resolver.dart';
+import 'team_priority.dart';
 import 'team_design_catalog.dart';
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,33 @@ class AutopilotSession {
   final String? activeGameId;
   final bool usedFallbackTimer;
 
+  /// This team's game is being TRACKED but the team does not hold the lights,
+  /// because a higher-priority team's game is running (rule 2 of
+  /// [GameDayPriorityResolver]).
+  ///
+  /// A deferred session is deliberately a real session and not an absence.
+  /// It runs the same phase machine — pre-game → live → final — so that when
+  /// the winner's game ends, hand-off can ask "is this team still playing?"
+  /// and get a true answer. If a deferred team had no session at all, the only
+  /// way to pick it up later would be `hasGameSoon`, which is false once its
+  /// game has already started, so a team deferred at 12:40 for a 1 pm start
+  /// could never take over at 3 pm. It would simply never light.
+  ///
+  /// What deferral suppresses is the two things that reach the user: no design
+  /// is applied while this is true, and no score celebrations fire
+  /// (`computeLiveCelebrationTeams`). Flipping it to false IS the hand-off.
+  final bool deferred;
+
+  /// When this session was created — the first-come-first-served tie-break
+  /// the resolver applies at equal priority (rule 3).
+  ///
+  /// Distinct from [gameStart], which is when the GAME starts and is null
+  /// whenever ESPN could not be read. Using gameStart as a stand-in made an
+  /// existing session look NEWER than a candidate being resolved right now,
+  /// which inverted every tie: the incumbent lost its own house to a
+  /// latecomer of equal rank.
+  final DateTime? activatedAt;
+
   const AutopilotSession({
     required this.teamSlug,
     this.phase = AutopilotSessionPhase.idle,
@@ -71,6 +100,8 @@ class AutopilotSession {
     this.countdownEnd,
     this.activeGameId,
     this.usedFallbackTimer = false,
+    this.deferred = false,
+    this.activatedAt,
   });
 
   AutopilotSession copyWith({
@@ -80,6 +111,8 @@ class AutopilotSession {
     DateTime? countdownEnd,
     String? activeGameId,
     bool? usedFallbackTimer,
+    bool? deferred,
+    DateTime? activatedAt,
   }) {
     return AutopilotSession(
       teamSlug: teamSlug,
@@ -89,6 +122,8 @@ class AutopilotSession {
       countdownEnd: countdownEnd ?? this.countdownEnd,
       activeGameId: activeGameId ?? this.activeGameId,
       usedFallbackTimer: usedFallbackTimer ?? this.usedFallbackTimer,
+      deferred: deferred ?? this.deferred,
+      activatedAt: activatedAt ?? this.activatedAt,
     );
   }
 
@@ -97,8 +132,27 @@ class AutopilotSession {
       phase == AutopilotSessionPhase.liveGame ||
       phase == AutopilotSessionPhase.postGame;
 
+  /// This session is the one currently driving the house.
+  ///
+  /// Exactly one session should satisfy this at a time. Everything that
+  /// reaches the user — the applied design, the celebrations — keys off this,
+  /// not off [isActive], which now also covers teams being tracked while they
+  /// wait their turn.
+  bool get ownsLights => isActive && !deferred;
+
+  /// This team's own game is still going, so it is a valid hand-off target.
+  ///
+  /// `postGame` counts: that team's game has ended but its own 30-minute
+  /// wind-down has not, and the wind-down is a deliberate part of the show.
+  bool get isHandoffCandidate =>
+      phase == AutopilotSessionPhase.preGame ||
+      phase == AutopilotSessionPhase.liveGame ||
+      phase == AutopilotSessionPhase.postGame;
+
   @override
-  String toString() => 'AutopilotSession($teamSlug, phase=$phase)';
+  String toString() =>
+      'AutopilotSession($teamSlug, phase=$phase'
+      '${deferred ? ', DEFERRED' : ''})';
 }
 
 // ---------------------------------------------------------------------------
@@ -142,8 +196,48 @@ class GameDayAutopilotService {
   /// Active sessions keyed by team slug.
   final Map<String, AutopilotSession> _sessions = {};
 
+  /// Last-seen enabled config per team slug, refreshed on every
+  /// [evaluateConfigs] pass.
+  ///
+  /// Hand-off has to re-apply the incoming team's design, which means it needs
+  /// that team's config — but hand-off is also triggered from [cancelSession],
+  /// which the UI calls with no config in hand. Caching what the evaluate loop
+  /// already receives every minute is cheaper and less fragile than another
+  /// callback into the provider graph, and it can never be staler than one
+  /// tick.
+  final Map<String, GameDayAutopilotConfig> _knownConfigs = {};
+
   /// Polling timer for post-game detection.
   Timer? _postGamePollTimer;
+
+  /// Last activation instant handed out, so no two sessions can share one.
+  ///
+  /// Rule 3 breaks an equal-priority tie by "who activated first". Two teams
+  /// whose windows open on the SAME evaluate pass both stamp `DateTime.now()`,
+  /// and at microsecond resolution those stamps can be identical — at which
+  /// point neither is "after" the other, both resolve to activate, and two
+  /// teams own the house at once. Clock resolution must not decide whether an
+  /// invariant holds, so stamps are strictly increasing.
+  DateTime? _lastActivationStamp;
+
+  /// The stamp [_nextActivationStamp] would hand out, without consuming it.
+  DateTime _peekActivationStamp() {
+    final now = DateTime.now();
+    final last = _lastActivationStamp;
+    return (last == null || now.isAfter(last))
+        ? now
+        : last.add(const Duration(microseconds: 1));
+  }
+
+  DateTime _nextActivationStamp() {
+    final now = DateTime.now();
+    final last = _lastActivationStamp;
+    final stamp = (last == null || now.isAfter(last))
+        ? now
+        : last.add(const Duration(microseconds: 1));
+    _lastActivationStamp = stamp;
+    return stamp;
+  }
 
   /// Callback invoked when the service needs to apply a WLED payload.
   /// Set by the provider layer to bridge into the WLED notifier.
@@ -176,6 +270,16 @@ class GameDayAutopilotService {
   /// Callback to read the user's preferred effect styles for design
   /// auto-selection. Returns empty list if no preferences set.
   List<String> Function()? onGetPreferredStyles;
+
+  /// Callback to read the user's ordered team SLUG list — the hierarchy that
+  /// decides which team owns the house when two games overlap.
+  ///
+  /// Must return slugs (`game_day_team_priority`), not display names; see the
+  /// header note on [GameDayPriorityResolver]. When unwired or empty, the
+  /// resolver falls back to first-come-first-served, which is the pre-2026-09
+  /// behaviour — so an unwired callback degrades to the old conduct rather
+  /// than to an error.
+  List<String> Function()? onGetTeamPriority;
 
   /// Callback to read the current calendar entry for a given date key,
   /// if one exists. Used to check for user overrides that should win
@@ -214,10 +318,30 @@ class GameDayAutopilotService {
 
   /// Check all enabled autopilot configs and activate pre-game if within
   /// the 30-minute window. Called periodically by the provider layer.
+  ///
+  /// Every team that is in its window gets a SESSION; at most one of them
+  /// holds the LIGHTS. Which one is decided by [GameDayPriorityResolver]
+  /// against the user's ordered slug list — see [_activateWithPriority].
   Future<void> evaluateConfigs(List<GameDayAutopilotConfig> configs) async {
     final now = DateTime.now();
 
     for (final config in configs) {
+      if (!config.enabled) continue;
+      _knownConfigs[config.teamSlug] = config;
+    }
+
+    // Walk the hierarchy, not Firestore document-id order. When two teams'
+    // windows open on the same tick, the #1 team must be the one that
+    // resolves first — otherwise the lower team activates against an empty
+    // field, puts its design on the wire, and is preempted a moment later,
+    // flashing the wrong colours at the house on the way.
+    final ordered = orderConfigsByPriority(
+      configs,
+      onGetTeamPriority?.call() ?? const <String>[],
+      (c) => c.teamSlug,
+    );
+
+    for (final config in ordered) {
       if (!config.enabled) continue;
 
       final session = _sessions[config.teamSlug];
@@ -228,7 +352,9 @@ class GameDayAutopilotService {
       }
 
       if (session != null && session.isActive) {
-        // Already active — check for phase transitions.
+        // Already active — check for phase transitions. A deferred session
+        // goes through this too: it is being tracked precisely so that its
+        // phase is known when a hand-off asks.
         await _updateActiveSession(config, session, now);
         continue;
       }
@@ -246,10 +372,124 @@ class GameDayAutopilotService {
           config.sport,
         );
         debugPrint('[GameDayAutopilot] Game soon for ${config.teamName}, '
-            'starting pre-game activation');
-        await _activatePreGame(config, nextGame);
+            'resolving priority before activation');
+        await _activateWithPriority(config, nextGame);
       }
     }
+  }
+
+  /// The arbiter. Decide whether [config] may take the house, must wait, or
+  /// should displace whoever currently holds it — then act on that decision.
+  ///
+  /// Mirrors `GameDayAutopilotBackgroundWorker._resolvePriorityForActivation`,
+  /// which has always done this on the (compiled-off) background path; this is
+  /// the foreground half that was missing.
+  Future<void> _activateWithPriority(
+    GameDayAutopilotConfig config,
+    DateTime? gameStart,
+  ) async {
+    final teamPriority = onGetTeamPriority?.call() ?? const <String>[];
+    final actives = _candidatesExcept(config.teamSlug, ownsLightsOnly: true);
+
+    // Peek at the next stamp WITHOUT consuming it: this candidate may end up
+    // deferred, and a deferred team still gets a session (and a real stamp)
+    // below. What matters here is only that it reads as later than every
+    // session already created.
+    final candidate = GameDayEventCandidate(
+      id: config.teamSlug,
+      source: GameDayEventSource.personalAutopilot,
+      teamSlug: config.teamSlug,
+      espnTeamId: config.espnTeamId,
+      activatedAt: _peekActivationStamp(),
+    );
+
+    final decision = GameDayPriorityResolver.resolve(
+      candidate: candidate,
+      activeEvents: actives,
+      teamPriority: teamPriority,
+    );
+
+    switch (decision.decision) {
+      case GameDayPriorityDecision.activate:
+        // Taking the house means nothing else may still be holding it. With
+        // monotonic stamps the resolver will not return `activate` while a
+        // rightful owner exists, but the invariant "exactly one session owns
+        // the lights" is load-bearing for celebrations and hand-off, so it is
+        // enforced here rather than left to hold by argument.
+        _demoteOtherOwners(config.teamSlug);
+        await _activatePreGame(config, gameStart);
+
+      case GameDayPriorityDecision.defer:
+        // Tracked, not lit. No design applied, no celebrations — but the
+        // phase machine runs, so this team is a hand-off candidate the moment
+        // the incumbent finishes.
+        debugPrint('[GameDayAutopilot] ${config.teamName} DEFERRED — '
+            '${decision.reason}');
+        await _activatePreGame(config, gameStart, deferred: true);
+
+      case GameDayPriorityDecision.preempt:
+        final loser = decision.affectedBy;
+        debugPrint('[GameDayAutopilot] ${config.teamName} PREEMPTS '
+            '${loser?.teamSlug} — ${decision.reason}');
+        if (loser != null) {
+          _demoteOtherOwners(config.teamSlug);
+          final incumbent = _sessions[loser.teamSlug];
+          if (incumbent != null) {
+            // The incumbent keeps its session and its phase tracking; it just
+            // stops owning the lights. It becomes a hand-off candidate, so a
+            // preempted team whose game outlasts the winner's gets the house
+            // back rather than being lost.
+            _sessions[loser.teamSlug] = incumbent.copyWith(deferred: true);
+            _notifySessionChanged(loser.teamSlug);
+          }
+        }
+        await _activatePreGame(config, gameStart);
+    }
+  }
+
+  /// Step every session except [keepSlug] out of the owning role.
+  ///
+  /// They keep their sessions and their phase tracking — they remain hand-off
+  /// candidates — they simply stop driving the house and stop celebrating.
+  void _demoteOtherOwners(String keepSlug) {
+    for (final entry in _sessions.entries.toList()) {
+      if (entry.key == keepSlug) continue;
+      if (!entry.value.ownsLights) continue;
+      _sessions[entry.key] = entry.value.copyWith(deferred: true);
+      _notifySessionChanged(entry.key);
+    }
+  }
+
+  /// Build resolver candidates from the live session map.
+  ///
+  /// [ownsLightsOnly] selects what "competing" means: for an activation
+  /// decision only the session actually holding the house competes, because a
+  /// deferred session has already lost and must not make a third team defer
+  /// to it. For hand-off, every still-playing session competes.
+  List<GameDayEventCandidate> _candidatesExcept(
+    String excludeSlug, {
+    required bool ownsLightsOnly,
+  }) {
+    final out = <GameDayEventCandidate>[];
+    for (final entry in _sessions.entries) {
+      if (entry.key == excludeSlug) continue;
+      final s = entry.value;
+      if (ownsLightsOnly ? !s.ownsLights : !s.isHandoffCandidate) continue;
+      out.add(GameDayEventCandidate(
+        id: s.teamSlug,
+        source: GameDayEventSource.personalAutopilot,
+        teamSlug: s.teamSlug,
+        espnTeamId: _knownConfigs[s.teamSlug]?.espnTeamId ?? '',
+        // Epoch-0 fallback, never `now`: an existing session with no recorded
+        // activation time must still read as OLDER than a candidate being
+        // resolved this instant, or first-come-first-served inverts.
+        activatedAt: s.activatedAt ??
+            s.gameStart ??
+            DateTime.fromMillisecondsSinceEpoch(0),
+        gameId: s.activeGameId,
+      ));
+    }
+    return out;
   }
 
   /// Force-activate autopilot for a team (e.g., manual trigger from UI).
@@ -261,6 +501,7 @@ class GameDayAutopilotService {
       teamSlug: config.teamSlug,
       phase: AutopilotSessionPhase.preGame,
       gameStart: DateTime.now(),
+      activatedAt: _nextActivationStamp(),
     );
     await _applyDesign(design);
     _notifySessionChanged(config.teamSlug);
@@ -387,13 +628,31 @@ class GameDayAutopilotService {
     return 0;
   }
 
+  /// Test seam: force a session's post-game countdown to have elapsed.
+  ///
+  /// The countdown is a wall-clock 30 minutes and the phase machine is driven
+  /// by `DateTime.now()`, so without this a hand-off test would have to wait
+  /// half an hour. Reaches only the in-memory session map — no I/O, no clock
+  /// injection into production paths.
+  @visibleForTesting
+  void debugSetCountdownEnd(String teamSlug, DateTime countdownEnd) {
+    final s = _sessions[teamSlug];
+    if (s == null) return;
+    _sessions[teamSlug] = s.copyWith(countdownEnd: countdownEnd);
+  }
+
   /// Cancel an active session for a team.
-  void cancelSession(String teamSlug) {
+  ///
+  /// Async since 2026-09-22: cancelling the team that holds the house now
+  /// hands off to the next team still playing instead of powering the house
+  /// off unconditionally. Cancelling a DEFERRED session touches the lights
+  /// not at all — it never had them.
+  Future<void> cancelSession(String teamSlug) async {
     final session = _sessions.remove(teamSlug);
-    if (session != null) {
-      debugPrint('[GameDayAutopilot] Session cancelled for $teamSlug');
-      onResumeNormalSchedule?.call();
-    }
+    if (session == null) return;
+    debugPrint('[GameDayAutopilot] Session cancelled for $teamSlug');
+    if (!session.ownsLights) return;
+    await _handOffOrResume(teamSlug);
   }
 
   /// Select the appropriate design for a team based on config and user profile.
@@ -494,55 +753,27 @@ class GameDayAutopilotService {
     );
   }
 
-  /// Check for overlapping games across all enabled configs.
-  /// Returns pairs of team slugs that have games at the same time.
-  Future<List<({String team1, String team2, DateTime gameTime})>>
-      detectConflicts(List<GameDayAutopilotConfig> configs) async {
-    final conflicts =
-        <({String team1, String team2, DateTime gameTime})>[];
-
-    final upcoming = <String, DateTime>{};
-    for (final config in configs) {
-      if (!config.enabled) continue;
-      final nextGame = await _scheduleService.fetchNextGameDate(
-        config.espnTeamId,
-        config.sport,
-      );
-      if (nextGame != null) {
-        upcoming[config.teamSlug] = nextGame;
-      }
-    }
-
-    final slugs = upcoming.keys.toList();
-    for (var i = 0; i < slugs.length; i++) {
-      for (var j = i + 1; j < slugs.length; j++) {
-        final time1 = upcoming[slugs[i]]!;
-        final time2 = upcoming[slugs[j]]!;
-        // Games within 4 hours of each other are considered overlapping.
-        if (time1.difference(time2).abs() < const Duration(hours: 4)) {
-          conflicts.add((
-            team1: slugs[i],
-            team2: slugs[j],
-            gameTime: time1,
-          ));
-        }
-      }
-    }
-
-    return conflicts;
-  }
+  // `detectConflicts` lived here: it paired teams whose next games fell within
+  // 4 hours and was exposed as `GameDayAutopilotNotifier.checkConflicts()`.
+  // It had no caller anywhere in lib/ or test/, its 4-hour window bore no
+  // relationship to any real arbitration, and it answered a question
+  // [GameDayPriorityResolver] now answers properly and per-event. Deleted
+  // 2026-09-22 rather than left sitting next to the live arbiter, where the
+  // next reader would have had to work out which of the two was load-bearing.
 
   void dispose() {
     _postGamePollTimer?.cancel();
     _sessions.clear();
+    _knownConfigs.clear();
   }
 
   // ── Internal: Pre-game activation ──────────────────────────────────────
 
   Future<void> _activatePreGame(
     GameDayAutopilotConfig config,
-    DateTime? gameStart,
-  ) async {
+    DateTime? gameStart, {
+    bool deferred = false,
+  }) async {
     // Daylight filter — skip activation if game is daylight-only
     if (config.skipDayGames && gameStart != null) {
       final location = onGetUserLocation?.call();
@@ -581,7 +812,18 @@ class GameDayAutopilotService {
       teamSlug: config.teamSlug,
       phase: AutopilotSessionPhase.preGame,
       gameStart: gameStart,
+      deferred: deferred,
+      activatedAt: _nextActivationStamp(),
     );
+    _notifySessionChanged(config.teamSlug);
+
+    if (deferred) {
+      // Tracked only. Applying here is exactly the bug — it would put the
+      // lower-priority team's design on a house the #1 team already owns.
+      debugPrint('[GameDayAutopilot] Pre-game TRACKED (deferred, no apply) '
+          'for ${config.teamName}');
+      return;
+    }
 
     // Select design — now passes user's style preferences via callback
     final preferredStyles = onGetPreferredStyles?.call() ?? const [];
@@ -591,6 +833,62 @@ class GameDayAutopilotService {
 
     debugPrint('[GameDayAutopilot] Pre-game activated for '
         '${config.teamName} with design: ${design.designName}');
+  }
+
+  // ── Internal: hand-off ─────────────────────────────────────────────────
+
+  /// The winner just finished. Give the house to the next team that is still
+  /// playing, or — only if there is none — resume the normal schedule.
+  ///
+  /// This replaces an unconditional `onResumeNormalSchedule()`, which calls
+  /// `togglePower(false)`. With two followed teams that meant the house went
+  /// DARK the moment the first game ended, part-way through the second
+  /// (audit/gameday-game-selection-2026-09-21 §4a). Turning the lights off
+  /// while a followed game is still on is never the right answer.
+  ///
+  /// [relinquishingSlug] is the team giving up the lights; it is excluded
+  /// from the candidate set regardless of its own phase.
+  Future<void> _handOffOrResume(String relinquishingSlug) async {
+    final teamPriority = onGetTeamPriority?.call() ?? const <String>[];
+    final remaining =
+        _candidatesExcept(relinquishingSlug, ownsLightsOnly: false);
+
+    final winner = GameDayPriorityResolver.handoffWinner(
+      remaining: remaining,
+      teamPriority: teamPriority,
+    );
+
+    if (winner == null) {
+      debugPrint('[GameDayAutopilot] $relinquishingSlug finished, no other '
+          'team still playing — resuming normal schedule');
+      onResumeNormalSchedule?.call();
+      return;
+    }
+
+    final session = _sessions[winner.teamSlug];
+    final config = _knownConfigs[winner.teamSlug];
+    if (session == null || config == null) {
+      // Should be unreachable: candidates are built from _sessions, and
+      // _knownConfigs is refreshed from the same enabled set every tick. If
+      // it ever happens, resuming is safer than leaving the previous team's
+      // design up for a team that is no longer configured.
+      debugPrint('[GameDayAutopilot] hand-off target ${winner.teamSlug} has '
+          'no ${session == null ? "session" : "config"} — resuming instead');
+      onResumeNormalSchedule?.call();
+      return;
+    }
+
+    // Taking over IS un-deferring. From here the team owns the lights and,
+    // because `ownsLights` gates it, its celebrations start firing.
+    _sessions[winner.teamSlug] = session.copyWith(deferred: false);
+
+    final preferredStyles = onGetPreferredStyles?.call() ?? const [];
+    final design = selectDesign(config, preferredStyles: preferredStyles);
+    await _applyDesign(design);
+    _notifySessionChanged(winner.teamSlug);
+
+    debugPrint('[GameDayAutopilot] HAND-OFF: $relinquishingSlug finished → '
+        '${config.teamName} takes the house with ${design.designName}');
   }
 
   // ── Internal: Active session updates ───────────────────────────────────
@@ -663,13 +961,20 @@ class GameDayAutopilotService {
       case AutopilotSessionPhase.postGame:
         // Check if 30-min countdown has elapsed.
         if (session.countdownEnd != null && now.isAfter(session.countdownEnd!)) {
+          final wasOwner = session.ownsLights;
           _sessions[config.teamSlug] = session.copyWith(
             phase: AutopilotSessionPhase.completed,
           );
-          debugPrint('[GameDayAutopilot] Post-game countdown complete for '
-              '${config.teamName}, resuming normal schedule');
-          onResumeNormalSchedule?.call();
           _notifySessionChanged(config.teamSlug);
+          debugPrint('[GameDayAutopilot] Post-game countdown complete for '
+              '${config.teamName}');
+          if (wasOwner) {
+            // Hand off to the next team still playing; resume only if there
+            // is none. A deferred session that completes never held the
+            // lights, so it must not trigger either — it just stops being
+            // tracked.
+            await _handOffOrResume(config.teamSlug);
+          }
         }
 
       case AutopilotSessionPhase.idle:

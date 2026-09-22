@@ -17,6 +17,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/team_color_resolver.dart';
 import '../../autopilot/game_day_autopilot_config.dart';
+import '../../autopilot/team_priority.dart';
 import '../data/team_colors.dart';
 
 class TeamRegistrationService {
@@ -85,7 +86,7 @@ class TeamRegistrationService {
       await docRef.set(fresh.toFirestore());
     }
 
-    await _appendTeamToProfile(uid, team.teamName);
+    await _appendTeamToProfile(uid, team.teamName, teamSlug);
 
     onTeamsChanged?.call();
   }
@@ -111,7 +112,7 @@ class TeamRegistrationService {
       throw StateError('TeamRegistrationService.removeTeam: empty uid');
     }
 
-    await _stripTeamFromProfile(uid, teamName);
+    await _stripTeamFromProfile(uid, teamName, teamSlug: teamSlug);
 
     try {
       await _firestore
@@ -185,15 +186,73 @@ class TeamRegistrationService {
 
   // ── Internal: profile-array writes ────────────────────────────────────
 
+  /// Persist a reordered hierarchy — the ONE write path both reorder
+  /// surfaces use.
+  ///
+  /// Game Day and Edit Profile render the same control and both land here, so
+  /// the display-name array and the slug array are always written from the
+  /// same gesture, in the same order, in one `set(merge)`. Two separate write
+  /// paths is exactly how the two screens would come to disagree about who
+  /// the user's #1 team is.
+  ///
+  /// [entries] is the full ordered list as the user just arranged it; the two
+  /// field values are derived by [alignPriorityLists].
+  Future<void> setTeamPriority({
+    required String uid,
+    required List<TeamPriorityEntry> entries,
+  }) async {
+    if (uid.isEmpty) {
+      throw StateError('TeamRegistrationService.setTeamPriority: empty uid');
+    }
+    final aligned = alignPriorityLists(entries);
+    await _firestore.collection('users').doc(uid).set({
+      'sports_team_priority': aligned.names,
+      'game_day_team_priority': aligned.slugs,
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    }, SetOptions(merge: true));
+    onTeamsChanged?.call();
+  }
+
+  /// Persist a healed slug ordering WITHOUT touching the display-name array.
+  ///
+  /// This is the heal-on-read write, and it is deliberately narrower than
+  /// [setTeamPriority]: the heal derives the slug list FROM the name list, so
+  /// it has nothing new to say about names, and rewriting them would turn a
+  /// read into an edit of data the user did arrange by hand.
+  ///
+  /// Writes only the signed-in user's own document — the caller passes their
+  /// own uid. There is no bulk path and no cross-account write.
+  Future<void> writeHealedGameDayPriority({
+    required String uid,
+    required List<String> slugs,
+  }) async {
+    if (uid.isEmpty) {
+      throw StateError(
+          'TeamRegistrationService.writeHealedGameDayPriority: empty uid');
+    }
+    await _firestore.collection('users').doc(uid).set({
+      'game_day_team_priority': slugs,
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    }, SetOptions(merge: true));
+  }
+
   /// Appends [teamName] to sports_team_priority and sports_teams arrays
-  /// (case-insensitive dedupe). Mirrors the canonical
-  /// [GameDayAutopilotNotifier._addTeamToProfile].
-  Future<void> _appendTeamToProfile(String uid, String teamName) async {
+  /// (case-insensitive dedupe), and [teamSlug] to game_day_team_priority.
+  /// Mirrors the canonical [GameDayAutopilotNotifier._addTeamToProfile].
+  ///
+  /// A new team lands at the END of both lists: adding a team must never
+  /// silently promote it over the one the user already ranked first.
+  Future<void> _appendTeamToProfile(
+    String uid,
+    String teamName,
+    String teamSlug,
+  ) async {
     final profileRef = _firestore.collection('users').doc(uid);
     final snap = await profileRef.get();
     final data = snap.data() ?? const <String, dynamic>{};
     final priority = _asStringList(data['sports_team_priority']);
     final teams = _asStringList(data['sports_teams']);
+    final slugPriority = _asStringList(data['game_day_team_priority']);
     final key = teamName.trim().toLowerCase();
 
     final updates = <String, dynamic>{};
@@ -203,25 +262,42 @@ class TeamRegistrationService {
     if (!teams.any((t) => t.trim().toLowerCase() == key)) {
       updates['sports_teams'] = [...teams, teamName];
     }
+    if (!slugPriority.contains(teamSlug)) {
+      updates['game_day_team_priority'] = [...slugPriority, teamSlug];
+    }
     if (updates.isEmpty) return;
     updates['updated_at'] = Timestamp.fromDate(DateTime.now());
     await profileRef.set(updates, SetOptions(merge: true));
   }
 
   /// Removes [teamName] from sports_team_priority and sports_teams arrays
-  /// (case-insensitive match). No-op if absent. Mirrors the canonical
+  /// (case-insensitive match), and [teamSlug] from game_day_team_priority.
+  /// No-op if absent. Mirrors the canonical
   /// [GameDayAutopilotNotifier._removeTeamFromProfile].
-  Future<void> _stripTeamFromProfile(String uid, String teamName) async {
+  ///
+  /// [teamSlug] is null for [removeTeamByNameOnly], whose whole purpose is
+  /// legacy free-text entries that never had a slug. When it is null the
+  /// name is still resolved through the catalogue, so a removal that DOES
+  /// correspond to a real team still cleans the slug list.
+  Future<void> _stripTeamFromProfile(
+    String uid,
+    String teamName, {
+    String? teamSlug,
+  }) async {
     final profileRef = _firestore.collection('users').doc(uid);
     final snap = await profileRef.get();
     final data = snap.data() ?? const <String, dynamic>{};
     final priority = _asStringList(data['sports_team_priority']);
     final teams = _asStringList(data['sports_teams']);
+    final slugPriority = _asStringList(data['game_day_team_priority']);
     final key = teamName.trim().toLowerCase();
+    final slug = teamSlug ?? slugForTeamName(teamName);
 
     final newPriority =
         priority.where((t) => t.trim().toLowerCase() != key).toList();
     final newTeams = teams.where((t) => t.trim().toLowerCase() != key).toList();
+    final newSlugPriority =
+        slug == null ? slugPriority : slugPriority.where((s) => s != slug).toList();
 
     final updates = <String, dynamic>{};
     if (newPriority.length != priority.length) {
@@ -229,6 +305,9 @@ class TeamRegistrationService {
     }
     if (newTeams.length != teams.length) {
       updates['sports_teams'] = newTeams;
+    }
+    if (newSlugPriority.length != slugPriority.length) {
+      updates['game_day_team_priority'] = newSlugPriority;
     }
     if (updates.isEmpty) return;
     updates['updated_at'] = Timestamp.fromDate(DateTime.now());

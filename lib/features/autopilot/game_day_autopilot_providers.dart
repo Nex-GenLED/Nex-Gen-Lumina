@@ -40,6 +40,7 @@ import 'autopilot_providers.dart';
 import 'game_day_autopilot_config.dart';
 import 'game_day_autopilot_service.dart';
 import 'game_day_background_persistence.dart';
+import 'team_priority.dart';
 import '../wled/participation_denormalizer.dart';
 
 // ---------------------------------------------------------------------------
@@ -183,6 +184,18 @@ final gameDayAutopilotServiceProvider =
     }
   };
 
+  // The hierarchy. SLUGS — see the header note on GameDayPriorityResolver;
+  // handing it `sportsTeamPriorityProvider` (display names) would make every
+  // rank lookup miss and silently restore first-come-first-served.
+  svc.onGetTeamPriority = () {
+    try {
+      return ref.read(gameDayTeamPriorityProvider);
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] Failed to read team priority: $e');
+      return const [];
+    }
+  };
+
   svc.onResolveParticipatingChannels = (config) {
     try {
       final rooflineAsync = ref.read(currentRooflineConfigProvider);
@@ -293,6 +306,93 @@ final enabledAutopilotConfigsProvider =
     orElse: () => const [],
   );
 });
+
+// ---------------------------------------------------------------------------
+// Team priority (the hierarchy)
+// ---------------------------------------------------------------------------
+
+/// The user's ordered team SLUG list — who wins when two games overlap.
+///
+/// Healed on every read: the stored `game_day_team_priority` is reconciled
+/// against the display-name array the user has actually arranged and against
+/// the configs that exist, so an account that has never written the slug
+/// field still gets a correct, ordered answer immediately. See
+/// [healGameDayTeamPriority] for the rules.
+///
+/// Reading is free and idempotent. Persisting the healed value is a separate,
+/// deliberate step — [gameDayTeamPriorityHealProvider].
+final gameDayTeamPriorityProvider = Provider<List<String>>((ref) {
+  final profile = ref.watch(currentUserProfileProvider).valueOrNull;
+  final configs =
+      ref.watch(gameDayAutopilotConfigsProvider).valueOrNull ?? const [];
+  if (profile == null) return const [];
+
+  // Sorted = Firestore document-id order, which is the order both the
+  // evaluate loop and the populate loop already walk. Sorting explicitly
+  // rather than trusting stream order keeps the appended tail deterministic.
+  final configSlugs = configs.map((c) => c.teamSlug).toList()..sort();
+
+  return healGameDayTeamPriority(
+    storedSlugs: profile.gameDayTeamPriority,
+    // Fall back to the unordered `sports_teams` mirror when the ordered array
+    // is empty, exactly as `sportsTeamPriorityProvider` does — an account that
+    // never reordered still has its teams in the order they were added.
+    profileNames: profile.sportsTeamPriority.isNotEmpty
+        ? profile.sportsTeamPriority
+        : profile.sportsTeams,
+    configSlugs: configSlugs,
+  );
+});
+
+/// HEAL-ON-READ. Persist the derived slug ordering to the signed-in user's
+/// OWN profile document, once, when it differs from what is stored.
+///
+/// Watched by the Game Day screen, so it runs when a user actually opens the
+/// feature — the same lazy shape the pixel-map heal uses. There is
+/// deliberately no bulk backfill: no account is written except the one whose
+/// session is running, and nothing runs for a signed-out user.
+///
+/// Convergence: the write updates the profile stream, the provider above
+/// recomputes, the healed value now equals the stored value, and no further
+/// write is owed. [_lastHealWritten] guards the round-trip window so a second
+/// stream tick carrying the pre-write value cannot queue a duplicate write.
+final gameDayTeamPriorityHealProvider = Provider<void>((ref) {
+  final profile = ref.watch(currentUserProfileProvider).valueOrNull;
+  final healed = ref.watch(gameDayTeamPriorityProvider);
+  if (profile == null) return;
+  // Nothing to heal before the configs have loaded; an empty derived list on
+  // an account that HAS teams would otherwise look like a legitimate clear.
+  if (healed.isEmpty) return;
+  if (!priorityNeedsHeal(
+    storedSlugs: profile.gameDayTeamPriority,
+    healedSlugs: healed,
+  )) {
+    return;
+  }
+  final signature = '${profile.id}|${healed.join(",")}';
+  if (_lastHealWritten == signature) return;
+  _lastHealWritten = signature;
+
+  unawaited(() async {
+    try {
+      await ref
+          .read(teamRegistrationServiceProvider)
+          .writeHealedGameDayPriority(uid: profile.id, slugs: healed);
+      debugPrint('[GameDayPriority] healed game_day_team_priority → '
+          '${healed.join(", ")}');
+    } catch (e) {
+      // Non-fatal: the reader above still returns the healed order in memory,
+      // so the hierarchy works this session even if the write failed. Clear
+      // the memo so a later read can retry.
+      _lastHealWritten = null;
+      debugPrint('[GameDayPriority] heal write failed: $e');
+    }
+  }());
+});
+
+/// Signature of the last heal write attempted, so the round-trip between the
+/// write and the profile stream echoing it back cannot produce a second write.
+String? _lastHealWritten;
 
 // ---------------------------------------------------------------------------
 // Background persistence: SharedPreferences bridge for the background isolate
@@ -741,7 +841,9 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     // Firestore stream snapshot, and the disabled team's entries would
     // be re-populated instead of teared down. (#63 E5 teardown.)
     if (!enabled) {
-      ref.read(gameDayAutopilotServiceProvider).cancelSession(teamSlug);
+      // Awaited: cancelling the team that holds the house now hands off to
+      // the next team still playing instead of powering the house off.
+      await ref.read(gameDayAutopilotServiceProvider).cancelSession(teamSlug);
       state = Map.from(state)..remove(teamSlug);
       _populateCalendarInBackground(teamSlug, justWrittenConfig: freshConfig);
       return;
@@ -956,7 +1058,7 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
         );
 
     try {
-      ref.read(gameDayAutopilotServiceProvider).cancelSession(teamSlug);
+      await ref.read(gameDayAutopilotServiceProvider).cancelSession(teamSlug);
     } catch (e) {
       debugPrint('[GameDayAutopilot] Failed to cancel session $teamSlug: $e');
     }
@@ -1071,7 +1173,25 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     final service = ref.read(gameDayAutopilotServiceProvider);
     var totalEntries = 0;
     final failedTeams = <String>[];
-    for (final config in enabledConfigs) {
+
+    // LEASE PRIMACY. On a night two teams share, the WLED timer ends up
+    // holding whichever team wrote LAST: the lease registry keeps one lease
+    // per dateKey and `CalendarEntrySet.primaries` returns the last-written
+    // entry. Writing in reverse priority order makes that the user's #1 team
+    // instead of whichever slug happened to sort later.
+    //
+    // Applied here, at the write, and NOT inside computeEnabledConfigsForTeam
+    // — that function answers "which teams are in this pass" and puts a
+    // just-toggled team last for Firestore-stream-lag reasons that have
+    // nothing to do with primacy (pinned by game_day_multi_team_test.dart).
+    // Keeping the two rules in separate places is what lets both stay true.
+    final ordered = orderConfigsForCalendarWrite(
+      enabledConfigs,
+      ref.read(gameDayTeamPriorityProvider),
+      (c) => c.teamSlug,
+    );
+
+    for (final config in ordered) {
       try {
         final count = await service.populateCalendarForTeam(config);
         totalEntries += count;
@@ -1301,13 +1421,11 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     return scheduleService.fetchNextGameDate(team.espnTeamId, team.sport);
   }
 
-  /// Detect conflicts between enabled autopilot teams.
-  Future<List<({String team1, String team2, DateTime gameTime})>>
-      checkConflicts() async {
-    final configs = ref.read(enabledAutopilotConfigsProvider);
-    final service = ref.read(gameDayAutopilotServiceProvider);
-    return service.detectConflicts(configs);
-  }
+  // `checkConflicts()` lived here, forwarding to the service's
+  // `detectConflicts`. Both had no caller in lib/ or test/ and both are gone
+  // (2026-09-22) — GameDayPriorityResolver now answers the same question
+  // per-event, and two overlapping answers next to each other is how the
+  // wrong one gets wired up later.
 }
 
 final gameDayAutopilotNotifierProvider =

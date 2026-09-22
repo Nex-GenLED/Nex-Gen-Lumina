@@ -13,9 +13,9 @@
 //      defers to the group. The "bigger moment" wins.
 //
 //   2. For DIFFERENT games on the same night, team priority wins.
-//      User's profile `sportsTeamPriority` list determines order.
-//      First-match wins. If team A ranks above team B, team A's event
-//      holds the evening regardless of which activated first.
+//      The user's ordered team list determines order. First-match wins.
+//      If team A ranks above team B, team A's event holds the evening
+//      regardless of which activated first.
 //
 //   3. If two events are at the same priority (same team, both personal
 //      Game Day, etc.), first-come-first-served.
@@ -24,6 +24,23 @@
 //      shortform event (Game Day, <8hr). This rule is already enforced
 //      by SyncHandoffManager — we preserve it here for completeness but
 //      don't duplicate logic.
+//
+//   5. HAND-OFF ON END. When the event holding the lights finishes, the
+//      lights do not go back to the baseline while another followed team
+//      is still playing — the highest-priority remaining event takes over.
+//      See [GameDayPriorityResolver.handoffWinner]. Added 2026-09-22; rules
+//      1-4 predate it and had no answer for "the winner ended first".
+//
+// ── THE LIST IS SLUGS, NOT DISPLAY NAMES ───────────────────────────────────
+// [resolve] ranks a candidate with `teamPriority.indexOf(candidate.teamSlug)`,
+// so `teamPriority` MUST hold slugs (`nfl_chiefs`), which is what the
+// `game_day_team_priority` profile field stores and what a config document's
+// id is. It must NOT be handed the legacy `sports_team_priority` array, which
+// holds display names ("Kansas City Chiefs"): every `indexOf` would return -1,
+// every team would rank last, and this resolver would silently degrade to
+// first-come-first-served while looking like it was arbitrating. That was the
+// live state until 2026-09-22 (audit/gameday-game-selection-2026-09-21 §3).
+// `team_priority.dart` owns the translation between the two shapes.
 //
 // This resolver is a pure function. Callers are responsible for actually
 // pausing, activating, or deferring based on the decision returned.
@@ -131,9 +148,10 @@ class GameDayPriorityResolver {
   /// Resolve whether [candidate] should activate, defer to, or preempt
   /// any event in [activeEvents].
   ///
-  /// [teamPriority] is the user's ordered sports team slug list (first =
-  /// highest priority). An empty list means no preferred ordering —
-  /// falls through to first-come-first-served.
+  /// [teamPriority] is the user's ordered team SLUG list (first = highest
+  /// priority) — `game_day_team_priority`, never the display-name array. See
+  /// the header note. An empty list means no preferred ordering — falls
+  /// through to first-come-first-served.
   ///
   /// [activeEvents] are events currently active or recently activated.
   /// Should NOT include [candidate] itself.
@@ -223,6 +241,47 @@ class GameDayPriorityResolver {
       decision: GameDayPriorityDecision.activate,
       reason: 'Highest priority among active events',
     );
+  }
+
+  /// RULE 5 — hand-off on end. Which remaining event should take the lights
+  /// when the one holding them finishes?
+  ///
+  /// Returns the highest-priority event in [remaining], or null when there is
+  /// nothing left to hand off to — and null is the ONLY case in which the
+  /// caller may resume the normal schedule or turn the house off.
+  ///
+  /// This is the rule the resolver was missing. Rules 1-3 arbitrate an event
+  /// that wants to START; nothing answered what happens when the winner ENDS.
+  /// The foreground service's answer was to call `onResumeNormalSchedule`
+  /// unconditionally, which powers the house off — so a user following two
+  /// teams went dark the moment the FIRST game finished, mid-way through the
+  /// second (audit/gameday-game-selection-2026-09-21 §4a).
+  ///
+  /// [remaining] must already exclude the event that is ending, and should
+  /// contain only events whose own game has not finished — the caller decides
+  /// what "still going" means for its phase model, because this resolver has
+  /// no phase vocabulary.
+  ///
+  /// Ordering is the same as [resolve]: lower rank index wins; an unlisted
+  /// team ranks last; ties break by earliest [GameDayEventCandidate.activatedAt]
+  /// so the hand-off is deterministic and matches rule 3's
+  /// first-come-first-served.
+  static GameDayEventCandidate? handoffWinner({
+    required List<GameDayEventCandidate> remaining,
+    required List<String> teamPriority,
+  }) {
+    GameDayEventCandidate? best;
+    int bestRank = -1;
+    for (final c in remaining) {
+      final rank = _priorityRank(c.teamSlug, teamPriority);
+      if (best == null ||
+          rank < bestRank ||
+          (rank == bestRank && c.activatedAt.isBefore(best.activatedAt))) {
+        best = c;
+        bestRank = rank;
+      }
+    }
+    return best;
   }
 
   /// Two events are "the same game" if:
