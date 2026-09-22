@@ -294,4 +294,59 @@ That establishes that **what the app sends changes with the pick**. It does **no
 3. **Merge order:** this branch must not ship without `60282a3` (§3.1). Verified to apply cleanly on `c2b013a`.
 4. **The white-strobe fallback goes live with this change** (§2.3). Default pick (Chase) × base design #3 (Chase) → white strobes. Working as designed; flagging so it is a known behaviour and not a bug report.
 5. **Commercial's celebration path is dead code** (§1.3). Out of scope here; the colour-fix report's statement that it is reachable today should be corrected wherever it has been repeated.
+
+---
+
+## Addendum — 2026-09-21 (late): rebase, bench, and the Bouncing Balls withdrawal
+
+Written after the sections above; nothing above was edited. Where this addendum and the body disagree, this addendum is current.
+
+### A.1 Rebase
+
+The three commits above were rebased onto `7c55c8e` — the tip of `origin/release/store-submission-consolidated`, which carries `60282a3` (§3.1's precondition is met) — as `fix/gameday-celebration-picker-wiring-rebased`. Zero conflicts; `git range-diff` reports every commit `=` and the patch-ids are identical. The original ref stayed where it was because another worktree still had it checked out.
+
+Gate on the rebase: `flutter analyze` 382 issues, the identical set to base (0 errors / 12 warnings / 370 infos, 0 in touched files). `flutter test` 3342 passed / 34 skipped / 0 failed against base `7c55c8e`'s 3330 / 34 / 0 — the +12 are §4.1's tests.
+
+### A.2 Bench, first pass (§6 is no longer open)
+
+Home LAN, controller `192.168.1.150` (WLED 0.15.1, ESP32, 290 LEDs, two segments 0–128 / 128–290). Method: a throwaway test drives the **real** `ForegroundCelebrationCoordinator` → `resolveCelebration` → `buildAnimationSteps` → the **real** `WledCelebrationDelivery` → `applyChannelFilter` → the **real** `WledService` at the bench IP; only the ESPN monitor (event injected), `wledRepositoryProvider` and `deviceChannelsProvider` are substituted. An independent Node reader polls `/json/state` at 4 Hz and reads live-view frames over the WebSocket; it never writes. Snapshot before, hash `presets.json` (raw bytes) and `/json/cfg` before and after, restore after.
+
+| Pick | On the wire (both segments) | Held | Frames | Result |
+|---|---|---|---|---|
+| **Meteor 76** | fx 76, sx 40, ix 128, pal 0, Chiefs `col` | 15.0 s | 100 % in the team hue arc, motion 17 % | **plays as chosen** — never the base (83), never the legacy 2/3/15, never the fallback 23 |
+| **Bouncing Balls 91** | fx 91, sx 55, ix 128, pal 0 | 7.6 s | 100 % in arc, motion 10 % | **controller REBOOTED**: stopped answering at the stage-3 re-POST, uptime reset, came back on cfg `def` (bri 128, orange fx 0) with **one segment 0–290** |
+
+`presets.json` (`8c53e9fe88f65c3c`, raw) and `cfg` (`e1feef2eb74dc2b3`) hashes were unchanged through both runs and the reboot. The controller was restored to its snapshot **including segment bounds** after the reboot, 0 diffs.
+
+**The revert never posts in a debug or test build.** `WledCelebrationDelivery.revert` sends the captured `seg` back, which carries `start`/`stop`/`rev`/`mi`; `pinNoGeometryOnWire` hits its `assert(false)`, the coordinator's `catch` swallows it, and the lights are left on the celebration's last stage. In a release build the assert is stripped and the payload is geometry-stripped and sent (`a356b5f` names this exact case). Pre-existing; this branch does not touch the revert. Every bench run therefore ended with a manual restore.
+
+### A.3 Decision and change — `15e1e2e`
+
+Tyler's call: **withdraw Bouncing Balls (91) from the picker now; do not investigate the WLED-side root cause on this branch.**
+
+- `WledEffectsCatalog.celebrationPickIds`: 91 removed → 16 entries. The picker builds its list from this, so it cannot be chosen.
+- `resolveCelebration`: an id not in `celebrationPickIds` resolves to `null`, i.e. "no pick" → the legacy sequence. A config saved with 91 before the withdrawal therefore fires the legacy sequence, and nothing withdrawn can reach the lights through a stale config. This is the one chokepoint both the residential coordinator and commercial `handleAlertEvent` pass through. (The compiled-off background worker, `game_day_autopilot_background_worker.dart:650`, reads the stored id directly and is not covered; it is behind `kSportsBackgroundServiceEnabled = false`.)
+- Game Day screen: a withdrawn stored id is labelled "Default", which is what fires. The picker already reseeded such a config on its first entry.
+- Tests: the curated-names pin drops the entry; new tests pin the withdrawal (picker), the null resolution (contrast), and a stale 91 firing the legacy sequence through the real coordinator (foreground). The commercial parity test's "distinct effect" was fx 79 — an id the picker never offered — and is now Meteor.
+
+Gate on `15e1e2e`: analyze 382, identical set; `flutter test` **3345 / 34 / 0** (+3).
+
+### A.4 Bench, second pass — on `15e1e2e`
+
+Same method. Between the first pass and this one another writer used the controller for about a minute (a power-off, then a three-colour fx 84 / pal 5 look); a three-minute read-only watch afterwards saw no further writes, and every run below was restored to that look, 0 diffs.
+
+| Run | Stored pick | On the wire | Held | Frames | Result |
+|---|---|---|---|---|---|
+| A | **91 (stale config)** | **fx 2 → 3 → 15**, legacy sx/ix, pal 0 | 15 s | 100 % in arc | **fx 91 never reached the wire** — the legacy sequence fired |
+| B | Meteor 76 | fx 76, sx 40, ix 128 | 14.9 s | 98.7 % in arc (the first two frames still carry the fading base) | plays as chosen; **no reboot** |
+| C | Android 27 | fx 27, sx 55, ix 128 | 14.9 s | 100 % in arc, motion 24 % | plays as chosen |
+| D | Washing Machine 113 | fx 113, sx 60, ix 128 | 14.8 s | **35 % in arc, 65 % off-team**, 8 hue buckets (blues, violets), 150+ distinct colours | plays as chosen — but **renders off-team under `pal:0`** |
+
+Run D is a new entry for §5: the catalog marks Washing Machine `usesSelectedColors`, the picker previews it with `pal:5` (team colours), and the celebration fires it with `pal:0`, under which WLED 0.15.1 draws it from its default palette. By measurement it belongs with the six. No run rebooted the controller; `presets.json` and `cfg` hashes unchanged throughout; final state = the pre-run look, 0 diffs.
+
+### A.5 What is still owed
+
+- **§5 palette decision** — unchanged, and now seven: 32 Chase Flash Rnd, 29 Chase Random, 64 Juggle, 42 Fireworks, 90 Fireworks 1D, 89 Fireworks Starburst (all `overridesColors` → preview `pal:4`, fire `pal:0`), plus **113 Washing Machine** by measurement (preview `pal:5`, fire `pal:0`). Nothing changed here.
+- The debug-only dead revert (A.2) — pre-existing, worth its own fix.
+- The WLED-side root cause of the fx 91 reboot — explicitly out of scope.
 6. Pre-existing, unchanged, noticed in passing — **by reading, not tested:** the score monitor only polls while a team is in `liveGame`, so a `win` appears to be emitted only if its poll sees `final` before the phase machine's does; and a score already queued still fires if the user switches celebrations off mid-queue.
