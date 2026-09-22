@@ -170,10 +170,17 @@ void main() {
     // any id the picker does not offer — must resolve to "no pick", so the
     // legacy sequence fires and the withdrawn effect never reaches the wire.
     test('an id the picker no longer offers → null, the legacy path', () {
-      expect(WledEffectsCatalog.celebrationPickIds.contains(91), isFalse);
-      expect(_resolve(91, _stateList(0)), isNull);
-      expect(_resolve(91, null), isNull, reason: 'fail-open does not apply: '
-          'the id is refused before the captured state is consulted');
+      // 91 Bouncing Balls (rebooted a controller), 32 Chase Flash Rnd and
+      // 29 Chase Random (generate their own colours) — all withdrawn
+      // 2026-09-21. A config that still holds any of them fires the legacy
+      // sequence: never the withdrawn effect, never a crash, never a blank.
+      for (final id in [91, 32, 29]) {
+        expect(WledEffectsCatalog.celebrationPickIds.contains(id), isFalse);
+        expect(_resolve(id, _stateList(0)), isNull, reason: 'fx $id');
+        expect(_resolve(id, null), isNull,
+            reason: 'fx $id: fail-open does not apply — the id is refused '
+                'before the captured state is consulted');
+      }
       expect(_resolve(9999, _stateList(0)), isNull);
     });
 
