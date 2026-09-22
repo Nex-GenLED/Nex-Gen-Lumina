@@ -5,9 +5,13 @@
 //    a false stall this week — see the schedule saga). See [_post].
 //  - cfg flash-saves can black out the web server for MINUTES; [patientVerify]
 //    polls liveness and NEVER spurious-fails a mid-stall controller.
+//  - EVERY cfg POST carries `light.gc` via the app's gamma chokepoint; a
+//    timers-only body wipes colour gamma on this firmware. See [postCfg].
 
 import 'dart:convert';
 import 'dart:io';
+
+import 'bench_core.dart' show prepareCfgPayload;
 
 class WledClient {
   final String base; // e.g. http://192.168.1.150
@@ -76,9 +80,15 @@ class WledClient {
           {Duration timeout = const Duration(seconds: 10)}) =>
       _post('/json/state', payload, timeout: timeout);
 
+  /// Every cfg body passes through [prepareCfgPayload] (the app's own
+  /// `normalizeWledCfgPayload`): WLED 0.15.x recomputes the gamma flags from
+  /// the body on every cfg deserialise, so a timers-only POST — which is what
+  /// every harness cfg write used to be — silently reset `light.gc.col` 2.8→1
+  /// on the live controller (2026-09-22). A body that states `light.gc` itself
+  /// passes through untouched.
   Future<bool> postCfg(Map<String, dynamic> payload,
           {Duration timeout = const Duration(seconds: 15)}) =>
-      _post('/json/cfg', payload, timeout: timeout);
+      _post('/json/cfg', prepareCfgPayload(payload), timeout: timeout);
 
   /// Patient verification through the post-commit network stall: poll [alive]
   /// every [interval] up to [maxWait]; on the first live response run [confirm]

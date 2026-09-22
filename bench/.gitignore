@@ -1,3 +1,9 @@
 # Transient per-run capture dumps (capture-before/restore-after brackets write
 # these). Not source — safe to delete anytime; never commit.
 snapshots/
+
+# Durable run state (inflight ledger + append-only run log). Gitignored because
+# it is per-rig, but NOT transient: deleting state/inflight.json silences the
+# pre-flight guard that stops a run from starting on a dirty controller. Use
+# `bench recover` to clear it properly.
+state/
