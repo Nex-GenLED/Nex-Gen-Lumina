@@ -68,12 +68,14 @@ Future<bool> applyBaseAndSpans(
   required List<int> baseRgbw,
   required Map<int, List<PixelSpan>> spansByChannel,
   String? label,
+  int? brightness,
 }) async {
   final result = await applyBaseAndSpansDetailed(
     ref,
     baseRgbw: baseRgbw,
     spansByChannel: spansByChannel,
     label: label,
+    brightness: brightness,
   );
   return result.isOk;
 }
@@ -103,11 +105,12 @@ Future<SpineWriteResult> applyBaseAndSpansDetailed(
 
 /// The spine itself. See [applyBaseAndSpansDetailed].
 ///
-/// [brightness] — master `bri`, stated ONLY when the caller has a brightness
-/// the user chose. Null (every caller but the Pattern Editor and the designs
-/// it saves) leaves the controller's brightness exactly as it is, which is
-/// what the spine has always done. It rides in the base write, so it lands
-/// with the base rather than as a visible step afterwards.
+/// [brightness] — master `bri`, stated ONLY when the caller has a level that
+/// was actually set: a stored design's [CustomDesign.appliedBrightness], or an
+/// editor's own slider. Null (a look with no brightness of its own yet — a new
+/// painting, a smart preset) leaves the controller's brightness exactly as it
+/// is. It rides in the base write, so it lands with the base rather than as a
+/// visible step afterwards.
 Future<SpineWriteResult> applyBaseAndSpansWith(
   ProviderReader read, {
   required List<int> baseRgbw,
@@ -190,7 +193,8 @@ Future<DesignApplyResult> applyPositionalDesignWith(
     baseRgbw: const [0, 0, 0, 0], // groups define the lit picture
     spansByChannel: spans,
     label: design.name,
-    brightness: design.statesBrightness ? design.brightness : null,
+    // The ONE brightness rule — the same getter the payload shapes read.
+    brightness: design.appliedBrightness,
   );
   return result.isOk ? DesignApplyResult.applied : DesignApplyResult.error;
 }

@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/scenes/scene_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_enforcement.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
@@ -132,6 +134,19 @@ final favoriteScenesProvider = Provider<AsyncValue<List<Scene>>>((ref) {
       scenes.where((s) => s.isFavorite).toList());
 });
 
+/// What `WledNotifier.setBrightness` does besides writing brightness, for the
+/// one scene apply that must not write one: tell schedule enforcement this was
+/// a manual change (or it re-asserts the schedule over the scene) and auto-pause
+/// Neighborhood Sync.
+void _recordManualApply(Ref ref) {
+  try {
+    ref.read(scheduleEnforcementServiceProvider).recordManualOverride();
+  } catch (e) {
+    debugPrint('Could not record manual override: $e');
+  }
+  SyncWarningDialog.autoPauseIfInSync(ref);
+}
+
 /// Apply a scene to the connected device
 final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
   return (scene) async {
@@ -189,9 +204,24 @@ final applySceneProvider = Provider<Future<bool> Function(Scene scene)>((ref) {
           colorNames: colorNames,
         );
 
-        // Also update brightness if specified
-        if (scene.brightness > 0) {
-          ref.read(wledStateProvider.notifier).setBrightness(scene.brightness);
+        // Brightness. For a design-backed scene the DESIGN decides
+        // ([CustomDesign.appliedBrightness]) — the same rule My Designs and
+        // the editors apply it by. This used to stamp `scene.brightness`
+        // unconditionally, which for a painted design is the model's unchosen
+        // 200: the spine had just deliberately left the controller's level
+        // alone, and this second write overrode it — so the same design came
+        // back at a different brightness from a scene than from My Designs.
+        //
+        // `setBrightness` is also what records the manual override and
+        // auto-pauses Neighborhood Sync, so a design that states no brightness
+        // still gets both — without a brightness write.
+        final sceneBrightness = design != null
+            ? design.appliedBrightness
+            : (scene.brightness > 0 ? scene.brightness : null);
+        if (sceneBrightness != null) {
+          ref.read(wledStateProvider.notifier).setBrightness(sceneBrightness);
+        } else if (design != null) {
+          _recordManualApply(ref);
         }
 
         // Log usage for learning

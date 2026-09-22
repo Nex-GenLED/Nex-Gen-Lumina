@@ -259,7 +259,13 @@ class _DesignDetailBody extends ConsumerWidget {
         _MetaRow(
           icon: Icons.brightness_6_outlined,
           label: 'Brightness',
-          value: '${design.brightness}',
+          // What Apply will actually do. An older painted design holds a 200
+          // nobody chose and nothing applies — showing it as "200" told the
+          // user the design had a brightness it would never come back at.
+          value: design.appliedBrightness == null
+              ? 'Keeps current'
+              : '${design.appliedBrightness}  '
+                  '(${(design.appliedBrightness! / 255 * 100).round()}%)',
         ),
         _MetaRow(
           icon: Icons.event_outlined,

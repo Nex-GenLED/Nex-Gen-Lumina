@@ -271,7 +271,10 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
         updatedAt: now,
         ownerId: user.uid,
         channels: [channel],
+        // Read from the controller when the editor loaded, and re-sent with
+        // every apply from this screen — the level this look was built at.
         brightness: state.brightness,
+        brightnessStated: true,
         tags: ['custom', 'color-editor'],
       );
 

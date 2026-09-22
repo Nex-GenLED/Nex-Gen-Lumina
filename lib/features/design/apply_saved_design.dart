@@ -116,7 +116,11 @@ Future<void> applySavedDesign(
         effectName: design.name,
         speed: firstChannel.speed,
         intensity: firstChannel.intensity,
-        brightness: design.brightness,
+        // Mirror what was SENT. A design that states no brightness left the
+        // controller's level alone, so the slider must stay where it is — this
+        // used to show the design's unchosen 200 until the next poll.
+        brightness:
+            design.appliedBrightness ?? ref.read(wledStateProvider).brightness,
       );
 
   ref
