@@ -425,14 +425,13 @@ void resetWledHttpClientsForTest() {
 ///
 /// `req.close().timeout(d)` alone completes the Dart future with a
 /// [TimeoutException] but leaves the request IN FLIGHT: the socket stays open
-/// until the controller answers, and the controller keeps the request in its
-/// serial queue and still spends time answering it (bench,
-/// controller-reachability-2026-09-23.md §4: WLED 0.15.x never closes a
-/// connection itself, and a burst of 16 queued reads takes 7–12 s to drain).
-/// A request nobody is waiting for must therefore be torn down on timeout so
-/// the controller sees a disconnect and dequeues it. [HttpClientRequest.abort]
-/// does exactly that; the late completion of the original future is
-/// swallowed by `Future.timeout`.
+/// until the controller answers or lwIP evicts it (WLED 0.15.x never closes a
+/// connection itself — bench, controller-reachability-2026-09-23.md §4.3), and
+/// while open it holds the pooled client's single `maxConnectionsPerHost` slot
+/// for that controller. A request nobody is waiting for must therefore be torn
+/// down at its timeout so the next request can proceed. [HttpClientRequest.abort]
+/// does exactly that; the late completion of the original future is swallowed
+/// by `Future.timeout`.
 Future<HttpClientResponse> closeOrAbort(
     HttpClientRequest req, Duration timeout) {
   return req.close().timeout(timeout, onTimeout: () {

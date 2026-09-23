@@ -1,13 +1,11 @@
 // #111 — a timed-out controller request must be ABORTED, not abandoned.
 //
 // `req.close().timeout(d)` completes the Dart future but leaves the request in
-// flight: the socket stays open until the controller answers, and the
-// controller keeps the request in its serial queue and still spends time
-// answering it. Bench (controller-reachability-2026-09-23.md): WLED 0.15.x
-// never closes a connection itself, and a burst of 16 queued reads takes
-// 7-12 s to drain, so abandoned requests amplify the very slowness that
-// timed them out. [closeOrAbort] tears the request down on timeout so the
-// controller sees a disconnect and dequeues it.
+// flight: the socket stays open until the controller answers or lwIP evicts it
+// (WLED 0.15.x never closes a connection itself — bench,
+// controller-reachability-2026-09-23.md §4.3), and while open it holds the
+// pooled client's single maxConnectionsPerHost slot for that controller.
+// [closeOrAbort] tears the request down on timeout so the next one can go.
 //
 // The "server" here is a raw ServerSocket that never answers, so the only
 // way its `done` future can complete is the client closing the connection.
