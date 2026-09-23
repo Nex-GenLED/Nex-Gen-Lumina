@@ -86,11 +86,10 @@ void main() {
   group('library cards', () {
     final repo = PatternRepository();
 
-    test('EVERY Architectural / Galaxy card in the family has a readable field', () async {
+    test('EVERY Architectural card in the family has a readable field', () async {
       int checked = 0;
       for (final kelvin in ['k2000', 'k2700', 'k3000', 'k3500', 'k4000', 'k4500', 'k5000', 'k5500', 'k6500']) {
-        for (final id in ['arch_${kelvin}_all', 'arch_${kelvin}_1on2off',
-            'arch_galaxy_${kelvin}_twinkle_1s2t']) {
+        for (final id in ['arch_${kelvin}_all', 'arch_${kelvin}_1on2off']) {
           final node = await repo.getNodeById(id);
           if (node == null) continue;
           for (final item in await repo.generatePatternsForNode(node)) {
@@ -106,16 +105,26 @@ void main() {
           }
         }
       }
-      expect(checked, greaterThan(20));
+      // 9 Kelvin styles x 2 cards, each yielding exactly one sparkle-family
+      // item (fx 51 Fairytwinkle) = 18. The floor was 20 while the Galaxy &
+      // Starlight twinkle cards still existed; they were removed 2026-09-23
+      // (their spacing rendered half the strip permanently black).
+      expect(checked, greaterThanOrEqualTo(18));
     });
 
-    test('Classic Twinkle card is genuine fx 17 at a readable speed', () async {
-      final node = await repo.getNodeById('arch_galaxy_k3000_twinkle_1s2t');
-      final items = await repo.generatePatternsForNode(node!);
-      final classic = _seg(items.firstWhere((i) => i.name.endsWith('Classic Twinkle')).wledPayload);
-      expect(classic['fx'], 17);
-      expect(classic['sx'], 200);
-      expect(classic['pal'], 0);
+    test('Twinkle picked from Top Picks is genuine fx 17 at a readable speed', () {
+      // Used to target the Galaxy "Classic Twinkle" card, removed 2026-09-23.
+      // The live route to Twinkle on an Architectural white is the tuner's
+      // Top Picks entry: fx 17 at its profile default, via buildSelectorPayload.
+      final seg = _seg(buildSelectorPayload(SelectorState(
+        effectId: 17,
+        speed: getSpeedProfile(17).rawDefault,
+        intensity: 128,
+        colors: const [_warm1, _warm2],
+      )));
+      expect(seg['fx'], 17);
+      expect(seg['sx'], 200);
+      expect(seg['pal'], 0);
     });
 
     test('a holiday red/green Twinkle card is byte-for-byte what it was', () async {
