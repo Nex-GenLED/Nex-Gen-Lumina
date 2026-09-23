@@ -52,7 +52,6 @@ import {
 } from "./gameDayGate";
 import { assertPayloadIsFireSafe, FIRE_JOBS_COLLECTION } from "./fireJobs";
 import {
-  DEFAULT_LEAD_MINUTES,
   PLAN_HORIZON_MS,
   argbToRgb,
   buildParticipatingSegArray,
@@ -66,6 +65,19 @@ import {
   toRgbwSlots,
 } from "./gameDayPlanning";
 import { fetchTeamGame, EspnGame } from "./espnClient";
+import {
+  TeamRow,
+  TeamWindow,
+  deriveTeamPriority,
+  handoffWinner,
+  leadMinutesFor,
+  orderByPriority,
+  ownerAt,
+  profileNamesFrom,
+  rankOf,
+  startDecision,
+  windowEndMs,
+} from "./gameDayHierarchy";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
@@ -94,6 +106,11 @@ interface PlanStats {
   configsEnabled: number;
   startsPlanned: number;
   endsPlanned: number;
+  /**
+   * Ends that HANDED OFF the house to another team's design instead of
+   * restoring base. A subset of `endsPlanned` — an end was planned either way.
+   */
+  handoffsPlanned: number;
   /**
    * START-phase outcomes. **Exactly one bucket per enabled config**, so the
    * invariant is `sum(skipped) + startsPlanned === configsEnabled` (less any
@@ -312,6 +329,7 @@ export async function runPlannerTick(
     configsEnabled: 0,
     startsPlanned: 0,
     endsPlanned: 0,
+    handoffsPlanned: 0,
     skipped: {},
     endSkipped: {},
     espnErrors: 0,
@@ -405,7 +423,102 @@ export async function runPlannerTick(
       }
     }
 
-    for (const cfgDoc of configs.docs) {
+    // ── THE HIERARCHY (defect 1 — +106's missing server half) ─────────
+    // The app decides which team's game owns the house from the user's
+    // ordered slug list. Until now the planner read neither priority field
+    // and planned every team alone. Rank is derived exactly as the app's
+    // heal-on-read does (stored slugs → profile names → remaining configs),
+    // so an account that has not opened Game Day since +106 ranks the same
+    // way here as it does in the app's memory. See gameDayHierarchy.ts.
+    const priority = deriveTeamPriority({
+      storedSlugs: udata.game_day_team_priority,
+      profileNames: profileNamesFrom(udata),
+      configs: configs.docs.map(
+        (d): TeamRow => ({
+          slug: d.id,
+          teamName:
+            typeof d.get("team_name") === "string" ? (d.get("team_name") as string) : null,
+        })
+      ),
+    });
+    // Walk the hierarchy, not document-id order — orderConfigsByPriority's
+    // reason: the #1 team must plan first so a lower team evaluated on the
+    // same tick sees it holding the house and defers.
+    const orderedDocs = orderByPriority(configs.docs, priority, (d) => d.id);
+
+    // ESPN, cached per (sport, team) across users — unchanged; lifted into a
+    // closure so the pre-pass and the loop share one read and one error count.
+    const gameFor = async (sport: string, espnTeamId: string): Promise<EspnGame | null> => {
+      const key = `${sport}/${espnTeamId}`;
+      if (!gameCache.has(key)) {
+        try {
+          gameCache.set(key, await fetchTeamGame(sport, espnTeamId));
+        } catch (err) {
+          gameCache.set(key, null);
+          stats.espnErrors++;
+          logger.warn(`planGameDayFires: ESPN failed for ${key}`, err);
+        }
+      }
+      return gameCache.get(key) ?? null;
+    };
+
+    // Pre-pass: every enabled team's window and session, so each START and
+    // END below is decided against the WHOLE FIELD rather than in isolation.
+    // The session read moves here from the loop (same count — one per config
+    // per tick); the loop reads the cached snapshot and keeps it current as
+    // it writes, so a team walked later this tick sees what an earlier one did.
+    const windows: TeamWindow[] = [];
+    const windowByEvent = new Map<string, TeamWindow>();
+    const sessionByEvent = new Map<string, Record<string, unknown>>();
+    const configByEvent = new Map<string, Record<string, unknown>>();
+    if (controller) {
+      const lat = u.get("latitude");
+      const lon = u.get("longitude");
+      for (let order = 0; order < orderedDocs.length; order++) {
+        const d = orderedDocs[order];
+        const c = d.data();
+        const sport = String(c.sport ?? "");
+        const game = await gameFor(sport, String(c.espn_team_id ?? ""));
+        if (!game) continue;
+        const eventId = eventIdFor(d.id, game.gameId);
+        const session = (await sessionRef(db, uid, eventId).get()).data() ?? {};
+        sessionByEvent.set(eventId, session);
+        configByEvent.set(eventId, c);
+        // The daylight filter, decided once here; the loop reads the flag.
+        // The user doc carries no tz offset; US Central is the fleet's
+        // reality today and a ±1 h error only matters within 30 min of
+        // sunset. Recorded as a limitation rather than hidden.
+        const daylightOnly =
+          c.skip_day_games === true &&
+          typeof lat === "number" &&
+          typeof lon === "number" &&
+          isDaylightOnlyGame({
+            gameStartMs: game.startMs,
+            estimatedDurationMs: estimatedDurationMs(sport),
+            latitude: lat,
+            longitude: lon,
+            tzOffsetHours: -5,
+          });
+        const w: TeamWindow = {
+          teamSlug: d.id,
+          eventId,
+          rank: rankOf(d.id, priority),
+          order,
+          windowStartMs: game.startMs - leadMinutesFor(c) * 60_000,
+          gameStartMs: game.startMs,
+          windowEndMs: windowEndMs(game.startMs, sport),
+          statusName: game.statusName,
+          eligible: !daylightOnly,
+          startPlanned:
+            session.startPlannedAt !== null && session.startPlannedAt !== undefined,
+          endFired: session.endFiredAt !== null && session.endFiredAt !== undefined,
+        };
+        windows.push(w);
+        windowByEvent.set(eventId, w);
+      }
+    }
+
+    for (const cfgDoc of orderedDocs) {
       stats.configsEnabled++;
       const c = cfgDoc.data();
       const teamSlug = cfgDoc.id;
@@ -429,17 +542,7 @@ export async function runPlannerTick(
         }
 
         // ── ESPN, cached per (sport, team) across users ──────────────────
-        const key = `${sport}/${espnTeamId}`;
-        if (!gameCache.has(key)) {
-          try {
-            gameCache.set(key, await fetchTeamGame(sport, espnTeamId));
-          } catch (err) {
-            gameCache.set(key, null);
-            stats.espnErrors++;
-            logger.warn(`planGameDayFires: ESPN failed for ${key}`, err);
-          }
-        }
-        const game = gameCache.get(key) ?? null;
+        const game = await gameFor(sport, espnTeamId);
         if (!game) {
           bump(stats.skipped, "no_game");
           // The biggest bucket (11 of 19 on 2026-08-11) and still bounded: one
@@ -451,7 +554,18 @@ export async function runPlannerTick(
 
         const eventId = eventIdFor(teamSlug, game.gameId);
         const sRef = sessionRef(db, uid, eventId);
-        const session = (await sRef.get()).data() ?? {};
+        // The pre-pass read this; a hand-off earlier this tick may have
+        // updated it in memory, which is exactly what this team must see.
+        const session = sessionByEvent.get(eventId) ?? (await sRef.get()).data() ?? {};
+        const win = windowByEvent.get(eventId);
+        if (!win) {
+          // Unreachable: the pre-pass builds a window for every config with a
+          // game and a controller, and both were just checked. Counted rather
+          // than assumed.
+          stats.errors++;
+          logger.error(`planGameDayFires: no window for ${uid}/${eventId}`);
+          continue;
+        }
 
         // ── Participation — S3b's consumer, wired here for the first time ─
         const part = participationForFire(controller.data(), nowMs);
@@ -465,54 +579,44 @@ export async function runPlannerTick(
         }
 
         // ── Daylight filter ──────────────────────────────────────────────
-        if (c.skip_day_games === true) {
-          const lat = u.get("latitude");
-          const lon = u.get("longitude");
-          if (typeof lat === "number" && typeof lon === "number") {
-            if (
-              isDaylightOnlyGame({
-                gameStartMs: game.startMs,
-                estimatedDurationMs: estimatedDurationMs(sport),
-                latitude: lat,
-                longitude: lon,
-                // The user doc carries no tz offset; US Central is the fleet's
-                // reality today and a ±1 h error only matters within 30 min of
-                // sunset. Recorded as a limitation rather than hidden.
-                tzOffsetHours: -5,
-              })
-            ) {
-              bump(stats.skipped, "daylight_game");
-              // ATTRIBUTABLE (#90). The second silent skip, and the one that
-              // swallowed mlb_royals on 2026-08-16: the 08-16 summary read
-              // `daylight_game: 9` and named not one team, so "your team played
-              // and we deliberately sat it out" was indistinguishable from
-              // "nothing happened" — which is exactly why a scoring game with
-              // an enabled config read as a celebrations failure.
-              //
-              // The skip itself is CORRECT behaviour (per-config `skip_day_games`
-              // opt-in + user lat/lon); only its invisibility is the defect.
-              // Batched with C10's `start_time_passed` row deliberately: two of
-              // the planner's skip reasons wrote rows and two did not, and the
-              // ASYMMETRY is the bug, not either row on its own.
-              //
-              // No lead is applied here — this branch is upstream of the START
-              // block that computes `startFireAt` — so the row names the game's
-              // own start, which is the time the user would look for.
-              logRows.push({
-                uid, teamSlug, eventId, action: "skip", reason: "daylight_game",
-                fireAt: new Date(game.startMs).toISOString(),
-              });
-              continue;
-            }
-          }
+        // Decided in the pre-pass (skip_day_games + user lat/lon). An
+        // ineligible window also takes no part in the hierarchy: it neither
+        // owns, blocks, nor receives the house.
+        if (!win.eligible) {
+          bump(stats.skipped, "daylight_game");
+          // ATTRIBUTABLE (#90). The second silent skip, and the one that
+          // swallowed mlb_royals on 2026-08-16: the 08-16 summary read
+          // `daylight_game: 9` and named not one team, so "your team played
+          // and we deliberately sat it out" was indistinguishable from
+          // "nothing happened" — which is exactly why a scoring game with
+          // an enabled config read as a celebrations failure.
+          //
+          // The skip itself is CORRECT behaviour (per-config `skip_day_games`
+          // opt-in + user lat/lon); only its invisibility is the defect.
+          // Batched with C10's `start_time_passed` row deliberately: two of
+          // the planner's skip reasons wrote rows and two did not, and the
+          // ASYMMETRY is the bug, not either row on its own.
+          //
+          // No lead is applied here — this branch is upstream of the START
+          // block that computes `startFireAt` — so the row names the game's
+          // own start, which is the time the user would look for.
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: "daylight_game",
+            fireAt: new Date(game.startMs).toISOString(),
+          });
+          continue;
         }
 
         // ── START ────────────────────────────────────────────────────────
-        const lead =
-          (typeof c.lead_time_minutes === "number"
-            ? c.lead_time_minutes
-            : DEFAULT_LEAD_MINUTES) * 60_000;
-        const startFireAt = game.startMs - lead;
+        // DEFECT 2: the app writes `lead_time_minutes_override`; this read
+        // `lead_time_minutes`, which nothing writes, so every fire went out at
+        // the 30-minute default. leadMinutesFor holds the precedence; the
+        // pre-pass applied it when it built the window.
+        const startFireAt = win.windowStartMs; // game.startMs − lead
+        // Rules 2/3: would a lit, higher-ranked (or first-come) team already
+        // hold the house when this start fired? Then this team DEFERS — no
+        // start job; tracked for hand-off.
+        const start = startDecision(win, windows);
 
         // OBSERVABILITY (2026-08-11): every path out of this block must
         // increment something. Before this, a config that passed participation
@@ -525,6 +629,24 @@ export async function runPlannerTick(
         const startBeyondHorizon = startFireAt >= nowMs + PLAN_HORIZON_MS;
 
         if (
+          !startAlreadyPlanned &&
+          !startInPast &&
+          !startBeyondHorizon &&
+          start.defer
+        ) {
+          // DEFERRED — the app's "tracked, not lit". Writing a start here is
+          // exactly the bug: it would put this team's design on a house the
+          // higher team already owns. One START bucket, so the reconciliation
+          // holds. No session write: the window is recomputed every tick and
+          // the hand-off does not need a marker to find this team.
+          bump(stats.skipped, "deferred_to_higher_priority");
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip",
+            reason: "deferred_to_higher_priority",
+            deferredTo: start.to.teamSlug,
+            fireAt: new Date(startFireAt).toISOString(),
+          });
+        } else if (
           !startAlreadyPlanned &&
           !startInPast &&
           !startBeyondHorizon
@@ -591,6 +713,11 @@ export async function runPlannerTick(
                 );
               }
               stats.startsPlanned++;
+              // Visible to every team walked after this one, this tick: they
+              // now resolve against a house this team holds. In log-only mode
+              // this is in-memory only, so the dry-run corpus shows same-tick
+              // deferrals and not cross-tick ones.
+              win.startPlanned = true;
             }
           }
         } else if (startAlreadyPlanned) {
@@ -626,6 +753,10 @@ export async function runPlannerTick(
           logRows.push({
             uid, teamSlug, eventId, action: "skip", reason: "start_time_passed",
             fireAt: new Date(startFireAt).toISOString(),
+            // A deferred team lands here every tick after its window opens:
+            // it never lost a start, it yielded one. Say so, or the row reads
+            // as the Dodgers case.
+            ...(start.defer ? { deferredTo: start.to.teamSlug } : {}),
           });
         }
 
@@ -657,6 +788,9 @@ export async function runPlannerTick(
           logRows.push({
             uid, teamSlug, eventId, action: "skip",
             reason: "end_skipped_no_start",
+            // A deferred team ends here by design: it never lit, so there is
+            // nothing to restore — the owner's end handles the house.
+            ...(start.defer ? { deferredTo: start.to.teamSlug } : {}),
           });
         }
 
@@ -672,9 +806,17 @@ export async function runPlannerTick(
         // moment it matters. A created-but-never-dispatched start leaves the
         // house exactly as a never-started one does.
         if (decision.fireEnd) {
+          // The job that lit THIS team's design: its own start, or — for a team
+          // that received the house by hand-off — the relinquisher's end job,
+          // recorded on the session as `startJobId` when the hand-off was
+          // planned.
+          const startJobId =
+            typeof session.startJobId === "string" && session.startJobId.length > 0
+              ? session.startJobId
+              : `${eventId}_start`;
           const startJob = await db
             .collection("users").doc(uid)
-            .collection(FIRE_JOBS_COLLECTION).doc(`${eventId}_start`)
+            .collection(FIRE_JOBS_COLLECTION).doc(startJobId)
             .get();
           if (!startJobConfirmsFired(startJob.data()?.state)) {
             bump(stats.endSkipped, "end:start_never_dispatched");
@@ -690,9 +832,77 @@ export async function runPlannerTick(
         }
 
         if (decision.fireEnd) {
+          // ── THE HIERARCHY AT THE END ───────────────────────────────────
+          // Before this, every team's end base-restored at its own final, so
+          // with two games the first to finish put the house back to base
+          // part-way through the second. Two questions now, in order.
+          //
+          // 1. Is this team the OWNER? If a higher-ranked lit team is still
+          //    playing, the house is theirs; restoring it would be the bug.
+          //    The end is recorded (endFiredAt, so it never re-fires) and no
+          //    job is written. The app's analogue: a deferred or preempted
+          //    session completes without calling onResumeNormalSchedule.
+          const owner = ownerAt(windows, nowMs);
+          if (owner !== null && owner.eventId !== eventId) {
+            bump(stats.endSkipped, "end:not_owner");
+            logRows.push({
+              uid, teamSlug, eventId, action: "skip",
+              reason: "end_suppressed_not_owner", owner: owner.teamSlug,
+              ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
+            });
+            if (writeJobs) {
+              await sRef.set(
+                {
+                  endFiredAt: admin.firestore.FieldValue.serverTimestamp(),
+                  endOutcome: "not_owner",
+                  endYieldedTo: owner.eventId,
+                },
+                { merge: true }
+              );
+              win.endFired = true;
+            }
+            continue;
+          }
+
+          // 2. Is another ranked team STILL PLAYING? Then the house is HANDED
+          //    OFF: this end job carries the survivor's design instead of the
+          //    base restore, and the survivor's session is marked started so
+          //    its own end can fire later (GUARD 0 / 0b read that marker).
+          //    Only when no team remains does the base look come back — the
+          //    app's rule 5, handoffWinner.
+          const winner = handoffWinner(windows, eventId, nowMs);
+          let handoff: { payload: string; to: TeamWindow } | null = null;
+          if (winner !== null) {
+            const built = buildGameDayPayload({
+              config: configByEvent.get(winner.eventId) ?? {},
+              participatingChannels: part.channels,
+              deviceChannelIds: part.deviceChannelIds,
+            });
+            if ("refuse" in built) {
+              // The survivor cannot be lit by this path (e.g. a per-pixel
+              // saved design). Legible, and the end falls back to base rather
+              // than leaving the finished team's colours up.
+              logRows.push({
+                uid, teamSlug, eventId, action: "skip",
+                reason: `handoff_refused:${built.refuse.split(":")[0]}`,
+                handoffTo: winner.teamSlug,
+              });
+            } else {
+              const safety = assertPayloadIsFireSafe("applyJson", built.payload);
+              if (!safety.ok) {
+                logger.error(
+                  `planGameDayFires: UNSAFE hand-off payload for ${uid}/${winner.teamSlug}: ${safety.reason}`
+                );
+              } else {
+                handoff = { payload: built.payload, to: winner };
+              }
+            }
+          }
+
           logRows.push({
             uid, teamSlug, eventId, action: "plan_end",
             fireAt: new Date(nowMs).toISOString(), reason: decision.reason,
+            ...(handoff ? { handoffTo: handoff.to.teamSlug } : {}),
             ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
           });
           if (writeJobs) {
@@ -713,18 +923,58 @@ export async function runPlannerTick(
                 controllerId: controller.id,
                 fireAt: admin.firestore.Timestamp.fromMillis(nowMs),
                 type: "applyJson",
-                payload: restore.payload,
+                payload: handoff ? handoff.payload : restore.payload,
                 state: "scheduled",
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 source: "game_day",
+                // Audit: an `end` whose payload is a design rather than a
+                // preset load must say which team it lit.
+                ...(handoff
+                  ? { handoffTo: handoff.to.eventId, handoffToTeam: handoff.to.teamSlug }
+                  : {}),
               })
               .catch((e) => {
                 if (e.code !== 6 && e.code !== "already-exists") throw e;
               });
             await sRef.set(
-              { endFiredAt: admin.firestore.FieldValue.serverTimestamp() },
+              {
+                endFiredAt: admin.firestore.FieldValue.serverTimestamp(),
+                ...(handoff ? { handedOffTo: handoff.to.eventId } : {}),
+              },
               { merge: true }
             );
+            win.endFired = true;
+            if (handoff) {
+              // The survivor now holds the house. `startPlannedAt` is what
+              // GUARD 0 requires before its own end may fire, and `startJobId`
+              // is what GUARD 0b reads to confirm the design reached the
+              // device. Neither is overwritten when the survivor had fired its
+              // own start — that job already confirms it.
+              const toSession = sessionByEvent.get(handoff.to.eventId) ?? {};
+              const alreadyStarted =
+                toSession.startPlannedAt !== null && toSession.startPlannedAt !== undefined;
+              const startFields = alreadyStarted
+                ? {}
+                : {
+                    startPlannedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    startJobId: `${eventId}_end`,
+                  };
+              await sessionRef(db, uid, handoff.to.eventId).set(
+                {
+                  ...startFields,
+                  gameStartMs: handoff.to.gameStartMs,
+                  teamSlug: handoff.to.teamSlug,
+                  sport: String(configByEvent.get(handoff.to.eventId)?.sport ?? ""),
+                  handedOffFrom: eventId,
+                },
+                { merge: true }
+              );
+              // Keep this tick's view coherent for the survivor's own pass.
+              Object.assign(toSession, startFields, { gameStartMs: handoff.to.gameStartMs });
+              sessionByEvent.set(handoff.to.eventId, toSession);
+              handoff.to.startPlanned = true;
+              stats.handoffsPlanned++;
+            }
           }
           stats.endsPlanned++;
         } else if (decision.reason !== "not_final" && decision.reason !== "already_fired") {
@@ -768,6 +1018,8 @@ export async function runPlannerTick(
     configsEnabled: stats.configsEnabled,
     startsPlanned: stats.startsPlanned,
     endsPlanned: stats.endsPlanned,
+    // Ends that handed the house to another team rather than restoring base.
+    handoffsPlanned: stats.handoffsPlanned,
     // Skip reasons by category — the field whose absence cost the most.
     // START phase, one bucket per config. See PlanStats.skipped.
     skipped: stats.skipped,
