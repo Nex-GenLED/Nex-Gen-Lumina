@@ -16,6 +16,7 @@ import '../services/group_autopilot_service.dart';
 import '../services/path1_complement_theme.dart';
 import '../services/path1_game_day_snapshot.dart';
 import 'game_day_setup_screen.dart';
+import 'sync_fire_status_banner.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FEATURED PATTERNS — Curated quick-picks sourced from the LIVE catalog (#11b)
@@ -204,6 +205,9 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
           ],
 
           _buildActionButton(isActive),
+          // v1: what actually happened at each house after Start (polls the
+          // fire record; hidden until a crew fanout has run).
+          const SyncFireStatusBanner(),
         ],
       ),
     );

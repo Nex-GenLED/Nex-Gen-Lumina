@@ -35,7 +35,9 @@
  *                                               // is all of host's controllers
  *   }
  *
- * Returns (flat 200 body): { ok: true, commandCount: N }
+ * Returns (flat 200 body): { ok: true, commandCount: N } on the self-only path;
+ * on the crew-fanout path { ok, fireId, memberCount, commandCount, skipped,
+ * noAddress, noBridge, expiresAtMs } — per-house detail via pollSyncFire.
  *
  * Deployment:
  *   cd functions
@@ -76,7 +78,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RATE_WINDOW_MS = exports.INITIATOR_COOLDOWN_MS = exports.GROUP_CEILING_PER_MIN = exports.FANOUT_OFF = exports.applySyncPattern = void 0;
+exports.RATE_WINDOW_MS = exports.INITIATOR_COOLDOWN_MS = exports.GROUP_CEILING_PER_MIN = exports.STUCK_EXECUTING_MS = exports.BRIDGE_LIVE_WINDOW_MS = exports.SYNC_COMMAND_TTL_MS = exports.SYNC_FANOUT_SOURCE = exports.FANOUT_OFF = exports.applySyncPattern = void 0;
 exports.isMemberSkipped = isMemberSkipped;
 exports.buildFanoutCommandDoc = buildFanoutCommandDoc;
 exports.fanoutPolicyFrom = fanoutPolicyFrom;
@@ -85,6 +87,10 @@ exports.mergeDenormTargets = mergeDenormTargets;
 exports.resolveMemberTargets = resolveMemberTargets;
 exports.partitionBroadcastPayload = partitionBroadcastPayload;
 exports.verifyFanoutTarget = verifyFanoutTarget;
+exports.classifyDeliveryRoute = classifyDeliveryRoute;
+exports.syncCommandDocId = syncCommandDocId;
+exports.fireTargetKey = fireTargetKey;
+exports.planQueueHygiene = planQueueHygiene;
 exports.fanoutToCrew = fanoutToCrew;
 exports.evaluateRateLimit = evaluateRateLimit;
 exports.reserveFanoutSlot = reserveFanoutSlot;
@@ -201,7 +207,18 @@ exports.applySyncPattern = (0, https_1.onRequest)({ maxInstances: 10, cors: fals
                 sessionId: sessionId || "",
                 source: source || "sync_fanout",
             });
-            res.status(200).json({ ok: true, ...fan });
+            // The app needs the fire id and the counts; the per-target detail
+            // (other members' command paths) is read back through pollSyncFire.
+            res.status(200).json({
+                ok: true,
+                fireId: fan.fireId,
+                memberCount: fan.memberCount,
+                commandCount: fan.commandCount,
+                skipped: fan.skipped,
+                noAddress: fan.noAddress,
+                noBridge: fan.noBridge,
+                expiresAtMs: fan.expiresAtMs,
+            });
             return;
         }
     }
@@ -561,11 +578,295 @@ function verifyFanoutTarget(targetUid, groupMemberUids) {
     }
     return { ok: true };
 }
+// ─── v1 crew fire: delivery planning ─────────────────────────────────────
+//
+// One Start tap becomes one FIRE: one command per member controller, written
+// in a single batch so every bridge sees its command in the same instant, and
+// one record at neighborhoods/{groupId}/fires/{fireId} that says, per house,
+// what was written and why not. `pollSyncFire` reads the member command docs
+// back into that record so the initiator is told what actually happened —
+// "sent to N" is not "N changed". The fires subcollection has no client rule
+// (admin-only); the callable is the read path.
+exports.SYNC_FANOUT_SOURCE = "sync_fanout";
+/**
+ * A sync command that is not picked up within this window must never fire
+ * late — the street has moved on and a stale scene landing 2 minutes later is
+ * worse than nothing. Written as `expiresAt` so the sweeper honours it
+ * (commandSafety.effectiveExpiryMs: explicit expiresAt wins over the 120 s
+ * default), and read by pollSyncFire to settle "no response".
+ */
+exports.SYNC_COMMAND_TTL_MS = 90_000;
+/**
+ * Bridge liveness. The firmware writes users/{uid}/bridge_status/current every
+ * 30 s over the SAME token and connection it polls commands with, so a
+ * heartbeat older than four intervals means the poll loop is not running
+ * either. A member in that state is not commanded at all: the command would
+ * sit pending for 90 s, block that member's Game Day fires via the
+ * one-in-flight guard (dispatchFireJobs.ts:326), and expire — and the initiator
+ * would learn nothing for 90 s. Recording `no_bridge` up front is faster and
+ * true. The app-open broadcast still reaches such a member if their app is up.
+ */
+exports.BRIDGE_LIVE_WINDOW_MS = 120_000;
+/**
+ * An `executing` sync command older than this was orphaned: the bridge claimed
+ * it and died (power, Wi-Fi) before reporting. WLED_HTTP_TIMEOUT_MS is 10 s, so
+ * nothing legitimately executes for 90 s. The sweeper deliberately never
+ * touches `executing` (it is a bridge claim), so this is the only place a
+ * stuck SYNC command is ever cleared — scoped to source == sync_fanout; other
+ * writers' commands are never touched.
+ */
+exports.STUCK_EXECUTING_MS = 90_000;
+/**
+ * PURE. How a member's command reaches their controller.
+ *   webhook URL set          → "webhook" (executeWledCommand forwards it; no
+ *                              bridge involved, heartbeat irrelevant)
+ *   heartbeat within window  → "bridge"
+ *   no / stale heartbeat     → "no_bridge" (not commanded; recorded)
+ */
+function classifyDeliveryRoute(args) {
+    const hasWebhook = typeof args.webhookUrl === "string" && args.webhookUrl.trim().length > 0;
+    if (hasWebhook)
+        return { route: "webhook", reason: "webhook_url" };
+    if (args.bridgeHeartbeatMs === null) {
+        return { route: "no_bridge", reason: "no_heartbeat_ever" };
+    }
+    const ageMs = args.nowMs - args.bridgeHeartbeatMs;
+    if (ageMs > exports.BRIDGE_LIVE_WINDOW_MS) {
+        return {
+            route: "no_bridge",
+            reason: `heartbeat_stale_${Math.round(ageMs / 1000)}s`,
+        };
+    }
+    return { route: "bridge", reason: "heartbeat_fresh" };
+}
+function safeIdPart(s) {
+    return s.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+/**
+ * Deterministic command doc id: `sync_{fireId}_{controllerId}`. A retried
+ * write for the same fire collides instead of firing twice (the bridge's poll
+ * has no orderBy, so a duplicate could land AFTER a newer scene). Same
+ * principle as fireJobDocId in commandSafety.
+ */
+function syncCommandDocId(fireId, controllerId, ordinal) {
+    const cid = safeIdPart(controllerId);
+    return `sync_${safeIdPart(fireId)}_${cid.length > 0 ? cid : "c" + ordinal}`;
+}
+/** Key of a target inside the fire record's `targets` map. */
+function fireTargetKey(uid, controllerId, ordinal) {
+    const cid = safeIdPart(controllerId);
+    return `${safeIdPart(uid)}__${cid.length > 0 ? cid : "c" + ordinal}`;
+}
+/**
+ * PURE. Queue hygiene before a new sync command is written for a member:
+ *   pending sync_fanout    → superseded (an older scene must not fire after
+ *                            the newer one; ≤5-per-poll + no ordering means a
+ *                            backlog of two can invert)
+ *   executing, too old     → stuck (see STUCK_EXECUTING_MS)
+ *   executing, recent      → left alone (the bridge is genuinely on it)
+ */
+function planQueueHygiene(docs, nowMs) {
+    const supersede = [];
+    const stuck = [];
+    for (const d of docs) {
+        if (d.status === "pending") {
+            supersede.push(d.id);
+        }
+        else if (d.status === "executing") {
+            if (d.createdAtMs !== null && nowMs - d.createdAtMs > exports.STUCK_EXECUTING_MS) {
+                stuck.push(d.id);
+            }
+        }
+    }
+    return { supersede, stuck };
+}
+function memberDisplayName(data) {
+    const n = data.displayName;
+    return typeof n === "string" ? n : "";
+}
+/**
+ * Plan one member's delivery. NEVER throws: any failure becomes a
+ * `plan_failed` record so the fire still says what happened to this house.
+ */
+async function planMemberDelivery(db, args) {
+    const displayName = memberDisplayName(args.memberData);
+    const bare = (status, reason) => ({
+        targets: [
+            {
+                uid: args.memberUid,
+                displayName,
+                controllerId: "",
+                controllerIp: "",
+                route: "none",
+                commandPath: null,
+                status,
+                reason,
+            },
+        ],
+        writes: [],
+    });
+    try {
+        const targets = await resolveMemberTargets(db, args.memberUid, args.memberData);
+        const userRef = db.collection("users").doc(args.memberUid);
+        // Webhook URL and bridge heartbeat: two reads per member, crew-scale.
+        let webhookUrl = null;
+        try {
+            const u = await userRef.get();
+            webhookUrl = u.data()?.webhookUrl || null;
+        }
+        catch (_) {
+            /* null webhook = bridge mode */
+        }
+        let bridgeHeartbeatMs = null;
+        try {
+            const hb = await userRef.collection("bridge_status").doc("current").get();
+            if (hb.exists) {
+                const t = hb.updateTime;
+                bridgeHeartbeatMs = t && typeof t.toMillis === "function" ? t.toMillis() : null;
+            }
+        }
+        catch (_) {
+            /* unreadable heartbeat = no evidence of a live bridge */
+        }
+        const route = classifyDeliveryRoute({
+            webhookUrl,
+            bridgeHeartbeatMs,
+            nowMs: args.nowMs,
+        });
+        const records = [];
+        const writes = [];
+        const commandsRef = userRef.collection("commands");
+        if (route.route === "no_bridge") {
+            targets.forEach((t, i) => records.push({
+                uid: args.memberUid,
+                displayName,
+                controllerId: t.id,
+                controllerIp: t.ip,
+                route: "no_bridge",
+                commandPath: null,
+                status: "no_bridge",
+                reason: route.reason,
+            }));
+            console.warn(`applySyncPattern FANOUT: ${args.memberUid} NOT commanded — ` +
+                `${route.reason} (${targets.length} controller(s) recorded no_bridge)`);
+            return { targets: records, writes };
+        }
+        // Queue hygiene — only this writer's class, only in-flight states. Two
+        // equality queries (no `in`) so no composite index is needed.
+        const inFlight = [];
+        for (const status of ["pending", "executing"]) {
+            try {
+                const snap = await commandsRef
+                    .where("source", "==", exports.SYNC_FANOUT_SOURCE)
+                    .where("status", "==", status)
+                    .get();
+                snap.forEach((d) => {
+                    const dd = d.data() || {};
+                    const created = dd.createdAt;
+                    inFlight.push({
+                        id: d.id,
+                        status,
+                        createdAtMs: created && typeof created.toMillis === "function"
+                            ? created.toMillis()
+                            : null,
+                    });
+                });
+            }
+            catch (err) {
+                console.warn(`applySyncPattern FANOUT: hygiene read (${status}) failed for ${args.memberUid}`, err);
+            }
+        }
+        const hygiene = planQueueHygiene(inFlight, args.nowMs);
+        for (const id of hygiene.supersede) {
+            writes.push({
+                kind: "update",
+                ref: commandsRef.doc(id),
+                data: {
+                    status: "superseded",
+                    error: `Superseded by sync fire ${args.fireId} before pickup.`,
+                    supersededBy: args.fireId,
+                    completedAt: admin.firestore.FieldValue.serverTimestamp(),
+                },
+            });
+        }
+        for (const id of hygiene.stuck) {
+            writes.push({
+                kind: "update",
+                ref: commandsRef.doc(id),
+                data: {
+                    status: "failed",
+                    error: "stuck_executing: bridge claimed this command and never reported " +
+                        `(> ${exports.STUCK_EXECUTING_MS / 1000}s); cleared by sync fire ${args.fireId}.`,
+                    completedAt: admin.firestore.FieldValue.serverTimestamp(),
+                },
+            });
+        }
+        if (hygiene.supersede.length + hygiene.stuck.length > 0) {
+            console.warn(`applySyncPattern FANOUT: hygiene for ${args.memberUid} — ` +
+                `superseded ${hygiene.supersede.length}, stuck ${hygiene.stuck.length}`);
+        }
+        targets.forEach((t, i) => {
+            // #67 — partition per TARGET: every member has their own channel count
+            // and their own excluded set.
+            const part = partitionBroadcastPayload({
+                payloadString: args.payloadString,
+                deviceChannelIds: t.deviceChannelIds ?? null,
+                participatingChannelIds: t.participatingChannelIds ?? null,
+            });
+            if (!part.partitioned) {
+                console.log(`applySyncPattern FANOUT: ${args.memberUid}/${t.id} NOT partitioned ` +
+                    `— ${part.reason} (excluded channels stay UNCHANGED, not dark)`);
+            }
+            const key = fireTargetKey(args.memberUid, t.id, i);
+            const cmdId = syncCommandDocId(args.fireId, t.id, i);
+            const cmdRef = commandsRef.doc(cmdId);
+            const doc = buildFanoutCommandDoc({
+                payloadString: part.payloadString,
+                controllerId: t.id,
+                controllerIp: t.ip,
+                webhookUrl,
+                source: args.source,
+                initiatorUid: args.initiatorUid,
+                sessionId: args.sessionId,
+            });
+            const deliverable = doc.status === "pending";
+            writes.push({
+                kind: "create",
+                ref: cmdRef,
+                data: {
+                    ...doc,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    expiresAt: args.expiresAt,
+                    syncFire: { groupId: args.groupId, fireId: args.fireId, key },
+                },
+            });
+            records.push({
+                uid: args.memberUid,
+                displayName,
+                controllerId: t.id,
+                controllerIp: t.ip,
+                route: route.route,
+                commandPath: cmdRef.path,
+                status: deliverable ? "pending" : "no_address",
+                reason: deliverable ? route.reason : "no_address",
+            });
+        });
+        return { targets: records, writes };
+    }
+    catch (err) {
+        console.warn(`applySyncPattern FANOUT: plan failed for ${args.memberUid}`, err);
+        return bare("plan_failed", err instanceof Error ? err.message : String(err));
+    }
+}
+/** Firestore batch limit is 500; keep headroom. */
+const FANOUT_BATCH_SIZE = 450;
 /**
  * Fan an ad-hoc sync out to every consenting crew member's own command queue.
  * Membership is read LIVE here (never a cached/passed-in list) so a member who
- * just left is already gone. Per-member work is isolated with allSettled — one
- * member's read/write failure must not abort the crew.
+ * just left is already gone. Per-member PLANNING is isolated — one member's
+ * read failure becomes a `plan_failed` record, never an abort. The WRITES are
+ * one batch: every bridge's command becomes visible in the same commit, which
+ * is what bounds the house-to-house spread to bridge poll phase.
  *
  * SYNC-1: each target is verified against the group's memberUids[] via
  * [verifyFanoutTarget] BEFORE any write — a member-subcollection doc alone (e.g.
@@ -573,24 +874,24 @@ function verifyFanoutTarget(targetUid, groupMemberUids) {
  * unit verification.
  */
 async function fanoutToCrew(db, args) {
+    const nowMs = args.nowMs ?? Date.now();
+    const groupRef = db.collection("neighborhoods").doc(args.groupId);
     // SYNC-1: the crew's verified roster. A member SUBCOLLECTION doc is only
     // fanned out to if its uid is ALSO in the group's memberUids[] (mutual /
     // self-consented membership). Read once; the members subcollection iteration
     // is cross-checked against it below.
-    const groupSnap = await db
-        .collection("neighborhoods")
-        .doc(args.groupId)
-        .get();
+    const groupSnap = await groupRef.get();
     const groupMemberUids = Array.isArray(groupSnap.data()?.memberUids)
         ? groupSnap.data().memberUids.filter((x) => typeof x === "string")
         : [];
-    const membersSnap = await db
-        .collection("neighborhoods")
-        .doc(args.groupId)
-        .collection("members")
-        .get();
+    const membersSnap = await groupRef.collection("members").get();
+    const fireRef = groupRef.collection("fires").doc();
+    const fireId = fireRef.id;
+    const expiresAtMs = nowMs + exports.SYNC_COMMAND_TTL_MS;
+    const expiresAt = admin.firestore.Timestamp.fromMillis(expiresAtMs);
     let memberCount = 0;
     let skipped = 0;
+    const targets = [];
     const tasks = [];
     membersSnap.forEach((memberDoc) => {
         const data = memberDoc.data();
@@ -601,31 +902,31 @@ async function fanoutToCrew(db, args) {
         // paused member who initiates receives their own command; pause continues
         // to mute INCOMING broadcasts."
         //
-        // Before this, the fanout arm RETURNS, so the host-only self-write below it
-        // never runs when fanout is on — the initiator's own command could only come
-        // from this loop, and this loop skipped them for being paused. A paused
-        // member pressing broadcast lit the whole crew and not their own house, and
-        // only when the flag was on. Found on the first successful two-node run
-        // (3/4, 2026-08-12: `members=1 commands=1 skipped=1`).
-        //
         // The exemption is deliberately keyed on identity, not on a relaxed
         // predicate: `isMemberSkipped` is unchanged, so every OTHER member's pause
         // semantics are untouched.
         const isInitiator = memberUid === args.initiatorUid;
         if (!isInitiator && isMemberSkipped(data.participationStatus)) {
             skipped++;
-            // This branch used to be SILENT. It incremented `skipped` and returned,
-            // so the 3/4 run reported `skipped:1` with no reason anywhere and the
-            // cause had to be recovered by reading the roster by hand. The sibling
-            // branch below has always logged; this one now matches it.
             console.warn(`applySyncPattern FANOUT: skipped ${memberUid} in ${args.groupId} — ` +
                 `participationStatus=${String(data.participationStatus)} ` +
                 "(not the initiator; pause mutes INCOMING broadcasts)");
+            targets.push({
+                uid: memberUid,
+                displayName: memberDisplayName(data),
+                controllerId: "",
+                controllerIp: "",
+                route: "none",
+                commandPath: null,
+                status: "skipped",
+                reason: String(data.participationStatus),
+            });
             return;
         }
         // SYNC-1: reject any target not mutually verified in memberUids[]. Closes
         // the self-fanout hole — a one-sided/out-of-band member doc never receives a
-        // write to its command queue. Structured + logged.
+        // write to its command queue. Structured + logged. NOT recorded on the fire
+        // (an unverified doc is not a house the crew consented to).
         const verdict = verifyFanoutTarget(memberUid, groupMemberUids);
         if (!verdict.ok) {
             skipped++;
@@ -634,65 +935,71 @@ async function fanoutToCrew(db, args) {
             return;
         }
         memberCount++;
-        tasks.push((async () => {
-            const targets = await resolveMemberTargets(db, memberUid, data);
-            // Webhook-Mode members need their forward URL; bridge-mode members get
-            // null. One get per member — acceptable at crew scale.
-            let webhookUrl = null;
-            try {
-                const u = await db.collection("users").doc(memberUid).get();
-                webhookUrl = u.data()?.webhookUrl || null;
-            }
-            catch (_) {
-                /* ignore — null webhook = bridge mode */
-            }
-            const commandsRef = db
-                .collection("users")
-                .doc(memberUid)
-                .collection("commands");
-            let written = 0;
-            for (const t of targets) {
-                // #67 — partition per TARGET, not once for the crew: every member has
-                // their own channel count and their own excluded set.
-                const part = partitionBroadcastPayload({
-                    payloadString: args.payloadString,
-                    deviceChannelIds: t.deviceChannelIds ?? null,
-                    participatingChannelIds: t.participatingChannelIds ?? null,
-                });
-                if (!part.partitioned) {
-                    console.log(`applySyncPattern FANOUT: ${memberUid}/${t.id} NOT partitioned ` +
-                        `— ${part.reason} (excluded channels stay UNCHANGED, not dark)`);
-                }
-                await commandsRef.add({
-                    ...buildFanoutCommandDoc({
-                        payloadString: part.payloadString,
-                        controllerId: t.id,
-                        controllerIp: t.ip,
-                        webhookUrl,
-                        source: args.source,
-                        initiatorUid: args.initiatorUid,
-                        sessionId: args.sessionId,
-                    }),
-                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                });
-                written++;
-            }
-            return written;
-        })());
+        tasks.push(planMemberDelivery(db, {
+            memberUid,
+            memberData: data,
+            initiatorUid: args.initiatorUid,
+            payloadString: args.payloadString,
+            sessionId: args.sessionId,
+            source: args.source,
+            groupId: args.groupId,
+            fireId,
+            nowMs,
+            expiresAt,
+        }));
     });
-    const results = await Promise.allSettled(tasks);
-    let commandCount = 0;
-    for (const r of results) {
-        if (r.status === "fulfilled") {
-            commandCount += r.value;
-        }
-        else {
-            console.warn("applySyncPattern: member fanout failed", r.reason);
-        }
+    const plans = await Promise.all(tasks); // planMemberDelivery never rejects
+    const writes = [];
+    for (const p of plans) {
+        targets.push(...p.targets);
+        writes.push(...p.writes);
     }
-    console.log(`applySyncPattern FANOUT: group=${args.groupId} members=${memberCount} ` +
-        `commands=${commandCount} skipped=${skipped}`);
-    return { memberCount, commandCount, skipped };
+    const commandCount = targets.filter((t) => t.status === "pending").length;
+    const noAddress = targets.filter((t) => t.status === "no_address").length;
+    const noBridge = targets.filter((t) => t.status === "no_bridge").length;
+    const targetsMap = {};
+    targets.forEach((t, i) => {
+        targetsMap[fireTargetKey(t.uid, t.controllerId, i)] = t;
+    });
+    const fireDoc = {
+        groupId: args.groupId,
+        initiatorUid: args.initiatorUid,
+        source: args.source,
+        sessionId: args.sessionId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAtMs: nowMs,
+        expiresAt,
+        payloadBytes: args.payloadString.length,
+        summary: { memberCount, commandCount, skipped, noAddress, noBridge },
+        targets: targetsMap,
+    };
+    // One commit → every member's command is visible at the same instant. A crew
+    // is ≤ 24 members (joinNeighborhood MAX_CREW_SIZE), so this is one batch in
+    // practice; the chunking is a guard, not a path.
+    const all = [{ kind: "create", ref: fireRef, data: fireDoc }, ...writes];
+    for (let i = 0; i < all.length; i += FANOUT_BATCH_SIZE) {
+        const batch = db.batch();
+        for (const w of all.slice(i, i + FANOUT_BATCH_SIZE)) {
+            if (w.kind === "create")
+                batch.create(w.ref, w.data);
+            else
+                batch.update(w.ref, w.data);
+        }
+        await batch.commit();
+    }
+    console.log(`applySyncPattern FANOUT: group=${args.groupId} fire=${fireId} ` +
+        `members=${memberCount} commands=${commandCount} skipped=${skipped} ` +
+        `no_address=${noAddress} no_bridge=${noBridge}`);
+    return {
+        fireId,
+        memberCount,
+        commandCount,
+        skipped,
+        noAddress,
+        noBridge,
+        expiresAtMs,
+        targets,
+    };
 }
 // ─── Slice 1 Commit 2: anti-strobe rate limit ────────────────────────────
 //

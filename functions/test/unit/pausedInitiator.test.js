@@ -26,60 +26,16 @@ const {
 const A = "uid_initiator";
 const B = "uid_other";
 
-/** Minimal in-memory Firestore covering exactly what fanoutToCrew touches. */
-function makeDb({ members }) {
-  const commands = {};
-  const memberUids = Object.keys(members);
-  const usersDoc = (uid) => ({
-    get: async () => ({ data: () => ({}) }),
-    collection: (sub) => {
-      if (sub === "controllers") {
-        return {
-          get: async () => ({ forEach: () => {} }),
-          doc: (id) => ({ _id: id }),
-        };
-      }
-      if (sub === "commands") {
-        commands[uid] = commands[uid] || [];
-        return {
-          add: async (doc) => {
-            commands[uid].push(doc);
-            return { id: "cmd" + commands[uid].length };
-          },
-        };
-      }
-      throw new Error("unexpected users subcollection: " + sub);
-    },
+// Shared in-memory Firestore fake (helpers/fakeCrewDb.js). Every named
+// controller resolves to 192.168.1.150 so the "REAL command" assertion below
+// keeps checking a deliverable address.
+const { makeCrewDb } = require("./helpers/fakeCrewDb");
+const makeDb = ({ members }) =>
+  makeCrewDb({
+    memberUids: Object.keys(members),
+    members,
+    defaultIp: "192.168.1.150",
   });
-  const db = {
-    getAll: async (...refs) =>
-      refs.map((r) => ({
-        id: r._id,
-        exists: true,
-        data: () => ({ ip: "192.168.1.150" }),
-      })),
-    collection: (name) => {
-      if (name === "neighborhoods") {
-        return {
-          doc: () => ({
-            get: async () => ({ data: () => ({ memberUids }) }),
-            collection: () => ({
-              get: async () => ({
-                forEach: (cb) =>
-                  Object.entries(members).forEach(([id, data]) =>
-                    cb({ id, data: () => data })
-                  ),
-              }),
-            }),
-          }),
-        };
-      }
-      if (name === "users") return { doc: usersDoc };
-      throw new Error("unexpected collection: " + name);
-    },
-  };
-  return { db, commands };
-}
 
 const run = (db) =>
   fanoutToCrew(db, {

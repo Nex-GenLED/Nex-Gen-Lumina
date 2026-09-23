@@ -31,6 +31,11 @@ exports.applySyncPattern = applySyncPattern;
 const { joinNeighborhood } = require("./lib/joinNeighborhood");
 exports.joinNeighborhood = joinNeighborhood;
 
+// Neighborhood Sync v1: read-back of a crew fire (per-house outcome) for the
+// initiator's app. Poll-only by design — see pollSyncFire.ts header.
+const { pollSyncFire } = require("./lib/pollSyncFire");
+exports.pollSyncFire = pollSyncFire;
+
 const { triggerSyncFailover } = require("./lib/triggerSyncFailover");
 exports.triggerSyncFailover = triggerSyncFailover;
 

@@ -10,76 +10,11 @@ const {
   fanoutToCrew,
 } = require("../../lib/applySyncPattern");
 
-// Minimal in-memory Firestore fake covering exactly what fanoutToCrew touches:
-//   neighborhoods/{g}.get() -> { memberUids }
-//   neighborhoods/{g}/members.get() -> forEach(doc{id,data()})
-//   users/{uid}.get() -> { } (no webhookUrl)
-//   users/{uid}/controllers.get() -> empty (members carry controllerId[])
-//   users/{uid}/commands.add(doc) -> recorded
-function makeDb({ memberUids, members }) {
-  const commands = {};
-  const usersDoc = (uid) => ({
-    get: async () => ({ data: () => ({}) }),
-    collection: (sub) => {
-      if (sub === "controllers") {
-        return {
-          get: async () => ({ forEach: () => {} }),
-          // #70: the denorm branch now JOINS ids to addresses, so the fake must
-          // hand back a controller doc. Without this the code under test falls
-          // into its address-join catch and every command becomes no_address —
-          // the assertions below would still pass, but against the degraded
-          // path rather than the real one.
-          doc: (id) => ({ _uid: uid, _id: id }),
-        };
-      }
-      if (sub === "commands") {
-        commands[uid] = commands[uid] || [];
-        return {
-          add: async (doc) => {
-            commands[uid].push(doc);
-            return { id: "cmd" + commands[uid].length };
-          },
-        };
-      }
-      throw new Error("unexpected users subcollection: " + sub);
-    },
-  });
-  const db = {
-    // Every named controller resolves to a real address, so the fanout under
-    // test produces deliverable commands.
-    getAll: async (...refs) =>
-      refs.map((r) => ({
-        id: r._id,
-        exists: true,
-        data: () => ({ ip: "10.0.0." + (r._id.length % 200) }),
-      })),
-    collection: (name) => {
-      if (name === "neighborhoods") {
-        return {
-          doc: () => ({
-            get: async () => ({ data: () => ({ memberUids }) }),
-            collection: (sub) => {
-              if (sub === "members") {
-                return {
-                  get: async () => ({
-                    forEach: (cb) =>
-                      Object.entries(members).forEach(([id, data]) =>
-                        cb({ id, data: () => data })
-                      ),
-                  }),
-                };
-              }
-              throw new Error("unexpected neighborhoods subcollection: " + sub);
-            },
-          }),
-        };
-      }
-      if (name === "users") return { doc: usersDoc };
-      throw new Error("unexpected collection: " + name);
-    },
-  };
-  return { db, commands };
-}
+// The in-memory Firestore fake lives in helpers/fakeCrewDb.js (shared with the
+// #69 suite and the v1 fire suite) so every fanoutToCrew test exercises the same
+// surface: batch writes, the fire record, bridge liveness, queue hygiene.
+const { makeCrewDb } = require("./helpers/fakeCrewDb");
+const makeDb = ({ memberUids, members }) => makeCrewDb({ memberUids, members });
 
 const args = (initiatorUid) => ({
   groupId: "g1",

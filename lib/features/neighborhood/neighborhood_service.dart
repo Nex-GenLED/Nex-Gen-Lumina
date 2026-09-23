@@ -10,40 +10,77 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'neighborhood_models.dart';
+import 'sync_fire_status.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
-/// Outcome of a server-side ad-hoc fanout POST (Slice 1 Commit 2).
+/// Outcome of a server-side ad-hoc fanout POST (Slice 1 Commit 2, v1 fire).
 ///
 /// [rateLimited] is the ONLY state that suppresses the app-open broadcast
 /// (reject = nothing fires). A plain failure ([ok] false, not rate-limited —
 /// network/500/no-auth) lets the broadcast proceed so app-open members aren't
 /// left dark.
+///
+/// v1: a successful crew fanout also returns the [fireId] of the fire record
+/// plus the server's per-house counts, so the app can poll [pollSyncFire] and
+/// tell the initiator what actually happened — "sent to N" is not "N changed".
 class FanoutResult {
   final bool ok;
   final bool rateLimited;
   final int retryAfterMs;
 
+  /// Fire record id when the crew-fanout path ran; null on the self-only path
+  /// and on every failure.
+  final String? fireId;
+  final int memberCount;
+  final int commandCount;
+  final int skipped;
+  final int noAddress;
+  final int noBridge;
+
   const FanoutResult({
     this.ok = false,
     this.rateLimited = false,
     this.retryAfterMs = 0,
+    this.fireId,
+    this.memberCount = 0,
+    this.commandCount = 0,
+    this.skipped = 0,
+    this.noAddress = 0,
+    this.noBridge = 0,
   });
 
   const FanoutResult.failed()
       : ok = false,
         rateLimited = false,
-        retryAfterMs = 0;
+        retryAfterMs = 0,
+        fireId = null,
+        memberCount = 0,
+        commandCount = 0,
+        skipped = 0,
+        noAddress = 0,
+        noBridge = 0;
 
   /// PURE parser over the HTTP status + body from applySyncPattern. Exposed
-  /// for testing. 200 + {ok:true} → ok; 200 + {reason:'rate_limited',
-  /// retryAfterMs} → rateLimited; anything else → a plain (non-rate-limited)
-  /// failure so the caller still broadcasts.
+  /// for testing. 200 + {ok:true} → ok (with fireId/counts when present);
+  /// 200 + {reason:'rate_limited', retryAfterMs} → rateLimited; anything else
+  /// → a plain (non-rate-limited) failure so the caller still broadcasts.
   factory FanoutResult.parse(int statusCode, String body) {
     if (statusCode != 200) return const FanoutResult(ok: false);
     try {
       final decoded = jsonDecode(body);
       if (decoded is Map) {
-        if (decoded['ok'] == true) return const FanoutResult(ok: true);
+        if (decoded['ok'] == true) {
+          final fid = decoded['fireId'];
+          return FanoutResult(
+            ok: true,
+            fireId: fid is String && fid.isNotEmpty ? fid : null,
+            memberCount: _int(decoded['memberCount']),
+            commandCount: _int(decoded['commandCount']),
+            skipped: _int(decoded['skipped']),
+            noAddress: _int(decoded['noAddress']),
+            noBridge: _int(decoded['noBridge']),
+          );
+        }
         if (decoded['reason'] == 'rate_limited') {
           final ra = decoded['retryAfterMs'];
           return FanoutResult(
@@ -58,6 +95,8 @@ class FanoutResult {
     }
     return const FanoutResult(ok: false);
   }
+
+  static int _int(Object? v) => v is num ? v.toInt() : 0;
 }
 
 /// Service for managing neighborhood sync groups in Firestore.
@@ -561,6 +600,30 @@ class NeighborhoodService {
     } catch (e) {
       debugPrint('NeighborhoodService.fanoutAdHocSync error: $e');
       return const FanoutResult.failed();
+    }
+  }
+
+  /// v1: read back the per-house outcome of a crew fire (see
+  /// [SyncFireStatus]). Calls the `pollSyncFire` callable, which mirrors each
+  /// member's relay command status into the fire record and returns the view.
+  /// Returns null on any failure (network, not deployed, not a member) — the
+  /// banner then shows "no confirmation", never a fabricated success.
+  Future<SyncFireStatus?> pollSyncFire({
+    required String groupId,
+    required String fireId,
+  }) async {
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('pollSyncFire');
+      final res = await callable
+          .call<dynamic>({'groupId': groupId, 'fireId': fireId})
+          .timeout(const Duration(seconds: 10));
+      final data = res.data;
+      if (data is Map) return SyncFireStatus.fromJson(data);
+      return null;
+    } catch (e) {
+      debugPrint('NeighborhoodService.pollSyncFire error: $e');
+      return null;
     }
   }
 

@@ -10,6 +10,32 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_service.dart';
 
 void main() {
   group('FanoutResult.parse', () {
+    test('200 + {ok:true, fireId, counts} → ok with the v1 fire fields', () {
+      final r = FanoutResult.parse(
+        200,
+        jsonEncode({
+          'ok': true,
+          'fireId': 'abc123',
+          'memberCount': 3,
+          'commandCount': 2,
+          'skipped': 0,
+          'noAddress': 0,
+          'noBridge': 1,
+        }),
+      );
+      expect(r.ok, isTrue);
+      expect(r.fireId, 'abc123');
+      expect(r.memberCount, 3);
+      expect(r.commandCount, 2);
+      expect(r.noBridge, 1);
+    });
+
+    test('200 + {ok:true} with no fireId (self-only path) → fireId null', () {
+      final r = FanoutResult.parse(200, jsonEncode({'ok': true, 'commandCount': 1}));
+      expect(r.ok, isTrue);
+      expect(r.fireId, isNull);
+    });
+
     test('200 + {ok:true, ...} → ok, not rate-limited', () {
       final r = FanoutResult.parse(
         200,

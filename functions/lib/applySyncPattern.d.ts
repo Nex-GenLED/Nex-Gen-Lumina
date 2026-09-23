@@ -34,7 +34,9 @@
  *                                               // is all of host's controllers
  *   }
  *
- * Returns (flat 200 body): { ok: true, commandCount: N }
+ * Returns (flat 200 body): { ok: true, commandCount: N } on the self-only path;
+ * on the crew-fanout path { ok, fireId, memberCount, commandCount, skipped,
+ * noAddress, noBridge, expiresAtMs } — per-house detail via pollSyncFire.
  *
  * Deployment:
  *   cd functions
@@ -191,11 +193,107 @@ export declare function verifyFanoutTarget(targetUid: string, groupMemberUids: s
     ok: boolean;
     reason?: string;
 };
+export declare const SYNC_FANOUT_SOURCE = "sync_fanout";
+/**
+ * A sync command that is not picked up within this window must never fire
+ * late — the street has moved on and a stale scene landing 2 minutes later is
+ * worse than nothing. Written as `expiresAt` so the sweeper honours it
+ * (commandSafety.effectiveExpiryMs: explicit expiresAt wins over the 120 s
+ * default), and read by pollSyncFire to settle "no response".
+ */
+export declare const SYNC_COMMAND_TTL_MS = 90000;
+/**
+ * Bridge liveness. The firmware writes users/{uid}/bridge_status/current every
+ * 30 s over the SAME token and connection it polls commands with, so a
+ * heartbeat older than four intervals means the poll loop is not running
+ * either. A member in that state is not commanded at all: the command would
+ * sit pending for 90 s, block that member's Game Day fires via the
+ * one-in-flight guard (dispatchFireJobs.ts:326), and expire — and the initiator
+ * would learn nothing for 90 s. Recording `no_bridge` up front is faster and
+ * true. The app-open broadcast still reaches such a member if their app is up.
+ */
+export declare const BRIDGE_LIVE_WINDOW_MS = 120000;
+/**
+ * An `executing` sync command older than this was orphaned: the bridge claimed
+ * it and died (power, Wi-Fi) before reporting. WLED_HTTP_TIMEOUT_MS is 10 s, so
+ * nothing legitimately executes for 90 s. The sweeper deliberately never
+ * touches `executing` (it is a bridge claim), so this is the only place a
+ * stuck SYNC command is ever cleared — scoped to source == sync_fanout; other
+ * writers' commands are never touched.
+ */
+export declare const STUCK_EXECUTING_MS = 90000;
+export type DeliveryRoute = "bridge" | "webhook" | "no_bridge";
+/**
+ * PURE. How a member's command reaches their controller.
+ *   webhook URL set          → "webhook" (executeWledCommand forwards it; no
+ *                              bridge involved, heartbeat irrelevant)
+ *   heartbeat within window  → "bridge"
+ *   no / stale heartbeat     → "no_bridge" (not commanded; recorded)
+ */
+export declare function classifyDeliveryRoute(args: {
+    webhookUrl: string | null;
+    bridgeHeartbeatMs: number | null;
+    nowMs: number;
+}): {
+    route: DeliveryRoute;
+    reason: string;
+};
+/**
+ * Deterministic command doc id: `sync_{fireId}_{controllerId}`. A retried
+ * write for the same fire collides instead of firing twice (the bridge's poll
+ * has no orderBy, so a duplicate could land AFTER a newer scene). Same
+ * principle as fireJobDocId in commandSafety.
+ */
+export declare function syncCommandDocId(fireId: string, controllerId: string, ordinal: number): string;
+/** Key of a target inside the fire record's `targets` map. */
+export declare function fireTargetKey(uid: string, controllerId: string, ordinal: number): string;
+export interface InFlightDoc {
+    id: string;
+    status: string;
+    createdAtMs: number | null;
+}
+/**
+ * PURE. Queue hygiene before a new sync command is written for a member:
+ *   pending sync_fanout    → superseded (an older scene must not fire after
+ *                            the newer one; ≤5-per-poll + no ordering means a
+ *                            backlog of two can invert)
+ *   executing, too old     → stuck (see STUCK_EXECUTING_MS)
+ *   executing, recent      → left alone (the bridge is genuinely on it)
+ */
+export declare function planQueueHygiene(docs: InFlightDoc[], nowMs: number): {
+    supersede: string[];
+    stuck: string[];
+};
+/** One line of the fire record: a member controller and what was done for it. */
+export interface FireTargetRecord {
+    uid: string;
+    displayName: string;
+    controllerId: string;
+    controllerIp: string;
+    route: DeliveryRoute | "none";
+    /** users/{uid}/commands/{id} when a command was written, else null. */
+    commandPath: string | null;
+    /** pending | no_address | no_bridge | skipped | plan_failed */
+    status: string;
+    reason: string;
+}
+export interface FanoutOutcome {
+    fireId: string;
+    memberCount: number;
+    commandCount: number;
+    skipped: number;
+    noAddress: number;
+    noBridge: number;
+    expiresAtMs: number;
+    targets: FireTargetRecord[];
+}
 /**
  * Fan an ad-hoc sync out to every consenting crew member's own command queue.
  * Membership is read LIVE here (never a cached/passed-in list) so a member who
- * just left is already gone. Per-member work is isolated with allSettled — one
- * member's read/write failure must not abort the crew.
+ * just left is already gone. Per-member PLANNING is isolated — one member's
+ * read failure becomes a `plan_failed` record, never an abort. The WRITES are
+ * one batch: every bridge's command becomes visible in the same commit, which
+ * is what bounds the house-to-house spread to bridge poll phase.
  *
  * SYNC-1: each target is verified against the group's memberUids[] via
  * [verifyFanoutTarget] BEFORE any write — a member-subcollection doc alone (e.g.
@@ -208,11 +306,8 @@ export declare function fanoutToCrew(db: admin.firestore.Firestore, args: {
     payloadString: string;
     sessionId: string;
     source: string;
-}): Promise<{
-    memberCount: number;
-    commandCount: number;
-    skipped: number;
-}>;
+    nowMs?: number;
+}): Promise<FanoutOutcome>;
 /** Per-group ceiling: max ad-hoc fanouts committed in any rolling 60s. */
 export declare const GROUP_CEILING_PER_MIN = 5;
 /** Per-initiator cooldown: minimum ms between one initiator's fanouts. */

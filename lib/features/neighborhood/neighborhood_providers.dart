@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
 import 'sync_fanout_feature_flag.dart';
+import 'sync_fire_status.dart';
 import 'services/sync_notification_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -369,6 +370,15 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
           groupId: command.groupId,
           payload: _buildFanoutPayload(command),
         );
+        // v1: remember the fire so the panel can poll its per-house outcome.
+        final fireId = result.fireId;
+        if (result.ok && fireId != null) {
+          ref.read(lastSyncFireProvider.notifier).state = SyncFireRef(
+            groupId: command.groupId,
+            fireId: fireId,
+            startedAt: DateTime.now(),
+          );
+        }
         if (result.rateLimited) {
           // Reject = nothing fires: skip the broadcast entirely.
           state = const AsyncValue.data(null);
@@ -783,3 +793,40 @@ Future<void> removePreviousGroup(String groupId) async {
   await prefs.remove('prev_group_name_$groupId');
   await prefs.remove('prev_group_code_$groupId');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Neighborhood Sync v1 — fire outcome (per-house read-back)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// How often the initiator's app asks pollSyncFire while a fire is open.
+const Duration kSyncFirePollInterval = Duration(seconds: 2);
+
+/// How long the app keeps polling before giving up on stragglers. Matches the
+/// server's SYNC_COMMAND_TTL_MS (90 s) plus one poll, so a command the bridge
+/// never picked up is reported `no_response` by the server, not guessed here.
+const Duration kSyncFirePollWindow = Duration(seconds: 95);
+
+/// The fire the initiator most recently started on this device (null until a
+/// crew fanout has returned a fireId). Set by [NeighborhoodNotifier.broadcastSync].
+final lastSyncFireProvider = StateProvider<SyncFireRef?>((ref) => null);
+
+/// Live per-house outcome of [fire]: polls the server every
+/// [kSyncFirePollInterval] until the fire settles or [kSyncFirePollWindow]
+/// elapses. Emits null when a poll fails (callable unreachable / not deployed)
+/// so the UI can say "no confirmation" rather than invent one. autoDispose:
+/// polling stops the moment nothing is watching.
+final syncFireStatusProvider = StreamProvider.autoDispose
+    .family<SyncFireStatus?, SyncFireRef>((ref, fire) async* {
+  final service = ref.watch(neighborhoodServiceProvider);
+  final deadline = fire.startedAt.add(kSyncFirePollWindow);
+  while (true) {
+    final status = await service.pollSyncFire(
+      groupId: fire.groupId,
+      fireId: fire.fireId,
+    );
+    yield status;
+    if (status != null && status.settled) return;
+    if (DateTime.now().isAfter(deadline)) return;
+    await Future<void>.delayed(kSyncFirePollInterval);
+  }
+});
