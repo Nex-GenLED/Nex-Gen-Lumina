@@ -8,6 +8,21 @@
  *
  * Collision-safe: retries up to 5 times if the generated code already exists.
  *
+ * WHO GETS A CODE (residential-path-audit-2026-09-23 §3.4, §9.2.2)
+ *   Only real accounts. 46 of 72 production codes had been burned on
+ *   anonymous and staff PIN sessions, because the trigger fires for every
+ *   users/{uid} create and the FCM token store creates a stub document for
+ *   every non-anonymous sign-in — including staff custom-token sessions.
+ *   The gate is decided from FIREBASE AUTH, not from document fields: the
+ *   created document is usually that stub and carries no profile key to
+ *   decide on.
+ *     • staff_* uids            → skip (deterministic mintStaffToken uids)
+ *     • no Auth record          → skip
+ *     • anonymous (no email, no provider) → skip
+ *     • anything else           → assign
+ *   A customer whose first document is a stub still gets a code; the
+ *   healUserProfile trigger repairs the stub independently.
+ *
  * Deployment:
  *   cd functions
  *   npm run build
@@ -16,6 +31,12 @@
 
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
+import {
+  AuthUserLike,
+  isAnonymousAuthUser,
+  isStaffUid,
+  lookupAuthUser,
+} from "./authIdentity";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
@@ -31,43 +52,89 @@ function generateCode(): string {
   return `LUM-${result}`;
 }
 
+export type ReferralSkipReason = "staff_uid" | "auth_missing" | "anonymous";
+
+export type ReferralGate =
+  | { assign: true }
+  | { assign: false; reason: ReferralSkipReason };
+
+/** Pure decision from the uid and its Auth record (null = no record). */
+export function referralCodeGate(
+  uid: string,
+  authUser: AuthUserLike | null
+): ReferralGate {
+  if (isStaffUid(uid)) return { assign: false, reason: "staff_uid" };
+  if (authUser === null) return { assign: false, reason: "auth_missing" };
+  if (isAnonymousAuthUser(authUser)) return { assign: false, reason: "anonymous" };
+  return { assign: true };
+}
+
+export interface ReferralDeps {
+  db: admin.firestore.Firestore;
+  getAuthUser: (uid: string) => Promise<AuthUserLike | null>;
+}
+
+export type ReferralResult =
+  | { assigned: string }
+  | { assigned: null; reason: ReferralSkipReason | "exhausted" };
+
+/**
+ * The trigger body, exported so tests can drive it directly.
+ */
+export async function runAssignReferralCode(
+  uid: string,
+  deps: Partial<ReferralDeps> = {}
+): Promise<ReferralResult> {
+  const db = deps.db ?? admin.firestore();
+  const getAuthUser = deps.getAuthUser ?? lookupAuthUser;
+
+  // Staff uids are decided by prefix — no Auth round-trip.
+  const gate = isStaffUid(uid)
+    ? referralCodeGate(uid, null)
+    : referralCodeGate(uid, await getAuthUser(uid));
+  if (!gate.assign) {
+    console.log(`Skipping referral code for ${uid}: ${gate.reason}`);
+    return { assigned: null, reason: gate.reason };
+  }
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const code = generateCode();
+    const codeRef = db.collection("referral_codes").doc(code);
+
+    try {
+      await db.runTransaction(async (tx) => {
+        const existing = await tx.get(codeRef);
+        if (existing.exists) {
+          throw new Error("collision");
+        }
+        tx.set(codeRef, { uid });
+        tx.update(db.collection("users").doc(uid), { referralCode: code });
+      });
+
+      console.log(`Assigned referral code ${code} to user ${uid}`);
+      return { assigned: code };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === "collision") {
+        console.warn(
+          `Referral code collision on attempt ${attempt + 1}, retrying...`
+        );
+        continue;
+      }
+      console.error(`Failed to assign referral code to ${uid}:`, err);
+      throw err;
+    }
+  }
+
+  console.error(
+    `Exhausted ${MAX_ATTEMPTS} attempts assigning referral code to ${uid}`
+  );
+  return { assigned: null, reason: "exhausted" };
+}
+
 export const assignReferralCode = onDocumentCreated(
   { document: "users/{uid}", region: "us-central1" },
   async (event) => {
-    const uid = event.params.uid;
-    const db = admin.firestore();
-
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const code = generateCode();
-      const codeRef = db.collection("referral_codes").doc(code);
-
-      try {
-        await db.runTransaction(async (tx) => {
-          const existing = await tx.get(codeRef);
-          if (existing.exists) {
-            throw new Error("collision");
-          }
-          tx.set(codeRef, { uid });
-          tx.update(db.collection("users").doc(uid), { referralCode: code });
-        });
-
-        console.log(`Assigned referral code ${code} to user ${uid}`);
-        return;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "collision") {
-          console.warn(
-            `Referral code collision on attempt ${attempt + 1}, retrying...`
-          );
-          continue;
-        }
-        console.error(`Failed to assign referral code to ${uid}:`, err);
-        throw err;
-      }
-    }
-
-    console.error(
-      `Exhausted ${MAX_ATTEMPTS} attempts assigning referral code to ${uid}`
-    );
+    await runAssignReferralCode(event.params.uid);
   }
 );

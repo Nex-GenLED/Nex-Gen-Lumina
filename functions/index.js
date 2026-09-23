@@ -42,6 +42,15 @@ exports.teardownTeamFires = teardownTeamFires;
 const { assignReferralCode } = require("./lib/assignReferralCode");
 exports.assignReferralCode = assignReferralCode;
 
+// ── Profile healer ────────────────────────────────────────────────────────
+// users/{uid} onCreate: repairs a stub profile ({fcmToken,…}) for an email
+// Auth user by merging the UserModel.fromJson-required keys from Firebase
+// Auth. Closes the Path C sign-in race for every build already in the field
+// (residential-path-audit-2026-09-23 §1.3 / §9.2.1). Skips anonymous and
+// staff_* sessions; never overwrites a field that is already set.
+const { healUserProfile } = require("./lib/healUserProfile");
+exports.healUserProfile = healUserProfile;
+
 // Import TypeScript-compiled referral code redemption (callable)
 const { redeemReferralCode } = require("./lib/redeemReferralCode");
 exports.redeemReferralCode = redeemReferralCode;
