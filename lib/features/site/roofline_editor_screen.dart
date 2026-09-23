@@ -633,7 +633,33 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
       // segments correctly under BoxFit.cover (mask carries it from the editor's
       // intrinsic image size).
       configEditor.setSourceAspectRatio(mask.sourceAspectRatio);
-      await configEditor.save();
+      // P1 (residential path audit §9.1 item 10 / S15): the result used to be
+      // discarded, so a pixelMap write that never landed still reported
+      // "Saved N roofline segments" and popped the editor. The legacy mask had
+      // already been written by then, which is what makes the lie convincing —
+      // the photo overlay still updates while the per-channel map the lights
+      // actually use is missing. Do not pop on a failure: the trace is only in
+      // memory and leaving loses it.
+      final saved = await configEditor.save();
+      if (!saved) {
+        final cause = configEditor.lastSaveError;
+        debugPrint('Roofline editor: pixelMap save failed — $cause');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Your outline was saved to your profile, but the per-channel '
+                'map did not save (${cause ?? 'unknown error'}). Your lights '
+                'will not follow it yet — check your connection and tap Save '
+                'again.',
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 8),
+            ),
+          );
+        }
+        return;
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

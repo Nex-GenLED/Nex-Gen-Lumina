@@ -162,6 +162,15 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
     }
 
     // Build segment path data for the painter if multi-segment config exists
+    // §9.1(12): the per-channel pixelMap now persists the traced photo's
+    // aspect, so forward it. Before this the overlay could not supply one at
+    // all and the painter fell through to `mask?.sourceAspectRatio` — null on
+    // every installer-mapped home, which under BoxFit.cover mis-projects the
+    // whole trace in release builds (the assert that would have caught it is
+    // stripped). The mask stays as the fallback for legacy homes.
+    final configAspect =
+        rooflineConfig?.sourceAspectRatio ?? mask?.sourceAspectRatio;
+
     List<SegmentPathData>? segmentPaths;
     if (hasSegments) {
       segmentPaths = rooflineConfig.segments
@@ -171,6 +180,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
                 channelIndex: s.channelIndex,
                 isConnectedToPrevious: s.isConnectedToPrevious,
                 overrideColor: s.overrideColor,
+                sourceAspectRatio: configAspect,
               ))
           .toList();
     }
@@ -191,6 +201,7 @@ class _AnimatedRooflineOverlayState extends ConsumerState<AnimatedRooflineOverla
             targetAspectRatio: widget.targetAspectRatio,
             imageAlignment: widget.imageAlignment,
             useBoxFitCover: widget.useBoxFitCover,
+            sourceAspectRatio: configAspect,
             backgroundColor: widget.backgroundColor,
             colorGroupSize: widget.colorGroupSize,
             spacing: widget.spacing,

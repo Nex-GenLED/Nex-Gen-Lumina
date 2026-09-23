@@ -45,6 +45,22 @@ Future<void> createUnlinkedUserProfile(User user) async {
   }
 }
 
+/// True when this document is a real profile rather than a stub.
+///
+/// P0 (residential path audit §9.1 item 6). Both redirect branches keyed on
+/// `doc.exists`, so a two-field stub written by the FCM token path satisfied
+/// "this account already has a profile", the skeleton was never written, and
+/// the account was stranded on /link-account with an unparseable document
+/// forever. `owner_id` is the same field `firestore.rules isProvisionedUser()`
+/// keys on — it is the one a profile writer always sets and a stub never has.
+/// [createUnlinkedUserProfile] is already `merge: true`, so calling it on an
+/// existing stub repairs it without touching the fields the stub does carry.
+bool hasProvisionedProfile(DocumentSnapshot<Map<String, dynamic>> doc) {
+  if (!doc.exists) return false;
+  final ownerId = doc.data()?['owner_id'];
+  return ownerId is String && ownerId.isNotEmpty;
+}
+
 /// Global redirect function for GoRouter.
 /// Handles auth checks, role-based access, and installation validation.
 Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
@@ -183,7 +199,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
           .doc(user.uid)
           .get();
 
-      if (userDoc.exists) {
+      if (hasProvisionedProfile(userDoc)) {
         final data = userDoc.data()!;
         final role = data['installation_role'] as String?;
 
@@ -201,7 +217,8 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
         if (ReviewerSeedService.isReviewer(user)) {
           return null; // stay on /login; _handleSignIn will navigate
         }
-        // User exists in Auth but not Firestore - create unlinked profile
+        // No parseable profile (absent document, or a stub with no owner_id)
+        // — write the skeleton. merge:true, so a stub keeps its fcmToken.
         await createUnlinkedUserProfile(user);
         return AppRoutes.linkAccount;
       }
@@ -258,7 +275,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
         .doc(user.uid)
         .get();
 
-    if (userDoc.exists) {
+    if (hasProvisionedProfile(userDoc)) {
       final data = userDoc.data()!;
       final role = data['installation_role'] as String?;
 
@@ -313,7 +330,8 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
       if (ReviewerSeedService.isReviewer(user)) {
         return null;
       }
-      // User exists in Auth but not Firestore - create unlinked profile
+      // No parseable profile (absent document, or a stub with no owner_id)
+      // — write the skeleton. merge:true, so a stub keeps its fcmToken.
       await createUnlinkedUserProfile(user);
       return AppRoutes.linkAccount;
     }

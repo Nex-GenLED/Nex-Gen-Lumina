@@ -421,10 +421,7 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         } catch (e) {
           debugPrint('Provider refresh failed (sim): $e');
         }
-        Future.delayed(const Duration(seconds: 2), () {
-          if (!mounted) return;
-          context.go(AppRoutes.dashboard);
-        });
+        Future.delayed(const Duration(seconds: 2), _exitAfterSetup);
       }
       return;
     }
@@ -463,10 +460,7 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       } catch (e) {
         debugPrint('Provider refresh failed: $e');
       }
-      Future.delayed(const Duration(seconds: 2), () {
-        if (!mounted) return;
-        context.go(AppRoutes.dashboard);
-      });
+      Future.delayed(const Duration(seconds: 2), _exitAfterSetup);
     } catch (e) {
       debugPrint('Provisioning via service failed: $e');
       if (!mounted) return;
@@ -480,6 +474,23 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         backgroundColor: Theme.of(context).colorScheme.error,
       ));
     }
+  }
+
+  /// Where to go once this page is done.
+  ///
+  /// P0 (residential path audit §4.4 variant B): this used to be an
+  /// unconditional `go(AppRoutes.dashboard)`. Launched from the installer
+  /// wizard's Step 2 "BLE Scan" (pushed at controller_setup_screen.dart), that
+  /// REPLACED the whole route stack — the wizard was destroyed mid-install and
+  /// the installer had to re-enter from the staff PIN with an empty selection.
+  /// In installer mode, pop back to whatever pushed us instead.
+  void _exitAfterSetup() {
+    if (!mounted) return;
+    if (ref.read(installerModeActiveProvider) && context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.go(AppRoutes.dashboard);
   }
 
   Future<void> _loadCurrentWifiSsid() async {
@@ -523,7 +534,7 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
   }
 
   void _skipWifiForNow() {
-    context.go(AppRoutes.dashboard);
+    _exitAfterSetup();
   }
 
   @override

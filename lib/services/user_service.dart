@@ -17,7 +17,9 @@ import 'package:nexgen_command/services/encryption_service.dart';
 
 /// Service for managing user data in Firestore
 class UserService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  /// Injectable so the profile-repair path (audit §9.1 item 7) can be
+  /// exercised against a fake. Defaults to the real instance.
+  final FirebaseFirestore _firestore;
 
   /// Backing store for the user's schedules. Defaults to the legacy
   /// array-on-user-doc implementation so behaviour is unchanged; the
@@ -26,9 +28,12 @@ class UserService {
   /// schedule methods below.
   final ScheduleRepository _scheduleRepository;
 
-  UserService({ScheduleRepository? scheduleRepository})
-      : _scheduleRepository =
-            scheduleRepository ?? LegacyArrayScheduleRepository();
+  UserService({
+    ScheduleRepository? scheduleRepository,
+    FirebaseFirestore? firestore,
+  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+        _scheduleRepository = scheduleRepository ??
+            LegacyArrayScheduleRepository(firestore: firestore);
 
   /// Create a new user profile
   Future<void> createUser(UserModel user) async {
@@ -287,14 +292,123 @@ class UserService {
     }
   }
 
-  /// Stream user profile changes
-  Stream<UserModel?> streamUser(String userId) {
+  /// The six keys [UserModel.fromJson] casts non-null. A document missing any
+  /// of them — or carrying a wrong type for one — throws on parse.
+  static const requiredProfileKeys = <String>[
+    'id',
+    'email',
+    'display_name',
+    'owner_id',
+    'created_at',
+    'updated_at',
+  ];
+
+  /// Which of [requiredProfileKeys] this document cannot satisfy.
+  ///
+  /// Mirrors the casts at `user_model.dart` exactly: the four ids/strings must
+  /// be Strings, the two stamps must be Firestore Timestamps.
+  static List<String> missingProfileKeys(Map<String, dynamic> data) {
+    final missing = <String>[];
+    for (final key in ['id', 'email', 'display_name', 'owner_id']) {
+      if (data[key] is! String) missing.add(key);
+    }
+    for (final key in ['created_at', 'updated_at']) {
+      if (data[key] is! Timestamp) missing.add(key);
+    }
+    return missing;
+  }
+
+  /// Writes back only the required keys this document is missing, leaving
+  /// every other field exactly as it is.
+  ///
+  /// P0 (residential path audit §9.1 item 7). An unparseable profile used to
+  /// surface as an `AsyncError` from [streamUser] that 40+ consumers swallow
+  /// through `maybeWhen(orElse: null)`. Nothing repaired it and nothing told
+  /// the user, so a stub document was a permanent, invisible dead end: the
+  /// first-run "Get started" button did nothing, the house-photo upload
+  /// reported success and wrote nothing, and BLE pairing refused with "Only
+  /// system owners can add new controllers".
+  ///
+  /// [authEmail] / [authDisplayName] come from the Firebase Auth record when
+  /// the caller has it; otherwise the email falls back to whatever the doc
+  /// already holds and the display name to the email's local part.
+  Future<void> repairProfileSkeleton(
+    String userId,
+    Map<String, dynamic> data, {
+    String? authEmail,
+    String? authDisplayName,
+  }) async {
+    final missing = missingProfileKeys(data);
+    if (missing.isEmpty) return;
+
+    final email = authEmail ??
+        (data['email'] is String ? data['email'] as String : '');
+    final patch = <String, dynamic>{};
+    for (final key in missing) {
+      switch (key) {
+        case 'id':
+        case 'owner_id':
+          patch[key] = userId;
+          break;
+        case 'email':
+          patch[key] = email;
+          break;
+        case 'display_name':
+          patch[key] = (authDisplayName != null && authDisplayName.isNotEmpty)
+              ? authDisplayName
+              : (email.isNotEmpty ? email.split('@').first : 'User');
+          break;
+        case 'created_at':
+        case 'updated_at':
+          patch[key] = FieldValue.serverTimestamp();
+          break;
+      }
+    }
+    // DELIBERATELY DOES NOT SET `installation_role`. This repair exists to make
+    // the document PARSE; deciding what the account is stays with the two
+    // writers that know — `route_guards.createUnlinkedUserProfile` (which the
+    // redirect already calls for any account with no owner_id) and
+    // `ReviewerSeedService`. Stamping 'unlinked' here would race the reviewer
+    // seed and could downgrade the App Review account to /link-account. A null
+    // role is handled identically to 'unlinked' everywhere in route_guards.
+    debugPrint('UserService: repairing profile $userId — missing $missing');
+    await _firestore
+        .collection('users')
+        .doc(userId)
+        .set(patch, SetOptions(merge: true));
+  }
+
+  /// Stream user profile changes.
+  ///
+  /// A document that cannot be parsed is NOT an error to this stream: it
+  /// triggers [repairProfileSkeleton] and emits null until the repair lands,
+  /// at which point the snapshot listener fires again with a parseable doc.
+  /// See [repairProfileSkeleton] for why an AsyncError was the wrong shape.
+  Stream<UserModel?> streamUser(
+    String userId, {
+    String? authEmail,
+    String? authDisplayName,
+  }) {
     return _firestore.collection('users').doc(userId).snapshots().map((doc) {
       if (!doc.exists) return null;
 
       // SECURITY: Decrypt sensitive data
       final encryptedData = doc.data()!;
       final decryptedData = EncryptionService.decryptUserData(encryptedData);
+      final missing = missingProfileKeys(decryptedData);
+      if (missing.isNotEmpty) {
+        unawaited(
+          repairProfileSkeleton(
+            userId,
+            decryptedData,
+            authEmail: authEmail,
+            authDisplayName: authDisplayName,
+          ).catchError((Object e) {
+            debugPrint('UserService: profile repair failed for $userId: $e');
+          }),
+        );
+        return null;
+      }
       return UserModel.fromJson(decryptedData);
     });
   }

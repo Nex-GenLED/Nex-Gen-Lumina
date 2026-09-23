@@ -34,7 +34,28 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
   Future<void> _completeOnboarding() async {
     final profileAsync = ref.read(currentUserProfileProvider);
     final profile = profileAsync.maybeWhen(data: (p) => p, orElse: () => null);
-    if (profile == null) return;
+    if (profile == null) {
+      // P1 (residential path audit §9.1 item 11 / S20). This was a bare
+      // `return`: on an account whose profile has not loaded (or was a stub,
+      // pre-repair) the "Get started" button did LITERALLY NOTHING, on the
+      // first screen a brand-new customer sees, with no way forward at all.
+      // UserService.streamUser now repairs a stub and re-emits, so the right
+      // answer is "try again in a second" rather than a dead end.
+      debugPrint('FirstRun: no parsed profile — cannot complete onboarding');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "We're still setting up your account. Give it a moment and tap "
+              'Get started again.',
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
+    }
 
     // Mark welcome complete. Do NOT touch teams/holidays/vibe — those were
     // set by the installer during handoff and are authoritative. Do NOT

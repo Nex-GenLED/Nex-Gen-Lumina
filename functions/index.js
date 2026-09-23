@@ -147,6 +147,14 @@ exports.planGameDayFires = planGameDayFires;
 const { setAccountProfile } = require("./lib/setAccountProfile");
 exports.setAccountProfile = setAccountProfile;
 
+// Installer wizard recovery path: find an EXISTING customer by email when the
+// dealer_code-scoped client query cannot see them (self-registered, or an
+// earlier wizard run that failed after the auth user was created), stamp
+// dealer_code when absent, and write the skeleton profile if the doc is missing
+// or a stub. Residential path audit 2026-09-23 §9.1 item 4.
+const { claimCustomerByEmail } = require("./lib/claimCustomerByEmail");
+exports.claimCustomerByEmail = claimCustomerByEmail;
+
 // ── Messaging ──────────────────────────────────────────────────────────────
 // SMS + email customer messaging pipeline. messaging-helpers.ts is a
 // shared support module imported by both functions below — it has no

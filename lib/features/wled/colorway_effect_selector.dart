@@ -782,7 +782,6 @@ class _ColorwayEffectSelectorPageState
       effectName = WledEffectsCatalog.getName(effectId);
     }
 
-    final currentState = ref.read(wledStateProvider);
     bool appliedToDevice = false;
     // The `pal` the as-sent payload carries, for the local preview below.
     int? sentPal;
@@ -847,14 +846,39 @@ class _ColorwayEffectSelectorPageState
       // Apply channel filter so all targeted segments receive the pattern
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isEmpty) {
+        // P1 (residential path audit §9.1 item 9 / S19). This returned in
+        // silence: the user tapped Apply and NOTHING happened — no lights, no
+        // preview, no message. The gate closes whenever /json/cfg could not be
+        // read with at least one LED bus, which is guaranteed off-LAN
+        // (CloudRelayRepository.getConfig returns null) and also happens when
+        // the controller has no buses configured yet.
         debugPrint('ColorwayEffectSelector apply: skip (U1 gate)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                "Couldn't read this controller's channels, so there is nothing "
+                'to apply to. Connect to your home Wi-Fi and try again, or set '
+                'up the controller in System → Hardware.',
+              ),
+              backgroundColor: Colors.orange.shade800,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
         return;
       }
       payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
 
       try {
-        await repo.applyJson(payload);
-        appliedToDevice = currentState.connected;
+        // P1 (audit §9.1 item 9 / S18): the applyJson RESULT is the truth about
+        // whether the lights changed. This used to discard it and report the
+        // PREVIOUS poll's `connected` flag instead, so a POST that timed out or
+        // came back non-2xx still said "Applied: <effect>".
+        appliedToDevice = await repo.applyJson(payload);
+        if (!appliedToDevice) {
+          debugPrint('Pattern apply: applyJson returned false');
+        }
       } catch (e) {
         debugPrint('Pattern apply failed (device offline?): $e');
       }

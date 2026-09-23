@@ -29,10 +29,31 @@ class _HardwareConfigStepState extends ConsumerState<HardwareConfigStep> {
   bool _applying = false;
   String? _result;
 
+  /// The controller this step operates on.
+  ///
+  /// P0 (residential path audit §4.4): this used to read
+  /// [selectedDeviceIpProvider] alone, which only the dashboard shell ever
+  /// populates — so inside the wizard it was ALWAYS null and every installer
+  /// was told to "go back and pick one" when they already had. Step 2 now sets
+  /// the provider from the wizard's own selection; this falls back to that
+  /// selection directly (and latches it) so the step still works if the wizard
+  /// is resumed or re-entered past Step 2.
+  String? _resolveIp() {
+    final existing = ref.read(selectedDeviceIpProvider);
+    if (existing != null) return existing;
+    final fromWizard = ref.read(installerSelectedControllerIpProvider);
+    if (fromWizard != null) {
+      ref.read(selectedDeviceIpProvider.notifier).state = fromWizard;
+    }
+    return fromWizard;
+  }
+
   Future<void> _applyStandard() async {
-    final ip = ref.read(selectedDeviceIpProvider);
+    final ip = _resolveIp();
     if (ip == null) {
-      setState(() => _result = 'No controller selected — go back and pick one.');
+      setState(() => _result =
+          'No controller selected — go back to Controller Setup and tick the '
+          'controller for this install.');
       return;
     }
 
@@ -70,6 +91,15 @@ class _HardwareConfigStepState extends ConsumerState<HardwareConfigStep> {
   }
 
   void _openCustom() {
+    // Latch the wizard's selection before the editor opens — HardwareConfig
+    // Screen reads selectedDeviceIpProvider and showed an empty editor
+    // otherwise (audit §4.4 step 4).
+    if (_resolveIp() == null) {
+      setState(() => _result =
+          'No controller selected — go back to Controller Setup and tick the '
+          'controller for this install.');
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => const HardwareConfigScreen(),

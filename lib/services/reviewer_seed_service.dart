@@ -27,7 +27,13 @@ class ReviewerSeedService {
 
   /// Seed the reviewer's Firestore profile + installation docs under the
   /// signed-in user's actual Auth UID. Called after the reviewer signs in.
-  /// Idempotent — skips if the user doc already exists.
+  /// Idempotent — skips if the reviewer already has a REAL profile.
+  ///
+  /// P0 (residential path audit §9.1 item 6): the skip used to key on
+  /// `doc.exists`, so a two-field stub from the FCM token path counted as
+  /// "already seeded" and the reviewer got a blank, unparseable account —
+  /// exactly the build-106 failure. Key on `owner_id`, the field only a real
+  /// profile writer sets.
   static Future<void> seedForUser(User user) async {
     try {
       final uid = user.uid;
@@ -35,7 +41,8 @@ class ReviewerSeedService {
           .collection('users')
           .doc(uid)
           .get();
-      if (doc.exists) return;
+      final ownerId = doc.data()?['owner_id'];
+      if (doc.exists && ownerId is String && ownerId.isNotEmpty) return;
 
       final reviewerModel = UserModel(
         id: uid,
@@ -83,10 +90,13 @@ class ReviewerSeedService {
         },
       );
 
+      // merge:true so seeding OVER a stub keeps whatever that stub carried
+      // (fcmToken, referralCode) instead of dropping it on the floor.
       await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .set(UserService.sanitizeForFirestore(reviewerModel.toJson()));
+          .set(UserService.sanitizeForFirestore(reviewerModel.toJson()),
+              SetOptions(merge: true));
 
       // Installation doc stays at a stable ID so the reviewer profile's
       // installationId field resolves correctly. Seed it if absent; the

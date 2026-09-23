@@ -26,7 +26,14 @@ final currentUserProfileProvider = StreamProvider<UserModel?>((ref) {
   final user = ref.watch(authStateProvider).maybeWhen(data: (u) => u, orElse: () => null);
   if (user == null) return const Stream.empty();
   final svc = ref.watch(userServiceProvider);
-  return svc.streamUser(user.uid);
+  // Hand the Auth identity down so an unparseable/stub document is repaired
+  // with the customer's real email and name rather than placeholders
+  // (UserService.repairProfileSkeleton).
+  return svc.streamUser(
+    user.uid,
+    authEmail: user.email,
+    authDisplayName: user.displayName,
+  );
 });
 
 /// Loads the Installation document for the current user (if any) and

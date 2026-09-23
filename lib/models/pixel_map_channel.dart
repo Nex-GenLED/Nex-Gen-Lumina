@@ -50,6 +50,20 @@ class PixelMapChannel {
   /// Home photo path, denormalized (same value across a controller's channels).
   final String? photoPath;
 
+  /// Aspect ratio (width / height) of the photo this channel's segments were
+  /// traced on, denormalized like [photoPath].
+  ///
+  /// P1 (residential path audit §9.1 item 12). This key did not exist, so EVERY
+  /// pixelMap writer dropped it — production census 2026-09-23: 24 of 24
+  /// pixelMap docs have no `source_aspect_ratio`. The only carrier left was the
+  /// legacy `roofline_mask` on the user doc, which the installer-mapped paths
+  /// (Step 6, Segment Setup, the Roofline Setup Wizard, Refine and the legacy
+  /// migration) never write. Under `BoxFit.cover` the painter's sole source
+  /// then resolves to null, and the debug assert that was supposed to catch it
+  /// is stripped from release builds — so every installer-mapped home's preview
+  /// silently mis-projects the trace in the shipped app.
+  final double? sourceAspectRatio;
+
   const PixelMapChannel({
     required this.controllerId,
     required this.channelIndex,
@@ -62,6 +76,7 @@ class PixelMapChannel {
     this.isStale = false,
     this.name,
     this.photoPath,
+    this.sourceAspectRatio,
   });
 
   /// Sum of this channel's mapped segment pixel counts.
@@ -165,6 +180,7 @@ class PixelMapChannel {
     bool? isStale,
     String? name,
     String? photoPath,
+    double? sourceAspectRatio,
   }) {
     return PixelMapChannel(
       controllerId: controllerId ?? this.controllerId,
@@ -178,6 +194,7 @@ class PixelMapChannel {
       isStale: isStale ?? this.isStale,
       name: name ?? this.name,
       photoPath: photoPath ?? this.photoPath,
+      sourceAspectRatio: sourceAspectRatio ?? this.sourceAspectRatio,
     );
   }
 
@@ -211,6 +228,7 @@ class PixelMapChannel {
       isStale: json['is_stale'] as bool? ?? false,
       name: json['name'] as String?,
       photoPath: json['photo_path'] as String?,
+      sourceAspectRatio: (json['source_aspect_ratio'] as num?)?.toDouble(),
     );
   }
 
@@ -226,6 +244,7 @@ class PixelMapChannel {
       'is_stale': isStale,
       if (name != null) 'name': name,
       if (photoPath != null) 'photo_path': photoPath,
+      if (sourceAspectRatio != null) 'source_aspect_ratio': sourceAspectRatio,
     };
   }
 
@@ -278,6 +297,7 @@ List<PixelMapChannel> splitConfigToPixelMapChannels(
         isStale: staleByChannel[ch] ?? false,
         name: config.name,
         photoPath: config.photoPath,
+        sourceAspectRatio: config.sourceAspectRatio,
       ),
   ];
 }
@@ -343,6 +363,13 @@ RooflineConfiguration aggregatePixelMapChannelsToConfig(
     updatedAt: updated,
     photoPath: sorted.firstWhere((c) => c.photoPath != null,
         orElse: () => sorted.first).photoPath,
+    // Denormalized across a controller's channels, so the first one that has
+    // it speaks for the whole map. Null when every channel predates §9.1(12) —
+    // the consumers then fall back to the legacy mask exactly as before.
+    sourceAspectRatio: sorted
+        .firstWhere((c) => c.sourceAspectRatio != null,
+            orElse: () => sorted.first)
+        .sourceAspectRatio,
     totalChannelCount: maxChannel + 1,
     // Device-truth bus lengths captured at map time — lets the few
     // whole-controller consumers translate channel-local indices

@@ -21,7 +21,9 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
 import 'package:nexgen_command/features/sports_alerts/services/sports_background_service.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
 import 'package:timezone/data/latest.dart' as tz;
@@ -498,12 +500,36 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
     // StreamProvider and is still loading at first build, so its initial value
     // — including an already-signed-in user restored from a cold start —
     // arrives as a normal change and this fires for it.
+    // STAFF SESSIONS ARE ALSO EXCLUDED (residential path audit §9.1 item 5).
+    // `isAnonymous` was the only filter, but the staff-PIN flow trades the
+    // anonymous session for a CUSTOM TOKEN whose uid is `staff_<mode>_<pin>`
+    // — not anonymous. So the notification prompt still appeared in front of
+    // an installer mid-commissioning (the very thing the 09-17 guard meant to
+    // stop) and the token write created a stub `users/staff_*` document: 3 of
+    // the 5 staff docs in production are exactly that. Claims are read the
+    // same way route_guards.dart does.
     ref.listen<AsyncValue<User?>>(authStateProvider, (prev, next) {
       next.whenData((user) {
         if (kIsWeb) return;
         if (user == null || user.isAnonymous) return;
-        ref.read(syncNotificationServiceProvider).onSignedIn();
+        final service = ref.read(syncNotificationServiceProvider);
+        unawaited(_onSignedInUnlessStaff(user, service));
       });
+    });
+
+    // The FCM token store no longer creates `users/{uid}` (it parks the token
+    // when there is no profile to write onto). This is the replay: the moment
+    // the profile actually parses, store it. Without this, push would be
+    // silently dead for the rest of the session on every account whose profile
+    // is written after sign-in — which is every account the installer wizard
+    // creates.
+    ref.listen<AsyncValue<UserModel?>>(currentUserProfileProvider,
+        (prev, next) {
+      if (kIsWeb) return;
+      if (next.valueOrNull == null) return;
+      unawaited(
+        ref.read(syncNotificationServiceProvider).retryPendingTokenStore(),
+      );
     });
 
     // Run schedule persistence health check once after auth is ready
@@ -540,3 +566,31 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   }
 }
 
+/// Drives FCM bootstrap for a real customer sign-in, skipping staff custom-token
+/// sessions.
+///
+/// A staff session (`role` claim of installer / salesperson / admin / owner) is
+/// a commissioning tool, not a person who wants push: prompting them interrupts
+/// an install, and storing a token used to fabricate a stub `users/staff_*`
+/// document. A claims read that fails is treated as "not staff" — the same
+/// fail-open choice `route_guards.appRedirect` makes — because a transient
+/// token error must not permanently cost a customer their push.
+Future<void> _onSignedInUnlessStaff(
+  User user,
+  SyncNotificationService service,
+) async {
+  try {
+    final claims = (await user.getIdTokenResult()).claims;
+    final role = claims?['role'] as String?;
+    if (role == 'installer' ||
+        role == 'salesperson' ||
+        role == 'admin' ||
+        role == 'owner') {
+      debugPrint('[SyncNotification] staff session ($role) — skipping FCM');
+      return;
+    }
+  } catch (e) {
+    debugPrint('[SyncNotification] claims read failed, continuing: $e');
+  }
+  service.onSignedIn();
+}

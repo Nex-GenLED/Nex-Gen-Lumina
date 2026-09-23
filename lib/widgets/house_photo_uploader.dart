@@ -78,6 +78,12 @@ class _HousePhotoUploaderState extends ConsumerState<HousePhotoUploader> {
         orElse: () => null,
       );
 
+      // P1 (residential path audit §9.1 item 11 / S14). The photo is in
+      // Storage by now, but `house_photo_url` is what every surface reads. When
+      // the profile is absent or unparseable this block was SKIPPED and the
+      // success toast still fired — the customer saw "uploaded successfully"
+      // and their house never appeared anywhere.
+      var profileWritten = false;
       if (profile != null) {
         final userService = ref.read(userServiceProvider);
         final updatedProfile = profile.copyWith(
@@ -86,12 +92,28 @@ class _HousePhotoUploaderState extends ConsumerState<HousePhotoUploader> {
           updatedAt: DateTime.now(),
         );
         await userService.updateUser(updatedProfile);
+        profileWritten = true;
       }
 
       if (mounted) {
         setState(() {
           _isUploading = false;
         });
+        if (!profileWritten) {
+          debugPrint('HousePhotoUploader: photo uploaded but no parsed '
+              'profile to attach it to — house_photo_url NOT written');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Your photo uploaded, but we couldn't attach it to your "
+                'profile yet. Reopen this screen in a moment and try again.',
+              ),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 6),
+            ),
+          );
+          return;
+        }
         widget.onPhotoUploaded?.call(downloadUrl);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

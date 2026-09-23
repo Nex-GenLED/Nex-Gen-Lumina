@@ -124,7 +124,7 @@ class RooflineConfigService {
     Map<int, bool> staleByChannel = const {},
   }) async {
     final col = pixelMapCollection(userId, controllerId);
-    final channels = splitConfigToPixelMapChannels(
+    var channels = splitConfigToPixelMapChannels(
       config,
       controllerId: controllerId,
       sourceCounts: sourceCounts,
@@ -136,6 +136,30 @@ class RooflineConfigService {
     final keepIds = channels.map((c) => c.channelIndex.toString()).toSet();
 
     final existing = await col.get();
+
+    // §9.1(12) — each doc is written with a FULL set(), not a merge, so a
+    // writer that rebuilds a RooflineConfiguration from scratch (Refine, the
+    // installer Map step, the Roofline Setup Wizard) would silently strip a
+    // source_aspect_ratio a photo trace had already established. Carry the
+    // stored value forward whenever the incoming config does not supply one.
+    // Single chokepoint on purpose: every pixelMap write in the app goes
+    // through here, including future ones.
+    if (config.sourceAspectRatio == null) {
+      double? stored;
+      for (final doc in existing.docs) {
+        final v = doc.data()['source_aspect_ratio'];
+        if (v is num && v > 0) {
+          stored = v.toDouble();
+          break;
+        }
+      }
+      if (stored != null) {
+        channels = [
+          for (final ch in channels) ch.copyWith(sourceAspectRatio: stored),
+        ];
+      }
+    }
+
     final batch = _firestore.batch();
     for (final ch in channels) {
       batch.set(
@@ -626,16 +650,32 @@ class RooflineConfigEditorNotifier
     return state!.validateAgainstDevice(devicePixelCount);
   }
 
+  /// Why the last [save] returned false. Kept so callers can TELL the user —
+  /// the editor screen used to show "Saved N segments" regardless of the
+  /// result, and the cause was destroyed inside the catch below (residential
+  /// path audit §9.1 item 10 / S15).
+  Object? lastSaveError;
+
   /// Save the current map to the active controller's per-channel pixelMap
   /// (Slice 1). Per-channel `source_pixel_count` is seeded from device-truth
   /// `WledLedBus.len` via [deviceChannelsProvider] — never hand-typed. Returns
-  /// false if there's no user or active controller.
+  /// false if there's no user or active controller, or if the write failed;
+  /// [lastSaveError] then says which.
   Future<bool> save() async {
-    if (state == null) return false;
+    lastSaveError = null;
+    if (state == null) {
+      lastSaveError = StateError('nothing to save — the editor is empty');
+      return false;
+    }
 
     final uid = _ref.read(effectiveUserUidProvider);
     final controllerId = _ref.read(activePixelMapControllerIdProvider);
-    if (uid == null || controllerId == null) return false;
+    if (uid == null || controllerId == null) {
+      lastSaveError = StateError(uid == null
+          ? 'no signed-in session to save under'
+          : 'no controller selected to save this roofline onto');
+      return false;
+    }
 
     try {
       final service = _ref.read(rooflineConfigServiceProvider);
@@ -657,7 +697,10 @@ class RooflineConfigEditorNotifier
       );
       state = configToSave;
       return true;
-    } catch (e) {
+    } catch (e, st) {
+      lastSaveError = e;
+      debugPrint('RooflineConfigEditor: pixelMap save FAILED for '
+          'uid=$uid controller=$controllerId: $e\n$st');
       return false;
     }
   }

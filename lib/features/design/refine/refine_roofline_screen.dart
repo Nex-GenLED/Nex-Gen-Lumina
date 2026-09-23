@@ -199,7 +199,19 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
   Future<void> _save() async {
     final uid = ref.read(effectiveUserUidProvider);
     final controllerId = ref.read(activePixelMapControllerIdProvider);
-    if (uid == null || controllerId == null) return;
+    if (uid == null || controllerId == null) {
+      // P1 (residential path audit §9.1 item 10 / S16): returning here in
+      // silence left the Save button looking like a no-op.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(uid == null
+              ? 'Not signed in — your refinements were not saved.'
+              : 'No controller selected — your refinements were not saved.'),
+          backgroundColor: Colors.red,
+        ));
+      }
+      return;
+    }
     setState(() => _busy = true);
     try {
       await _restorePrior();
@@ -228,6 +240,22 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
         setState(() => _dirty = false);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Saved'), backgroundColor: NexGenPalette.cyan));
+      }
+    } catch (e, st) {
+      // P1 (audit §9.1 item 10 / S16): there was NO catch at all. A failed
+      // savePixelMap escaped as an unhandled async error — the "Saved" toast
+      // was skipped, `_dirty` stayed true, and the screen said nothing, so the
+      // refinements looked like they had simply not been tapped.
+      debugPrint('RefineRoofline: save FAILED for '
+          'uid=$uid controller=$controllerId: $e');
+      debugPrint('$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not save your refinements ($e). They are still '
+              'here — check your connection and tap Save again.'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 8),
+        ));
       }
     } finally {
       if (mounted) setState(() => _busy = false);

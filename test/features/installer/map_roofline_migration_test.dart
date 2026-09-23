@@ -123,14 +123,22 @@ void main() {
     expect((ch0.data()!['segments'] as List).isNotEmpty, isTrue);
   });
 
-  test('migration is a no-op for controllers not in the id set', () async {
+  test('migration moves nothing for controllers not in the id set — and now '
+      'reports that as a failure', () async {
     final db = FakeFirebaseFirestore();
     await _seedControllerWithMap(db);
-    await migrateInstallerControllersToCustomer(
-      firestore: db,
-      fromUid: _staff,
-      toUid: _customer,
-      controllerIds: {'someOtherController'},
+    // Since audit §9.1 item 3 this THROWS rather than returning a clean skip:
+    // a selection the customer does not end up holding is a failed install,
+    // not a finished one. The data-movement contract is unchanged — see
+    // controller_migration_moved_nothing_test.dart for the full rule.
+    await expectLater(
+      migrateInstallerControllersToCustomer(
+        firestore: db,
+        fromUid: _staff,
+        toUid: _customer,
+        controllerIds: {'someOtherController'},
+      ),
+      throwsA(isA<ControllerMigrationEmptyException>()),
     );
     // Nothing moved.
     expect(await _pixelMapIds(db, _customer), isEmpty);

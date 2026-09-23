@@ -488,6 +488,14 @@ class RooflineLightPainter extends CustomPainter {
     canvas.drawCircle(pos, dotRadius * 0.35, lensPaint);
   }
 
+  /// Latches the missing-aspect warning so a repainting animation cannot
+  /// flood the log with the same line 60 times a second.
+  static bool _warnedMissingAspect = false;
+
+  /// Resets the missing-aspect warning latch. Tests only.
+  @visibleForTesting
+  static void resetAspectWarning() => _warnedMissingAspect = false;
+
   /// Projects a segment's normalized trace points to canvas coordinates through
   /// the shared [projectRoofline] — the ONLY place this math lives.
   ///
@@ -514,14 +522,22 @@ class RooflineLightPainter extends CustomPainter {
 
     var srcAspect = segmentAspect ?? sourceAspectRatio ?? mask?.sourceAspectRatio;
     if (srcAspect == null) {
-      assert(
-        false,
-        'RooflineLightPainter: BoxFit.cover requested but no sourceAspectRatio '
-        'is available (segment, painter, and mask are all null). Provide '
-        'SegmentPathData.sourceAspectRatio or RooflineLightPainter.sourceAspectRatio '
-        'so the trace projects onto the cover-cropped photo. Falling back to '
-        'targetAspectRatio (identity crop) — the trace may render mis-placed.',
-      );
+      // §9.1(12): this used to be `assert(false, ...)`, which is STRIPPED from
+      // release builds — so the one signal that the trace was about to be
+      // mis-projected existed only in debug, while production shipped 24 of 24
+      // pixelMap docs with no aspect at all. Log it in every build instead, and
+      // log it once rather than on every frame of a 60fps repaint.
+      if (!_warnedMissingAspect) {
+        _warnedMissingAspect = true;
+        debugPrint(
+          'RooflineLightPainter: BoxFit.cover requested but no '
+          'sourceAspectRatio is available (segment, painter, and mask are all '
+          'null). Falling back to targetAspectRatio (identity crop) — the '
+          'trace will render mis-placed on a photo whose aspect differs from '
+          'the canvas. Persist source_aspect_ratio on the pixelMap channel '
+          '(PixelMapChannel.sourceAspectRatio) to fix it at the source.',
+        );
+      }
       srcAspect = targetAspectRatio ?? (size.width / size.height);
     }
 
