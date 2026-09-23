@@ -75,14 +75,15 @@ class DdpService {
   /// Fetches LED count from /json/info on the target. Returns null on failure.
   Future<int?> getLedCount() async {
     if (kSimulationMode) return 150;
+    // #111 — closed in `finally` so a timeout aborts the request instead of
+    // leaving the connection open on the controller.
+    final httpClient = HttpClient()..connectionTimeout = const Duration(seconds: 3);
     try {
-      final httpClient = HttpClient()..connectionTimeout = const Duration(seconds: 3);
       final uri = Uri.parse('http://${target.address}/json/info');
       final req = await httpClient.getUrl(uri);
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(const Duration(seconds: 3));
       final body = await res.transform(utf8.decoder).join();
-      httpClient.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final map = jsonDecode(body) as Map<String, dynamic>;
         final leds = map['leds'];
@@ -93,6 +94,8 @@ class DdpService {
       }
     } catch (e) {
       debugPrint('DDP getLedCount error: $e');
+    } finally {
+      httpClient.close(force: true);
     }
     return null;
   }

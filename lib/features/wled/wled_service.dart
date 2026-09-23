@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
 import 'package:nexgen_command/features/schedule/timer_landing.dart'
     show timerInstancesFromCfg;
@@ -385,7 +384,19 @@ final Map<int, HttpClient> _wledClients = <int, HttpClient>{};
 HttpClient _wledClientFor(Duration connectionTimeout) {
   return _wledClients.putIfAbsent(
     connectionTimeout.inMilliseconds,
-    () => HttpClient()..connectionTimeout = connectionTimeout,
+    () => HttpClient()
+      ..connectionTimeout = connectionTimeout
+      // ONE live connection per controller (bench 2026-09-23,
+      // controller-reachability-2026-09-23.md §4.5-4.6, §6). WLED 0.15.x
+      // listens with a backlog of 5 and silently DROPS every SYN that arrives
+      // while it is full — no RST — so the phone retransmits (1 s, 3 s, 7 s …)
+      // until its 15 s connectionTimeout and the app reports "offline". The
+      // repository-rebuild cascade and the resume burst used to open 6-9
+      // connections in the same frame; spaced out, the same requests are all
+      // answered in < 1 s. dart:io queues requests to the same host behind the
+      // live one, so callers need no change. A hung request cannot starve the
+      // queue: [closeOrAbort] frees the connection at its timeout.
+      ..maxConnectionsPerHost = 1,
   );
 }
 
@@ -408,6 +419,28 @@ void resetWledHttpClientsForTest() {
     c.close(force: true);
   }
   _wledClients.clear();
+}
+
+/// #111 — sends [req] and waits at most [timeout] for the response HEADERS.
+///
+/// `req.close().timeout(d)` alone completes the Dart future with a
+/// [TimeoutException] but leaves the request IN FLIGHT: the socket stays open
+/// until the controller answers, and the controller keeps the request in its
+/// serial queue and still spends time answering it (bench,
+/// controller-reachability-2026-09-23.md §4: WLED 0.15.x never closes a
+/// connection itself, and a burst of 16 queued reads takes 7–12 s to drain).
+/// A request nobody is waiting for must therefore be torn down on timeout so
+/// the controller sees a disconnect and dequeues it. [HttpClientRequest.abort]
+/// does exactly that; the late completion of the original future is
+/// swallowed by `Future.timeout`.
+Future<HttpClientResponse> closeOrAbort(
+    HttpClientRequest req, Duration timeout) {
+  return req.close().timeout(timeout, onTimeout: () {
+    final ex = TimeoutException(
+        'WLED request timed out after ${timeout.inSeconds}s', timeout);
+    req.abort(ex);
+    throw ex;
+  });
 }
 
 class WledService
@@ -648,7 +681,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/state'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode >= 200 && res.statusCode < 300) {
         return jsonDecode(body) as Map<String, dynamic>;
@@ -679,7 +712,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/info'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -732,7 +765,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/cfg'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final decoded = jsonDecode(body);
@@ -921,7 +954,7 @@ class WledService
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
       req.contentLength = bodyBytes.length;
       req.add(bodyBytes);
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final resBody = await res.transform(utf8.decoder).join();
 
       debugPrint('📥 WLED Response: ${res.statusCode}');
@@ -1060,7 +1093,7 @@ class WledService
       // WLED 0.15.x drops chunked POSTs. Do NOT swap for http.post.
       req.contentLength = bodyBytes.length;
       req.add(bodyBytes);
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final resBody = await res.transform(utf8.decoder).join();
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -1121,7 +1154,7 @@ class WledService
       // headroom so a normal flash-save (aggravated by preceding preset psaves,
       // or a firmware stall) doesn't time out and get reported as a failure.
       // connectionTimeout stays 15s: the TCP handshake isn't the slow part.
-      final res = await req.close().timeout(const Duration(seconds: 30));
+      final res = await closeOrAbort(req, const Duration(seconds: 30));
       final resBody = await res.transform(utf8.decoder).join();
 
       debugPrint('📥 WLED /json/cfg response: ${res.statusCode}');
@@ -1155,7 +1188,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/cfg'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 10));
+      final res = await closeOrAbort(req, const Duration(seconds: 10));
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final cfg = jsonDecode(body) as Map<String, dynamic>;
@@ -1178,7 +1211,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/state'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 5));
+      final res = await closeOrAbort(req, const Duration(seconds: 5));
       await res.drain<void>();
       return res.statusCode >= 200 && res.statusCode < 300;
     } catch (e) {
@@ -1239,7 +1272,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/cfg'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -1290,7 +1323,7 @@ class WledService
       write('--$boundary--\r\n');
 
       req.add(builder.takeBytes());
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       if (res.statusCode >= 200 && res.statusCode < 300) return true;
       final body = await res.transform(utf8.decoder).join();
       debugPrint('WLED /edit upload error ${res.statusCode}: $body');
@@ -1357,7 +1390,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/presets'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 10));
+      final res = await closeOrAbort(req, const Duration(seconds: 10));
       final body = await res.transform(utf8.decoder).join();
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -1424,7 +1457,7 @@ class WledService
       final req = await client.getUrl(_uri('/presets.json'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 10));
+      final res = await closeOrAbort(req, const Duration(seconds: 10));
       // TOLERANT READ (P1-52 / #89). Collect BYTES and repair them before
       // decoding. A strict utf8.decoder here threw on one stray 0xFF and took
       // every schedule's arming down with it. See [sanitizePresetsJson].
@@ -1496,9 +1529,10 @@ class WledService
   @override
   void reset() {
     // Drop capability + preset caches so the next reconnect re-queries
-    // the device. HttpClient instances are created per-request and already
-    // closed with force:true, so there is no shared connection pool owned
-    // by this service to tear down.
+    // the device. The HTTP clients are process-wide (`_wledClientFor`) and
+    // every request is non-persistent, so there is no per-service connection
+    // to tear down here; an in-flight request that outlives its timeout is
+    // aborted by [closeOrAbort] (#111).
     _supportsRgbwCache = null;
     _presetNamesCache = null;
     debugPrint('🔄 WledService.reset(): caches cleared for $baseUrl');
@@ -1594,7 +1628,7 @@ class WledService
       req.contentLength = bodyBytes.length;
       req.add(bodyBytes);
 
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final resBody = await res.transform(utf8.decoder).join();
 
       debugPrint('📥 WLED savePreset response: ${res.statusCode}');
@@ -1641,7 +1675,7 @@ class WledService
       req.contentLength = bodyBytes.length;
       req.add(bodyBytes);
 
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       await res.transform(utf8.decoder).join();
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -1674,17 +1708,24 @@ class WledService
 
       debugPrint('📤 WLED loadPreset: Loading preset $presetId');
 
-      final response = await http.post(
-        _uri('/json/state'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 15));
+      // #111 — was the last `http.post` in this file: a throwaway client
+      // whose request could not be aborted on timeout. Same shape as
+      // [_postJson] now (pooled client, explicit Content-Length, abort).
+      final bodyBytes = utf8.encode(jsonEncode(payload));
+      final client = _wledClientFor(const Duration(seconds: 15));
+      final req = await client.postUrl(_uri('/json/state'));
+      req.persistentConnection = false;
+      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+      req.contentLength = bodyBytes.length;
+      req.add(bodyBytes);
+      final response = await closeOrAbort(req, const Duration(seconds: 15));
+      final resBody = await response.transform(utf8.decoder).join();
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         debugPrint('✅ WLED preset $presetId loaded successfully');
         return true;
       }
-      debugPrint('❌ WLED loadPreset error ${response.statusCode}: ${response.body}');
+      debugPrint('❌ WLED loadPreset error ${response.statusCode}: $resBody');
     } catch (e) {
       debugPrint('❌ WLED loadPreset exception: $e');
     }
@@ -1703,7 +1744,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/info'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final info = jsonDecode(body) as Map<String, dynamic>;
@@ -1816,7 +1857,7 @@ class WledService
       final req = await client.getUrl(_uri('/json/info'));
       req.persistentConnection = false;
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      final res = await closeOrAbort(req, const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
