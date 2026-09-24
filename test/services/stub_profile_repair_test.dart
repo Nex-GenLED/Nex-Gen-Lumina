@@ -194,7 +194,107 @@ void main() {
     });
   });
 
+  // 2.5.10+108 — the build-107 repair WRITE LOOP.
+  //
+  // A `serverTimestamp()` still in flight reads back as null in the local
+  // snapshot. build-107 repaired that null with another serverTimestamp(),
+  // whose local snapshot was null again: one ordinary
+  // `updated_at: serverTimestamp()` write started an unbounded write loop on
+  // `users/{uid}` (239 repair writes in 4 s, reproduced with the real client
+  // SDK against the Firestore emulator). fake_cloud_firestore resolves server
+  // timestamps instantly and never reports pending writes, which is why the
+  // suite could not see it — so the decision is pinned directly here.
+  group('decideProfileSnapshot', () {
+    final now = DateTime(2026, 9, 24, 12);
+    Map<String, dynamic> pendingStamp() =>
+        {..._realProfile(), 'updated_at': null};
+
+    test('THE REGRESSION: a pending updated_at is being written, not missing',
+        () {
+      final d = UserService.decideProfileSnapshot(pendingStamp(),
+          hasPendingWrites: true, now: now);
+      expect(d.repair, isFalse);
+      expect(d.parseable, isNotNull);
+      expect(UserModel.fromJson(d.parseable!).id, _uid,
+          reason: 'the profile keeps parsing while the write is in flight');
+    });
+
+    test('both stamps pending (a skeleton write in flight) still parse', () {
+      final d = UserService.decideProfileSnapshot(
+          {..._realProfile(), 'created_at': null, 'updated_at': null},
+          hasPendingWrites: true,
+          now: now);
+      expect(d.repair, isFalse);
+      expect(d.parseable, isNotNull);
+    });
+
+    test('a pending snapshot never repairs, even when a string key is missing',
+        () {
+      final d = UserService.decideProfileSnapshot(
+          {..._realProfile()}..remove('display_name'),
+          hasPendingWrites: true,
+          now: now);
+      expect(d.parseable, isNull);
+      expect(d.repair, isFalse,
+          reason: 'the server-confirmed snapshot decides, not a local one');
+    });
+
+    test('a confirmed stub is repaired once, then waits out the cooldown', () {
+      final first = UserService.decideProfileSnapshot(_stub,
+          hasPendingWrites: false, now: now);
+      expect(first.repair, isTrue);
+
+      final soon = UserService.decideProfileSnapshot(_stub,
+          hasPendingWrites: false,
+          now: now.add(const Duration(seconds: 5)),
+          lastRepairAt: now);
+      expect(soon.repair, isFalse,
+          reason: 'a rejected repair (reject → revert → repair) must not loop');
+
+      final later = UserService.decideProfileSnapshot(_stub,
+          hasPendingWrites: false,
+          now: now.add(UserService.profileRepairCooldown),
+          lastRepairAt: now);
+      expect(later.repair, isTrue);
+    });
+
+    test('a complete confirmed profile parses and is left alone', () {
+      final d = UserService.decideProfileSnapshot(_realProfile(),
+          hasPendingWrites: false, now: now);
+      expect(d.repair, isFalse);
+      expect(d.parseable, isNotNull);
+    });
+
+    test('LOOP GATE: the write→null→repair cycle stops at zero repairs', () {
+      // Model of the client: every repair write is another pending
+      // serverTimestamp, so the next local snapshot shows updated_at null
+      // with hasPendingWrites true. build-107's rule ("repair whenever
+      // missingProfileKeys is non-empty") repairs on every one of them.
+      var build107Repairs = 0;
+      var fixedRepairs = 0;
+      DateTime? lastRepair;
+      for (var i = 0; i < 200; i++) {
+        final snapshot = pendingStamp();
+        if (UserService.missingProfileKeys(snapshot).isNotEmpty) {
+          build107Repairs++;
+        }
+        final d = UserService.decideProfileSnapshot(snapshot,
+            hasPendingWrites: true,
+            now: now.add(Duration(milliseconds: i * 16)),
+            lastRepairAt: lastRepair);
+        if (d.repair) {
+          fixedRepairs++;
+          lastRepair = now;
+        }
+      }
+      expect(build107Repairs, 200, reason: 'the defect, reproduced');
+      expect(fixedRepairs, 0);
+    });
+  });
+
   group('streamUser', () {
+    setUp(UserService.resetProfileRepairThrottleForTest);
+
     test('THE REGRESSION: a stub emits null and triggers a repair instead of '
         'an AsyncError nobody reads', () async {
       final db = FakeFirebaseFirestore();

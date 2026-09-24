@@ -19,112 +19,172 @@ class FavoritesGrid extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final favoritesAsync = ref.watch(favoritePatternsProvider);
+    // Row 1 — the two reserved whites. Local, so it renders at once and a
+    // slow or stuck favorites load can never hold it back.
+    final whites = ref.watch(favoriteWhiteSlotsProvider);
+    // Row 2 — the customer's own favorites, the only part that waits on
+    // Firestore. Every state it can be in is one 52 px row inside this
+    // section: the spinner is scoped to it and nothing else on the screen,
+    // and every state ends (see userFavoritePatternsProvider).
+    final userFavoritesAsync = ref.watch(userFavoritePatternsProvider);
 
-    return favoritesAsync.when(
-      data: (favorites) {
-        if (favorites.isEmpty) {
-          return _buildEmptyState(context, ref);
-        }
-
-        // Show first 4 favorites in a 2x2 grid layout
-        final displayFavorites = favorites.take(4).toList();
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Column(
-            children: [
-              // First row (2 cards)
-              Row(
-                children: [
-                  Expanded(
-                    child: _FavoritePatternCard(
-                      favorite: displayFavorites[0],
-                      onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[0]) : null,
-                      showAutoAddedBadge: showAutoAddedBadge,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: displayFavorites.length > 1
-                        ? _FavoritePatternCard(
-                            favorite: displayFavorites[1],
-                            onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[1]) : null,
-                            showAutoAddedBadge: showAutoAddedBadge,
-                          )
-                        : const _EmptySlot(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              // Second row (2 cards)
-              Row(
-                children: [
-                  Expanded(
-                    child: displayFavorites.length > 2
-                        ? _FavoritePatternCard(
-                            favorite: displayFavorites[2],
-                            onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[2]) : null,
-                            showAutoAddedBadge: showAutoAddedBadge,
-                          )
-                        : const _EmptySlot(),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: displayFavorites.length > 3
-                        ? _FavoritePatternCard(
-                            favorite: displayFavorites[3],
-                            onTap: onPatternTap != null ? () => onPatternTap!(displayFavorites[3]) : null,
-                            showAutoAddedBadge: showAutoAddedBadge,
-                          )
-                        : const _EmptySlot(),
-                  ),
-                ],
-              ),
-            ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        children: [
+          _pairRow(whites.isNotEmpty ? whites[0] : null,
+              whites.length > 1 ? whites[1] : null),
+          const SizedBox(height: 10),
+          userFavoritesAsync.when(
+            // Retry invalidates the provider; show that it is loading again
+            // rather than leaving the error row up (Riverpod's default for a
+            // refresh).
+            skipLoadingOnRefresh: false,
+            data: (favorites) => favorites.isEmpty
+                ? const _NoFavoritesYetRow()
+                : _pairRow(favorites[0], favorites.length > 1 ? favorites[1] : null),
+            loading: () => const _FavoritesLoadingRow(),
+            error: (error, stack) {
+              debugPrint('FavoritesGrid: error loading favorites: $error');
+              return _FavoritesErrorRow(
+                onRetry: () => ref.invalidate(userFavoritePatternsProvider),
+              );
+            },
           ),
-        );
-      },
-      loading: () => const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32.0),
-          child: CircularProgressIndicator(),
-        ),
+        ],
       ),
-      error: (error, stack) {
-        // Firestore index/permission errors should not block the UI —
-        // show the empty state so the rest of the home screen is usable.
-        debugPrint('FavoritesGrid: error loading favorites: $error');
-        return _buildEmptyState(context, ref);
-      },
     );
   }
 
-  Widget _buildEmptyState(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+  Widget _pairRow(FavoritePattern? left, FavoritePattern? right) {
+    Widget slot(FavoritePattern? favorite) => favorite == null
+        ? const _EmptySlot()
+        : _FavoritePatternCard(
+            favorite: favorite,
+            onTap: onPatternTap != null ? () => onPatternTap!(favorite) : null,
+            showAutoAddedBadge: showAutoAddedBadge,
+          );
+    return Row(
+      children: [
+        Expanded(child: slot(left)),
+        const SizedBox(width: 10),
+        Expanded(child: slot(right)),
+      ],
+    );
+  }
+}
+
+/// The frame every second-row state is drawn in: the height and outline of
+/// a favorite card, so the section does not jump between states.
+class _FavoritesStatusRow extends StatelessWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+
+  const _FavoritesStatusRow({required this.child, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.1),
+              width: 1,
+              strokeAlign: BorderSide.strokeAlignInside,
+            ),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoritesLoadingRow extends StatelessWidget {
+  const _FavoritesLoadingRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _FavoritesStatusRow(
+      child: Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+    );
+  }
+}
+
+/// The empty state: the query came back with nothing (or the account is
+/// still being set up, which parks here rather than waiting).
+class _NoFavoritesYetRow extends StatelessWidget {
+  const _NoFavoritesYetRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return _FavoritesStatusRow(
+      onTap: () => context.push(AppRoutes.explore),
+      child: Row(
         children: [
-          Icon(
-            Icons.star_border_rounded,
-            size: 48,
-            color: NexGenPalette.textSecondary.withValues(alpha: 0.5),
+          Icon(Icons.star_border_rounded,
+              size: 20,
+              color: NexGenPalette.textSecondary.withValues(alpha: 0.6)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'No favorites yet — save a pattern from Explore',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: NexGenPalette.textSecondary,
+                  ),
+            ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            'No Favorites Yet',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: NexGenPalette.textSecondary,
-                ),
+          Icon(Icons.add_rounded,
+              size: 20, color: Colors.white.withValues(alpha: 0.3)),
+        ],
+      ),
+    );
+  }
+}
+
+class _FavoritesErrorRow extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _FavoritesErrorRow({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return _FavoritesStatusRow(
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off_rounded,
+              size: 20,
+              color: NexGenPalette.textSecondary.withValues(alpha: 0.6)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Couldn't load your favorites",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: NexGenPalette.textSecondary,
+                  ),
+            ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Your most-used patterns will appear here',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: NexGenPalette.textSecondary.withValues(alpha: 0.7),
-                ),
+          TextButton(
+            onPressed: onRetry,
+            child: const Text('Retry'),
           ),
         ],
       ),
