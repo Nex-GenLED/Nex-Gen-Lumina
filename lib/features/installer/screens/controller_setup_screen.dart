@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
@@ -630,15 +631,29 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       ref.invalidate(controllersStreamProvider);
       _checkAllControllerStatus();
       if (mounted) {
+        // P1 (residential path audit §9.1 item 13 / S10). `info == null` means
+        // /json/info never answered, so the doc goes in with
+        // connectionMethod: 'unknown'. Step 3 then HARD-BLOCKS on exactly that
+        // — Continue disabled, no Skip — and the installer only discovers it
+        // two steps after the add "succeeded". Say so here, while they are
+        // still standing at the controller.
+        final unreachable = info == null;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-              '✓ Controller added. If the red dot persists, open '
-              'WLED in a browser at this IP → Config → WiFi Setup '
-              '→ set a Static IP → Save & Reboot.',
+            content: Text(
+              unreachable
+                  ? 'Controller saved, but it did not answer at $ip. '
+                      'Step 3 (Connection Method) will not let you continue '
+                      'until it does — check power and cabling, then open '
+                      'WLED in a browser at this IP → Config → WiFi '
+                      'Setup → set a Static IP → Save & Reboot.'
+                  : '✓ Controller added. If the red dot persists, open '
+                      'WLED in a browser at this IP → Config → WiFi '
+                      'Setup → set a Static IP → Save & Reboot.',
             ),
-            duration: const Duration(seconds: 8),
-            backgroundColor: Colors.amber.shade800,
+            duration: Duration(seconds: unreachable ? 12 : 8),
+            backgroundColor:
+                unreachable ? Colors.red.shade800 : Colors.amber.shade800,
             action: SnackBarAction(
               label: 'Got it',
               textColor: Colors.white,
@@ -821,6 +836,27 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
         _validationError = 'Please select at least one controller for this installation.';
       });
       return;
+    }
+
+    // P0 (residential path audit §4.4): hand the wizard's OWN selection to
+    // selectedDeviceIpProvider. Nothing else on the wizard's route sets it —
+    // autoConnectControllerProvider is watched only by MainScaffold, which is
+    // not mounted here — so Steps 5 (Hardware Config) and 6 (Map Roofline)
+    // used to open with "No controller selected / connected" and the installer
+    // had to skip both. Prefer a controller this step has already probed as
+    // online so the repository points at something that answers.
+    final controllers = ref.read(controllersStreamProvider).maybeWhen(
+          data: (list) => list,
+          orElse: () => const <ControllerInfo>[],
+        );
+    final ip = resolveInstallerControllerIp(
+      controllers,
+      selected,
+      statusById: _controllerStatus,
+    );
+    if (ip != null) {
+      ref.read(selectedDeviceIpProvider.notifier).state = ip;
+      debugPrint('Installer: wizard selection → selectedDeviceIp=$ip');
     }
 
     ref.read(installerModeActiveProvider.notifier).recordActivity();

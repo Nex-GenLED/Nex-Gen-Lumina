@@ -122,6 +122,28 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
           SnackBar(content: Text(message), backgroundColor: Colors.red),
         );
       }
+    } catch (e) {
+      // P0 (residential path audit §9.1 item 8 / S5). Only FirebaseAuth
+      // exceptions were caught, but AuthManager rethrows non-Auth failures too
+      // — a rules denial or a dropped connection on the PROFILE write
+      // (UserService.createUser). The Auth account exists by then, so the user
+      // saw nothing at all, no success, no error, and their next sign-in hit
+      // the stub race with no profile document. Production census 2026-09-23:
+      // 32 email Auth accounts in exactly that state.
+      debugPrint('Signup: profile creation failed after auth: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Your account was created but we could not finish setting up '
+              'your profile. Check your connection and sign in — we will '
+              'finish it for you.',
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

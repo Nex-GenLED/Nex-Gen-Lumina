@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_logic.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_state.dart';
 import 'package:nexgen_command/features/wled/device_write_reporter.dart';
@@ -34,6 +35,25 @@ class MapRooflineStep extends ConsumerStatefulWidget {
 }
 
 class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
+  @override
+  void initState() {
+    super.initState();
+    // P0 (residential path audit §4.4): this step reaches the device through
+    // wledRepositoryProvider → selectedDeviceIpProvider, which only the
+    // dashboard shell populates. Inside the wizard it was always null, so the
+    // step opened with "No controller connected" and no channel chips and the
+    // installer had to press "Map later" every time. Step 2 now sets it from
+    // the wizard's own selection; latch it here too so a resumed wizard that
+    // lands straight on this step still sees the controller.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(selectedDeviceIpProvider) != null) return;
+      final fromWizard = ref.read(installerSelectedControllerIpProvider);
+      if (fromWizard == null) return;
+      ref.read(selectedDeviceIpProvider.notifier).state = fromWizard;
+    });
+  }
+
   int? _selectedChannel;
   int _cursor = 0; // channel-local pixel index
   Timer? _chaseTimer;
@@ -552,10 +572,12 @@ class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
           ),
           const SizedBox(height: 16),
           if (selectedIp == null)
-            const _Warn('No controller connected — connect on the local '
-                'network to walk the roofline, or map later.')
+            const _Warn('No controller selected — go back to Controller Setup '
+                'and tick the controller for this install, or map later.')
           else if (channels.isEmpty)
-            const _Warn('No channels detected from the device hardware config.'),
+            _Warn('No channels detected from $selectedIp — the controller is '
+                'not answering on this network, or its hardware config has no '
+                'LED outputs yet. Configure it in Step 5, or map later.'),
           if (channels.isNotEmpty) ...[
             _ChannelChips(
               channels: channels,

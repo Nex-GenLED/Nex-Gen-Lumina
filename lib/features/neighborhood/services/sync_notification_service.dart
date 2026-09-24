@@ -347,19 +347,81 @@ class SyncNotificationService {
     }
   }
 
+  /// The token this path could not store because the profile was not there
+  /// yet, and the uid it belongs to. Consumed by [retryPendingTokenStore].
+  String? _pendingToken;
+  String? _pendingTokenUid;
+
+  /// True when a token write is waiting for the profile document to appear.
+  @visibleForTesting
+  bool get hasPendingTokenStore => _pendingToken != null;
+
+  /// Re-run a token store that was refused because `users/{uid}` did not exist
+  /// or had no `owner_id` yet.
+  ///
+  /// Driven from `main.dart` when `currentUserProfileProvider` first emits a
+  /// PARSED model — i.e. the moment the profile is real. Without this the token
+  /// would stay unstored (push silently dead) for the whole session on any
+  /// account whose profile is written after sign-in, which is every account the
+  /// installer wizard creates.
+  Future<void> retryPendingTokenStore() async {
+    final token = _pendingToken;
+    final uid = _pendingTokenUid;
+    if (token == null || uid == null) return;
+    if (_uid != uid) {
+      // Different account signed in meanwhile — the pending write is moot.
+      _pendingToken = null;
+      _pendingTokenUid = null;
+      return;
+    }
+    try {
+      await _storeToken(token);
+    } catch (e) {
+      debugPrint('[SyncNotification] Pending token store failed: $e');
+    }
+  }
+
   /// Store the FCM token in the user's document under their member profile
   /// within each neighborhood group they belong to.
+  ///
+  /// **THIS PATH MUST NEVER CREATE `users/{uid}`.** It used to be a
+  /// `set(..., merge: true)`, which creates the document when it is absent.
+  /// Fired from the auth-state listener on every non-anonymous sign-in, that
+  /// made it a race against every profile writer: whoever lost wrote a
+  /// two-field STUB that `UserModel.fromJson` cannot parse, that
+  /// `route_guards` then treated as "this account already has a profile" (it
+  /// keyed on `doc.exists`), and that 40+ consumers silently swallowed as an
+  /// `AsyncError`. Production census 2026-09-23: 25 of 52 /users documents are
+  /// exactly that stub, and 32 email Auth accounts with no document at all are
+  /// one sign-in away from joining them.
+  ///
+  /// The guard is `owner_id`, not `exists` — an existing stub is still "no
+  /// profile". When there is nothing to write onto, the token is parked and
+  /// [retryPendingTokenStore] replays it once the profile lands.
   Future<void> _storeToken(String token) async {
     final uid = _uid;
     if (uid == null) return;
 
     debugPrint('[SyncNotification] Storing token for $uid');
 
-    // Store in user's top-level document for easy access
-    await _firestore.collection('users').doc(uid).set(
+    final userRef = _firestore.collection('users').doc(uid);
+    final snap = await userRef.get();
+    final ownerId = snap.data()?['owner_id'];
+    if (!snap.exists || ownerId is! String || ownerId.isEmpty) {
+      _pendingToken = token;
+      _pendingTokenUid = uid;
+      debugPrint('[SyncNotification] No profile for $uid yet — token parked, '
+          'will store once the profile is written');
+      return;
+    }
+
+    // update(), not set(merge:) — a document deleted between the read above
+    // and this write must fail rather than be recreated as a stub.
+    await userRef.update(
       {'fcmToken': token, 'fcmTokenUpdatedAt': FieldValue.serverTimestamp()},
-      SetOptions(merge: true),
     );
+    _pendingToken = null;
+    _pendingTokenUid = null;
 
     // Also update in all neighborhood groups this user belongs to
     final groups = await _firestore

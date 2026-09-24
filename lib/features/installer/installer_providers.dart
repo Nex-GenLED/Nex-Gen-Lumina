@@ -5,7 +5,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_state.dart';
@@ -633,6 +635,47 @@ final installerSiteModeProvider = StateProvider<SiteMode>((ref) => SiteMode.resi
 /// Provider for selected controller IDs during installation setup
 final installerSelectedControllersProvider = StateProvider<Set<String>>((ref) => {});
 
+/// Resolves the IP of the controller the WIZARD has selected — the wizard's
+/// own state, independent of the dashboard shell.
+///
+/// P0 (residential path audit 2026-09-23 §4.4): Steps 5 (Hardware Config) and
+/// 6 (Map Roofline) gated on `selectedDeviceIpProvider`, which is only ever
+/// populated by `autoConnectControllerProvider`, whose sole watcher is
+/// `MainScaffold`. The installer wizard runs on the root navigator outside
+/// that shell, so both steps reported "No controller selected / connected" and
+/// offered nothing but Skip / Map later — the forced skip the owner reported.
+///
+/// Pure so the selection rule is testable without a container: prefer a
+/// selected controller that is known-online, else the first selected one with
+/// a non-empty IP. [statusById] is the step's live per-card probe result
+/// (`null` = not yet probed, which is NOT treated as offline).
+String? resolveInstallerControllerIp(
+  Iterable<ControllerInfo> controllers,
+  Set<String> selectedIds, {
+  Map<String, bool?> statusById = const {},
+}) {
+  final selected = [
+    for (final c in controllers)
+      if (selectedIds.contains(c.id) && c.ip.isNotEmpty) c,
+  ];
+  if (selected.isEmpty) return null;
+  for (final c in selected) {
+    if (statusById[c.id] == true) return c.ip;
+  }
+  return selected.first.ip;
+}
+
+/// [resolveInstallerControllerIp] over the live controllers stream. Null until
+/// the installer has selected a controller that carries an IP.
+final installerSelectedControllerIpProvider = Provider<String?>((ref) {
+  final controllers = ref.watch(controllersStreamProvider).maybeWhen(
+        data: (list) => list,
+        orElse: () => const <ControllerInfo>[],
+      );
+  final selected = ref.watch(installerSelectedControllersProvider);
+  return resolveInstallerControllerIp(controllers, selected);
+});
+
 /// Provider for linked controller IDs (Residential mode)
 final installerLinkedControllersProvider = StateProvider<Set<String>>((ref) => {});
 
@@ -855,4 +898,9 @@ void resetInstallerWizardState(WidgetRef ref) {
   ref.read(installerConnectionMethodSkippedProvider.notifier).state =
       const {};
   ref.read(rooflineCaptureProvider.notifier).reset();
+  // The wizard sets selectedDeviceIpProvider itself (see
+  // [installerSelectedControllerIpProvider]); clear it with the rest of the
+  // wizard state so a staff-session selection cannot leak into the next
+  // install or into the customer's dashboard.
+  ref.read(selectedDeviceIpProvider.notifier).state = null;
 }

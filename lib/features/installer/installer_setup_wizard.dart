@@ -147,6 +147,41 @@ bool staffTokenNeedsRefresh({
 }) =>
     !now.isBefore(authenticatedAt.add(safetyMargin));
 
+/// Thrown when the controller migration moved NOTHING although the installer
+/// had selected controllers for this install, and the customer's account does
+/// not already hold them.
+///
+/// P0 (residential path audit 2026-09-23 §9.1 item 3 / S6): the four
+/// "legitimate skip" reasons (`no-source-uid`, `same-uid`, `source-empty`,
+/// `no-match`) returned NORMALLY, so the wizard went on to show "Setup
+/// Complete" for a customer whose account had zero controllers. Production
+/// census: 2 of 23 primary users are in exactly that state.
+///
+/// Raised only after confirming the destination does NOT already hold every
+/// selected controller — that check is what keeps the retry path safe when a
+/// commit landed but the client never saw the acknowledgement.
+class ControllerMigrationEmptyException implements Exception {
+  const ControllerMigrationEmptyException({
+    required this.skipReason,
+    required this.selectedCount,
+    required this.presentAtDestination,
+  });
+
+  /// The [ControllerMigrationResult.skipReason] that produced no movement.
+  final String skipReason;
+
+  /// How many controllers the installer had ticked for this install.
+  final int selectedCount;
+
+  /// How many of those are already under the customer uid.
+  final int presentAtDestination;
+
+  @override
+  String toString() =>
+      'no controllers were transferred ($skipReason): $selectedCount selected, '
+      '$presentAtDestination already on the customer account';
+}
+
 /// Outcome of [migrateInstallerControllersToCustomer].
 ///
 /// A *failure* is not represented here — it throws. This distinguishes the
@@ -214,13 +249,40 @@ Future<ControllerMigrationResult> migrateInstallerControllersToCustomer({
   required String toUid,
   required Set<String> controllerIds,
 }) async {
+  /// A "nothing moved" outcome is only acceptable when the customer already
+  /// HAS every controller the installer selected — i.e. a prior attempt landed
+  /// (the client just never saw the ack), or the source and destination are the
+  /// same account. Anything else is a failed install being reported as a
+  /// finished one, so it throws for [_migrateControllersWithRetry] to surface.
+  Future<ControllerMigrationResult> assertNothingWasOwed(String reason) async {
+    if (controllerIds.isEmpty) {
+      // Legacy "migrate everything" call — no explicit expectation to check.
+      return ControllerMigrationResult(skipReason: reason);
+    }
+    final destCol =
+        firestore.collection('users').doc(toUid).collection('controllers');
+    final dest = await destCol.get();
+    final destIds = dest.docs.map((d) => d.id).toSet();
+    final present = controllerIds.where(destIds.contains).length;
+    if (present == controllerIds.length) {
+      debugPrint('Installer: nothing to migrate ($reason) — all '
+          '$present selected controller(s) already on $toUid');
+      return ControllerMigrationResult(skipReason: reason);
+    }
+    throw ControllerMigrationEmptyException(
+      skipReason: reason,
+      selectedCount: controllerIds.length,
+      presentAtDestination: present,
+    );
+  }
+
   if (fromUid == null || fromUid.isEmpty) {
     debugPrint('Installer: skipping controller migration — no source UID');
-    return const ControllerMigrationResult(skipReason: 'no-source-uid');
+    return assertNothingWasOwed('no-source-uid');
   }
   if (fromUid == toUid) {
     debugPrint('Installer: skipping controller migration — same UID');
-    return const ControllerMigrationResult(skipReason: 'same-uid');
+    return assertNothingWasOwed('same-uid');
   }
   {
     final sourceCol =
@@ -233,7 +295,7 @@ Future<ControllerMigrationResult> migrateInstallerControllersToCustomer({
       // Also the "retry after a commit that actually landed" case — the source
       // was drained by the successful commit the client never saw acknowledged.
       debugPrint('Installer: no controllers to migrate from $fromUid');
-      return const ControllerMigrationResult(skipReason: 'source-empty');
+      return assertNothingWasOwed('source-empty');
     }
 
     // Only migrate controllers from this installation session, so an admin's
@@ -245,7 +307,7 @@ Future<ControllerMigrationResult> migrateInstallerControllersToCustomer({
     if (docsToMigrate.isEmpty) {
       debugPrint('Installer: no matching controllers to migrate '
           '(${snapshot.docs.length} total, ${controllerIds.length} selected)');
-      return const ControllerMigrationResult(skipReason: 'no-match');
+      return assertNothingWasOwed('no-match');
     }
 
     // Read each controller's pixelMap subcollection BEFORE the batch (reads
@@ -793,6 +855,74 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     );
   }
 
+  /// Recovers an EXISTING customer account by email through the
+  /// `claimCustomerByEmail` callable, repairing it enough to be installable.
+  ///
+  /// P0 (residential path audit §9.1 item 4). The client-side lookup this
+  /// backs up can only see /users docs that already carry the installer's
+  /// dealer_code, because the staff read rule is caller-and-resource scoped on
+  /// that field. Everything else — self-registered customers, and the 32
+  /// production Auth accounts with no profile document at all — is invisible
+  /// to it, and the wizard dead-ended on "contact support".
+  ///
+  /// The callable stamps `dealer_code` only when it is ABSENT and writes the
+  /// skeleton profile only when `owner_id` is missing, so it cannot take a
+  /// customer from another dealer and cannot flatten a real profile.
+  ///
+  /// Returns the customer uid, or null after reporting the reason — in which
+  /// case the caller must return without completing the install.
+  Future<String?> _claimCustomerByEmail(String email) async {
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('claimCustomerByEmail');
+      final result =
+          await callable.call<Map<String, dynamic>>({'email': email});
+      final uid = result.data['uid'] as String?;
+      if (uid == null || uid.isEmpty) {
+        if (mounted) setState(() => _isProcessing = false);
+        _showError(
+          'Could not link that existing account. Double-check the email, then '
+          'contact support if it keeps failing.',
+        );
+        return null;
+      }
+      debugPrint('Installer: claimed existing account '
+          '(profileCreated=${result.data['profileCreated']}, '
+          'dealerCodeStamped=${result.data['dealerCodeStamped']})');
+      return uid;
+    } on FirebaseFunctionsException catch (e) {
+      if (mounted) setState(() => _isProcessing = false);
+      final String message;
+      switch (e.code) {
+        case 'not-found':
+          message =
+              'That email is already registered with Nex-Gen, but we could not '
+              'find the account. Double-check the spelling and try again.';
+          break;
+        case 'permission-denied':
+          message =
+              'That account belongs to another dealer. Contact support to '
+              'transfer it before continuing this install.';
+          break;
+        default:
+          message =
+              'Could not link that existing account (${e.code}). Check your '
+              'connection and retry, or contact support.';
+      }
+      debugPrint('Installer: claimCustomerByEmail failed (${e.code}) ${e.message}');
+      _showError(message);
+      return null;
+    } catch (e) {
+      debugPrint('Installer: claimCustomerByEmail failed: $e');
+      if (mounted) setState(() => _isProcessing = false);
+      _showError(
+        'Could not link that existing account. Check your connection and '
+        'retry, or contact support.',
+      );
+      return null;
+    }
+  }
+
   /// The controller migration, plus an installer-visible retry (P0-6).
   ///
   /// This runs AFTER `createUserWithEmailAndPassword`, so a failure here leaves
@@ -853,12 +983,23 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
           builder: (ctx) => AlertDialog(
             title: const Text("Controllers didn't transfer"),
             content: Text(
-              "The customer's account was created, but their controllers could "
-              'not be moved onto it ($e).\n\n'
-              'If you stop now they will sign in to an app with no lights. '
-              'Nothing has been lost — the controllers are still on this device '
-              "under your installer login — so check your connection and tap "
-              'Retry.',
+              // A "nothing was transferred" failure is not a connectivity
+              // problem, so it must not tell the installer to check their
+              // connection — same Retry/Stop shape, different cause, different
+              // fix (audit §9.1 item 3).
+              e is ControllerMigrationEmptyException
+                  ? "The customer's account was created, but NONE of the "
+                      'controllers you selected ended up on it ($e).\n\n'
+                      'If you stop now they will sign in to an app with no '
+                      'lights. Go back to Controller Setup, confirm the right '
+                      'controllers are ticked, then tap Retry — or tap Stop to '
+                      'report this install as failed.'
+                  : "The customer's account was created, but their controllers "
+                      'could not be moved onto it ($e).\n\n'
+                      'If you stop now they will sign in to an app with no '
+                      'lights. Nothing has been lost — the controllers are '
+                      'still on this device under your installer login — so '
+                      'check your connection and tap Retry.',
             ),
             actions: [
               TextButton(
@@ -1268,22 +1409,30 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
             if (existingQuery.docs.isEmpty) {
               // No customer matches both email AND dealer_code in this
-              // dealer's scope. Either a typo, a customer registered
-              // under a different dealer, or a self-registered customer
-              // with no dealer association — none of which the installer
-              // can resolve in-app today.
-              if (mounted) setState(() => _isProcessing = false);
-              _showError(
-                'No existing customer matches this email under your dealer code. '
-                'Double-check the email. If they\'re a Nex-Gen customer through '
-                'another dealer or self-registered without an installer, contact '
-                'support to associate them with your account before continuing.',
+              // dealer's scope. That does NOT mean the account is out of
+              // reach: the query can only see docs that already carry this
+              // dealer_code, so a self-registered customer, or one whose
+              // profile was never written because an earlier wizard run died
+              // after createUserWithEmailAndPassword, is invisible to it.
+              // Production census 2026-09-23: 32 email Auth accounts with no
+              // /users document at all.
+              //
+              // Fall through to the staff-claim callable, which looks the
+              // account up by email through the Admin SDK, stamps dealer_code
+              // when absent (it never reassigns another dealer's — the same
+              // transition firestore.rules:388-391 denies on the client) and
+              // writes the skeleton profile when the doc is missing or a stub.
+              final claimed = await _claimCustomerByEmail(
+                customerInfo.email.trim().toLowerCase(),
               );
-              return;
+              // _claimCustomerByEmail has already told the installer why.
+              if (claimed == null) return;
+              userId = claimed;
+              isExistingAccount = true;
+            } else {
+              userId = existingQuery.docs.first.id;
+              isExistingAccount = true;
             }
-
-            userId = existingQuery.docs.first.id;
-            isExistingAccount = true;
           } catch (queryError) {
             // Query itself failed (permission denied, network, etc.).
             // Do NOT silently create a placeholder — that orphans the

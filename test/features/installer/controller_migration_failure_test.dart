@@ -200,6 +200,16 @@ void main() {
         )).skipReason,
         'same-uid',
       );
+      // `no-match` is now only a clean skip when nothing was OWED — i.e. the
+      // customer already holds every selected controller. A no-match that
+      // leaves the customer short THROWS; see
+      // controller_migration_moved_nothing_test.dart (audit §9.1 item 3).
+      await db
+          .collection('users')
+          .doc(_customer)
+          .collection('controllers')
+          .doc('not-this-one')
+          .set({'ip': '192.168.1.173'});
       expect(
         (await migrateInstallerControllersToCustomer(
           firestore: db, fromUid: _staff, toUid: _customer,
@@ -207,9 +217,10 @@ void main() {
         )).skipReason,
         'no-match',
       );
-      // None of those touched anything.
+      // None of those MOVED or DELETED anything: the staff controller is
+      // still there and the customer holds only the doc seeded above.
       expect(await _controllerIds(db, _staff), [_ctrl]);
-      expect(await _controllerIds(db, _customer), isEmpty);
+      expect(await _controllerIds(db, _customer), ['not-this-one']);
     });
   });
 

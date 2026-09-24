@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -18,6 +19,14 @@ import 'package:nexgen_command/features/neighborhood/services/sync_notification_
 ///
 /// These tests drive the real `startAuthWatch()` path against fakes rather than
 /// asserting on code shape.
+///
+/// UPDATED 2026-09-23 (residential path audit §9.1 item 5). The token write is
+/// no longer allowed to CREATE `users/{uid}` — a merge-set that did was the
+/// mechanism behind 25 of 52 production /users documents being unparseable
+/// stubs. Each test below therefore seeds a real profile first; the property
+/// being pinned is unchanged ("a late sign-in stores the token"), and the new
+/// "must not create" half lives in
+/// test/features/neighborhood/fcm_never_creates_profile_test.dart.
 
 class _FakeUser implements User {
   @override
@@ -142,6 +151,19 @@ class _FakeFunctions implements FirebaseFunctions {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// The minimum profile `UserService.missingProfileKeys` accepts — the token
+/// write now requires an `owner_id` to land on.
+Future<void> _seedProfile(FakeFirebaseFirestore db, String uid) {
+  return db.collection('users').doc(uid).set({
+    'id': uid,
+    'owner_id': uid,
+    'email': '$uid@example.test',
+    'display_name': uid,
+    'created_at': Timestamp.now(),
+    'updated_at': Timestamp.now(),
+  });
+}
+
 SyncNotificationService _build({
   required FakeFirebaseFirestore firestore,
   required _FakeAuth auth,
@@ -169,6 +191,8 @@ void main() {
         messaging: messaging,
       );
 
+      await _seedProfile(firestore, 'u1');
+
       // Cold start: watcher armed while NOBODY is signed in.
       service.startAuthWatch();
       await Future<void>.delayed(Duration.zero);
@@ -178,7 +202,7 @@ void main() {
       expect(messaging.requestPermissionCalls, 0,
           reason: 'must not prompt for notifications before a user exists');
       final before = await firestore.collection('users').doc('u1').get();
-      expect(before.exists, isFalse);
+      expect(before.data()!.containsKey('fcmToken'), isFalse);
 
       // The user signs in later in the same session.
       auth.emitSignIn('u1');
@@ -188,7 +212,7 @@ void main() {
       // never written, because initialize() had already burned its flag.
       final after = await firestore.collection('users').doc('u1').get();
       expect(after.exists, isTrue,
-          reason: 'FCM token doc must be created on late sign-in');
+          reason: 'FCM token must be stored on late sign-in');
       expect(after.data()!['fcmToken'], 'tok-abc123');
       expect(after.data()!.containsKey('fcmTokenUpdatedAt'), isTrue);
 
@@ -209,6 +233,7 @@ void main() {
         messaging: messaging,
       );
 
+      await _seedProfile(firestore, 'u2');
       service.startAuthWatch();
       auth.emitSignIn('u2');
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -216,7 +241,7 @@ void main() {
       expect(messaging.requestPermissionCalls, greaterThan(0),
           reason: 'initialize() should have been attempted');
       final doc = await firestore.collection('users').doc('u2').get();
-      expect(doc.exists, isTrue,
+      expect(doc.data()!['fcmToken'], isNotNull,
           reason:
               'a throw inside initialize() must not prevent the token write');
       expect(doc.data()!['fcmToken'], 'tok-abc123');
@@ -236,6 +261,8 @@ void main() {
         messaging: messaging,
       );
 
+      await _seedProfile(firestore, 'first');
+      await _seedProfile(firestore, 'second');
       service.startAuthWatch();
 
       auth.emitSignIn('first');
@@ -247,10 +274,14 @@ void main() {
 
       // Both users must hold the token. The old idempotency flag would have
       // stopped after the first.
-      expect((await firestore.collection('users').doc('first').get()).exists,
-          isTrue);
-      expect((await firestore.collection('users').doc('second').get()).exists,
-          isTrue);
+      expect(
+          (await firestore.collection('users').doc('first').get())
+              .data()!['fcmToken'],
+          'tok-abc123');
+      expect(
+          (await firestore.collection('users').doc('second').get())
+              .data()!['fcmToken'],
+          'tok-abc123');
 
       await auth.close();
       service.dispose();
@@ -268,14 +299,18 @@ void main() {
         messaging: messaging,
       );
 
+      await _seedProfile(firestore, 'u3');
       service.startAuthWatch();
       auth.emitSignIn('u3');
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(messaging.getTokenCalls, greaterThan(0));
-      expect((await firestore.collection('users').doc('u3').get()).exists,
+      expect(
+          (await firestore.collection('users').doc('u3').get())
+              .data()!
+              .containsKey('fcmToken'),
           isFalse,
-          reason: 'a null token must not produce a document');
+          reason: 'a null token must not be written'); 
 
       await auth.close();
       service.dispose();
@@ -321,6 +356,7 @@ void main() {
         messaging: messaging,
       );
 
+      await _seedProfile(firestore, 'declines');
       service.startAuthWatch();
 
       // First sign-in: the user declines.
@@ -363,6 +399,8 @@ void main() {
         messaging: messaging,
       );
 
+      await _seedProfile(firestore, 'u4');
+      await _seedProfile(firestore, 'u5');
       service.startAuthWatch();
       auth.emitSignIn('u4');
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -373,10 +411,14 @@ void main() {
 
       expect(messaging.onTokenRefreshListens, 1,
           reason: 'stream listeners are attach-once');
-      expect((await firestore.collection('users').doc('u4').get()).exists,
-          isTrue);
-      expect((await firestore.collection('users').doc('u5').get()).exists,
-          isTrue,
+      expect(
+          (await firestore.collection('users').doc('u4').get())
+              .data()!['fcmToken'],
+          'tok-abc123');
+      expect(
+          (await firestore.collection('users').doc('u5').get())
+              .data()!['fcmToken'],
+          'tok-abc123',
           reason: 'the token re-stores under the second uid');
 
       await auth.close();
