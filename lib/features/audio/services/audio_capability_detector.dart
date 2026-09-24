@@ -146,18 +146,21 @@ class AudioCapabilityDetector {
 
   /// Fetch and decode JSON from [url]. Returns null on any failure.
   Future<dynamic> _fetchJson(String url) async {
+    // #111 — closed in `finally` so a timeout aborts the request instead of
+    // leaving the connection open on the controller.
+    final client = HttpClient()..connectionTimeout = _timeout;
     try {
-      final client = HttpClient()..connectionTimeout = _timeout;
       final req = await client.getUrl(Uri.parse(url));
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final res = await req.close().timeout(_timeout);
       final body = await res.transform(utf8.decoder).join();
-      client.close(force: true);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         return jsonDecode(body);
       }
     } catch (e) {
       debugPrint('AudioCapabilityDetector fetch $url failed: $e');
+    } finally {
+      client.close(force: true);
     }
     return null;
   }

@@ -516,18 +516,22 @@ Future<WledConfigPushResult> pushGammaConfig(
 /// the typed [WledService.getConfig] (which only parses `hw.led.*`).
 /// Returns null on any error.
 Future<Map<String, dynamic>?> _fetchRawConfig(String ip) async {
+  // #111 — close in `finally`: `close(force: true)` aborts an in-flight
+  // request, so a timeout no longer leaves the connection open on the
+  // controller (it used to close on the success path only).
+  final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
   try {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     final req = await client.getUrl(Uri.parse('http://$ip/json/cfg'));
     req.headers.set(HttpHeaders.acceptHeader, 'application/json');
     final res = await req.close().timeout(const Duration(seconds: 15));
     final body = await res.transform(utf8.decoder).join();
-    client.close(force: true);
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return jsonDecode(body) as Map<String, dynamic>;
     }
   } catch (e) {
     debugPrint('[WledConfig] _fetchRawConfig exception: $e');
+  } finally {
+    client.close(force: true);
   }
   return null;
 }
@@ -542,6 +546,10 @@ Future<WledConfigPushResult> _postConfig(
   String ip,
   Map<String, dynamic> data,
 ) async {
+  // #111 — closed in `finally`: `close(force: true)` aborts an in-flight
+  // request, so a timeout no longer leaves the connection open on the
+  // controller (it used to close on the success path only).
+  HttpClient? client;
   try {
     // GAMMA CHOKEPOINT — see [normalizeWledCfgPayload]. This is the install-time
     // cfg boundary (raw HTTP, no repository), so the hw.led bus rebuild, the
@@ -554,15 +562,13 @@ Future<WledConfigPushResult> _postConfig(
     debugPrint(
         '[WledConfig]   bytes=${bodyBytes.length} target=$ip');
 
-    final client =
-        HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     final req = await client.postUrl(Uri.parse('http://$ip/json/cfg'));
     req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
     req.contentLength = bodyBytes.length;
     req.add(bodyBytes);
     final res = await req.close().timeout(const Duration(seconds: 15));
     final resBody = await res.transform(utf8.decoder).join();
-    client.close(force: true);
 
     if (res.statusCode >= 200 && res.statusCode < 300) {
       debugPrint('[WledConfig] /json/cfg → ${res.statusCode} OK');
@@ -580,5 +586,7 @@ Future<WledConfigPushResult> _postConfig(
       success: false,
       errorMessage: 'Config push failed — $e',
     );
+  } finally {
+    client?.close(force: true);
   }
 }

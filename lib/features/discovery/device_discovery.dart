@@ -143,14 +143,15 @@ class DeviceDiscoveryService {
       for (int i = 1; i <= 254; i++) {
         final ip = '$subnet.$i';
         futures.add(() async {
+          // #111 — closed in `finally`: the 253 hosts that do not answer
+          // used to leak a client (and its pending connect) per scan.
+          final client = HttpClient()
+            ..connectionTimeout = const Duration(milliseconds: 800);
           try {
-            final client = HttpClient()
-              ..connectionTimeout = const Duration(milliseconds: 800);
             final req = await client.getUrl(Uri.parse('http://$ip/json/info'));
             final res = await req.close()
                 .timeout(const Duration(milliseconds: 800));
             final body = await res.transform(utf8.decoder).join();
-            client.close(force: true);
             if (res.statusCode == 200 && body.contains('WLED')) {
               results.add(DeviceEndpoint(
                 name: 'WLED @ $ip',
@@ -158,7 +159,10 @@ class DeviceDiscoveryService {
               ));
               debugPrint('Found WLED device at $ip');
             }
-          } catch (_) {}
+          } catch (_) {
+          } finally {
+            client.close(force: true);
+          }
         }());
 
         // Process in batches of 20
