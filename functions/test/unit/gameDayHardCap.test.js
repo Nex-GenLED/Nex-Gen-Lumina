@@ -48,6 +48,25 @@ describe("fallbackEndMs — the app's fallback bound", () => {
     }
   });
 
+  test("estimatedDurationMs matches the app's estimatedGameDuration for EVERY SportType", () => {
+    // game_day_autopilot_config.dart `estimatedGameDuration`, case for case.
+    // WNBA and soccer used to fall to the server's 3 h default — capping (and
+    // day-game skipping) on a different clock from the app's.
+    const APP = {
+      mlb: 3 * H,
+      nfl: 3.5 * H, ncaaFB: 3.5 * H,
+      nba: 2.5 * H, wnba: 2.5 * H, ncaaMB: 2.5 * H,
+      nhl: 2.5 * H,
+      mls: 2 * H, nwsl: 2 * H, fifa: 2 * H, championsLeague: 2 * H,
+    };
+    for (const [sport, ms] of Object.entries(APP)) {
+      expect([sport, estimatedDurationMs(sport)]).toEqual([sport, ms]);
+    }
+    // So the cap for a soccer match is 3 h after kick-off, as in the app.
+    expect(fallbackEndMs(T0, "mls")).toBe(T0 + 3 * H);
+    expect(fallbackEndMs(T0, "wnba")).toBe(T0 + 3.5 * H);
+  });
+
   test("the cap can never fire before GUARD 2's minimum plausible duration, for any sport", () => {
     for (const s of SPORTS) {
       const min = MIN_PLAUSIBLE_DURATION_MS[s] ?? MIN_PLAUSIBLE_DURATION_DEFAULT_MS;

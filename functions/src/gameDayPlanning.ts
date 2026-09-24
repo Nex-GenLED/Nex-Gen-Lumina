@@ -626,7 +626,17 @@ export function fallbackEndMs(gameStartMs: number, sport: string): number {
   return gameStartMs + estimatedDurationMs(sport) + FALLBACK_END_BUFFER_MS;
 }
 
-/** Estimated duration per sport, mirroring the client's `_estimatedDuration`. */
+/**
+ * Estimated duration per sport, mirroring the client's `estimatedGameDuration`
+ * (game_day_autopilot_config.dart) case for case.
+ *
+ * WNBA and the four soccer sports used to fall through to the 3 h default
+ * while the app used 2.5 h and 2 h. Three things read this number, and each
+ * disagreed with the app for those sports: the hard cap and the hierarchy
+ * window (`fallbackEndMs`) ended up to an hour later, and the `skip_day_games`
+ * filter (`isDaylightOnlyGame`) could fire a day game the app would skip.
+ * `default` is only reached by a sport the app cannot configure.
+ */
 export function estimatedDurationMs(sport: string): number {
   switch (sport) {
     case "nfl":
@@ -635,9 +645,15 @@ export function estimatedDurationMs(sport: string): number {
     case "mlb":
       return 3 * 3600_000;
     case "nba":
+    case "wnba":
     case "nhl":
     case "ncaaMB":
       return 2.5 * 3600_000;
+    case "mls":
+    case "nwsl":
+    case "fifa":
+    case "championsLeague":
+      return 2 * 3600_000;
     default:
       return 3 * 3600_000;
   }
