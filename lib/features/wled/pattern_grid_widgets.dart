@@ -242,7 +242,6 @@ class LibraryNodeCard extends StatelessWidget {
 
     // Architectural Kelvin folders
     if (id.startsWith('arch_k')) return Icons.thermostat_outlined;
-    if (id == 'arch_galaxy') return Icons.auto_awesome_outlined;
 
     // Movie franchise folders
     if (id == 'franchise_disney') return Icons.castle_outlined;
