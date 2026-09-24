@@ -613,8 +613,13 @@ describe("a postponed game, and a game that never reports final", () => {
     expect(payloadOf(f.job(`${RO}_end`))).toEqual({ ps: BASE_ON_PRESET });
   });
 
+  // WAS "…no end ever fires for #1 (unchanged: the server has no fallback end)".
+  // That title and its `endsPlanned 0` loop through 23:30 pinned the defect the
+  // hard cap fixes. Every assertion it made up to the Chiefs' bound (22:30) is
+  // kept; past the bound it now pins the cap, more tightly than before: the
+  // exact tick, the payload, the reason, once only, and #2 still suppressed.
   test("a #1 game that NEVER reports final holds the house for its window; the #2 end is suppressed; "
-    + "no end ever fires for #1 (unchanged: the server has no fallback end)", async () => {
+    + "then the HARD CAP ends #1 at its bound and restores base, once", async () => {
     const f = makeDb(seed({
       user: { game_day_team_priority: ["nfl_chiefs", "mlb_royals"] },
       configs: { mlb_royals: {}, nfl_chiefs: {} },
@@ -633,13 +638,170 @@ describe("a postponed game, and a game that never reports final", () => {
     expect(f.job(`${RO}_end`)).toBeUndefined();
     expect(r.endSkipped).toEqual({ "end:not_owner": 1 });
 
-    // ESPN never says final for the Chiefs. Tick past their window and beyond.
-    for (const [h, m] of [[21, 0], [22, 0], [22, 35], [23, 0], [23, 30]]) {
+    // ESPN never says final for the Chiefs. Inside their bound (18:00 + 3.5 h
+    // + 60 min = 22:30) nothing ends — the cap is not an early end — and AT
+    // the bound nothing ends either (strictly after, as the app's isAfter).
+    for (const [h, m] of [[21, 0], [22, 0], [22, 30]]) {
       r = await tick(f.db, at(h, m));
       expect(r.endsPlanned).toBe(0);
+      expect(r.hardCapsPlanned).toBe(0);
     }
     expect(f.job(`${CH}_end`)).toBeUndefined();
+
+    // The first tick past the bound: the cap fires. The Royals ended (yielded)
+    // at 20:10, so nobody is left to hand off to — the base restore.
+    r = await tick(f.db, at(22, 35));
+    expect(r.endsPlanned).toBe(1);
+    expect(r.hardCapsPlanned).toBe(1);
+    expect(r.handoffsPlanned).toBe(0);
+    const end = f.job(`${CH}_end`);
+    expect(payloadOf(end)).toEqual({ ps: BASE_ON_PRESET });
+    expect(end.fireAt.toMillis()).toBe(at(22, 35));
+    expect(end.handoffTo).toBeUndefined();
+    expect(rows(r, (x) => x.action === "plan_end")).toEqual([
+      expect.objectContaining({ eventId: CH, teamSlug: "nfl_chiefs", reason: "hard_cap" }),
+    ]);
+    expect(f.session(CH).endFiredAt).toBeDefined();
+
+    // Once per event.
+    for (const [h, m] of [[23, 0], [23, 30]]) {
+      r = await tick(f.db, at(h, m));
+      expect(r.endsPlanned).toBe(0);
+      expect(r.hardCapsPlanned).toBe(0);
+    }
+    // The #2 end the hierarchy suppressed stays suppressed.
     expect(f.job(`${RO}_end`)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE HARD CAP — a game ESPN never marks final ends at the app's fallback bound
+// ---------------------------------------------------------------------------
+describe("THE HARD CAP: a game ESPN never marks final ends at start + estimatedDuration + 60 min", () => {
+  const CH = ev("nfl_chiefs", "401");
+  const RO = ev("mlb_royals", "402");
+  const TH = ev("nba_thunder", "403");
+
+  test("one team stuck IN PROGRESS: base restored at the first tick past 22:30 — not before, not at", async () => {
+    const f = makeDb(seed({ configs: { nfl_chiefs: {} } }));
+    const g = games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    await tick(f.db, at(13));
+    f.dispatched(`${CH}_start`);
+    g.live("nfl_chiefs");
+    for (const [h, m] of [[19, 0], [21, 0], [22, 25], [22, 30]]) {
+      const r = await tick(f.db, at(h, m));
+      expect(r.endsPlanned).toBe(0);
+      expect(r.endSkipped).toEqual({});
+    }
+    const r = await tick(f.db, at(22, 35));
+    expect(r).toMatchObject({ endsPlanned: 1, hardCapsPlanned: 1, handoffsPlanned: 0, errors: 0 });
+    expect(payloadOf(f.job(`${CH}_end`))).toEqual({ ps: BASE_ON_PRESET });
+    const planEnd = rows(r, (x) => x.action === "plan_end")[0];
+    expect(planEnd.reason).toBe("hard_cap");
+    // A capped end is an ordinary end: same row shape as a confirmed final's.
+    expect(Object.keys(planEnd).sort()).toEqual(["action", "eventId", "fireAt", "reason", "teamSlug", "uid"]);
+  });
+
+  test("POSTPONED after the start fired — the real-world no-final case — is capped the same way", async () => {
+    const f = makeDb(seed({ configs: { mlb_royals: {} } }));
+    const g = games({ mlb_royals: { gameId: "402", startMs: at(19) } });
+    await tick(f.db, at(14));
+    f.dispatched(`${RO}_start`);                                  // lit at 18:30
+    g.set("mlb_royals", { statusName: "STATUS_POSTPONED" });      // called off
+    for (const [h, m] of [[18, 45], [21, 0], [23, 0]]) {
+      expect((await tick(f.db, at(h, m))).endsPlanned).toBe(0);
+    }
+    const r = await tick(f.db, at(23, 5));                        // 19:00 + 3 h + 60 min = 23:00
+    expect(r.hardCapsPlanned).toBe(1);
+    expect(payloadOf(f.job(`${RO}_end`))).toEqual({ ps: BASE_ON_PRESET });
+  });
+
+  test("#1 capped while a LOWER, lit team still plays → the house is HANDED OFF, not left in #1's colours", async () => {
+    const f = makeDb(seed({
+      user: { game_day_team_priority: ["nba_thunder", "nfl_chiefs"] },
+      configs: { nba_thunder: {}, nfl_chiefs: {} },
+    }));
+    const g = games({
+      nfl_chiefs: { gameId: "401", startMs: at(18) },         // #2, window 17:30 → 22:30
+      nba_thunder: { gameId: "403", startMs: at(18, 30) },    // #1, window 18:00 → 22:00
+    });
+    await tick(f.db, at(13));
+    // The Chiefs are alone at 17:30; the Thunder preempt at 18:00. Both lit.
+    expect(f.job(`${CH}_start`)).toBeDefined();
+    expect(f.job(`${TH}_start`)).toBeDefined();
+    f.dispatched(`${CH}_start`); f.dispatched(`${TH}_start`);
+    g.live("nfl_chiefs"); g.live("nba_thunder");
+
+    expect((await tick(f.db, at(22, 0))).endsPlanned).toBe(0);   // AT the Thunder bound
+    const r = await tick(f.db, at(22, 5));
+    expect(r).toMatchObject({ endsPlanned: 1, hardCapsPlanned: 1, handoffsPlanned: 1 });
+    // NOT end:not_owner. Asked "who owns the house now?", the closed Thunder
+    // window no longer counts and the Chiefs read as owner — the Thunder end
+    // would be suppressed and Thunder colours left over the Chiefs game.
+    expect(r.endSkipped).toEqual({});
+    const end = f.job(`${TH}_end`);
+    expect(firstColor(end)).toEqual(RGB.nfl_chiefs);
+    expect(payloadOf(end).ps).toBeUndefined();
+    expect(end.handoffTo).toBe(CH);
+    expect(rows(r, (x) => x.action === "plan_end")[0]).toMatchObject({ reason: "hard_cap", handoffTo: "nfl_chiefs" });
+    // The Chiefs lit their own start; that job still confirms them.
+    expect(f.session(CH).startJobId).toBeUndefined();
+    expect(f.session(CH).handedOffFrom).toBe(TH);
+
+    // …and the Chiefs, never final either, are capped at THEIR bound: base.
+    f.dispatched(`${TH}_end`);
+    expect((await tick(f.db, at(22, 30))).endsPlanned).toBe(0);
+    const r2 = await tick(f.db, at(22, 35));
+    expect(r2).toMatchObject({ endsPlanned: 1, hardCapsPlanned: 1, handoffsPlanned: 0 });
+    expect(payloadOf(f.job(`${CH}_end`))).toEqual({ ps: BASE_ON_PRESET });
+  });
+
+  test("#2 capped while the lit #1 still plays → suppressed (not_owner); the house stays with #1", async () => {
+    const f = makeDb(seed({
+      user: { game_day_team_priority: ["nfl_chiefs", "nba_thunder"] },
+      configs: { nba_thunder: {}, nfl_chiefs: {} },
+    }));
+    const g = games({
+      nfl_chiefs: { gameId: "401", startMs: at(18) },         // #1, window 17:30 → 22:30
+      nba_thunder: { gameId: "403", startMs: at(17) },        // #2, window 16:30 → 20:30
+    });
+    await tick(f.db, at(12));
+    f.dispatched(`${CH}_start`); f.dispatched(`${TH}_start`);
+    g.live("nfl_chiefs"); g.live("nba_thunder");
+
+    const r = await tick(f.db, at(20, 35));
+    expect(r.endsPlanned).toBe(0);
+    expect(r.hardCapsPlanned).toBe(0);
+    expect(r.endSkipped).toEqual({ "end:not_owner": 1 });
+    expect(f.job(`${TH}_end`)).toBeUndefined();
+    expect(f.session(TH)).toMatchObject({ endOutcome: "not_owner", endYieldedTo: CH });
+    expect(rows(r, (x) => x.reason === "end_suppressed_not_owner")[0].owner).toBe("nfl_chiefs");
+  });
+
+  test("GUARD 0b still applies: a start that never reached the device is not 'ended' by the cap", async () => {
+    const f = makeDb(seed({ configs: { nfl_chiefs: {} } }));
+    const g = games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    await tick(f.db, at(13));                                     // written, never dispatched
+    g.live("nfl_chiefs");
+    const r = await tick(f.db, at(22, 35));
+    expect(r.endsPlanned).toBe(0);
+    expect(r.hardCapsPlanned).toBe(0);
+    expect(r.endSkipped).toEqual({ "end:start_never_dispatched": 1 });
+    expect(f.job(`${CH}_end`)).toBeUndefined();
+  });
+
+  test("an account the planner never lit (log-only) is never capped — GUARD 0 holds at tick level", async () => {
+    const f = makeDb(seed({ configs: { nfl_chiefs: {} } }));
+    const g = games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    const logOnly = (t) => runPlannerTick(f.db, t, { forcePolicy: { enabled: false, allowlist: null } });
+    await logOnly(at(13));
+    g.live("nfl_chiefs");
+    const r = await logOnly(at(23, 0));
+    expect(r.endsPlanned).toBe(0);
+    expect(r.hardCapsPlanned).toBe(0);
+    expect(r.endSkipped).toEqual({ "end:no_start": 1 });
+    expect(f.job(`${CH}_end`)).toBeUndefined();
+    expect(f.session(CH)).toBeUndefined();
   });
 });
 

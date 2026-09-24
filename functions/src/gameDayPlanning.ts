@@ -77,6 +77,14 @@ export const MIN_PLAUSIBLE_DURATION_MS: Record<string, number> = {
 };
 export const MIN_PLAUSIBLE_DURATION_DEFAULT_MS = 1.5 * 3600_000;
 
+/**
+ * The buffer past a game's estimated duration after which it is over whether
+ * or not ESPN ever says so. The app's own number: its liveGame fallback moves a
+ * session to postGame once `now.isAfter(gameStart + estimatedDuration + 60 min)`
+ * (game_day_autopilot_service.dart, "FALLBACK timer"). See `fallbackEndMs`.
+ */
+export const FALLBACK_END_BUFFER_MS = 60 * 60_000;
+
 /** Serialized payload ceiling for a single fire command. */
 export const MAX_FIRE_PAYLOAD_BYTES = 4096;
 
@@ -312,6 +320,45 @@ export interface EndSignalDecision {
 }
 
 /**
+ * The end decision: ESPN's final behind its guards, then the HARD CAP.
+ *
+ * THE CAP. A game ESPN never marks final — postponed after the start fired,
+ * suspended, or a feed that simply stops updating — used to hold the house in
+ * team colours indefinitely: `not_final` every tick, forever, and the only way
+ * back was the everyday schedule's next boundary. The app never had this hole:
+ * its liveGame fallback declares the game over at start + estimatedDuration +
+ * 60 min. The planner now does the same, at the same instant, and the end that
+ * follows is an ordinary end — the ownership check, the hand-off, and the base
+ * restore all run exactly as they do for a confirmed final.
+ *
+ * WHAT THE CAP DOES NOT BYPASS. It is evaluated only after GUARD 0 (`no_start`)
+ * and GUARD 3 (`already_fired`), so it can never end a show this system did not
+ * start, and never fires twice. It needs a known `gameStartMs`, so a session
+ * with no start time refuses rather than assuming one. GUARD 0b (the start job
+ * reached the device) is the caller's, and applies to a capped end unchanged.
+ *
+ * STRICTLY AFTER the bound, as the app's `isAfter` is. When ESPN's final path
+ * would fire anyway it wins the label (`confirmed_final`); `hard_cap` names only
+ * the ends that ESPN never confirmed, so the log counts how often the feed let a
+ * game run out.
+ */
+export function decideEndSignal(args: {
+  espnIsFinal: boolean;
+  state: EndSignalState;
+  sport: string;
+  nowMs: number;
+}): EndSignalDecision {
+  const d = decideEndSignalFromEspn(args);
+  if (d.fireEnd || d.reason === "no_start" || d.reason === "already_fired") return d;
+  const startMs =
+    typeof args.state.gameStartMs === "number" ? args.state.gameStartMs : null;
+  if (startMs !== null && args.nowMs > fallbackEndMs(startMs, args.sport)) {
+    return { fireEnd: true, reason: "hard_cap", nextConsecutive: d.nextConsecutive };
+  }
+  return d;
+}
+
+/**
  * The three mandatory guards, evaluated together.
  *
  * All three read PERSISTED state, never function-local variables. Cloud
@@ -320,7 +367,7 @@ export interface EndSignalDecision {
  * `endFiredAt` marker is what makes "never more than once per event" survive a
  * retry — S3's deterministic command id protects the transport, not the plan.
  */
-export function decideEndSignal(args: {
+function decideEndSignalFromEspn(args: {
   espnIsFinal: boolean;
   state: EndSignalState;
   sport: string;
@@ -566,6 +613,17 @@ export function baseRestorePayload(args: {
     preset: isDark ? BASE_ON_PRESET : BASE_OFF_PRESET,
     basis: isDark ? "after_sunset" : "daylight",
   };
+}
+
+/**
+ * When a game is over if ESPN never says so: start + estimatedDuration +
+ * FALLBACK_END_BUFFER_MS. The app's liveGame fallback bound, and the one
+ * number both the hard cap (`decideEndSignal`) and the hierarchy's "still
+ * playing" window (`gameDayHierarchy.windowEndMs`) read, so a game stops
+ * owning the house at the same instant its end fires.
+ */
+export function fallbackEndMs(gameStartMs: number, sport: string): number {
+  return gameStartMs + estimatedDurationMs(sport) + FALLBACK_END_BUFFER_MS;
 }
 
 /** Estimated duration per sport, mirroring the client's `_estimatedDuration`. */

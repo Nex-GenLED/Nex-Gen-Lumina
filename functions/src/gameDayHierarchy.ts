@@ -42,7 +42,7 @@
  *           BASE (baseRestorePayload). The server is right and is unchanged.
  */
 
-import { DEFAULT_LEAD_MINUTES, estimatedDurationMs } from "./gameDayPlanning";
+import { DEFAULT_LEAD_MINUTES, fallbackEndMs } from "./gameDayPlanning";
 
 // ---------------------------------------------------------------------------
 // Lead time — DEFECT 2
@@ -199,9 +199,13 @@ export const DEAD_STATUSES: ReadonlySet<string> = new Set([
   "STATUS_CANCELLED",
 ]);
 
-/** The app's fallback end: estimated duration plus a 60-minute buffer. */
+/**
+ * The app's fallback end: estimated duration plus a 60-minute buffer. The same
+ * bound the hard cap fires at (`fallbackEndMs`), so a game stops owning the
+ * house at the instant its capped end is due.
+ */
 export function windowEndMs(gameStartMs: number, sport: string): number {
-  return gameStartMs + estimatedDurationMs(sport) + 60 * 60_000;
+  return fallbackEndMs(gameStartMs, sport);
 }
 
 /** "Still playing" at `t`: the lead window has opened and nothing has ended it. */
@@ -234,6 +238,36 @@ export function ownerAt(windows: TeamWindow[], t: number): TeamWindow | null {
   let best: TeamWindow | null = null;
   for (const w of windows) {
     if (!isOpenAt(w, t) || !w.startPlanned) continue;
+    if (best === null || outranks(w, best)) best = w;
+  }
+  return best;
+}
+
+/**
+ * The END's ownership question: is a lit team that OUTRANKS `self` still
+ * playing at `t`? Then `self`'s design is not what is on the house, and its end
+ * must not touch it. Null means `self` holds the house and its end may hand
+ * off or restore.
+ *
+ * Asked about `self` directly rather than through `ownerAt(t) === self`, and
+ * the difference is the hard cap. The two agree whenever `self` is itself open
+ * — every confirmed final, since `decideEndSignal` caps the first tick after
+ * the bound. They disagree once `self`'s own window has closed: `ownerAt` no
+ * longer counts it, so a LOWER lit team still playing would read as the owner
+ * and the capped #1's end would be suppressed — its colours left over the #2
+ * game with nothing to hand the house back. The app hands off there
+ * (fallback → postGame → handoffWinner), and so does this.
+ */
+export function outrankedBy(
+  windows: TeamWindow[],
+  self: TeamWindow,
+  t: number
+): TeamWindow | null {
+  let best: TeamWindow | null = null;
+  for (const w of windows) {
+    if (w.eventId === self.eventId) continue;
+    if (!isOpenAt(w, t) || !w.startPlanned) continue;
+    if (!outranks(w, self)) continue;
     if (best === null || outranks(w, best)) best = w;
   }
   return best;
