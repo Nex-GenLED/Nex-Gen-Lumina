@@ -1,0 +1,30 @@
+// Lumina ESP32 Bridge — OTA signing PUBLIC key — TEMPLATE
+//
+// The bridge installs an OTA image only if the manifest's signature verifies
+// against this key (ECDSA P-256, SHA-256). Only the PUBLIC key goes here.
+//
+//   src/ota_pubkey.h        production key — the esp32dev (release) env
+//   src/ota_pubkey_bench.h  bench key      — the esp32dev-bench* envs
+//
+// Two different keys on purpose: an image signed with the bench key can never
+// install on a fielded bridge.
+//
+// Generate a key pair with:
+//   python tools/sign_firmware.py keygen --private <OUTSIDE-THE-REPO>/lumina-ota-prod.pem \
+//          --header src/ota_pubkey.h
+//
+// The PRIVATE key never enters this repository (the repo is public) and never
+// sits on a machine that also runs untrusted code; keep an offline backup.
+// Losing it means the fleet can only be updated by another USB visit.
+//
+// A public key is not secret, so the generated header may be committed.
+
+#ifndef OTA_PUBKEY_H
+#define OTA_PUBKEY_H
+
+#define OTA_SIGNING_PUBKEY_PEM \
+  "-----BEGIN PUBLIC KEY-----\n" \
+  "REPLACE-WITH-THE-GENERATED-KEY\n" \
+  "-----END PUBLIC KEY-----\n"
+
+#endif  // OTA_PUBKEY_H

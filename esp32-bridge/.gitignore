@@ -3,3 +3,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Private keys never belong in this (public) repository. OTA public-key
+# headers (src/ota_pubkey*.h) may be committed.
+*.pem
+*.key

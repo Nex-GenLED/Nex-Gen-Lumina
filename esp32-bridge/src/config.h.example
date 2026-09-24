@@ -24,9 +24,12 @@
 // This is the UID from Firebase Authentication for the home owner
 #define FIREBASE_USER_UID "USER_UID_HERE"
 
-// Firebase Auth credentials for the bridge's own Firebase account.
-// The bridge signs in with these to get an ID token for authenticated
-// Firestore access. Create this account in Firebase Console > Authentication.
+// LEGACY shared bridge account. Firmware 1.3.0+ signs in as the bridge's OWN
+// account (bridge_<deviceId>), delivered over USB by
+// tools/provision_bridge_serial.py and kept in NVS; these two values are only
+// the fallback while the fleet migrates. Build with
+// -DBRIDGE_LEGACY_SHARED_AUTH=0 once the migration is done — the values are
+// then left out of the image entirely.
 #define FIREBASE_AUTH_EMAIL    "bridge@example.local"
 #define FIREBASE_AUTH_PASSWORD "PASSWORD_HERE"
 
@@ -68,6 +71,18 @@
 
 // LED pin for status indication (built-in LED on most ESP32 dev boards)
 #define STATUS_LED_PIN 2
+
+// ============================================================================
+// 1.3.0 tunables (optional — main.cpp has these defaults)
+// ============================================================================
+// #define BRIDGE_LOOP_WDT_TIMEOUT_S   180      // hardware task watchdog
+// #define BRIDGE_PROGRESS_TIMEOUT_MS  300000UL // no successful poll → restart
+// #define BRIDGE_BOOT_DEADLINE_MS     600000UL // setup() must finish by then
+// #define HEARTBEAT_POLL_FRESH_MS     90000UL  // heartbeat only while polling works
+// #define TB_FOLLOWUP_DELAY_MS        300      // Sync timebase follow-up POST
+// #define SNTP_SYNC_INTERVAL_MS       900000UL // clock re-sync for the timebase
+// #define OTA_CHANNEL                 "stable" // bridge_firmware/{channel}
+// #define BRIDGE_LEGACY_SHARED_AUTH   1        // 0 at the end of the migration
 
 // ============================================================================
 // Debug Configuration

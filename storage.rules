@@ -70,5 +70,18 @@ service firebase.storage {
       // purgeUserAccount callable sweeps the prefix server-side.
       allow delete: if isOwner(userId);
     }
+
+    // Lumina Bridge OTA images (bridge firmware 1.3.0+). Read only by bridge
+    // identities — the legacy shared account while the per-bridge migration
+    // runs, and Admin-created bridge_<deviceId> accounts. Written only by
+    // the Admin SDK (esp32-bridge/tools/publish_firmware.js). The bridge
+    // downloads with its ID token and checks the manifest signature and the
+    // image SHA-256; it never uses a download-token URL.
+    match /bridge-firmware/{allPaths=**} {
+      allow read: if request.auth != null &&
+                  (request.auth.token.get('email', '') == 'bridge@nex-genled.com' ||
+                   request.auth.uid.matches('bridge_[0-9A-F]{12}'));
+      allow write: if false;
+    }
   }
 }

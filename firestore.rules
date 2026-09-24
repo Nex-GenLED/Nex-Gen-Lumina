@@ -93,10 +93,26 @@ service cloud.firestore {
     // for a given user. The bridge authenticates with its own Firebase account
     // (e.g. bridge@lumina.local) whose email is stored in the user doc during
     // pairing. This grants the bridge read/write on commands and bridge_status.
+    //
+    // Bridge firmware 1.3.0+ signs in as its OWN account (uid
+    // bridge_<deviceId>, email bridge-<deviceid>@bridges.nex-genled.com,
+    // created only by the Admin SDK at provisioning). This rule is
+    // unchanged: the app records whichever email the bridge reports, so a
+    // per-bridge email here delegates this user's queue to that one bridge.
     function isBridgeForUser(userId) {
       return request.auth != null &&
              exists(/databases/$(database)/documents/users/$(userId)) &&
              get(/databases/$(database)/documents/users/$(userId)).data.bridge_email == request.auth.token.email;
+    }
+
+    // Any Lumina Bridge identity: the legacy shared account (removed at the
+    // end of the per-bridge migration) or an Admin-created per-bridge
+    // account. Client sign-up cannot choose a uid, so the uid pattern
+    // cannot be claimed by a user account.
+    function isBridgeIdentity() {
+      return request.auth != null &&
+             (request.auth.token.get('email', '') == 'bridge@nex-genled.com' ||
+              request.auth.uid.matches('bridge_[0-9A-F]{12}'));
     }
 
     // SECURITY: Prevent tampering with critical fields
@@ -752,12 +768,22 @@ service cloud.firestore {
     // ── Bridge Registry (self-registration for Lumina ESP32 bridges) ──
     // The bridge writes /bridge_registry/{deviceId} on boot so the app
     // can discover and pair it via Firestore — no mDNS or local IP needed.
-    // The bridge authenticates as bridge@nex-genled.com (single shared
-    // account; per-bridge accounts are tracked as a future improvement).
+    // Firmware <= 1.2 authenticates as bridge@nex-genled.com (single shared
+    // account, which can write ANY registry doc). Firmware 1.3.0+ with a
+    // provisioned credential authenticates as bridge_<deviceId> and can
+    // write ONLY its own doc. The shared branch is removed at the end of
+    // the per-bridge migration (bridge-firmware-plan, phase R3).
     match /bridge_registry/{deviceId} {
       function isBridge() {
         return request.auth != null &&
                request.auth.token.email == 'bridge@nex-genled.com';
+      }
+
+      // Per-bridge identity writing its own document. Admin-created uid;
+      // client sign-up cannot choose it.
+      function isThisBridge() {
+        return request.auth != null &&
+               request.auth.uid == 'bridge_' + deviceId;
       }
 
       // 2026-05-27: Two bridges in the field have stale NVS pointing
@@ -793,16 +819,17 @@ service cloud.firestore {
       // Only the bridge can create its own registration doc, and the
       // incoming doc must not carry the blocked pairedUid (see
       // isNotBlockedDeletedUid above — temporary).
-      allow create: if isBridge() && isNotBlockedDeletedUid();
+      allow create: if (isBridge() || isThisBridge()) && isNotBlockedDeletedUid();
 
       // Two write paths:
-      //   (a) the bridge updates anything on its own doc, or
+      //   (a) the bridge updates anything on its own doc (the shared
+      //       account: any doc; a per-bridge account: its own only), or
       //   (b) a user requests pairing by writing pendingUid=their uid
       //       — but only when the bridge is unpaired, so a malicious
       //       user can't yank a bridge that's already in service.
       // Both paths are further gated on isNotBlockedDeletedUid (the
       // incoming doc must not carry the blocked pairedUid).
-      allow update: if (isBridge() ||
+      allow update: if (isBridge() || isThisBridge() ||
         (request.auth != null &&
          resource.data.status == 'unpaired' &&
          request.resource.data.pendingUid == request.auth.uid))
@@ -812,6 +839,18 @@ service cloud.firestore {
       // (Console / admin-SDK deletes bypass rules, so the orphan doc can
       // still be cleaned up from the Firebase Console.)
       allow delete: if false;
+    }
+
+    // ── Bridge firmware OTA manifests (bridge firmware 1.3.0+) ──
+    // One doc per channel ("stable", "beta", "bench"): version, url, size,
+    // sha256, sig, devices[], minVersion, enabled. Written only by the Admin
+    // SDK (esp32-bridge/tools/publish_firmware.js). Read only by bridge
+    // identities — the image it points to still carries the legacy shared
+    // credential while the migration runs. The bridge trusts the signature,
+    // not this document: a manifest without a valid signature is refused.
+    match /bridge_firmware/{channel} {
+      allow read: if isBridgeIdentity();
+      allow write: if false;
     }
 
     // ── Referral Codes (reverse lookup: code → uid) ──
