@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/autopilot/habit_learner.dart';
+import 'package:nexgen_command/features/favorites/favorites_load_guard.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -56,50 +59,115 @@ List<FavoritePattern> _buildWhiteSlots(Ref ref) {
   ];
 }
 
-/// Stream of user's favorite patterns.
-/// Slots 1-2 are always the user's preferred whites (permanently reserved).
-/// Slots 3+ are user favorites sorted by usage/recency.
-final favoritePatternsProvider = StreamProvider.autoDispose<List<FavoritePattern>>((ref) async* {
-  // Watch white preferences so favorites update when whites change
-  final whiteSlots = _buildWhiteSlots(ref);
+/// Slots 1-2 of My Favorites: the user's preferred whites, permanently
+/// reserved. Built locally (defaults until the profile carries preferences),
+/// so this row renders at once and never waits on Firestore.
+final favoriteWhiteSlotsProvider =
+    Provider.autoDispose<List<FavoritePattern>>((ref) => _buildWhiteSlots(ref));
 
+/// Where the signed-in account's OWN profile stands.
+enum ProfileProvisioning {
+  /// The profile stream has not produced anything yet (cold start).
+  loading,
+
+  /// No document, a document that does not parse yet, or no `owner_id` — the
+  /// first-login window before the installer's profile write or the
+  /// server-side healer lands.
+  notProvisioned,
+
+  /// Parses and carries a non-empty `owner_id`, the field `firestore.rules`
+  /// `isProvisionedUser()` keys on.
+  provisioned,
+}
+
+/// [ProfileProvisioning] for the signed-in account.
+///
+/// `select`, so this rebuilds only when the answer changes. The favorites
+/// listen used to rebuild on every emission of the profile stream (through
+/// the white slots), i.e. on every write to `users/{uid}` — dozens per second
+/// during the build-107 repair loop — and each rebuild threw away the pending
+/// listen and started a new one.
+final ownProfileProvisioningProvider =
+    Provider.autoDispose<ProfileProvisioning>((ref) {
+  return ref.watch(currentUserProfileProvider.select((profile) {
+    if (!profile.hasValue) {
+      return profile.hasError
+          ? ProfileProvisioning.notProvisioned
+          : ProfileProvisioning.loading;
+    }
+    return (profile.value?.ownerId ?? '').isNotEmpty
+        ? ProfileProvisioning.provisioned
+        : ProfileProvisioning.notProvisioned;
+  }));
+});
+
+/// Slots 3+ of My Favorites: the customer's saved favorites, manual first,
+/// then most recently used, then most used.
+///
+/// Never hangs:
+///   • signed out → `[]`;
+///   • the signed-in account's own profile not provisioned yet (first login,
+///     before the installer's profile write or the server-side healer lands)
+///     → `[]` without subscribing — My Favorites shows its empty state;
+///   • the profile still loading → loading, but under the same deadline: a
+///     profile that never arrives ends in the Retry state, not a spinner;
+///   • otherwise the Firestore listen must produce its first snapshot within
+///     [favoritesLoadTimeoutProvider], or the listen is cancelled and the
+///     provider errors (My Favorites shows Retry).
+final userFavoritePatternsProvider =
+    StreamProvider.autoDispose<List<FavoritePattern>>((ref) {
   // Effective UID — respects installer impersonation via the
   // existing-customer flow.
   final uid = ref.watch(effectiveUserUidProvider);
-  if (uid == null) {
-    yield whiteSlots;
-    return;
+  if (uid == null) return Stream.value(const <FavoritePattern>[]);
+
+  // An installer viewing a customer reads THAT customer's favorites; this
+  // session's own profile says nothing about whether theirs is provisioned.
+  final viewingCustomer =
+      (ref.watch(installerAccessingCustomerProvider) ?? '').isNotEmpty;
+  final timeout = ref.watch(favoritesLoadTimeoutProvider);
+  if (!viewingCustomer) {
+    switch (ref.watch(ownProfileProvisioningProvider)) {
+      case ProfileProvisioning.notProvisioned:
+        return Stream.value(const <FavoritePattern>[]);
+      case ProfileProvisioning.loading:
+        // Rebuilt (and this stream dropped) the moment the profile arrives.
+        return firstEventWithin(
+          StreamController<List<FavoritePattern>>().stream,
+          timeout,
+        );
+      case ProfileProvisioning.provisioned:
+        break;
+    }
   }
 
   final userService = ref.watch(userServiceProvider);
-  await for (final favoritesData in userService.streamFavorites(uid)) {
-    final userFavorites = favoritesData
-        .map((data) => FavoritePattern.fromJson(data))
-        .toList();
-
-    // Sort user favorites by usage and recency
-    userFavorites.sort((a, b) {
-      // Manual favorites first
-      if (a.autoAdded != b.autoAdded) {
-        return a.autoAdded ? 1 : -1;
-      }
-      // Then by last used (most recent first)
-      if (a.lastUsed != null && b.lastUsed != null) {
-        return b.lastUsed!.compareTo(a.lastUsed!);
-      }
-      // Then by usage count
-      return b.usageCount.compareTo(a.usageCount);
-    });
-
-    // Reserved white slots first, then user favorites
-    final combined = <FavoritePattern>[
-      ...whiteSlots,
-      ...userFavorites,
-    ];
-
-    yield combined;
-  }
+  return firstEventWithin(
+    userService.streamFavorites(uid).map(sortUserFavorites),
+    timeout,
+  );
 });
+
+/// Parses and orders the stored favorites for My Favorites.
+@visibleForTesting
+List<FavoritePattern> sortUserFavorites(
+    List<Map<String, dynamic>> favoritesData) {
+  final userFavorites =
+      favoritesData.map((data) => FavoritePattern.fromJson(data)).toList();
+  userFavorites.sort((a, b) {
+    // Manual favorites first
+    if (a.autoAdded != b.autoAdded) {
+      return a.autoAdded ? 1 : -1;
+    }
+    // Then by last used (most recent first)
+    if (a.lastUsed != null && b.lastUsed != null) {
+      return b.lastUsed!.compareTo(a.lastUsed!);
+    }
+    // Then by usage count
+    return b.usageCount.compareTo(a.usageCount);
+  });
+  return userFavorites;
+}
 
 /// Notifier for managing favorites
 class FavoritesNotifier extends AutoDisposeAsyncNotifier<void> {

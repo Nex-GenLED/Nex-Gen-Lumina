@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -17,7 +19,35 @@ class AuthStateListenable extends ChangeNotifier {
   }
 }
 
+/// Upper bound on any Firestore round trip [appRedirect] waits for.
+///
+/// GoRouter awaits the redirect before EVERY navigation, including a tab tap.
+/// An unbounded `get()` — or a `set()`, whose Future only completes when the
+/// server acknowledges it, i.e. never while offline — therefore froze all
+/// navigation whenever the Firestore client was backed up. That is how the
+/// build-107 profile-repair write loop (see
+/// `UserService.decideProfileSnapshot`) made the nav bar unreachable. Every
+/// such wait is now bounded; a timeout falls into each call site's existing
+/// error arm, which already continues rather than blocks.
+const Duration kRedirectFirestoreTimeout = Duration(seconds: 8);
+
+/// Reads `users/{uid}` for [appRedirect], bounded by
+/// [kRedirectFirestoreTimeout]. Throws [TimeoutException] when the read does
+/// not come back in time; every caller already catches.
+Future<DocumentSnapshot<Map<String, dynamic>>> _readUserDocForRedirect(
+    String uid) {
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .get()
+      .timeout(kRedirectFirestoreTimeout);
+}
+
 /// Creates an unlinked user profile for new Firebase Auth users.
+///
+/// The redirect awaits this, so the wait is bounded by
+/// [kRedirectFirestoreTimeout]. On timeout the write is still queued in the
+/// Firestore client and lands when the connection recovers.
 Future<void> createUnlinkedUserProfile(User user) async {
   // Reviewer account never gets an unlinked skeleton — it gets its full
   // demo profile written by ReviewerSeedService.seedForUser(). Gating
@@ -38,7 +68,7 @@ Future<void> createUnlinkedUserProfile(User user) async {
         'welcome_completed': false,
       }),
       SetOptions(merge: true),
-    );
+    ).timeout(kRedirectFirestoreTimeout);
     debugPrint('Created unlinked user profile for ${user.uid}');
   } catch (e) {
     debugPrint('Error creating unlinked user profile: $e');
@@ -168,10 +198,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   final isForcedResetRoute =
       state.matchedLocation == AppRoutes.forcedPasswordReset;
   try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    final userDoc = await _readUserDocForRedirect(user.uid);
     if (userDoc.exists) {
       final mustReset =
           userDoc.data()?['must_reset_password'] as bool? ?? false;
@@ -194,10 +221,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   if (isAuthRoute) {
     // Check if user has installation access
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final userDoc = await _readUserDocForRedirect(user.uid);
 
       if (hasProvisionedProfile(userDoc)) {
         final data = userDoc.data()!;
@@ -239,10 +263,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
   // First-run check: redirect to onboarding if welcomeCompleted == false
   try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    final userDoc = await _readUserDocForRedirect(user.uid);
     if (userDoc.exists) {
       final data = userDoc.data()!;
       final welcomeCompleted = data['welcome_completed'] as bool? ?? true;
@@ -270,10 +291,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
   // For protected routes (dashboard, settings, etc.), verify installation access
   try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    final userDoc = await _readUserDocForRedirect(user.uid);
 
     if (hasProvisionedProfile(userDoc)) {
       final data = userDoc.data()!;

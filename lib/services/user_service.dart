@@ -378,12 +378,76 @@ class UserService {
         .set(patch, SetOptions(merge: true));
   }
 
+  /// Minimum gap between two repairs of the same profile in one app process.
+  static const profileRepairCooldown = Duration(seconds: 30);
+
+  /// When each uid was last repaired, process-wide (every [UserService]
+  /// instance streams the same document).
+  static final Map<String, DateTime> _lastProfileRepairAt = {};
+
+  @visibleForTesting
+  static void resetProfileRepairThrottleForTest() =>
+      _lastProfileRepairAt.clear();
+
+  /// What [streamUser] does with one snapshot of `users/{uid}`.
+  ///
+  /// THE 2.5.10+108 FIX. A `FieldValue.serverTimestamp()` that has not
+  /// reached the server yet reads back as `null` in the local snapshot (the
+  /// FlutterFire default, `ServerTimestampBehavior.none`). build-107 read that
+  /// `null` as "missing `updated_at`" and repaired it — with another
+  /// `serverTimestamp()`, which made the next local snapshot null again. One
+  /// ordinary `updated_at: serverTimestamp()` write (schedule saves, the
+  /// route-guard skeleton, profile edits) therefore started an unbounded
+  /// write loop on the user document: 239 repair writes in 4 s against the
+  /// emulator with the real client SDK. The loop flooded the Firestore
+  /// client's work queue, so the favorites listen and the router's user-doc
+  /// reads never came back (the first-login "Favorites spinner freezes the
+  /// app"), and the queued writes persisted on disk and restarted the loop on
+  /// every relaunch until the app was reinstalled.
+  ///
+  /// So, for a snapshot with local writes still pending:
+  ///   • a null `created_at` / `updated_at` is a timestamp being written, not
+  ///     a missing one — it parses with a local estimate, as the SDK's own
+  ///     `ServerTimestampBehavior.estimate` would;
+  ///   • no repair is ever fired; the server-confirmed snapshot decides.
+  /// And any repair is limited to one per [profileRepairCooldown], so a write
+  /// the rules reject (reject → revert → repair) cannot loop either.
+  @visibleForTesting
+  static ProfileSnapshotDecision decideProfileSnapshot(
+    Map<String, dynamic> data, {
+    required bool hasPendingWrites,
+    required DateTime now,
+    DateTime? lastRepairAt,
+  }) {
+    var view = data;
+    if (hasPendingWrites &&
+        (data['created_at'] == null || data['updated_at'] == null)) {
+      final estimate = Timestamp.fromDate(now);
+      view = {
+        ...data,
+        if (data['created_at'] == null) 'created_at': estimate,
+        if (data['updated_at'] == null) 'updated_at': estimate,
+      };
+    }
+    final missing = missingProfileKeys(view);
+    if (missing.isEmpty) {
+      return ProfileSnapshotDecision(parseable: view, repair: false);
+    }
+    final coolingDown = lastRepairAt != null &&
+        now.difference(lastRepairAt) < profileRepairCooldown;
+    return ProfileSnapshotDecision(
+      parseable: null,
+      repair: !hasPendingWrites && !coolingDown,
+    );
+  }
+
   /// Stream user profile changes.
   ///
   /// A document that cannot be parsed is NOT an error to this stream: it
   /// triggers [repairProfileSkeleton] and emits null until the repair lands,
   /// at which point the snapshot listener fires again with a parseable doc.
-  /// See [repairProfileSkeleton] for why an AsyncError was the wrong shape.
+  /// See [repairProfileSkeleton] for why an AsyncError was the wrong shape,
+  /// and [decideProfileSnapshot] for why a pending write never repairs.
   Stream<UserModel?> streamUser(
     String userId, {
     String? authEmail,
@@ -395,8 +459,18 @@ class UserService {
       // SECURITY: Decrypt sensitive data
       final encryptedData = doc.data()!;
       final decryptedData = EncryptionService.decryptUserData(encryptedData);
-      final missing = missingProfileKeys(decryptedData);
-      if (missing.isNotEmpty) {
+      final now = DateTime.now();
+      final decision = decideProfileSnapshot(
+        decryptedData,
+        hasPendingWrites: doc.metadata.hasPendingWrites,
+        now: now,
+        lastRepairAt: _lastProfileRepairAt[userId],
+      );
+      if (decision.parseable != null) {
+        return UserModel.fromJson(decision.parseable!);
+      }
+      if (decision.repair) {
+        _lastProfileRepairAt[userId] = now;
         unawaited(
           repairProfileSkeleton(
             userId,
@@ -407,9 +481,8 @@ class UserService {
             debugPrint('UserService: profile repair failed for $userId: $e');
           }),
         );
-        return null;
       }
-      return UserModel.fromJson(decryptedData);
+      return null;
     });
   }
 
@@ -1055,4 +1128,17 @@ class FirestoreSerializationError implements Exception {
         '(type: $valueType, shape: $valueShape). '
         'Add explicit handling in UserService._sanitizeValue.';
   }
+}
+
+/// The outcome of [UserService.decideProfileSnapshot] for one snapshot.
+@immutable
+class ProfileSnapshotDecision {
+  /// The data to parse into a [UserModel], or null when the document cannot
+  /// be parsed yet (the stream then emits null).
+  final Map<String, dynamic>? parseable;
+
+  /// Whether to fire [UserService.repairProfileSkeleton] for this snapshot.
+  final bool repair;
+
+  const ProfileSnapshotDecision({required this.parseable, required this.repair});
 }
