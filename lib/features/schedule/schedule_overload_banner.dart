@@ -344,12 +344,13 @@ class _CleanupSheetState extends State<_CleanupSheet> {
 
             // Buttons
             Padding(
-              // Bottom padding includes kBottomNavBarPadding so the action
-              // buttons sit above the glass dock nav bar overlay (which
-              // remains visible on top of modal sheets opened from the
-              // inner navigator).
-              padding: const EdgeInsets.fromLTRB(
-                  20, 12, 20, 8 + kBottomNavBarPadding),
+              // Bottom padding includes the shell-injected dock inset so the
+              // action buttons sit above the glass dock nav bar overlay
+              // (which remains visible on top of modal sheets opened from
+              // the inner navigator). Reads 0 inside a SafeArea, which has
+              // then already consumed it.
+              padding: EdgeInsets.fromLTRB(
+                  20, 12, 20, 8 + navBarTotalHeight(context)),
               child: Column(
                 children: [
                   SizedBox(

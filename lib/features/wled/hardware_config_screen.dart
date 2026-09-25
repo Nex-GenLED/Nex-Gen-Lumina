@@ -515,31 +515,28 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
     final structural = _isStructuralChange;
     final scheme = Theme.of(context).colorScheme;
 
-    // Lift the FAB above the glass dock nav bar overlay so it isn't hidden
-    // behind it. See main_scaffold.dart:187-198 for the convention. Matches
-    // my_schedule_page.dart / edit_profile_screen.dart.
-    return Padding(
-      padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-      child: FloatingActionButton.extended(
-        onPressed: _saving ? null : _save,
-        backgroundColor: structural ? scheme.error : NexGenPalette.cyan,
-        foregroundColor: structural ? scheme.onError : Colors.black,
-        icon: _saving
-            ? SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: structural ? scheme.onError : Colors.black,
-                ),
-              )
-            : Icon(structural ? Icons.restart_alt : Icons.save),
-        label: Text(_saving
-            ? 'Saving\u2026'
-            : structural
-                ? 'Save & Reboot Board'
-                : 'Save Changes'),
-      ),
+    // No manual lift: the shell injects the dock height into
+    // MediaQuery.viewPadding, and Scaffold places its FAB above that. On the
+    // root navigator (installer wizard) there is no dock and no lift.
+    return FloatingActionButton.extended(
+      onPressed: _saving ? null : _save,
+      backgroundColor: structural ? scheme.error : NexGenPalette.cyan,
+      foregroundColor: structural ? scheme.onError : Colors.black,
+      icon: _saving
+          ? SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: structural ? scheme.onError : Colors.black,
+              ),
+            )
+          : Icon(structural ? Icons.restart_alt : Icons.save),
+      label: Text(_saving
+          ? 'Saving\u2026'
+          : structural
+              ? 'Save & Reboot Board'
+              : 'Save Changes'),
     );
   }
 }

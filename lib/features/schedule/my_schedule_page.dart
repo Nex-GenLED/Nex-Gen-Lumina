@@ -510,20 +510,13 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
         ],
       ),
 
-      floatingActionButton: Padding(
-        // Lift the FAB above the glass dock nav bar overlay so it isn't
-        // hidden behind it. The parent shell's Scaffold uses extendBody:true
-        // and overlays the dock via a Stack (it's not a bottomNavigationBar),
-        // so default FAB positioning would otherwise sit underneath the dock.
-        // Use navBarTotalHeight() so the offset also includes the device
-        // bottom safe-area inset (e.g. iPhone home indicator).
-        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-        child: FloatingActionButton(
-          backgroundColor: NexGenPalette.cyan,
-          foregroundColor: Colors.black,
-          onPressed: () => showScheduleEditor(context, ref),
-          child: const Icon(CupertinoIcons.add),
-        ),
+      // No manual lift: the shell injects the dock height into
+      // MediaQuery.viewPadding, and Scaffold places its FAB above that.
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: NexGenPalette.cyan,
+        foregroundColor: Colors.black,
+        onPressed: () => showScheduleEditor(context, ref),
+        child: const Icon(CupertinoIcons.add),
       ),
     );
   }
@@ -1062,7 +1055,7 @@ class _PendingPreviewSheet extends StatelessWidget {
 
               // Trailing space clears the glass dock nav bar overlay so
               // the Confirm/Cancel buttons aren't hidden behind the dock.
-              const SizedBox(height: 16 + kBottomNavBarPadding),
+              SizedBox(height: 16 + navBarTotalHeight(context)),
             ],
           ),
         ),
@@ -1738,8 +1731,7 @@ void showDayDetailSheet(
       final date = DateTime.tryParse(dateKey);
 
       return Container(
-        padding:
-            const EdgeInsets.fromLTRB(20, 12, 20, 24 + kBottomNavBarPadding),
+        padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + navBarTotalHeight(ctx)),
         decoration: BoxDecoration(
           color: NexGenPalette.matteBlack,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -1913,7 +1905,7 @@ void showScheduleDetailSheetForEntry(
     builder: (ctx) => Container(
       // Bottom padding clears the glass dock nav bar overlay so the
       // last detail row isn't hidden behind the dock.
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32 + kBottomNavBarPadding),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 32 + navBarTotalHeight(ctx)),
       decoration: BoxDecoration(
         color: NexGenPalette.matteBlack,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -4413,8 +4405,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
               // last action button (Save/Delete) would otherwise sit
               // behind the dock when the sheet is fully expanded.
               // Use navBarTotalHeight(context) so devices with a home
-              // indicator / gesture nav also clear their safe area —
-              // kBottomNavBarPadding alone misses the bottom inset.
+              // indicator / gesture nav also clear their safe area — a bare
+              // constant would miss the bottom inset.
               padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context) + 16),
               children: [
                 Row(children: [

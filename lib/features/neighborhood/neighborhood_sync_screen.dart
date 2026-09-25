@@ -2694,7 +2694,9 @@ class _FindNearbyGroupsSheetState extends ConsumerState<_FindNearbyGroupsSheet> 
 
     return ListView.builder(
       controller: scrollController,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+      // Bottom term clears the glass dock (shell-injected inset); this sheet
+      // opens on the branch navigator, which the dock overlays.
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 32 + navBarTotalHeight(context)),
       itemCount: _nearbyGroups!.length,
       itemBuilder: (context, index) {
         final group = _nearbyGroups![index];

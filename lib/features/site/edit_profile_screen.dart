@@ -399,8 +399,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             startDay = startDay.clamp(1, startDays.last);
             endDay = endDay.clamp(1, endDays.last);
             return Padding(
+              // Bottom: keyboard inset + the dock inset the shell injects, so
+              // the sheet's last row clears the glass dock with the keyboard
+              // closed and is not hidden by it.
               padding: EdgeInsets.only(
-                left: 16, right: 16, bottom: MediaQuery.of(ctx).viewInsets.bottom + 16, top: 12,
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom +
+                    navBarTotalHeight(ctx) +
+                    16,
+                top: 12,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -647,18 +655,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         error: (e, st) => Center(child: Text('Auth error: $e')),
         loading: () => const Center(child: CircularProgressIndicator()),
       ),
-      floatingActionButton: Padding(
-        // Lift the FAB above the glass dock nav bar overlay so it isn't
-        // hidden behind it. The parent shell uses extendBody:true with the
-        // dock overlaid via Stack (not bottomNavigationBar), so default FAB
-        // positioning sits underneath the dock and the user can't see/tap
-        // the Update Profile button. Matches my_schedule_page.dart pattern.
-        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-        child: FloatingActionButton.extended(
-          onPressed: _saving ? null : _onSave,
-          icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
-          label: Text(_saving ? 'Saving…' : 'Update Profile'),
-        ),
+      // No manual lift: the shell injects the dock height into
+      // MediaQuery.viewPadding, and Scaffold places its FAB above that.
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _saving ? null : _onSave,
+        icon: _saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
+        label: Text(_saving ? 'Saving…' : 'Update Profile'),
       ),
     );
   }
@@ -1555,9 +1557,14 @@ class _AddHolidaySheetState extends State<_AddHolidaySheet> {
     _day = _day.clamp(1, days.last);
 
     return Padding(
+      // Bottom: keyboard inset + the dock inset the shell injects (see the
+      // date-range sheet above for the same rule).
       padding: EdgeInsets.only(
-        left: 16, right: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        left: 16,
+        right: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom +
+            navBarTotalHeight(context) +
+            16,
         top: 12,
       ),
       child: Column(

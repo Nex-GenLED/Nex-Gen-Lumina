@@ -91,17 +91,13 @@ class MyPropertiesScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: Padding(
-        // Lift the FAB above the glass dock nav bar overlay so it isn't
-        // hidden behind it. See main_scaffold.dart:187-198 for the
-        // convention. Matches my_schedule_page.dart / edit_profile_screen.
-        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-        child: FloatingActionButton.extended(
-          onPressed: () => _showAddPropertyDialog(context, ref),
-          backgroundColor: NexGenPalette.cyan,
-          icon: const Icon(Icons.add_home),
-          label: const Text('Add Property'),
-        ),
+      // No manual lift: the shell injects the dock height into
+      // MediaQuery.viewPadding, and Scaffold places its FAB above that.
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showAddPropertyDialog(context, ref),
+        backgroundColor: NexGenPalette.cyan,
+        icon: const Icon(Icons.add_home),
+        label: const Text('Add Property'),
       ),
     );
   }

@@ -2,7 +2,12 @@
 //
 // Item #51 Prompt 4 — bottom sheet that surfaces the currently-active
 // ephemeral game session (preGame/liveGame/postGame phase) with controls
-// to edit the design or cancel the session.
+// to edit the design, open the full Game Day screen, or end the session.
+//
+// The sheet is a shortcut, never a gate: the Game Day screen (team selector,
+// per-team cards) is always reachable from it via "Open Game Day". It is
+// presented on the ROOT navigator (game_day_entry_button.dart) so the glass
+// dock cannot cover its lower actions.
 //
 // Time-formatting discipline: all session timestamps are converted via
 // .toLocal() before extraction (Item #63 lesson — ESPN-sourced DateTime
@@ -12,15 +17,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app_router.dart';
 import '../../../theme.dart';
 import '../../sports_alerts/data/team_colors.dart';
 import '../../wled/sports_library_builder.dart';
 import 'ephemeral_game_session.dart';
 import 'ephemeral_game_session_providers.dart';
+import 'ephemeral_session_expiry.dart';
 
 /// Bottom sheet surfaced when the user taps the home dashboard Game Day
 /// button while a session is in active phase. Shows the team, phase,
-/// game start time, revert label, and Edit Design / Cancel actions.
+/// game start time, revert label, and Edit Design / Open Game Day /
+/// End session actions.
 class ActiveSessionSheet extends ConsumerWidget {
   final EphemeralGameSession session;
 
@@ -132,11 +140,26 @@ class ActiveSessionSheet extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 8),
-          // Cancel Session button (destructive)
+          // Open Game Day — the full screen with the team selector. The
+          // session sheet must never be the only thing the home tile reaches.
           OutlinedButton.icon(
-            onPressed: () => _onCancel(context, ref),
+            onPressed: () => _onOpenGameDay(context),
+            icon: const Icon(Icons.stadium_rounded),
+            label: const Text('Open Game Day'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: NexGenPalette.cyan,
+              side: BorderSide(
+                color: NexGenPalette.cyan.withValues(alpha: 0.5),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // End session (destructive)
+          OutlinedButton.icon(
+            onPressed: () => _onEndSession(context, ref),
             icon: const Icon(Icons.close_rounded),
-            label: const Text('Cancel Session'),
+            label: const Text('End session'),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.red.shade300,
               side: BorderSide(
@@ -178,13 +201,21 @@ class ActiveSessionSheet extends ConsumerWidget {
     return '$hour12:$mm $period';
   }
 
+  void _onOpenGameDay(BuildContext context) {
+    // Dismiss the sheet, then push the Game Day screen exactly as the home
+    // tile does when no session is active.
+    Navigator.of(context).pop();
+    if (!context.mounted) return;
+    context.push(AppRoutes.gameDay);
+  }
+
   void _onEditDesign(BuildContext context) {
     final teamSlug = session.teamSlug;
     final messenger = ScaffoldMessenger.of(context);
-    // Dismiss the sheet first; the sheet's Navigator pops, leaving the
-    // dashboard route intact. Then push the picker route from Item #64
-    // which uses parentNavigatorKey: _rootNavigatorKey so back-arrow
-    // returns directly to the dashboard.
+    // Dismiss the sheet first; the dashboard route stays intact. Then push
+    // the picker route from Item #64 which uses
+    // parentNavigatorKey: _rootNavigatorKey so back-arrow returns directly to
+    // the dashboard.
     Navigator.of(context).pop();
     if (!context.mounted) return;
 
@@ -213,42 +244,48 @@ class ActiveSessionSheet extends ConsumerWidget {
         extra: {'teamSlug': teamSlug});
   }
 
-  Future<void> _onCancel(BuildContext context, WidgetRef ref) async {
+  Future<void> _onEndSession(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
     final svc = ref.read(ephemeralGameSessionServiceProvider);
     if (svc == null) return;
 
-    // Capture session data BEFORE cancelling so undo can recreate the
-    // session as a new Firestore document with identical parameters
-    // (option-b approach — service does not need a restoreSession method).
+    // Capture session data BEFORE ending so undo can recreate the session as
+    // a new Firestore document with identical parameters (option-b approach
+    // — the service does not need a restoreSession method).
     final captured = session;
+    final now = ref.read(ephemeralSessionClockProvider)();
+    // UNDO only makes sense while the game can still be tracked. Re-creating
+    // a session for a finished game would be refused by createSession anyway.
+    final canUndo = !isEphemeralSessionExpired(captured, now);
     Navigator.of(context).pop(); // dismiss the sheet
 
     await svc.cancelSession(captured.sessionId);
 
     messenger.showSnackBar(
       SnackBar(
-        content: const Text('Session cancelled'),
+        content: const Text('Session ended'),
         duration: const Duration(seconds: 5),
-        action: SnackBarAction(
-          label: 'UNDO',
-          onPressed: () async {
-            try {
-              final restored = await svc.createSession(
-                teamSlug: captured.teamSlug,
-                gameId: captured.gameId,
-                revertWledPayload: captured.revertWledPayload,
-                revertLabel: captured.revertLabel,
-              );
-              await svc.startTracking(restored.sessionId);
-            } catch (e) {
-              debugPrint('[ActiveSessionSheet] undo cancel failed: $e');
-              messenger.showSnackBar(
-                SnackBar(content: Text('Could not undo: $e')),
-              );
-            }
-          },
-        ),
+        action: canUndo
+            ? SnackBarAction(
+                label: 'UNDO',
+                onPressed: () async {
+                  try {
+                    final restored = await svc.createSession(
+                      teamSlug: captured.teamSlug,
+                      gameId: captured.gameId,
+                      revertWledPayload: captured.revertWledPayload,
+                      revertLabel: captured.revertLabel,
+                    );
+                    await svc.startTracking(restored.sessionId);
+                  } catch (e) {
+                    debugPrint('[ActiveSessionSheet] undo end failed: $e');
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('Could not undo: $e')),
+                    );
+                  }
+                },
+              )
+            : null,
       ),
     );
   }

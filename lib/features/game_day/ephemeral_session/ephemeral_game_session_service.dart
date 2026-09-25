@@ -36,6 +36,7 @@ import '../../wled/wled_providers.dart';
 import '../../wled/zone_providers.dart';
 import '../game_day_apply.dart';
 import 'ephemeral_game_session.dart';
+import 'ephemeral_session_expiry.dart';
 
 class EphemeralGameSessionService {
   EphemeralGameSessionService({
@@ -44,11 +45,13 @@ class EphemeralGameSessionService {
     required String userId,
     required EspnApiService espnApi,
     required GameScheduleService scheduleService,
+    DateTime Function()? now,
   })  : _firestore = firestore,
         _ref = ref,
         _userId = userId,
         _espnApi = espnApi,
-        _scheduleService = scheduleService {
+        _scheduleService = scheduleService,
+        _now = now ?? DateTime.now {
     // Resume tracking any sessions that were active before the app restarted.
     unawaited(_bootstrap());
   }
@@ -58,6 +61,9 @@ class EphemeralGameSessionService {
   final String _userId;
   final EspnApiService _espnApi;
   final GameScheduleService _scheduleService;
+
+  /// Injectable clock so expiry can be tested at a chosen instant.
+  final DateTime Function() _now;
 
   /// In-memory mirror of active sessions. Keyed by sessionId — multiple
   /// sessions for the same team can coexist (deliberate divergence from
@@ -118,8 +124,16 @@ class EphemeralGameSessionService {
       gameStart: game.scheduledDate,
       revertWledPayload: revertWledPayload,
       revertLabel: revertLabel,
-      createdAt: DateTime.now(),
+      createdAt: _now(),
     );
+    // A session for a game that is already over would be expired on arrival
+    // and finalised by the next sweep without ever doing anything. Refuse it
+    // here so the caller (e.g. the sheet's UNDO) can say so honestly.
+    if (isEphemeralSessionExpired(session, _now())) {
+      throw StateError(
+          'Game $gameId for $teamSlug ended before ${ephemeralSessionExpiresAt(session)}; '
+          'refusing to create an already-expired session');
+    }
 
     // SANITIZE AS A BACKSTOP, not as the fix. jsonEncode on
     // revert_wled_payload (see EphemeralGameSession.toJson) is what makes
@@ -146,11 +160,13 @@ class EphemeralGameSessionService {
       if (loaded == null) {
         throw StateError('Session $sessionId not found');
       }
-      if (loaded.phase != EphemeralSessionPhase.completed) {
-        _sessions[sessionId] = loaded;
-      } else {
+      if (loaded.phase == EphemeralSessionPhase.completed) return;
+      if (isEphemeralSessionExpired(loaded, _now())) {
+        // Never adopt a stale document into the phase machine.
+        await _expireSession(loaded);
         return;
       }
+      _sessions[sessionId] = loaded;
     }
     _ensureTimer();
   }
@@ -242,19 +258,36 @@ class EphemeralGameSessionService {
           .where('phase',
               isNotEqualTo: EphemeralSessionPhase.completed.toJson())
           .get();
+      final now = _now();
+      final stale = <EphemeralGameSession>[];
       for (final doc in snap.docs) {
         try {
           final session = EphemeralGameSession.fromJson(doc.data());
+          // A session that outlived its game is finalised here, not adopted.
+          // Adopting it would run the phase machine on last night's game and
+          // apply its revert payload over whatever the schedule has set since.
+          if (isEphemeralSessionExpired(session, now)) {
+            stale.add(session);
+            continue;
+          }
           _sessions[session.sessionId] = session;
         } catch (e) {
           debugPrint(
               '[EphemeralSession] bootstrap: parse failed for ${doc.id}: $e');
         }
       }
+      for (final session in stale) {
+        await _expireSession(session);
+      }
       if (_sessions.isNotEmpty) {
         debugPrint(
             '[EphemeralSession] Bootstrapped ${_sessions.length} active session(s)');
         _ensureTimer();
+        // Catch up NOW rather than at the first periodic tick. The timer's
+        // first evaluation is a full minute after launch, and for that minute
+        // a session whose countdown elapsed while the app was closed sat in
+        // postGame with the home-screen button pointing at it.
+        await _evaluate();
       }
     } catch (e) {
       debugPrint('[EphemeralSession] Bootstrap failed: $e');
@@ -278,12 +311,18 @@ class EphemeralGameSessionService {
       _evaluationTimer = null;
       return;
     }
-    final now = DateTime.now();
+    final now = _now();
     // Snapshot the values to a list so concurrent mutations during
     // _advanceSession don't break iteration.
     for (final session in List.of(_sessions.values)) {
       if (session.phase == EphemeralSessionPhase.completed) continue;
       try {
+        // The bound the phase machine never had: a session past its expiry
+        // is finalised whatever phase it is in, and its revert is NOT applied.
+        if (isEphemeralSessionExpired(session, now)) {
+          await _expireSession(session);
+          continue;
+        }
         await _advanceSession(session, now);
       } catch (e) {
         debugPrint(
@@ -320,7 +359,7 @@ class EphemeralGameSessionService {
               session,
               EphemeralSessionPhase.postGame,
               gameEnd: now,
-              countdownEnd: now.add(const Duration(minutes: 30)),
+              countdownEnd: now.add(kEphemeralPostGameCountdown),
             );
             return;
           }
@@ -355,20 +394,20 @@ class EphemeralGameSessionService {
             session,
             EphemeralSessionPhase.postGame,
             gameEnd: now,
-            countdownEnd: now.add(const Duration(minutes: 30)),
+            countdownEnd: now.add(kEphemeralPostGameCountdown),
           );
           return;
         }
-        // Fallback: estimated duration + 60-min buffer past game start.
+        // Fallback: estimated duration + buffer past game start.
         final estimatedEnd = session.gameStart
             .add(estimatedGameDuration(teamInfo.sport))
-            .add(const Duration(minutes: 60));
+            .add(kEphemeralLiveGameBuffer);
         if (now.isAfter(estimatedEnd)) {
           await _updatePhase(
             session,
             EphemeralSessionPhase.postGame,
             gameEnd: now,
-            countdownEnd: now.add(const Duration(minutes: 30)),
+            countdownEnd: now.add(kEphemeralPostGameCountdown),
           );
         }
 
@@ -446,6 +485,56 @@ class EphemeralGameSessionService {
     } catch (e) {
       debugPrint(
           '[EphemeralSession] Phase write failed for ${session.sessionId}: $e');
+    }
+  }
+
+  /// Finalise a session that outlived its game (ephemeral_session_expiry.dart)
+  /// WITHOUT applying its revert payload.
+  ///
+  /// The revert is a `/json/state` capture from before the game. Hours later
+  /// the schedule has taken the house back, and re-applying that capture would
+  /// stomp it — lights on at 9 am in last night's "before" state. So expiry
+  /// only clears the persisted state: the document, the in-memory mirror, and
+  /// the background worker's celebration arming for the team.
+  Future<void> _expireSession(EphemeralGameSession session) async {
+    _sessions.remove(session.sessionId);
+    debugPrint('[EphemeralSession] ${session.sessionId} expired '
+        '(${session.phase.name}, game ${session.gameId} for ${session.teamSlug}, '
+        'expired at ${ephemeralSessionExpiresAt(session)}) — finalising without revert');
+
+    // Same disarm as the natural end and the user cancel: an expired session
+    // must not leave the team armed for celebrations in a LATER game.
+    try {
+      await clearGameDaySession(session.teamSlug);
+    } catch (e) {
+      debugPrint(
+          '[EphemeralSession] expire: disarm failed for ${session.sessionId}: $e');
+    }
+
+    try {
+      await _collection.doc(session.sessionId).delete();
+    } catch (e) {
+      debugPrint(
+          '[EphemeralSession] expire: delete failed for ${session.sessionId}, '
+          'falling back to completed-state write: $e');
+      try {
+        final completed = session.copyWith(
+          phase: EphemeralSessionPhase.completed,
+          completedReason: EphemeralCompletedReason.expired,
+          completedAt: _now(),
+        );
+        await _collection
+            .doc(session.sessionId)
+            .set(UserService.sanitizeForFirestore(completed.toJson()));
+      } catch (e2) {
+        debugPrint(
+            '[EphemeralSession] expire: completed-state fallback write also failed: $e2');
+      }
+    }
+
+    if (_sessions.isEmpty) {
+      _evaluationTimer?.cancel();
+      _evaluationTimer = null;
     }
   }
 

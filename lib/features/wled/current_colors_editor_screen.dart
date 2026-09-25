@@ -70,7 +70,10 @@ class CurrentColorsEditorScreen extends ConsumerWidget {
       children: [
         Expanded(
           child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, navBarTotalHeight(context)),
+            // The fixed action bar below this list is what sits over the
+            // dock; its SafeArea consumes the shell's dock inset. The list
+            // itself ends above the bar, so it needs no dock padding.
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

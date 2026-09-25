@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/whites/white_preset_models.dart';
 import 'package:nexgen_command/features/whites/white_preference_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -130,7 +131,10 @@ class _PreferredWhiteSelectionPageState extends ConsumerState<PreferredWhiteSele
             : null,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+        // Bottom term is the shell-injected dock inset when this page is
+        // under the glass dock (/settings/my-whites) and just the safe area
+        // during onboarding, where it sits on the root navigator.
+        padding: EdgeInsets.fromLTRB(20, 12, 20, 40 + navBarTotalHeight(context)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

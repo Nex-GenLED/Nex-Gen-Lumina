@@ -80,16 +80,35 @@ class AppNeon {
   static const magenta = Color(0xFFFF00FF);
 }
 
-/// Nex-Gen Premium palette (Dark-first)
-/// Visual height of the glass dock nav bar content (excluding device bottom inset).
+/// Visual height of the glass dock nav bar content (excluding device bottom
+/// inset) at default text scale: 8 + the 84 px Lumina button + 8. Pinned by
+/// test/widgets/nav_bar_inset_test.dart against the real dock.
+///
+/// Only two things read this: the dock's own layout, and [NavBarInsetShell]
+/// (widgets/navigation/nav_bar_inset.dart) as the inset to reserve before its
+/// first measurement of the rendered dock lands. Screens must NOT pad by it.
 const kNavBarContentHeight = 100.0;
 
-/// Total height of the nav bar including the device's bottom safe-area inset.
-/// Use as bottom padding on scrollable content within the main shell
-/// (e.g. ListView, GridView, CustomScrollView) so that the last item
-/// scrolls fully above the nav bar overlay.
+/// The bottom inset content must clear: the persistent nav dock (when there
+/// is one over this widget) plus the device's bottom safe-area inset.
+///
+/// Since 2026-09-25 this is simply the bottom [MediaQuery] padding.
+/// [NavBarInsetShell] injects the dock's height into `MediaQuery.padding`
+/// for everything rendered beneath the dock — exactly what Scaffold does for
+/// an `extendBody` bottom bar — so:
+///
+///   * inside the main shell this is dock + safe area, as before;
+///   * on the root navigator (no dock) it is the safe area alone, where the
+///     old constant added 100 px of nothing;
+///   * inside a SafeArea or a padding-less ListView it is 0, because that
+///     ancestor has already consumed the inset — no more double padding.
+///
+/// Prefer letting the framework consume the inset (a ListView with no
+/// explicit `padding:`, a SafeArea, a Scaffold's floatingActionButton).
+/// Use this only where a scrollable sets explicit padding and needs the
+/// bottom term.
 double navBarTotalHeight(BuildContext context) =>
-    kNavBarContentHeight + MediaQuery.of(context).padding.bottom;
+    MediaQuery.paddingOf(context).bottom;
 
 /// Height an extended FAB occupies, plus its margin — 48dp button + 16dp gap
 /// above the surface it floats over, and a little breathing room so content
@@ -111,9 +130,6 @@ const kFabClearance = 80.0;
 /// floatingActionButton.
 double navBarPlusFabHeight(BuildContext context) =>
     navBarTotalHeight(context) + kFabClearance;
-
-/// Legacy alias — prefer [navBarTotalHeight] for device-aware padding.
-const kBottomNavBarPadding = kNavBarContentHeight;
 
 class NexGenPalette {
   // Base

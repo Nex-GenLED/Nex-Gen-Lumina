@@ -223,32 +223,27 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
               child: Scaffold(
                 extendBody: true,
                 backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                body: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: _ShellBranchHost(
-                          navigationShell: widget.navigationShell),
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: isSimpleMode
-                          ? SimpleNavBar(
-                              index: shellIndex == 3 ? 1 : 0,
-                              onTap: (i) => _onTap(i == 0 ? 0 : 3),
-                            )
-                          : GlassDockNavBar(
-                              index: shellIndex,
-                              onTap: _onTap,
-                              onLuminaTap: _handleLuminaTap,
-                              onLuminaLongPress: _handleLuminaLongPress,
-                              isVoiceListening: luminaState.isOpen &&
-                                  luminaState.mode == LuminaSheetMode.listening,
-                              hasActiveSession: luminaState.hasActiveSession,
-                            ),
-                    ),
-                  ],
+                // The dock floats over the branch host; NavBarInsetShell
+                // reserves its height in the host's MediaQuery so every tab
+                // body (and every sheet opened from one) clears it. See
+                // widgets/navigation/nav_bar_inset.dart.
+                body: NavBarInsetShell(
+                  body: _ShellBranchHost(
+                      navigationShell: widget.navigationShell),
+                  navBar: isSimpleMode
+                      ? SimpleNavBar(
+                          index: shellIndex == 3 ? 1 : 0,
+                          onTap: (i) => _onTap(i == 0 ? 0 : 3),
+                        )
+                      : GlassDockNavBar(
+                          index: shellIndex,
+                          onTap: _onTap,
+                          onLuminaTap: _handleLuminaTap,
+                          onLuminaLongPress: _handleLuminaLongPress,
+                          isVoiceListening: luminaState.isOpen &&
+                              luminaState.mode == LuminaSheetMode.listening,
+                          hasActiveSession: luminaState.hasActiveSession,
+                        ),
                 ),
               ),
             ),
@@ -266,15 +261,13 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
 /// Wraps the StatefulNavigationShell with two app-wide keyboard-dismiss
 /// behaviors that every screen inherits automatically.
 ///
-/// **Note on bottom nav inset**: The dock-height inset is NOT applied
-/// here via MediaQuery injection. The codebase already has an
-/// established `navBarTotalHeight(context)` helper in `app_colors.dart`
-/// (used by 30+ screens) that returns `kNavBarContentHeight + bottom
-/// device inset`. Injecting an additional 100px into MediaQuery here
-/// would double-pad every screen that already calls that helper. New
-/// screens with hidden bottom buttons should be fixed by adding
-/// `padding: EdgeInsets.only(bottom: navBarTotalHeight(context))`
-/// to their scrollable, matching the existing convention.
+/// **Note on bottom nav inset**: the dock-height inset IS applied via
+/// MediaQuery injection, by [NavBarInsetShell] around this host (see
+/// widgets/navigation/nav_bar_inset.dart). `navBarTotalHeight(context)`
+/// in `app_colors.dart` reads that injected inset back rather than adding
+/// its own constant, so the 30+ existing call sites are single-padded and
+/// a new screen needs nothing special: a ListView with no explicit
+/// `padding:`, a SafeArea, or a Scaffold FAB already clears the dock.
 ///
 /// 1. **Tap-outside keyboard dismiss** — translucent GestureDetector
 ///    that calls `unfocus()` when the user taps an inert area. The
