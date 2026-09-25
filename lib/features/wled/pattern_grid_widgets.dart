@@ -76,11 +76,15 @@ class LibraryNodeGrid extends StatelessWidget {
   /// at any depth RETURNS the design instead of applying/browsing.
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
+  /// SAVE mode's destination label, forwarded to the leaf selector's commit
+  /// button ("Save to Favorites" …). Null outside SAVE mode.
+  final String? saveDestinationLabel;
+
   /// Opt-in per-row actions. Null (every catalog surface) renders cards
   /// byte-identically to before. See [LibraryNodeAction].
   final LibraryNodeActionsBuilder? actionsBuilder;
 
-  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage, this.onDesignSelected, this.actionsBuilder});
+  const LibraryNodeGrid({super.key, required this.children, this.parentAccent, this.parentGradient, this.folderAspectRatio, this.teamSlug, this.emptyMessage, this.onDesignSelected, this.saveDestinationLabel, this.actionsBuilder});
 
   @override
   Widget build(BuildContext context) {
@@ -113,7 +117,7 @@ class LibraryNodeGrid extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: SizedBox(
               height: 44,
-              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, actions: actionsBuilder?.call(node)),
+              child: LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, saveDestinationLabel: saveDestinationLabel, actions: actionsBuilder?.call(node)),
             ),
           );
         },
@@ -132,7 +136,7 @@ class LibraryNodeGrid extends StatelessWidget {
       itemCount: children.length,
       itemBuilder: (context, index) {
         final node = children[index];
-        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, actions: actionsBuilder?.call(node));
+        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, saveDestinationLabel: saveDestinationLabel, actions: actionsBuilder?.call(node));
       },
     );
   }
@@ -153,11 +157,14 @@ class LibraryNodeCard extends StatelessWidget {
   /// Selection mode (additive, mirrors [teamSlug]): see [LibraryNodeGrid].
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
+  /// SAVE mode's destination label; see [LibraryNodeGrid.saveDestinationLabel].
+  final String? saveDestinationLabel;
+
   /// Opt-in trailing overflow menu. Null or empty → no menu is built at all,
   /// which is every catalog node. See [LibraryNodeAction].
   final List<LibraryNodeAction>? actions;
 
-  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected, this.actions});
+  const LibraryNodeCard({super.key, required this.node, this.index, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected, this.saveDestinationLabel, this.actions});
 
   bool get _hasActions => actions != null && actions!.isNotEmpty;
 
@@ -595,6 +602,7 @@ class LibraryNodeCard extends StatelessWidget {
                   parentAccent: accentColor,
                   teamSlug: teamSlug,
                   onDesignSelected: onDesignSelected,
+                  saveDestinationLabel: saveDestinationLabel,
                 ),
               ),
             );
@@ -694,6 +702,7 @@ class LibraryNodeCard extends StatelessWidget {
                   parentGradient: gradientColors,
                   teamSlug: teamSlug,
                   onDesignSelected: onDesignSelected,
+                  saveDestinationLabel: saveDestinationLabel,
                 ),
               ),
             );
@@ -845,6 +854,7 @@ class LibraryNodeCard extends StatelessWidget {
                   parentGradient: [primaryColor, gradientSecond],
                   teamSlug: teamSlug,
                   onDesignSelected: onDesignSelected,
+                  saveDestinationLabel: saveDestinationLabel,
                 ),
               ),
             );

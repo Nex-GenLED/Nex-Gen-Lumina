@@ -4090,6 +4090,7 @@ void showScheduleEditor(
   WidgetRef ref, {
   int? preselectedDayIndex,
   ScheduleItem? editing,
+  PatternSelection? initialPattern,
 }) {
   showModalBottomSheet(
     context: context,
@@ -4102,6 +4103,7 @@ void showScheduleEditor(
       builder: (ctx, scroll) => _ScheduleEditor(
         preselectedDayIndex: preselectedDayIndex,
         editing: editing,
+        initialPattern: initialPattern,
         scrollController: scroll,
       ),
     ),
@@ -4233,7 +4235,11 @@ class _ScheduleEditor extends ConsumerStatefulWidget {
   final int? preselectedDayIndex; // 0..6 => S..S
   final ScheduleItem? editing;
   final ScrollController? scrollController;
-  const _ScheduleEditor({this.preselectedDayIndex, this.editing, this.scrollController});
+
+  /// A design chosen elsewhere (Explore's "Save to schedule") to open a NEW
+  /// schedule with. Nothing is sent to the controller by pre-selecting it.
+  final PatternSelection? initialPattern;
+  const _ScheduleEditor({this.preselectedDayIndex, this.editing, this.scrollController, this.initialPattern});
   @override
   ConsumerState<_ScheduleEditor> createState() => _ScheduleEditorState();
 }
@@ -4284,6 +4290,10 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     // solar schedule still opens showing its real setting.
     if (!ref.read(solarSchedulingEnabledSyncProvider)) {
       _offTrigger = _TriggerType.specificTime;
+    }
+    if (widget.initialPattern != null) {
+      _selectedPattern = widget.initialPattern;
+      _action = _ActionType.runPattern;
     }
     // If editing an existing item, hydrate state from it.
     final editing = widget.editing;
@@ -4673,6 +4683,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                             const RouteSettings(name: _kSchedulePatternPickerRoute),
                         builder: (_) => LibraryBrowserScreen(
                           nodeId: null,
+                          saveDestinationLabel: 'schedule',
                           onDesignSelected: (s) {
                             sel = s;
                             rootNav.popUntil((r) =>

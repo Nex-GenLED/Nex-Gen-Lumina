@@ -24,7 +24,6 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
-import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
@@ -200,7 +199,29 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
   /// to [LibraryNodeGrid] exactly like [teamSlug]. Null == normal browse.
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
 
-  const LibraryBrowserScreen({super.key, this.nodeId, this.nodeName, this.parentAccent, this.parentGradient, this.teamSlug, this.onDesignSelected});
+  /// SAVE mode's destination, for the leaf selector's commit button
+  /// ("Save to Favorites", "Save to Game Day", "Save to schedule").
+  final String? saveDestinationLabel;
+
+  /// Seed for the leaf selector, so a picker opens on the destination's
+  /// CURRENT design (the Game Day plan's effect) rather than a default.
+  final int? initialEffectId;
+  final int? initialSpeed;
+  final int? initialIntensity;
+
+  const LibraryBrowserScreen({
+    super.key,
+    this.nodeId,
+    this.nodeName,
+    this.parentAccent,
+    this.parentGradient,
+    this.teamSlug,
+    this.onDesignSelected,
+    this.saveDestinationLabel,
+    this.initialEffectId,
+    this.initialSpeed,
+    this.initialIntensity,
+  });
 
   @override
   ConsumerState<LibraryBrowserScreen> createState() => _LibraryBrowserScreenState();
@@ -475,15 +496,18 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         });
                         return ColorwayEffectSelectorPage(
                           paletteNode: node,
-                          teamSlug: widget.teamSlug,
                           onDesignSelected: widget.onDesignSelected,
+                          saveDestinationLabel: widget.saveDestinationLabel,
+                          initialEffectId: widget.initialEffectId,
+                          initialSpeed: widget.initialSpeed,
+                          initialIntensity: widget.initialIntensity,
                         );
                       }
                       if (widget.nodeId == LibraryCategoryIds.architectural) {
                         return Column(
                           children: [
                             const _KelvinReferenceChart(),
-                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected)),
+                            Expanded(child: LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, folderAspectRatio: 2.2, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected, saveDestinationLabel: widget.saveDestinationLabel)),
                           ],
                         );
                       }
@@ -493,6 +517,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         parentGradient: widget.parentGradient,
                         teamSlug: widget.teamSlug,
                         onDesignSelected: widget.onDesignSelected,
+                        saveDestinationLabel: widget.saveDestinationLabel,
                         // Opt-in row actions, My Designs BROWSE mode only.
                         // Catalog folders and every picker pass null and
                         // render exactly as before — the three card builders
@@ -513,7 +538,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                       );
                     },
                     loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
-                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected),
+                    error: (_, __) => LibraryNodeGrid(children: children, parentAccent: widget.parentAccent, parentGradient: widget.parentGradient, teamSlug: widget.teamSlug, onDesignSelected: widget.onDesignSelected, saveDestinationLabel: widget.saveDestinationLabel),
                   );
                 },
                 loading: () => const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
@@ -638,15 +663,7 @@ class _KelvinReferenceChart extends StatelessWidget {
 class _CompactPatternItemCard extends ConsumerWidget {
   final PatternItem item;
   final List<Color> themeColors;
-  /// Defensive Game Day plumbing. Currently unreachable in Game Day —
-  /// _CompactPatternItemCard is private and only constructed by
-  /// ThemeSelectionScreen, which is itself Explore-only. The parameter
-  /// is kept in place so if a future Game Day flow routes through this
-  /// card (e.g. a team-themed sub-category surface), saveDesign already
-  /// fires from _handleTap / _applyWithColor without further changes.
-  final String? teamSlug;
-  // ignore: unused_element_parameter
-  const _CompactPatternItemCard({required this.item, required this.themeColors, this.teamSlug});
+  const _CompactPatternItemCard({required this.item, required this.themeColors});
 
   static String _effectDisplayName(int effectId) {
     const names = {
@@ -835,39 +852,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
       _updateLocalState(ref);
 
-      // Game Day persistence — when teamSlug is set, this picker is
-      // operating as a Game Day design picker, so persist the choice
-      // to the team's GameDayAutopilotConfig via the existing
-      // saveDesign provider method. The Firestore write triggers a
-      // stream emission on gameDayAutopilotConfigsProvider which
-      // rebuilds gameDayTeamsProvider and refreshes the Game Day card.
-      if (teamSlug != null) {
-        try {
-          final seg = (payload['seg'] is List && (payload['seg'] as List).isNotEmpty)
-              ? (payload['seg'] as List).first as Map
-              : <String, dynamic>{};
-          final effectId = (seg['fx'] as num?)?.toInt() ?? 0;
-          final speed = (seg['sx'] as num?)?.toInt() ?? 128;
-          final intensity = (seg['ix'] as num?)?.toInt() ?? 128;
-          final brightness = (payload['bri'] as num?)?.toInt() ?? 200;
-
-          await ref
-              .read(gameDayAutopilotNotifierProvider.notifier)
-              .saveDesign(
-                teamSlug: teamSlug!,
-                designName: item.name,
-                wledPayload: payload,
-                effectId: effectId,
-                speed: speed,
-                intensity: intensity,
-                brightness: brightness,
-              );
-        } catch (e, st) {
-          debugPrint('[GameDayPicker] saveDesign failed: $e\n$st');
-          // Non-fatal — the lights are already showing the design.
-          // The card label just won't refresh until next pick.
-        }
-      }
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
@@ -935,32 +919,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
       }
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
 
-      // Game Day persistence — see _handleTap for full rationale.
-      if (teamSlug != null) {
-        try {
-          final segPersist = (payload['seg'] is List && (payload['seg'] as List).isNotEmpty)
-              ? (payload['seg'] as List).first as Map
-              : <String, dynamic>{};
-          final effectId = (segPersist['fx'] as num?)?.toInt() ?? 0;
-          final speed = (segPersist['sx'] as num?)?.toInt() ?? 128;
-          final intensity = (segPersist['ix'] as num?)?.toInt() ?? 128;
-          final brightness = (payload['bri'] as num?)?.toInt() ?? 200;
-
-          await ref
-              .read(gameDayAutopilotNotifierProvider.notifier)
-              .saveDesign(
-                teamSlug: teamSlug!,
-                designName: item.name,
-                wledPayload: payload,
-                effectId: effectId,
-                speed: speed,
-                intensity: intensity,
-                brightness: brightness,
-              );
-        } catch (e, st) {
-          debugPrint('[GameDayPicker] saveDesign failed (with color): $e\n$st');
-        }
-      }
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));

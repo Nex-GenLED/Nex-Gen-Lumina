@@ -34,6 +34,7 @@ import '../wled/zone_providers.dart';
 import 'game_day_apply.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
+import 'game_day_config_row.dart';
 import 'team_picker_sheet.dart';
 import '../autopilot/team_priority.dart';
 import '../site/user_profile_providers.dart';
@@ -388,7 +389,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
             child: Column(
               children: [
                 // Design row
-                _ConfigRow(
+                GameDayConfigRow(
                   icon: Icons.palette_outlined,
                   label: 'Design',
                   value: config.designLabel,
@@ -969,7 +970,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           // Live Scoring remains the alerts ON/OFF above; this is the
           // SENSITIVITY the retired screen owned and the card did not, which is
           // an autopilot-run-configuration concern like the rest of this group.
-          _ConfigRow(
+          GameDayConfigRow(
             icon: Icons.notifications_active_outlined,
             label: 'Alerts',
             value: _sensitivityLabel(config.alertSensitivity),
@@ -990,7 +991,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           // scoreCelebrationEnabled-keyed AnimatedOpacity, before the
           // reposition existed; reinstating that here would put two
           // independent gates on one row group.
-          _ConfigRow(
+          GameDayConfigRow(
             icon: Icons.auto_awesome_outlined,
             label: 'Celebration',
             value: _celebrationLabel(config),
@@ -1419,58 +1420,6 @@ class _GameStatusBadge extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ConfigRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback? onTap;
-
-  const _ConfigRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: NexGenPalette.cyan),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 14,
-                color: NexGenPalette.textMedium,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: NexGenPalette.textHigh,
-              ),
-            ),
-            if (onTap != null) ...[
-              const SizedBox(width: 6),
-              Icon(Icons.chevron_right,
-                  size: 18, color: NexGenPalette.textMedium),
-            ],
-          ],
-        ),
       ),
     );
   }

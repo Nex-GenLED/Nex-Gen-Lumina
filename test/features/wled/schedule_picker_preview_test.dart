@@ -224,7 +224,12 @@ void main() {
     ));
     await tester.pump();
 
-    await tester.tap(find.text('Set design'));
+    // A preview was sent first (the only controller write a save-mode picker
+    // makes on its own); the exit then restores the captured look.
+    await tester.tap(find.byKey(const ValueKey('preview-on-lights')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.text('Save'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
@@ -260,8 +265,9 @@ void main() {
     container.dispose();
   });
 
-  testWidgets('(b) preview applies live on adjustment in selection mode',
-      (tester) async {
+  testWidgets(
+      '(b) adjustments do NOT touch the lights in save mode; "Preview on '
+      'lights" is the one control that does', (tester) async {
     tester.view.physicalSize = const Size(1200, 3000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -276,18 +282,56 @@ void main() {
     ));
     await tester.pump();
 
-    // Twist the speed slider — the preview path (_sendToWled) is NOT gated by
-    // selection mode, so it must write to the device.
+    // Twist the speed slider. Choosing a design for a SCHEDULE must not
+    // light the house on its own (apply-vs-save split, 2026-09-25).
     final slider = find.byType(Slider).first;
     await tester.ensureVisible(slider);
     await tester.drag(slider, const Offset(60, 0));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200)); // clear the debounce
+    expect(repo.applyJsonCalls, isEmpty,
+        reason: 'an adjustment in save mode must not write to the device');
 
+    // The explicit preview control is what applies live.
+    await tester.tap(find.byKey(const ValueKey('preview-on-lights')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
     final previewWrites =
         repo.applyJsonCalls.where((c) => c['bri'] == 255).toList();
     expect(previewWrites, isNotEmpty,
-        reason: 'live preview must apply on adjustment in selection mode');
+        reason: '"Preview on lights" must apply the current look');
+
+    // ...and from then on adjustments follow, as a live preview should.
+    final before = repo.applyJsonCalls.length;
+    await tester.drag(slider, const Offset(-30, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(repo.applyJsonCalls.length, greaterThan(before));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    container.dispose();
+  });
+
+  testWidgets('(c) Save without a preview issues NO controller command',
+      (tester) async {
+    final repo = _FakeWledRepository();
+    final container =
+        ProviderContainer(overrides: _overrides(repo, seed: _capturedSeed()));
+    LibraryDesignSelection? received;
+    await tester.pumpWidget(_harness(
+      container: container,
+      onDesignSelected: (s) => received = s,
+    ));
+    await tester.pump();
+
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(received, isNotNull);
+    expect(repo.applyJsonCalls, isEmpty,
+        reason: 'nothing was previewed, so there is nothing to restore and '
+            'a Save must not write to the device at all');
 
     await tester.pumpWidget(const SizedBox.shrink());
     container.dispose();
@@ -304,6 +348,11 @@ void main() {
     ));
     await tester.pump();
 
+    // A preview was sent first (the only controller write a save-mode picker
+    // makes on its own); the exit then restores the captured look.
+    await tester.tap(find.byKey(const ValueKey('preview-on-lights')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
     // No Save — user backs out. Disposing the effect selector (as the parent
     // LibraryBrowserScreen's back button would) must restore.
     await tester.pumpWidget(const SizedBox.shrink());
@@ -333,7 +382,12 @@ void main() {
 
     // Save with a failing device: the selection must still be delivered (the
     // user's choice is not lost), but the restore write fails.
-    await tester.tap(find.text('Set design'));
+    // A preview was sent first (the only controller write a save-mode picker
+    // makes on its own); the exit then restores the captured look.
+    await tester.tap(find.byKey(const ValueKey('preview-on-lights')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.text('Save'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 

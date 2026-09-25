@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import '../patterns/utils/pattern_display_name.dart';
 import '../sports_alerts/models/score_alert_config.dart' show AlertSensitivity;
 import '../sports_alerts/models/sport_type.dart';
+import '../wled/wled_effects_catalog.dart';
 
 // ---------------------------------------------------------------------------
 // Estimated game durations by sport (used as post-game fallback)
@@ -266,18 +267,57 @@ class GameDayAutopilotConfig {
   Color get primaryColor => Color(primaryColorValue);
   Color get secondaryColor => Color(secondaryColorValue);
 
-  /// Human-readable design label for the UI.
+  /// The first segment of the stored design payload, or null when no design
+  /// has been saved. This is the ONE representation the card's label and the
+  /// device write share (see [designLabel], [game_day_apply.dart]).
+  Map<String, dynamic>? get savedDesignSegment {
+    final seg = savedDesignPayload?['seg'];
+    final first = seg is List ? (seg.isEmpty ? null : seg.first) : seg;
+    return first is Map ? Map<String, dynamic>.from(first) : null;
+  }
+
+  /// What the house will run for this team, as the segment that will be sent:
+  /// the saved design's when one exists, otherwise the team-colour base built
+  /// from [effectId] / [speed] / [intensity] — the same fields
+  /// `applyGameDayConfigToDevice` puts on the wire.
+  Map<String, dynamic> get effectiveDesignSegment =>
+      savedDesignSegment ??
+      <String, dynamic>{'fx': effectId, 'sx': speed, 'ix': intensity};
+
+  /// The WLED effect id the team will actually fire.
+  int get effectiveEffectId =>
+      (effectiveDesignSegment['fx'] as num?)?.toInt() ?? effectId;
+
+  /// Human-readable design label for the UI — derived from the payload that
+  /// will be sent, never from a separate label field.
   ///
-  /// Resolution order:
-  ///   1. If [savedDesignName] is set, use it (user-named design wins).
-  ///   2. If the effect has been customized away from the default Solid
-  ///      (effectId != 0), reflect the live effect: "<team> <Effect>".
-  ///      Without this branch a Theater-Chase-customized team would still
-  ///      show "Team Colors" on the card despite playing fx 12.
-  ///   3. Fall back to a mode-derived label. The fallback no longer
-  ///      includes "(Solid)" — that suffix was misleading once any non-
-  ///      Solid effect was in use, and adds noise even when accurate.
+  /// Before 2026-09-25 the label came from `saved_design_name` (which the
+  /// picker composed from the RAW selected effect) with a fallback on
+  /// [effectId], while the device write used `saved_design_payload` (whose
+  /// `fx` may be a substituted layout effect). A fresh team read "`<Team>`
+  /// Running" from the default `effect_id: 52` while the picker opened on
+  /// Solid, and a saved "… - Solid" could fire as Blocks. Now:
+  ///
+  ///   1. A saved design: "`<palette> - <effect>`", where the effect is read
+  ///      from [savedDesignSegment]'s `fx` and the palette is
+  ///      [savedDesignName] (legacy names that already carry a `" - Effect"`
+  ///      suffix have it stripped first, so the suffix always reflects the
+  ///      payload).
+  ///   2. A saved name with no payload (nothing to derive from): the name.
+  ///   3. No saved design: "`<team> <effect>`" from the base fields, which is
+  ///      exactly what Light Up Now sends.
   String get designLabel {
+    final seg = savedDesignSegment;
+    if (seg != null) {
+      final fx = (seg['fx'] as num?)?.toInt() ?? 0;
+      final raw = (savedDesignName ?? '').trim();
+      final base = raw.isEmpty
+          ? 'Custom Design'
+          : (raw.contains(' - ')
+              ? raw.substring(0, raw.lastIndexOf(' - ')).trim()
+              : raw);
+      return '$base - ${_effectShortName(fx)}';
+    }
     if (savedDesignName != null && savedDesignName!.isNotEmpty) {
       return savedDesignName!;
     }
@@ -332,8 +372,8 @@ class GameDayAutopilotConfig {
   }
 
   /// Map a WLED effectId to a short display name for [designLabel].
-  /// Curated to game-day-relevant effects; unknown ids fall back to
-  /// "Custom" to avoid leaking raw effect numbers into the UI.
+  /// Curated short names for game-day-relevant effects; any other id uses
+  /// the catalog's name so a saved design never reads as a bare "Custom".
   static String _effectShortName(int effectId) {
     const names = {
       0: 'Solid', 2: 'Breathe', 12: 'Fade',
@@ -342,7 +382,7 @@ class GameDayAutopilotConfig {
       43: 'Chase', 46: 'Lightning', 52: 'Running',
       80: 'Twinklefox', 83: 'Pattern', 87: 'Glitter',
     };
-    return names[effectId] ?? 'Custom';
+    return names[effectId] ?? WledEffectsCatalog.getName(effectId);
   }
 
   /// Estimated game duration for this sport.

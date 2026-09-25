@@ -174,7 +174,8 @@ class FavoritesNotifier extends Notifier<void> {
 
     try {
       await writeFavorite(
-        FirebaseFirestore.instance
+        ref
+            .read(favoritesFirestoreProvider)
             .doc('users/${user.uid}/favorites/$patternId'),
         patternName: patternName,
         payload: patternData,
@@ -192,7 +193,8 @@ class FavoritesNotifier extends Notifier<void> {
     if (user == null) return;
 
     try {
-      await FirebaseFirestore.instance
+      await ref
+          .read(favoritesFirestoreProvider)
           .doc('users/${user.uid}/favorites/$patternId')
           .delete();
     } catch (e) {
@@ -264,6 +266,11 @@ class FavoritesNotifier extends Notifier<void> {
 final favoritesNotifierProvider = NotifierProvider<FavoritesNotifier, void>(
   FavoritesNotifier.new,
 );
+
+/// The Firestore instance favorites are written to. The body only runs when
+/// read, so a test that overrides it never touches Firebase.
+final favoritesFirestoreProvider =
+    Provider<FirebaseFirestore>((_) => FirebaseFirestore.instance);
 
 /// Streams the set of all favorited pattern IDs for efficient lookup.
 /// Used by FavoriteHeartButton to show filled/outlined state without
