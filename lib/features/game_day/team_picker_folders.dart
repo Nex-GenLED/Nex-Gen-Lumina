@@ -41,6 +41,24 @@ String gameDayLeagueFolderId(SportType sport) => switch (sport) {
       SportType.ncaaMB => LeagueFolderIds.ncaaBasketball,
     };
 
+/// The picker's root order, by Explore folder id.
+///
+/// This is the ONE place the picker intentionally differs from Explore
+/// Designs: Explore lists NCAA Football and NCAA Basketball last (after
+/// WNBA); the picker seats each college league beside its pro league, so a
+/// fan of one football team finds both football folders together. Folder
+/// identity, naming and every deeper level still come from Explore.
+const List<String> kGameDayPickerLeagueOrder = [
+  LeagueFolderIds.nfl,
+  LeagueFolderIds.ncaaFootball,
+  LeagueFolderIds.nba,
+  LeagueFolderIds.ncaaBasketball,
+  LeagueFolderIds.mlb,
+  LeagueFolderIds.nhl,
+  LeagueFolderIds.soccer,
+  LeagueFolderIds.wnba,
+];
+
 /// Read-only view of the Explore Sports folders that hold Game Day teams.
 class GameDayTeamFolders {
   GameDayTeamFolders._();
@@ -71,10 +89,24 @@ class GameDayTeamFolders {
   /// A folder by its Explore id, or null when the picker does not show it.
   static LibraryNode? node(String id) => _byId[id];
 
-  /// The folders directly under [parentId], in Explore's sort order.
-  static List<LibraryNode> childFolders(String parentId) =>
-      _byId.values.where((n) => n.parentId == parentId).toList()
-        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  /// The folders directly under [parentId].
+  ///
+  /// At the root the order is [kGameDayPickerLeagueOrder]; everywhere else
+  /// (Soccer's leagues) it is Explore's own sort order.
+  static List<LibraryNode> childFolders(String parentId) {
+    final folders = _byId.values.where((n) => n.parentId == parentId).toList();
+    if (parentId == rootId) {
+      int rank(LibraryNode n) {
+        final i = kGameDayPickerLeagueOrder.indexOf(n.id);
+        return i < 0 ? kGameDayPickerLeagueOrder.length + n.sortOrder : i;
+      }
+
+      folders.sort((a, b) => rank(a).compareTo(rank(b)));
+    } else {
+      folders.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    }
+    return folders;
+  }
 
   /// The Game Day sport whose teams live in [folderId], or null for a
   /// grouping folder such as Soccer.

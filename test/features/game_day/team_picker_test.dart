@@ -18,20 +18,28 @@ import 'package:nexgen_command/features/wled/sports_library_builder.dart';
 
 void main() {
   group('folder tree — Explore Designs, reused', () {
-    test('the root lists Explore\'s Sports folders in Explore\'s order', () {
+    test(
+        'the root lists Explore\'s Sports folders, college beside pro '
+        '(kGameDayPickerLeagueOrder — the one deliberate difference from '
+        'Explore\'s order)', () {
       final names = GameDayTeamFolders.childFolders(GameDayTeamFolders.rootId)
           .map((n) => n.name)
           .toList();
       expect(names, [
         'NFL',
+        'NCAA Football',
         'NBA',
+        'NCAA Basketball',
         'MLB',
         'NHL',
         'Soccer',
         'WNBA',
-        'NCAA Football',
-        'NCAA Basketball',
       ]);
+      expect(
+          GameDayTeamFolders.childFolders(GameDayTeamFolders.rootId)
+              .map((n) => n.id),
+          kGameDayPickerLeagueOrder,
+          reason: 'every root folder is named in the order constant');
     });
 
     test('Soccer groups its leagues exactly as Explore does', () {
