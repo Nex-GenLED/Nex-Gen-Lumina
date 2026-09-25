@@ -83,10 +83,11 @@ void main() {
 
       expect(col.length, 3, reason: 'col must be padded to 3 slots');
 
-      // Slot 0 — primary (royal blue) RGBW
-      expect(col[0], [0x00, 0x46, 0x87, 0]);
-      // Slot 1 — secondary (gold) RGBW
-      expect(col[1], [0xBD, 0x9B, 0x60, 0]);
+      // Slot 0 — primary (royal blue) RGBW, as its LED colour: brand
+      // #004687 → [0, 132, 255] (lib/data/team_led_colors.dart).
+      expect(col[0], [0, 132, 255, 0]);
+      // Slot 1 — secondary (gold) RGBW, LED: brand #BD9B60 → [255, 176, 38].
+      expect(col[1], [255, 176, 38, 0]);
       // Slot 2 — the padding the device needs to clear its stale third slot
       expect(col[2], [0, 0, 0, 0]);
     });

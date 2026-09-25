@@ -451,14 +451,17 @@ class _ColorwayEffectSelectorPageState
     return null;
   }
 
-  /// The palette's colours as RGBW `col` entries — the same derivation the
-  /// preview and commit paths use.
+  /// The palette's colours as RGBW `col` entries — the ONE derivation the
+  /// preview, commit and save paths all use.
+  ///
+  /// A sports team node's [LibraryNode.themeColors] are BRAND colours: right
+  /// for the swatches this page paints, wrong on the lights (Packers #203731
+  /// lit reads teal). Its payload colours are the LED colours instead.
   List<List<int>> _paletteColsRgbw() {
-    final cols = _paletteColors
-        .take(3)
-        .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(),
-            (c.b * 255).round(), forceZeroWhite: true))
-        .toList();
+    final cols = selectorPaletteCols(
+      [for (final c in _paletteColors) c.toARGB32()],
+      teamColors: widget.paletteNode.teamColors,
+    );
     if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
     return cols;
   }
@@ -714,11 +717,7 @@ class _ColorwayEffectSelectorPageState
         speed = breathing ? 100 : 0;
       } else {
         final effectId = ref.read(selectorEffectIdProvider);
-        cols = _paletteColors
-            .take(3)
-            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-            .toList();
-        if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
+        cols = _paletteColsRgbw();
         fxId = _effectiveEffectId(effectId);
         speed = ref.read(selectorSpeedProvider);
       }
@@ -793,12 +792,9 @@ class _ColorwayEffectSelectorPageState
       if (_isBrightnessGradient) {
         cols = PatternRepository.colorsToWledCol(previewColors);
       } else {
-        final raw = previewColors
-            .take(3)
-            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-            .toList();
-        if (raw.isEmpty) raw.add(rgbToRgbw(255, 255, 255));
-        cols = raw;
+        // previewColors == _paletteColors here; the local preview keeps the
+        // brand colours, the device gets the LED ones.
+        cols = _paletteColsRgbw();
       }
 
       // Same builder as the preview path and save-to-design, so the payload

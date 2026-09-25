@@ -990,6 +990,12 @@ class ComplementTheme {
   /// If there are more homes than colors, colors wrap around.
   final List<int> themeColors;
 
+  /// What the homes are SENT, when it differs from [themeColors]. A Game Day
+  /// theme's [themeColors] are the team's BRAND colours (the swatches); its
+  /// [ledThemeColors] are their LED colours (lib/data/team_led_colors.dart).
+  /// Null for the built-in holiday themes, whose colours ship as picked.
+  final List<int>? ledThemeColors;
+
   /// Optional effect ID that works best with this theme (0 = solid color).
   final int recommendedEffectId;
 
@@ -999,10 +1005,14 @@ class ComplementTheme {
     required this.description,
     required this.icon,
     required this.themeColors,
+    this.ledThemeColors,
     this.recommendedEffectId = 0,
   });
 
-  /// Get the color for a specific home index (0-based).
+  /// The colours a sync command carries — [ledThemeColors] when set.
+  List<int> get sendColors => ledThemeColors ?? themeColors;
+
+  /// Get the color for a specific home index (0-based), for display.
   /// Wraps around if there are more homes than colors.
   int getColorForIndex(int homeIndex) {
     return themeColors[homeIndex % themeColors.length];
@@ -1013,15 +1023,17 @@ class ComplementTheme {
     return themeColors.map((c) => Color(c | 0xFF000000)).toList();
   }
 
-  /// Builds the member color overrides map for a list of members.
+  /// Builds the member color overrides map for a list of members — the
+  /// colours each home is SENT ([sendColors]).
   Map<String, List<int>> buildMemberColorOverrides(List<NeighborhoodMember> members) {
     final sorted = List<NeighborhoodMember>.from(members)
       ..sort((a, b) => a.positionIndex.compareTo(b.positionIndex));
 
+    final send = sendColors;
     final overrides = <String, List<int>>{};
     for (int i = 0; i < sorted.length; i++) {
       // Each member gets a single solid color from the theme
-      final color = getColorForIndex(i);
+      final color = send[i % send.length];
       overrides[sorted[i].oderId] = [color];
     }
     return overrides;

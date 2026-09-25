@@ -513,8 +513,8 @@ class AutopilotScheduler {
     final repo = _ref.read(wledRepositoryProvider);
     if (repo == null) return;
 
-    final primary = AlertTriggerService.colorToRgbw(teamInfo.primary);
-    final secondary = AlertTriggerService.colorToRgbw(teamInfo.secondary);
+    final primary = teamInfo.primaryLedRgb.toRgbw();
+    final secondary = teamInfo.secondaryLedRgb.toRgbw();
 
     final payload = <String, dynamic>{
       'on': true,

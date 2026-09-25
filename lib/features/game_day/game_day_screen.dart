@@ -750,10 +750,13 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       id: 'celebration_${config.teamSlug}',
       name: '${config.teamName} Celebration',
       nodeType: LibraryNodeType.palette,
+      // Brand colours paint the picker; the preview it sends to the house
+      // carries their LED colours (teamColors).
       themeColors: [
         Color(config.primaryColorValue),
         Color(config.secondaryColorValue),
       ],
+      teamColors: true,
     );
 
     final navigator = Navigator.of(context, rootNavigator: true);

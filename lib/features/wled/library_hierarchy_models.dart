@@ -40,6 +40,11 @@ class LibraryNode {
   /// Additional metadata (league info, suggested effects, etc.)
   final Map<String, dynamic>? metadata;
 
+  /// [themeColors] are a sports team's BRAND colours. They stay the colours
+  /// this node paints in the UI; any controller payload built from them must
+  /// carry their LED colours instead (lib/data/team_led_colors.dart).
+  final bool teamColors;
+
   const LibraryNode({
     required this.id,
     required this.name,
@@ -51,6 +56,7 @@ class LibraryNode {
     this.previewColors,
     this.sortOrder = 0,
     this.metadata,
+    this.teamColors = false,
   });
 
   /// Returns true if this node has color themes (is a palette/team)
@@ -95,6 +101,7 @@ class LibraryNode {
     List<Color>? previewColors,
     int? sortOrder,
     Map<String, dynamic>? metadata,
+    bool? teamColors,
   }) {
     return LibraryNode(
       id: id ?? this.id,
@@ -107,6 +114,7 @@ class LibraryNode {
       previewColors: previewColors ?? this.previewColors,
       sortOrder: sortOrder ?? this.sortOrder,
       metadata: metadata ?? this.metadata,
+      teamColors: teamColors ?? this.teamColors,
     );
   }
 

@@ -17,7 +17,6 @@
 //   3. Fallback: Solid in team primary color
 
 import 'dart:async';
-import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 
@@ -677,8 +676,10 @@ class GameDayAutopilotService {
     GameDayAutopilotConfig config, {
     List<String> preferredStyles = const [],
   }) {
-    final primaryRgb = _colorToRgbList(config.primaryColor);
-    final secondaryRgb = _colorToRgbList(config.secondaryColor);
+    // LED colours: every branch below ends in a controller payload.
+    // config.primaryColor is the BRAND colour, for UI only.
+    final primaryRgb = config.primaryLedRgb.toRgb();
+    final secondaryRgb = config.secondaryLedRgb.toRgb();
     final colors = [primaryRgb, secondaryRgb];
 
     // Priority 1: User has a saved design.
@@ -1259,14 +1260,6 @@ class GameDayAutopilotService {
       return _StyleCategory.motion;
     }
     return _StyleCategory.static_;
-  }
-
-  List<int> _colorToRgbList(Color color) {
-    return [
-      (color.r * 255.0).round().clamp(0, 255),
-      (color.g * 255.0).round().clamp(0, 255),
-      (color.b * 255.0).round().clamp(0, 255),
-    ];
   }
 }
 

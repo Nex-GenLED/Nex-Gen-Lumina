@@ -23,6 +23,7 @@
 import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/data/team_led_colors.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_service.dart';
 import 'package:nexgen_command/features/autopilot/team_design_catalog.dart';
@@ -37,8 +38,10 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart'
 // Bills: blue + red, 120° apart — the design used on the bench.
 const Color _primary = Color(0xFF00338D);
 const Color _secondary = Color(0xFFC60C30);
-const List<int> _primaryRgbw = [0, 51, 141, 0];
-const List<int> _secondaryRgbw = [198, 12, 48, 0];
+// On the wire the team's colours are their LED colours, not the brand hex
+// (#00338D → [0, 92, 255], #C60C30 → [255, 0, 34]; lib/data/team_led_colors.dart).
+final List<int> _primaryRgbw = teamLedRgb(0x00338D).toRgbw();
+final List<int> _secondaryRgbw = teamLedRgb(0xC60C30).toRgbw();
 
 List<Map<String, dynamic>> _segs(Map<String, dynamic> payload) =>
     (payload['seg'] as List)
@@ -192,7 +195,7 @@ void main() {
         'business)', () {
       final saved = _config(
         designMode: AutopilotDesignMode.saved,
-        savedDesignPayload: const {
+        savedDesignPayload: {
           'on': true,
           'bri': 200,
           'seg': [

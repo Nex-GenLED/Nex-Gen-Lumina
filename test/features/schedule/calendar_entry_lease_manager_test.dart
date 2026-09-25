@@ -517,6 +517,47 @@ void main() {
       expect(col0.length, 4); // RGBW
     });
 
+    // Team LED colours: a Game Day entry's `color` is the team's BRAND colour
+    // (the calendar paints it); the preset it psaves must carry the LED
+    // colour. Packers #203731 lit reads teal — the bug this pins.
+    test('Game Day entry: psaved preset carries the team LED colour, the '
+        'entry keeps the brand colour', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      const brand = Color(0xFF203731); // Packers green
+      const entry = CalendarEntry(
+        dateKey: '2026-05-19',
+        patternName: 'Packers Colors (Solid)',
+        color: brand,
+        onTime: '18:00',
+        offTime: '22:00',
+        brightness: 80,
+        type: CalendarEntryType.autopilot,
+        autopilot: true,
+        sourceTag: CalendarEntrySourceTag.gameDay,
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      final col0 = ((p['seg'] as List).first as Map)['col'] as List;
+      expect(col0.first, [0, 255, 31, 0],
+          reason: 'LED Packers green: full green, blue stripped');
+      expect(col0.first, isNot([32, 55, 49, 0]),
+          reason: 'the brand hex must never reach the controller');
+      expect(entry.color, brand, reason: 'the calendar still paints brand');
+    });
+
+    test('a user entry in the same colour ships as picked — the LED table is '
+        'for team colours only', () async {
+      final h = buildHarness();
+      await h.manager.initialize();
+      final entry = buildEntry(
+        dateKey: '2026-05-19',
+        color: const Color(0xFF203731),
+      );
+      final p = h.manager.synthesizeWledPayloadForTest(entry);
+      final col0 = ((p['seg'] as List).first as Map)['col'] as List;
+      expect(col0.first, [32, 55, 49, 0]);
+    });
+
     test('brightness 50 (CalendarEntry scale) produces bri 128 (WLED scale)',
         () async {
       final h = buildHarness();

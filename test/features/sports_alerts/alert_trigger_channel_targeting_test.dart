@@ -130,8 +130,8 @@ void main() {
 
       // Content (effect + colors) preserved verbatim on every channel.
       final expectedColors = [
-        AlertTriggerService.colorToRgbw(team.primary),
-        AlertTriggerService.colorToRgbw(team.secondary),
+        AlertTriggerService.teamLedRgbw(team.primary),
+        AlertTriggerService.teamLedRgbw(team.secondary),
         [0, 0, 0, 0],
       ];
       for (final seg in [seg0, seg1]) {

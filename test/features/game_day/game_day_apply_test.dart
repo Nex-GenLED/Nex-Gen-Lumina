@@ -101,8 +101,10 @@ void main() {
         expect(seg['pal'], 0);
         final cols = seg['col'] as List;
         expect(cols.length, 2);
-        expect(cols[0], [0, 70, 135, 0]); // primary 0xFF004687
-        expect(cols[1], [189, 155, 96, 0]); // secondary 0xFFBD9B60
+        // The config's brand ints go out as their LED colours
+        // (lib/data/team_led_colors.dart), never the brand hex.
+        expect(cols[0], [0, 132, 255, 0]); // primary brand 0xFF004687
+        expect(cols[1], [255, 176, 38, 0]); // secondary brand 0xFFBD9B60
       }
 
       // Post Fix 3 Part 2 (2026-05-23): shortTeamName prefers the curated

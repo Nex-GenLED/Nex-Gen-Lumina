@@ -10,6 +10,7 @@
 // That is what lets the round-trip (payload → state → payload) be tested
 // without a widget or a container.
 
+import 'package:nexgen_command/data/team_led_colors.dart';
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/sparkle_background.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -115,6 +116,24 @@ bool _colorsEqual(List<List<int>> a, List<List<int>> b) {
   }
   return true;
 }
+
+/// A palette's first three colours (0xAARRGGBB) as the RGBW `col` entries
+/// the tuner sends, W forced to 0. Empty in, empty out — the caller owns the
+/// empty-palette fallback.
+///
+/// [teamColors]: the palette is a sports team's BRAND colours (a
+/// `LibraryNode.teamColors` node). Those stay the swatches the tuner paints;
+/// what goes on the wire is their LED colour (lib/data/team_led_colors.dart).
+List<List<int>> selectorPaletteCols(
+  List<int> argb, {
+  required bool teamColors,
+}) =>
+    <List<int>>[
+      for (final c in argb.take(3))
+        teamColors
+            ? teamLedRgb(c).toRgbw()
+            : <int>[(c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, 0],
+    ];
 
 /// The single tuner payload builder.
 ///

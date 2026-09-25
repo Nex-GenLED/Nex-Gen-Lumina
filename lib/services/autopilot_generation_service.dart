@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/data/team_led_colors.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/models/autopilot_profile.dart';
 import 'package:nexgen_command/models/autopilot_schedule_item.dart';
@@ -369,8 +370,10 @@ class AutopilotGenerationService {
 
     if (event.suggestedColors != null && event.suggestedColors!.isNotEmpty) {
       buffer.writeln('Suggested colors to use:');
-      for (final color in event.suggestedColors!) {
-        buffer.writeln('- RGB(${color.red}, ${color.green}, ${color.blue})');
+      // The model's colours go straight into `col`, so it is given the
+      // colours to SEND — LED colours for a team (_sendRgb).
+      for (final rgb in _sendRgb(event)) {
+        buffer.writeln('- RGB(${rgb[0]}, ${rgb[1]}, ${rgb[2]})');
       }
     }
 
@@ -429,6 +432,29 @@ class AutopilotGenerationService {
     return score.clamp(0.0, 1.0);
   }
 
+  /// [event]'s suggested colours as the `[r, g, b]` to SEND. A sports game's
+  /// suggestedColors are the team's BRAND colours (they stay the item's UI
+  /// `colors`); on the lights they are the team's LED colours
+  /// (lib/data/team_led_colors.dart). Other events' colours ship as picked.
+  static List<List<int>> _sendRgb(CalendarEvent event) {
+    final colors = event.suggestedColors ?? const [];
+    if (event.type == CalendarEventType.sportGame) {
+      return [for (final c in colors) teamLedRgb(c.toARGB32()).toRgb()];
+    }
+    return [
+      for (final c in colors)
+        [
+          (c.r * 255.0).round().clamp(0, 255),
+          (c.g * 255.0).round().clamp(0, 255),
+          (c.b * 255.0).round().clamp(0, 255),
+        ],
+    ];
+  }
+
+  @visibleForTesting
+  static List<List<int>> sendRgbForTest(CalendarEvent event) =>
+      _sendRgb(event);
+
   /// Get a fallback pattern when AI generation fails.
   Map<String, dynamic> _getFallbackPattern(CalendarEvent event, bool colorsAllowed) {
     if (!colorsAllowed) {
@@ -455,9 +481,9 @@ class AutopilotGenerationService {
     // Use event colors if available
     if (event.suggestedColors != null && event.suggestedColors!.isNotEmpty) {
       // Convert to RGBW format (W=0 for saturated colors)
-      final colors = event.suggestedColors!
+      final colors = _sendRgb(event)
           .take(3)
-          .map((c) => rgbToRgbw(c.red, c.green, c.blue, forceZeroWhite: true))
+          .map((c) => rgbToRgbw(c[0], c[1], c[2], forceZeroWhite: true))
           .toList();
 
       return {

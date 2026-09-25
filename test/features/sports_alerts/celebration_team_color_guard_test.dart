@@ -189,8 +189,10 @@ void main() {
 
   group('the team colours are actually on the wire', () {
     test('slot 0 of every stage is the team primary, white channel zeroed', () {
-      final primary = AlertTriggerService.colorToRgbw(_team.primary);
-      expect(primary, [227, 24, 55, 0]); // Chiefs red #E31837
+      final primary = AlertTriggerService.teamLedRgbw(_team.primary);
+      // Chiefs red — brand #E31837 on the UI, its LED colour on the wire
+      // (lib/data/team_led_colors.dart), never the brand [227, 24, 55].
+      expect(primary, [255, 0, 34, 0]);
       for (final type in AlertEventType.values) {
         for (final step in AlertTriggerService.buildAnimationSteps(type, _team)) {
           for (final seg in _segsOf(step)) {

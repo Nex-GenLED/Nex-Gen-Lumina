@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../../../data/team_led_colors.dart';
 import '../../../models/autopilot_override.dart';
 import '../../../services/autopilot_scheduler.dart';
 import '../../wled/wled_effects_catalog.dart' show WledEffectsCatalog;
@@ -406,7 +407,7 @@ class AlertTriggerService {
     TeamColors team,
   ) {
     final colors = _teamColorArray(team);
-    final primary = colorToRgbw(team.primary);
+    final primary = team.primaryLedRgb.toRgbw();
     List<List<int>> primaryOnly() => [
           List<int>.from(primary),
           [0, 0, 0, 0],
@@ -554,23 +555,19 @@ class AlertTriggerService {
   // Color helpers
   // ---------------------------------------------------------------------------
 
-  /// Build the WLED 3-slot color array: [primary, secondary, black].
+  /// Build the WLED 3-slot color array: [primary, secondary, black], in the
+  /// team's LED colours.
   static List<List<int>> _teamColorArray(TeamColors team) => [
-        colorToRgbw(team.primary),
-        colorToRgbw(team.secondary),
+        team.primaryLedRgb.toRgbw(),
+        team.secondaryLedRgb.toRgbw(),
         [0, 0, 0, 0],
       ];
 
-  /// Convert a Flutter [Color] to RGBW with forceZeroWhite for saturated
-  /// team colors (per project convention).
-  ///
-  /// Public so the [AutopilotScheduler] can reuse for pre-game colorways.
-  static List<int> colorToRgbw(Color c) => rgbToRgbw(
-        (c.r * 255.0).round().clamp(0, 255),
-        (c.g * 255.0).round().clamp(0, 255),
-        (c.b * 255.0).round().clamp(0, 255),
-        forceZeroWhite: true,
-      );
+  /// A team's BRAND colour → the RGBW `col` entry a controller gets: its LED
+  /// colour, W = 0 (lib/data/team_led_colors.dart). Team colours only — a
+  /// user-picked colour must not go through this.
+  static List<int> teamLedRgbw(Color brand) =>
+      teamLedRgb(brand.toARGB32()).toRgbw();
 
   // ---------------------------------------------------------------------------
   // Notifications

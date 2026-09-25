@@ -24,6 +24,7 @@ import 'dart:ui' show Color;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../../data/team_led_colors.dart';
 import '../../utils/sun_utils.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
@@ -634,8 +635,9 @@ class GameDayAutopilotBackgroundWorker {
   static Map<String, dynamic> buildCelebrationPayloadForTest(
     BackgroundGameDayAutopilotConfig config,
   ) {
-    final primary = Color(config.primaryColorValue);
-    final secondary = Color(config.secondaryColorValue);
+    // LED colours — the stored ints are the team's BRAND colour (UI).
+    final primary = teamLedRgb(config.primaryColorValue);
+    final secondary = teamLedRgb(config.secondaryColorValue);
     // RAW single-seg-no-id → expandForChannels fans the celebration flash
     // across the participating channels too (same #29 fix as the base show).
     return expandForChannels(
@@ -656,18 +658,8 @@ class GameDayAutopilotBackgroundWorker {
                 : 240,
             'pal': 0,
             'col': [
-              [
-                (primary.r * 255).round(),
-                (primary.g * 255).round(),
-                (primary.b * 255).round(),
-                0,
-              ],
-              [
-                (secondary.r * 255).round(),
-                (secondary.g * 255).round(),
-                (secondary.b * 255).round(),
-                0,
-              ],
+              primary.toRgbw(),
+              secondary.toRgbw(),
             ],
           }
         ],

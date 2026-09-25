@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../data/team_led_colors.dart';
 import '../patterns/utils/pattern_display_name.dart';
 import '../sports_alerts/models/score_alert_config.dart' show AlertSensitivity;
 import '../sports_alerts/models/sport_type.dart';
@@ -263,8 +264,16 @@ class GameDayAutopilotConfig {
     this.celebrationIntensity = 240,
   });
 
+  /// BRAND colours — for UI paint only (cards, dots, gradients).
   Color get primaryColor => Color(primaryColorValue);
   Color get secondaryColor => Color(secondaryColorValue);
+
+  /// LED colours — what a controller payload must carry. The stored ints are
+  /// the team's BRAND colour (written once at addTeam), so the translation
+  /// happens here at read time and covers every existing config doc. See
+  /// lib/data/team_led_colors.dart.
+  LedRgb get primaryLedRgb => teamLedRgb(primaryColorValue);
+  LedRgb get secondaryLedRgb => teamLedRgb(secondaryColorValue);
 
   /// Human-readable design label for the UI.
   ///

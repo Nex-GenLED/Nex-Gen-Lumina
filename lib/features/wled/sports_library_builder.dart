@@ -118,6 +118,7 @@ class SportsLibraryBuilder {
           nodeType: LibraryNodeType.palette,
           parentId: parentId,
           themeColors: team.colors,
+          teamColors: true,
           sortOrder: i,
           metadata: {
             'league': league,
@@ -182,6 +183,7 @@ class SportsLibraryBuilder {
           nodeType: LibraryNodeType.palette,
           parentId: parentId,
           themeColors: team.colors.map((c) => c.toColor()).toList(),
+          teamColors: true,
           sortOrder: i,
           metadata: {
             'league': team.league,

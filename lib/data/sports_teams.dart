@@ -127,9 +127,11 @@ class SportsTeamsDatabase {
 
   /// Derive a [SportsTeam] from a [UnifiedTeamEntry].
   ///
-  /// Uses raw brand colors (no LED optimisation) — this path feeds UI
-  /// rendering only. LED payload generation calls [ledOptimizedRgb] directly
-  /// on the [UnifiedTeamEntry] (see lumina_brain.dart).
+  /// Uses raw BRAND colors — what the UI paints. They do reach controllers,
+  /// and every such path translates them to LED colours at payload time
+  /// (lib/data/team_led_colors.dart): Explore team nodes via
+  /// `LibraryNode.teamColors`, the autopilot sport-game fallback, and the AI
+  /// via [UnifiedTeamEntry.ledOptimizedRgb] (see lumina_brain.dart).
   static SportsTeam _fromEntry(UnifiedTeamEntry entry) {
     return SportsTeam(
       name: UnifiedTeamEntry.extractTeamName(entry.officialName, entry.city),

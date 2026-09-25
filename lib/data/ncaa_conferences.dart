@@ -347,6 +347,7 @@ class NcaaConferences {
           nodeType: LibraryNodeType.palette,
           parentId: parentId,
           themeColors: [school.primaryColor, school.secondaryColor],
+          teamColors: true,
           sortOrder: i,
           metadata: {
             'school': school.name,

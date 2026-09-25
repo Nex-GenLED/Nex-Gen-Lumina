@@ -329,7 +329,7 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       groupId: groupId,
       members: members,
       effectId: effectIdOverride ?? theme.recommendedEffectId,
-      colors: theme.themeColors, // Fallback colors
+      colors: theme.sendColors, // Fallback colors
       speed: speed,
       intensity: intensity,
       brightness: brightness,

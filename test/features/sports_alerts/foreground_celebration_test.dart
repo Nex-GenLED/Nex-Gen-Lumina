@@ -339,8 +339,8 @@ void main() {
                 'default palette');
         expect(segs.map((s) => s['col']),
             everyElement([
-              AlertTriggerService.colorToRgbw(teamColors.primary),
-              AlertTriggerService.colorToRgbw(teamColors.secondary),
+              AlertTriggerService.teamLedRgbw(teamColors.primary),
+              AlertTriggerService.teamLedRgbw(teamColors.secondary),
               [0, 0, 0, 0],
             ]),
             reason: 'the palette is built from these — they must be on the '

@@ -11,6 +11,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../../data/team_led_colors.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../neighborhood_models.dart';
 import 'path1_game_day_snapshot.dart';
@@ -24,9 +25,14 @@ ComplementTheme path1ToComplementTheme(Path1GameDaySnapshot snap) {
     name: 'Game Day - ${snap.teamName}',
     description: '${snap.sport.displayName} team colors',
     icon: _sportIcon(snap.sport),
+    // Brand colours for the theme swatches; LED colours for the homes.
     themeColors: [
       snap.primaryColorValue & 0xFFFFFF,
       snap.secondaryColorValue & 0xFFFFFF,
+    ],
+    ledThemeColors: [
+      teamLedRgb(snap.primaryColorValue).rgb,
+      teamLedRgb(snap.secondaryColorValue).rgb,
     ],
     recommendedEffectId: snap.effectId,
   );
