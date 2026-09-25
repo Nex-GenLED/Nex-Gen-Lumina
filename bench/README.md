@@ -88,3 +88,39 @@ All WLED behavior claims must be tagged `verified-by-bench` / `verified-by-sourc
 Assertion/diff logic is unit-tested in
 [test/bench/bench_core_test.dart](../test/bench/bench_core_test.dart) with canned
 fixtures; the hardware commands are the integration tests.
+
+## Team LED colour preview (`team_led_preview.dart`)
+
+A separate, interactive tool for tuning [lib/data/team_led_colors.dart](../lib/data/team_led_colors.dart)
+by eye. It pushes one team's colours at a time to the **spare** controller and
+records keep / adjust verdicts:
+
+```bash
+dart run bench/bin/team_led_preview.dart                    # every team, Packers first
+dart run bench/bin/team_led_preview.dart --league nfl       # one league (nba, mlb, nhl, mls, nwsl, wnba, ncaa, ncaamb, fifa, cl)
+dart run bench/bin/team_led_preview.dart --start nfl_bears  # resume
+dart run bench/bin/team_led_preview.dart --smoke            # non-interactive self-check, then restore
+```
+
+Keys: `n`/Enter next · `p` prev · `b` both colours (bands) · `1` primary · `2`
+secondary · `o` A/B the old brand hex · `k` keep → next · `a` adjust (type a
+note) · `s` skip · `q` quit. Verdicts append to `state/team_led_notes.jsonl`.
+
+It does not share this harness's client. Its own client can only `GET` and
+`POST /json/state`, and it enforces the rules in code
+([bench/src/team_led_preview_core.dart](src/team_led_preview_core.dart), unit-tested in
+[test/bench/team_led_preview_core_test.dart](../test/bench/team_led_preview_core_test.dart)):
+
+- **Never `192.168.1.150`.** It is refused by address, by resolved address, and
+  by the controller's own reported `ip`. The default target is `192.168.1.173`.
+- **Live state only.** No `psave`, `pdel`, `ps`, `pl`, `playlist` or `rb` at
+  any depth, and no top-level `ib`, `sb`, `n`, `ql` or `np`. It never writes
+  `/json/cfg`, and it reads colour gamma rather than setting it.
+- **Restore on exit.** The original `/json/state` is captured before the first
+  write, to `state/team_led_preview_capture.json`. It is restored on `q`,
+  Ctrl+C or any error, then read back and diffed field by field. If a run is
+  killed hard, restore it with `--restore-from bench/state/team_led_preview_capture.json`.
+
+The table assumes the fleet's colour gamma (`light.gc.col` 2.8). The tool
+prints the controller's value. Where colour gamma is off, `--emulate-gamma`
+applies 2.8 in software so the preview still matches customer houses.
