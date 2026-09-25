@@ -40,11 +40,14 @@ const TEAMS = {
   nba_thunder: { sport: "nba", espn: "25", name: "Oklahoma City Thunder", primary: 0xff007ac1, secondary: 0xffef6f1c },
   nhl_blues: { sport: "nhl", espn: "19", name: "St. Louis Blues", primary: 0xff002f87, secondary: 0xfffcb514 },
 };
+// What reaches the controller: each team's LED colour, not the stored brand
+// int (lib/data/team_led_colors.dart ↔ src/teamLedColors.ts). Brand in the
+// comment for reference.
 const RGB = {
-  nfl_chiefs: [227, 24, 55, 0],
-  mlb_royals: [0, 70, 135, 0],
-  nba_thunder: [0, 122, 193, 0],
-  nhl_blues: [0, 47, 135, 0],
+  nfl_chiefs: [255, 0, 34, 0], // brand #E31837
+  mlb_royals: [0, 132, 255, 0], // brand #004687
+  nba_thunder: [0, 161, 255, 0], // brand #007AC1
+  nhl_blues: [0, 89, 255, 0], // brand #002F87
 };
 
 // ---------------------------------------------------------------------------

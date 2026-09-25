@@ -53,7 +53,6 @@ import {
 import { assertPayloadIsFireSafe, FIRE_JOBS_COLLECTION } from "./fireJobs";
 import {
   PLAN_HORIZON_MS,
-  argbToRgb,
   buildParticipatingSegArray,
   buildFullPartitionSegArray,
   decideEndSignal,
@@ -65,6 +64,7 @@ import {
   toRgbwSlots,
 } from "./gameDayPlanning";
 import { fetchTeamGame, EspnGame } from "./espnClient";
+import { teamLedRgb } from "./teamLedColors";
 import {
   TeamRow,
   TeamWindow,
@@ -254,11 +254,16 @@ export function buildGameDayPayload(args: {
   const secondary =
     typeof c.secondary_color === "number" ? c.secondary_color : 0xffffffff;
 
+  // `primary_color` / `secondary_color` are the team's BRAND colours (the app
+  // paints them; addTeam writes them once). Sent as-is they read wrong at LED
+  // intensity — Packers #203731 lights teal — so the fire carries the LED
+  // colour (teamLedColors.ts, mirror of lib/data/team_led_colors.dart). A
+  // colour that is not a known team colour passes through unchanged.
   const look = {
     effectId: typeof c.effect_id === "number" ? c.effect_id : 0,
     speed: typeof c.speed === "number" ? c.speed : 128,
     intensity: typeof c.intensity === "number" ? c.intensity : 128,
-    colorSlots: toRgbwSlots([argbToRgb(primary), argbToRgb(secondary)]),
+    colorSlots: toRgbwSlots([teamLedRgb(primary), teamLedRgb(secondary)]),
   };
 
   // #67 — assert the full partition when the device set is known, so an
