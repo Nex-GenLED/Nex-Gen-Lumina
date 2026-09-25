@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
+import 'package:nexgen_command/features/favorites/favorites_picker.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -133,7 +132,7 @@ class _NoFavoritesYetRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _FavoritesStatusRow(
-      onTap: () => context.push(AppRoutes.explore),
+      onTap: () => openFavoritesPicker(context),
       child: Row(
         children: [
           Icon(Icons.star_border_rounded,
@@ -201,7 +200,7 @@ class _EmptySlot extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => context.push(AppRoutes.explore),
+        onTap: () => openFavoritesPicker(context),
         borderRadius: BorderRadius.circular(14),
         child: Container(
           height: 52,

@@ -72,7 +72,7 @@ import {
   handoffWinner,
   leadMinutesFor,
   orderByPriority,
-  ownerAt,
+  outrankedBy,
   profileNamesFrom,
   rankOf,
   startDecision,
@@ -111,6 +111,13 @@ interface PlanStats {
    * restoring base. A subset of `endsPlanned` — an end was planned either way.
    */
   handoffsPlanned: number;
+  /**
+   * Ends ESPN never confirmed: the hard cap fired at start + estimatedDuration
+   * + 60 min. A subset of `endsPlanned`. Non-zero means the feed let a game run
+   * out — worth reading, because every one is a game the house would otherwise
+   * have held in team colours indefinitely.
+   */
+  hardCapsPlanned: number;
   /**
    * START-phase outcomes. **Exactly one bucket per enabled config**, so the
    * invariant is `sum(skipped) + startsPlanned === configsEnabled` (less any
@@ -330,6 +337,7 @@ export async function runPlannerTick(
     startsPlanned: 0,
     endsPlanned: 0,
     handoffsPlanned: 0,
+    hardCapsPlanned: 0,
     skipped: {},
     endSkipped: {},
     espnErrors: 0,
@@ -842,8 +850,11 @@ export async function runPlannerTick(
           //    The end is recorded (endFiredAt, so it never re-fires) and no
           //    job is written. The app's analogue: a deferred or preempted
           //    session completes without calling onResumeNormalSchedule.
-          const owner = ownerAt(windows, nowMs);
-          if (owner !== null && owner.eventId !== eventId) {
+          //    Asked of THIS team rather than "who owns the house now": a
+          //    hard-capped team's own window has just closed, and a lower
+          //    team still playing must receive the hand-off, not outrank it.
+          const owner = outrankedBy(windows, win, nowMs);
+          if (owner !== null) {
             bump(stats.endSkipped, "end:not_owner");
             logRows.push({
               uid, teamSlug, eventId, action: "skip",
@@ -977,6 +988,7 @@ export async function runPlannerTick(
             }
           }
           stats.endsPlanned++;
+          if (decision.reason === "hard_cap") stats.hardCapsPlanned++;
         } else if (decision.reason !== "not_final" && decision.reason !== "already_fired") {
           // endSkipped, NOT skipped: this config has already been counted once
           // in the START dimension and counting it again there would break
@@ -1020,6 +1032,8 @@ export async function runPlannerTick(
     endsPlanned: stats.endsPlanned,
     // Ends that handed the house to another team rather than restoring base.
     handoffsPlanned: stats.handoffsPlanned,
+    // Ends the hard cap fired because ESPN never said final.
+    hardCapsPlanned: stats.hardCapsPlanned,
     // Skip reasons by category — the field whose absence cost the most.
     // START phase, one bucket per config. See PlanStats.skipped.
     skipped: stats.skipped,

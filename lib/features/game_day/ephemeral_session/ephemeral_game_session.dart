@@ -39,6 +39,15 @@ enum EphemeralSessionPhase {
   /// removed immediately on completion.
   completed;
 
+  /// The session is doing something the user can see: the team design is
+  /// up (or about to be) and the phase machine is still tracking the game.
+  /// Whether such a session is still CURRENT is a separate question, answered
+  /// by `isEphemeralSessionExpired` (ephemeral_session_expiry.dart).
+  bool get isActive =>
+      this == EphemeralSessionPhase.preGame ||
+      this == EphemeralSessionPhase.liveGame ||
+      this == EphemeralSessionPhase.postGame;
+
   String toJson() => name;
 
   static EphemeralSessionPhase fromJson(String json) =>
@@ -55,6 +64,10 @@ enum EphemeralCompletedReason {
 
   /// User explicitly cancelled the session.
   cancelledByUser,
+
+  /// The session outlived its game (see ephemeral_session_expiry.dart) and
+  /// was finalised WITHOUT applying its revert payload.
+  expired,
 
   /// An error prevented normal completion.
   error;

@@ -115,18 +115,14 @@ class _SubUsersScreenState extends ConsumerState<SubUsersScreen> {
 
     return Scaffold(
       appBar: const GlassAppBar(title: Text('Manage Users')),
+      // No manual lift: the shell injects the dock height into
+      // MediaQuery.viewPadding, and Scaffold places its FAB above that.
       floatingActionButton: _isPrimaryUser
-          ? Padding(
-              // Lift the FAB above the glass dock nav bar overlay so it
-              // isn't hidden behind it. See main_scaffold.dart:187-198 for
-              // the convention. Matches my_schedule_page / edit_profile.
-              padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-              child: FloatingActionButton.extended(
-                onPressed: () => _showInviteDialog(context),
-                backgroundColor: NexGenPalette.cyan,
-                icon: const Icon(Icons.person_add, color: Colors.black),
-                label: const Text('Invite', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
-              ),
+          ? FloatingActionButton.extended(
+              onPressed: () => _showInviteDialog(context),
+              backgroundColor: NexGenPalette.cyan,
+              icon: const Icon(Icons.person_add, color: Colors.black),
+              label: const Text('Invite', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
             )
           : null,
       body: ListView(

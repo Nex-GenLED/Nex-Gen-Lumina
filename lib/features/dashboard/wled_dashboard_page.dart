@@ -49,10 +49,8 @@ import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
 import 'package:nexgen_command/features/favorites/favorite_apply.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
-import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session.dart';
-import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session_providers.dart';
-import 'package:nexgen_command/features/game_day/ephemeral_session/active_session_sheet.dart';
-import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
+import 'package:nexgen_command/features/dashboard/widgets/feature_button.dart';
+import 'package:nexgen_command/features/game_day/game_day_entry_button.dart';
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
@@ -482,9 +480,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  _FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
+                  FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
                   const SizedBox(width: 12),
-                  _FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.push(AppRoutes.neighborhoodSync)),
+                  FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.push(AppRoutes.neighborhoodSync)),
                 ],
               ),
             ),
@@ -496,26 +494,26 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             //
             // Item #51 Prompt 4: when an ephemeral session is in active phase
             // (preGame/liveGame/postGame), the Game Day button paints with a
-            // team-color gradient and tapping opens the ActiveSessionSheet
-            // instead of navigating to the Game Day hub.
+            // team-color gradient and tapping opens the session sheet, which
+            // links on to the Game Day hub. See GameDayEntryButton.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
-                  _buildGameDayButton(context, ref),
+                  const GameDayEntryButton(),
                   const SizedBox(width: 12),
                   // Audio Mode hidden in release builds pending v1.0.1 rework
                   // (named effect catalog + design selector + sensitivity defaults).
                   // The capability detector continues running so the v1.0.1 work
                   // can use it without re-plumbing.
                   if (kDebugMode && audioSupported)
-                    _FeatureButton(
+                    FeatureButton(
                       icon: Icons.graphic_eq_rounded,
                       label: 'Audio Mode',
                       onTap: () => context.push(AppRoutes.audioReactive),
                     )
                   else
-                    _FeatureButton(
+                    FeatureButton(
                       icon: Icons.palette_outlined,
                       label: 'My Designs',
                       // Routes to the synthetic Explore "My Designs"
@@ -542,43 +540,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           ]),
         ),
       ]),
-    );
-  }
-
-  /// Item #51 Prompt 4 — builds the Game Day feature button with active-
-  /// phase awareness. When a session is in preGame/liveGame/postGame phase,
-  /// the button paints with the team's primary→secondary gradient and tap
-  /// opens [ActiveSessionSheet]. Otherwise renders the default cyan button
-  /// that navigates to the Game Day hub.
-  Widget _buildGameDayButton(BuildContext context, WidgetRef ref) {
-    final activeSession = ref.watch(activePhaseSessionProvider);
-    final teamInfo = activeSession != null
-        ? kTeamColors[activeSession.teamSlug]
-        : null;
-    final gradient = (activeSession != null && teamInfo != null)
-        ? LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [teamInfo.primary, teamInfo.secondary],
-          )
-        : null;
-
-    return _FeatureButton(
-      icon: Icons.stadium_rounded,
-      label: 'Game Day',
-      onTap: activeSession != null
-          ? () => _showActiveSessionSheet(activeSession)
-          : () => context.push(AppRoutes.gameDay),
-      gradient: gradient,
-    );
-  }
-
-  void _showActiveSessionSheet(EphemeralGameSession session) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => ActiveSessionSheet(session: session),
     );
   }
 
@@ -1742,79 +1703,6 @@ class _SkySlot {
   final String label;
 
   const _SkySlot(this.startHour, this.colors, this.opacity, this.label);
-}
-
-class _FeatureButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  /// When non-null, replaces the default solid background with a gradient
-  /// fill. Used by the Game Day button to surface active ephemeral session
-  /// state with the team's primary→secondary colors (Item #51 Prompt 4).
-  final Gradient? gradient;
-
-  const _FeatureButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.gradient,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hasGradient = gradient != null;
-    return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-            decoration: BoxDecoration(
-              color: hasGradient
-                  ? null
-                  : NexGenPalette.gunmetal90.withValues(alpha: 0.7),
-              gradient: gradient,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: hasGradient
-                    ? Colors.white.withValues(alpha: 0.25)
-                    : NexGenPalette.cyan.withValues(alpha: 0.25),
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  icon,
-                  size: 20,
-                  color: hasGradient ? Colors.white : NexGenPalette.cyan,
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: hasGradient
-                          ? Colors.white
-                          : NexGenPalette.textPrimary,
-                      letterSpacing: 0.3,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Brightness slider with a 200ms debounce on the network publish.

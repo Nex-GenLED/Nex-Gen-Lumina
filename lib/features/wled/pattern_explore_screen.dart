@@ -593,7 +593,9 @@ class _NoMatchRedirectWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      // Bottom term clears the glass dock (shell-injected inset) so the
+      // "browse our existing designs" action stays tappable.
+      padding: EdgeInsets.fromLTRB(24, 32, 24, 32 + navBarTotalHeight(context)),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -763,7 +765,9 @@ class _LibrarySearchResultsView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      // Bottom term clears the glass dock (shell-injected inset) so the last
+      // search results are not hidden behind it.
+      padding: EdgeInsets.fromLTRB(16, 8, 16, 8 + navBarTotalHeight(context)),
       children: [
         // Results header
         Text(
@@ -822,8 +826,6 @@ class _LibrarySearchResultsView extends ConsumerWidget {
             pattern: pattern,
           )),
         ],
-
-        const SizedBox(height: 40),
       ],
     );
   }

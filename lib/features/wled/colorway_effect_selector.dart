@@ -29,6 +29,10 @@ import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/favorites/favorites_providers.dart';
+import 'package:nexgen_command/features/game_day/game_day_design_save.dart';
+import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
+    show showScheduleEditor, PatternSelection;
 
 /// Compose a richer Now Playing label for the Colorway / Architectural
 /// Apply path. Stopgap for the current single-string `activePresetLabelProvider`
@@ -83,15 +87,27 @@ Map<String, dynamic> designEditPreviewPayload(
 /// `CustomDesign.toWledPayload()` so it round-trips into a ScheduleItem.
 class LibraryDesignSelection {
   final String id;
+
+  /// Display name of the choice, "`<palette> - <effect>`".
   final String name;
   final String imageUrl;
   final Map<String, dynamic> wledPayload;
+
+  /// The palette's own name, without the effect suffix. Destinations that
+  /// derive the effect from [wledPayload] (Game Day) store THIS, so the label
+  /// they show can never disagree with the payload they fire.
+  final String? paletteName;
+
   const LibraryDesignSelection({
     required this.id,
     required this.name,
     required this.wledPayload,
     this.imageUrl = '',
+    this.paletteName,
   });
+
+  /// [paletteName] when known, else [name].
+  String get baseName => paletteName ?? name;
 }
 
 /// Effect selector page that replaces the pattern grid.
@@ -99,19 +115,23 @@ class LibraryDesignSelection {
 class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   final LibraryNode paletteNode;
 
-  /// When non-null, this selector is operating inside the Game Day
-  /// picker. Committing a pattern (via [_applyPattern]) will persist
-  /// the design to the team's GameDayAutopilotConfig via saveDesign.
-  /// Preview-apply (the debounced [_sendToWled] path) is intentionally
-  /// NOT wired to saveDesign — that path fires on every knob twist
-  /// and would otherwise spam Firestore with intermediate states.
-  final String? teamSlug;
-
-  /// When non-null, this selector is in SELECTION mode (e.g. the schedule
-  /// pattern picker): committing RETURNS the chosen design via this callback
-  /// instead of applying to lights or persisting to Game Day. Null (the
-  /// default) preserves the normal apply-on-tap behavior byte-for-byte.
+  /// When non-null, this selector is in SAVE mode (the schedule, Game Day and
+  /// Favorites pickers): committing RETURNS the chosen design via this
+  /// callback for the CALLER to persist, and nothing here writes to the
+  /// controller unless the user taps "Preview on lights". Null (the default)
+  /// is APPLY mode: the commit button applies to the lights and persists
+  /// nothing; a secondary "Save…" offers Favorites / Game Day / schedule.
+  ///
+  /// The selector itself never persists a design anywhere. The Game Day
+  /// `saveDesign` side-channel that once lived here (keyed on a `teamSlug`
+  /// parameter, and fired by the SAME button that applied to the lights) is
+  /// gone as of 2026-09-25; GameDayDesignPickerScreen supplies the save
+  /// through this callback instead.
   final void Function(LibraryDesignSelection selection)? onDesignSelected;
+
+  /// SAVE mode's destination, for the commit button: "Save to Favorites",
+  /// "Save to Game Day", "Save to schedule". Null reads "Save".
+  final String? saveDestinationLabel;
 
   /// DESIGN-EDIT mode. When non-null this tuner is editing a STORED design
   /// rather than browsing a catalog palette: the seven selector providers are
@@ -150,8 +170,8 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
-    this.teamSlug,
     this.onDesignSelected,
+    this.saveDestinationLabel,
     this.editingDesign,
     this.celebrationMode = false,
     this.initialEffectId,
@@ -198,6 +218,16 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
 class _ColorwayEffectSelectorPageState
     extends ConsumerState<ColorwayEffectSelectorPage> {
   Timer? _debounceTimer;
+
+  /// SAVE mode: true once the user tapped "Preview on lights". Until then no
+  /// adjustment reaches the controller — choosing a design for a schedule,
+  /// Game Day or Favorites must not light the house on its own.
+  bool _livePreviewOn = false;
+
+  /// SAVE mode that is not the celebration picker (celebration keeps its
+  /// always-live preview and its own "Set celebration" commit).
+  bool get _isSaveMode =>
+      widget.onDesignSelected != null && !widget.celebrationMode;
 
   /// SELECTION and DESIGN-EDIT modes. The pre-preview device look, snapshotted
   /// on entry (see [initState]) so the CANCEL exit can RESTORE it. The live
@@ -319,15 +349,17 @@ class _ColorwayEffectSelectorPageState
       }
       // CELEBRATION seeds from the stored choice (or the first curated pick);
       // every other mode keeps the historical effect-0 seed byte-for-byte.
+      // Otherwise seed from the caller's stored choice when it has one (the
+      // Game Day picker passes the plan's current effect, so the editor opens
+      // on what the card shows), else the historical effect-0 seed.
       final seedFx = widget.celebrationMode
           ? _celebrationSeedEffectId()
-          : 0;
+          : (widget.initialEffectId ?? 0);
       ref.read(selectorEffectIdProvider.notifier).state = seedFx;
-      ref.read(selectorSpeedProvider.notifier).state = widget.celebrationMode
-          ? (widget.initialSpeed ?? getSpeedProfile(seedFx).rawDefault)
-          : getSpeedProfile(0).rawDefault;
+      ref.read(selectorSpeedProvider.notifier).state =
+          widget.initialSpeed ?? getSpeedProfile(seedFx).rawDefault;
       ref.read(selectorIntensityProvider.notifier).state =
-          widget.celebrationMode ? (widget.initialIntensity ?? 128) : 128;
+          widget.initialIntensity ?? 128;
       ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
       ref.read(selectorSpacingProvider.notifier).state = initSpacing;
       ref.read(selectorGradientPresetProvider.notifier).state = initPreset;
@@ -601,6 +633,12 @@ class _ColorwayEffectSelectorPageState
   /// decision — leftover preview is a benign, self-correcting state).
   Future<bool> _restoreCapturedLook() async {
     if (_capturedLook == null) return true; // nothing to restore / consumed
+    if (_isSaveMode && !_livePreviewOn) {
+      // No preview ever reached the lights: nothing to undo, and a restore
+      // write would itself be a controller command a Save must not issue.
+      _capturedLook = null;
+      return true;
+    }
     if (_restoreDemoMode) {
       _capturedLook = null; // demo: no device, nothing to undo
       return true;
@@ -690,6 +728,8 @@ class _ColorwayEffectSelectorPageState
   }
 
   void _sendToWled() {
+    // SAVE mode: the lights are untouched until "Preview on lights".
+    if (_isSaveMode && !_livePreviewOn) return;
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 150), () async {
       final demoMode = ref.read(demoModeProvider);
@@ -757,7 +797,10 @@ class _ColorwayEffectSelectorPageState
     });
   }
 
-  Future<void> _applyPattern() async {
+  /// Everything a commit needs, from the SAME builder the live preview uses
+  /// ([_sendToWled]), so what was previewed is what gets applied, saved or
+  /// handed back — and so a Save never needs a device to build its payload.
+  _Commit _buildCommit() {
     final colorGroup = ref.read(selectorColorGroupProvider);
     final spacing = ref.read(selectorSpacingProvider);
     final intensity = ref.read(selectorIntensityProvider);
@@ -782,67 +825,88 @@ class _ColorwayEffectSelectorPageState
       effectName = WledEffectsCatalog.getName(effectId);
     }
 
-    bool appliedToDevice = false;
-    // The `pal` the as-sent payload carries, for the local preview below.
-    int? sentPal;
+    final List<List<int>> cols;
+    if (_isBrightnessGradient) {
+      cols = PatternRepository.colorsToWledCol(previewColors);
+    } else {
+      final raw = previewColors
+          .take(3)
+          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
+          .toList();
+      if (raw.isEmpty) raw.add(rgbToRgbw(255, 255, 255));
+      cols = raw;
+    }
 
-    // Try to send to device
+    // Same overrides as the preview path, so what was previewed is what
+    // gets committed (and what a saved design round-trips back to).
+    final solid = _activeSolidFields();
+    final payload = buildSelectorPayload(SelectorState(
+      effectId: fxId,
+      speed: solid?.sx ?? speed,
+      intensity: solid?.ix ?? intensity,
+      grouping: solid?.grp ?? colorGroup,
+      spacing: spacing,
+      colors: cols,
+      paletteOverride: solid?.pal ??
+          rainbowPaletteOverride(
+              effectId: fxId, rainbowScope: _isRainbowPalette),
+    ));
+    return _Commit(
+      payload: payload,
+      fxId: fxId,
+      speed: speed,
+      intensity: intensity,
+      colorGroup: colorGroup,
+      spacing: spacing,
+      effectName: effectName,
+      previewColors: previewColors,
+      pal: _wirePal(payload),
+    );
+  }
+
+  /// The commit button. SAVE mode hands the design back (no controller
+  /// write of its own); APPLY mode writes it to the lights and persists
+  /// nothing.
+  Future<void> _applyPattern() async {
+    final commit = _buildCommit();
+    final fxId = commit.fxId;
+    final speed = commit.speed;
+    final intensity = commit.intensity;
+    final colorGroup = commit.colorGroup;
+    final spacing = commit.spacing;
+    final previewColors = commit.previewColors;
+    final effectName = commit.effectName;
+    // The `pal` the as-sent payload carries, for the local preview below.
+    final int? sentPal = commit.pal;
+    var payload = commit.payload;
+
+    // SAVE mode (schedule / Game Day / Favorites pickers, and celebration).
+    // Hand the chosen design's RAW payload back to the caller to persist,
+    // and — only if "Preview on lights" was used — RESTORE the pre-preview
+    // look, because choosing a design for later must not leave it applied
+    // now. Nothing is applied and nothing is persisted here.
+    if (widget.onDesignSelected != null) {
+      final selection = LibraryDesignSelection(
+        id: widget.paletteNode.id,
+        name: '${widget.paletteNode.name} - $effectName',
+        paletteName: widget.paletteNode.name,
+        wledPayload: payload,
+      );
+      // Undo the preview via the same applyJson mechanism (see
+      // _restoreCapturedLook). Await so the restore write lands before the
+      // callback tears down the picker stack. A failed restore is benign and
+      // self-correcting — it must NOT lose the user's selection, so we hand
+      // back the design regardless.
+      await _restoreCapturedLook();
+      if (!mounted) return;
+      widget.onDesignSelected!(selection);
+      return;
+    }
+
+    // APPLY mode: write to the lights.
+    bool appliedToDevice = false;
     final repo = ref.read(wledRepositoryProvider);
     if (repo != null) {
-      final List<List<int>> cols;
-      if (_isBrightnessGradient) {
-        cols = PatternRepository.colorsToWledCol(previewColors);
-      } else {
-        final raw = previewColors
-            .take(3)
-            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-            .toList();
-        if (raw.isEmpty) raw.add(rgbToRgbw(255, 255, 255));
-        cols = raw;
-      }
-
-      // Same builder as the preview path and save-to-design, so the payload
-      // persisted to Game Day cannot drift from the one previewed.
-      // Same overrides as the preview path, so what was previewed is what
-      // gets committed (and what a saved design round-trips back to).
-      final solid = _activeSolidFields();
-      var payload = buildSelectorPayload(SelectorState(
-        effectId: fxId,
-        speed: solid?.sx ?? speed,
-        intensity: solid?.ix ?? intensity,
-        grouping: solid?.grp ?? colorGroup,
-        spacing: spacing,
-        colors: cols,
-        paletteOverride: solid?.pal ??
-            rainbowPaletteOverride(
-                effectId: fxId, rainbowScope: _isRainbowPalette),
-      ));
-      sentPal = _wirePal(payload);
-
-      // SELECTION MODE (e.g. the schedule picker) — the SAVE exit. The live
-      // preview HAS been applying to the lights on each adjustment; committing
-      // "Set design" must (1) hand the chosen design's RAW payload back to the
-      // caller for the schedule to store, and (2) RESTORE the pre-preview look
-      // — setting a design for a SCHEDULE must not leave it applied now. Do NOT
-      // apply the selection to the lights and do NOT persist to Game Day.
-      // Returned shape mirrors the legacy _PatternPickerSheet's PatternSelection.
-      if (widget.onDesignSelected != null) {
-        final selection = LibraryDesignSelection(
-          id: widget.paletteNode.id,
-          name: '${widget.paletteNode.name} - $effectName',
-          wledPayload: payload,
-        );
-        // Undo the preview via the same applyJson mechanism (see
-        // _restoreCapturedLook). Await so the restore write lands before the
-        // callback tears down the picker stack. A failed restore is benign and
-        // self-correcting — it must NOT lose the user's selection, so we hand
-        // back the design regardless.
-        await _restoreCapturedLook();
-        if (!mounted) return;
-        widget.onDesignSelected!(selection);
-        return;
-      }
-
       // Apply channel filter so all targeted segments receive the pattern
       final channels = ref.read(effectiveChannelIdsProvider);
       if (channels.isEmpty) {
@@ -881,52 +945,6 @@ class _ColorwayEffectSelectorPageState
         }
       } catch (e) {
         debugPrint('Pattern apply failed (device offline?): $e');
-      }
-
-      // Game Day persistence — when teamSlug is set, this selector is
-      // operating as a Game Day design picker, so persist the choice
-      // to the team's GameDayAutopilotConfig via the existing
-      // saveDesign provider method. The displayed design name matches
-      // the local-preview label used below ("<palette> - <effect>") so
-      // the Game Day card label is consistent with what the user just
-      // saw committed.
-      if (widget.teamSlug != null) {
-        try {
-          final designName = '${widget.paletteNode.name} - $effectName';
-          await ref
-              .read(gameDayAutopilotNotifierProvider.notifier)
-              .saveDesign(
-                teamSlug: widget.teamSlug!,
-                designName: designName,
-                wledPayload: payload,
-                effectId: fxId,
-                speed: speed,
-                intensity: intensity,
-                brightness: (payload['bri'] as num?)?.toInt() ?? 200,
-              );
-        } catch (e, st) {
-          // A failed save must LOOK failed — persisting the design IS the
-          // point of the Game Day picker's Apply (BUG-GD-PICKER-1 item 4).
-          // Surface the error instead of swallowing it, and skip the success
-          // snackbar / preview-sync below so the UI never implies the design
-          // stuck. Post-fix this path is essentially unreachable (jsonEncode
-          // makes the write succeed); it now fires only on a genuine Firestore
-          // error or a future nested-array regression the sanitizer rejects.
-          debugPrint('[GameDayPicker/Colorway] saveDesign failed: $e\n$st');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                  "Applied to your lights, but couldn't save this design "
-                  'for Game Day. Please try again.',
-                ),
-                backgroundColor: Colors.red.shade800,
-                duration: const Duration(seconds: 4),
-              ),
-            );
-          }
-          return;
-        }
       }
     }
 
@@ -980,6 +998,233 @@ class _ColorwayEffectSelectorPageState
       );
     }
     if (appliedToDevice) maybeShowManualApplyOffWarning(ref);
+  }
+
+  // ── Commit controls ────────────────────────────────────────────────────
+
+  /// The controls under the preview. Three modes:
+  ///   • DESIGN-EDIT → "Save to design" (writes back to the stored design).
+  ///   • SAVE (onDesignSelected) → "Preview on lights" + "Save to `<dest>`".
+  ///     Save hands the design back and never writes to the controller;
+  ///     Preview is the ONLY thing here that does.
+  ///   • APPLY (Explore) → "Save…" (Favorites / Game Day / schedule, no
+  ///     controller write) + "Apply" (controller write, no persistence).
+  List<Widget> _commitButtons() {
+    final primaryStyle = ElevatedButton.styleFrom(
+      backgroundColor: NexGenPalette.cyan,
+      foregroundColor: NexGenPalette.matteBlack,
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    );
+    final secondaryStyle = OutlinedButton.styleFrom(
+      foregroundColor: NexGenPalette.cyan,
+      side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.5)),
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    );
+    if (widget.isDesignEdit) {
+      return [
+        ElevatedButton.icon(
+          key: const ValueKey('save-to-design'),
+          onPressed: _saveToDesign,
+          icon: const Icon(Icons.save_outlined, size: 18),
+          label: const Text('Save to design'),
+          style: primaryStyle,
+        ),
+      ];
+    }
+    if (_isSaveMode) {
+      final dest = widget.saveDestinationLabel;
+      return [
+        OutlinedButton.icon(
+          key: const ValueKey('preview-on-lights'),
+          onPressed: _previewOnLights,
+          icon: Icon(
+              _livePreviewOn ? Icons.visibility : Icons.visibility_outlined,
+              size: 18),
+          label: Text(_livePreviewOn ? 'Previewing' : 'Preview on lights'),
+          style: secondaryStyle,
+        ),
+        const SizedBox(width: 8),
+        ElevatedButton.icon(
+          key: const ValueKey('save-design'),
+          onPressed: _applyPattern,
+          icon: const Icon(Icons.save_outlined, size: 18),
+          label: Text(dest == null ? 'Save' : 'Save to $dest'),
+          style: primaryStyle,
+        ),
+      ];
+    }
+    return [
+      OutlinedButton.icon(
+        key: const ValueKey('save-elsewhere'),
+        onPressed: _showSaveSheet,
+        icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+        label: const Text('Save…'),
+        style: secondaryStyle,
+      ),
+      const SizedBox(width: 8),
+      ElevatedButton.icon(
+        key: const ValueKey('apply-design'),
+        onPressed: _applyPattern,
+        icon: const Icon(Icons.check, size: 18),
+        label: const Text('Apply'),
+        style: primaryStyle,
+      ),
+    ];
+  }
+
+  /// SAVE mode's one controller write: turn the live preview on (it then
+  /// follows every adjustment, exactly as APPLY mode's preview does) and send
+  /// the current look. Save / Cancel restore the captured look afterwards.
+  void _previewOnLights() {
+    if (!_livePreviewOn) setState(() => _livePreviewOn = true);
+    _sendToWled();
+    final dest = widget.saveDestinationLabel;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Previewing on your lights — nothing is saved until '
+            'you tap ${dest == null ? 'Save' : 'Save to $dest'}.'),
+        duration: const Duration(seconds: 2),
+        backgroundColor: NexGenPalette.gunmetal,
+      ),
+    );
+  }
+
+  /// APPLY mode's secondary: persist the current design somewhere without
+  /// touching the lights.
+  Future<void> _showSaveSheet() async {
+    final commit = _buildCommit();
+    final selection = LibraryDesignSelection(
+      id: widget.paletteNode.id,
+      name: '${widget.paletteNode.name} - ${commit.effectName}',
+      paletteName: widget.paletteNode.name,
+      wledPayload: commit.payload,
+    );
+    final choice = await showModalBottomSheet<_SaveTarget>(
+      context: context,
+      useRootNavigator: true,
+      backgroundColor: NexGenPalette.gunmetal,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Text('Save "${selection.name}"',
+                style: const TextStyle(
+                    color: NexGenPalette.textHigh,
+                    fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            ListTile(
+              key: const ValueKey('save-target-favorites'),
+              leading: const Icon(Icons.star_border_rounded,
+                  color: NexGenPalette.cyan),
+              title: const Text('Save to Favorites',
+                  style: TextStyle(color: NexGenPalette.textHigh)),
+              onTap: () => Navigator.of(ctx).pop(_SaveTarget.favorites),
+            ),
+            ListTile(
+              key: const ValueKey('save-target-game-day'),
+              leading:
+                  const Icon(Icons.stadium_rounded, color: NexGenPalette.cyan),
+              title: const Text('Save to Game Day',
+                  style: TextStyle(color: NexGenPalette.textHigh)),
+              subtitle: const Text('Pick a team',
+                  style: TextStyle(color: NexGenPalette.textMedium)),
+              onTap: () => Navigator.of(ctx).pop(_SaveTarget.gameDay),
+            ),
+            ListTile(
+              key: const ValueKey('save-target-schedule'),
+              leading: const Icon(Icons.schedule_rounded,
+                  color: NexGenPalette.cyan),
+              title: const Text('Save to schedule',
+                  style: TextStyle(color: NexGenPalette.textHigh)),
+              subtitle: const Text('Opens a new schedule with this design',
+                  style: TextStyle(color: NexGenPalette.textMedium)),
+              onTap: () => Navigator.of(ctx).pop(_SaveTarget.schedule),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    switch (choice) {
+      case _SaveTarget.favorites:
+        try {
+          await ref.read(favoritesNotifierProvider.notifier).addToFavorites(
+                patternId: favoritePatternIdFor(selection),
+                patternName: selection.name,
+                wledPayload: selection.wledPayload,
+              );
+          messenger.showSnackBar(SnackBar(
+              content: Text('Saved "${selection.name}" to Favorites')));
+        } catch (e) {
+          messenger
+              .showSnackBar(SnackBar(content: Text('Could not save: $e')));
+        }
+      case _SaveTarget.gameDay:
+        final teamSlug = await _pickGameDayTeam();
+        if (teamSlug == null || !mounted) return;
+        try {
+          await saveGameDayDesignSelection(ref, teamSlug, selection);
+          messenger.showSnackBar(SnackBar(
+              content: Text('Saved "${selection.name}" to Game Day')));
+        } catch (e) {
+          messenger
+              .showSnackBar(SnackBar(content: Text('Could not save: $e')));
+        }
+      case _SaveTarget.schedule:
+        showScheduleEditor(
+          context,
+          ref,
+          initialPattern: PatternSelection(
+            id: selection.id,
+            name: selection.name,
+            imageUrl: selection.imageUrl,
+            wledPayload: selection.wledPayload,
+          ),
+        );
+    }
+  }
+
+  Future<String?> _pickGameDayTeam() async {
+    final configs =
+        ref.read(gameDayAutopilotConfigsProvider).valueOrNull ?? const [];
+    if (configs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Add a team on the Game Day screen first.')));
+      return null;
+    }
+    return showModalBottomSheet<String>(
+      context: context,
+      useRootNavigator: true,
+      backgroundColor: NexGenPalette.gunmetal,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final c in configs)
+              ListTile(
+                key: ValueKey('save-target-team-${c.teamSlug}'),
+                leading: Icon(Icons.stadium_rounded, color: c.primaryColor),
+                title: Text(c.teamName,
+                    style: const TextStyle(color: NexGenPalette.textHigh)),
+                onTap: () => Navigator.of(ctx).pop(c.teamSlug),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -1072,8 +1317,10 @@ class _ColorwayEffectSelectorPageState
                     ],
                   ),
                 ),
-                // Open in full pattern editor (not applicable for gradients)
-                if (!_isBrightnessGradient)
+                // Open in full pattern editor (not applicable for gradients,
+                // and not from a SAVE-mode picker: the editor applies live and
+                // returns nothing to the destination).
+                if (!_isBrightnessGradient && !_isSaveMode)
                   SizedBox(
                     width: 44,
                     height: 44,
@@ -1108,31 +1355,7 @@ class _ColorwayEffectSelectorPageState
                 //     schedule) and restores the pre-preview look rather than
                 //     applying now, so it reads "Set design".
                 //   • CATALOG → applies to the lights.
-                ElevatedButton.icon(
-                  // Precedence: DESIGN-EDIT first because it is the only
-                  // mode that changes the ACTION (a fourth exit,
-                  // _saveToDesign) rather than just the wording. CELEBRATION
-                  // must be tested before the selection branch — it always
-                  // pairs with onDesignSelected, so the later branch would
-                  // otherwise swallow its label.
-                  onPressed:
-                      widget.isDesignEdit ? _saveToDesign : _applyPattern,
-                  icon: Icon(
-                      widget.isDesignEdit ? Icons.save_outlined : Icons.check,
-                      size: 18),
-                  label: Text(widget.isDesignEdit
-                      ? 'Save to design'
-                      : widget.onDesignSelected != null
-                          ? 'Set design'
-                          : 'Apply'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: NexGenPalette.cyan,
-                    foregroundColor: NexGenPalette.matteBlack,
-                    minimumSize: const Size(0, 40),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                ),
+                ..._commitButtons(),
               ],
             ),
           ),
@@ -2211,4 +2434,39 @@ class _ColorwayEffectSelectorPageState
       ),
     );
   }
+}
+
+/// What [_ColorwayEffectSelectorPageState._buildCommit] resolves for a commit.
+class _Commit {
+  final Map<String, dynamic> payload;
+  final int fxId;
+  final int speed;
+  final int intensity;
+  final int colorGroup;
+  final int spacing;
+  final String effectName;
+  final List<Color> previewColors;
+  final int? pal;
+  const _Commit({
+    required this.payload,
+    required this.fxId,
+    required this.speed,
+    required this.intensity,
+    required this.colorGroup,
+    required this.spacing,
+    required this.effectName,
+    required this.previewColors,
+    required this.pal,
+  });
+}
+
+enum _SaveTarget { favorites, gameDay, schedule }
+
+/// The favorites document id for a catalog design: palette + effect, so the
+/// same palette with two effects is two favorites, not one overwrite.
+String favoritePatternIdFor(LibraryDesignSelection selection) {
+  final seg = selection.wledPayload['seg'];
+  final first = seg is List && seg.isNotEmpty ? seg.first : seg;
+  final fx = first is Map ? first['fx'] : null;
+  return fx == null ? selection.id : '${selection.id}_fx$fx';
 }

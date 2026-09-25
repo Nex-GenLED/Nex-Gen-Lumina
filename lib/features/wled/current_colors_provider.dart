@@ -284,9 +284,9 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
 
       debugPrint('Saved custom pattern "$patternName" successfully');
 
-      // Apply the pattern immediately
-      await applyTemporaryColors();
-
+      // SAVE ONLY. "Save As" used to also apply to the controller; the
+      // editor's Apply button is the one that writes to the lights
+      // (apply-vs-save split, 2026-09-25).
       return true;
     } catch (e) {
       debugPrint('Error saving custom pattern: $e');

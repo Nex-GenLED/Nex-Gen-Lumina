@@ -459,7 +459,7 @@ void main() {
       ));
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('Set design'), findsOneWidget,
+      expect(find.text('Save'), findsOneWidget,
           reason: 'selection mode keeps its own commit label — celebration '
               'no longer shares this button');
       expect(find.text('TOP PICKS'), findsOneWidget);

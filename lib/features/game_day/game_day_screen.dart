@@ -18,7 +18,6 @@ import '../../widgets/section_header.dart';
 import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
 import '../autopilot/game_day_refresh_result.dart';
-import '../sports_alerts/data/team_colors.dart';
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/models/game_state.dart';
 import '../sports_alerts/models/sport_type.dart';
@@ -35,6 +34,8 @@ import '../wled/zone_providers.dart';
 import 'game_day_apply.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
+import 'game_day_config_row.dart';
+import 'team_picker_sheet.dart';
 import '../autopilot/team_priority.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/services/team_registration_service.dart';
@@ -388,7 +389,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
             child: Column(
               children: [
                 // Design row
-                _ConfigRow(
+                GameDayConfigRow(
                   icon: Icons.palette_outlined,
                   label: 'Design',
                   value: config.designLabel,
@@ -969,7 +970,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           // Live Scoring remains the alerts ON/OFF above; this is the
           // SENSITIVITY the retired screen owned and the card did not, which is
           // an autopilot-run-configuration concern like the rest of this group.
-          _ConfigRow(
+          GameDayConfigRow(
             icon: Icons.notifications_active_outlined,
             label: 'Alerts',
             value: _sensitivityLabel(config.alertSensitivity),
@@ -990,7 +991,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           // scoreCelebrationEnabled-keyed AnimatedOpacity, before the
           // reposition existed; reinstating that here would put two
           // independent gates on one row group.
-          _ConfigRow(
+          GameDayConfigRow(
             icon: Icons.auto_awesome_outlined,
             label: 'Celebration',
             value: _celebrationLabel(config),
@@ -1419,58 +1420,6 @@ class _GameStatusBadge extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ConfigRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback? onTap;
-
-  const _ConfigRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: NexGenPalette.cyan),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 14,
-                color: NexGenPalette.textMedium,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: NexGenPalette.textHigh,
-              ),
-            ),
-            if (onTap != null) ...[
-              const SizedBox(width: 6),
-              Icon(Icons.chevron_right,
-                  size: 18, color: NexGenPalette.textMedium),
-            ],
-          ],
-        ),
       ),
     );
   }
@@ -1920,278 +1869,9 @@ class _AddTeamButton extends ConsumerWidget {
   }
 
   void _showTeamPicker(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: NexGenPalette.gunmetal,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.85,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (_, scrollController) => _TeamPickerSheet(
-          scrollController: scrollController,
-          existingTeamSlugs: existingTeamSlugs,
-        ),
-      ),
-    );
-  }
-}
-
-// ===========================================================================
-// Team Picker Bottom Sheet
-// ===========================================================================
-
-class _TeamPickerSheet extends ConsumerStatefulWidget {
-  final ScrollController scrollController;
-  final Set<String> existingTeamSlugs;
-
-  const _TeamPickerSheet({
-    required this.scrollController,
-    required this.existingTeamSlugs,
-  });
-
-  @override
-  ConsumerState<_TeamPickerSheet> createState() => _TeamPickerSheetState();
-}
-
-class _TeamPickerSheetState extends ConsumerState<_TeamPickerSheet> {
-  final _searchController = TextEditingController();
-  String? _categoryFilter;
-
-  // Category chips group leagues by sport so WNBA sits next to NBA under
-  // "Basketball" and NWSL next to MLS under "Soccer".
-  static final List<({String label, Set<SportType> sports})> _categories = [
-    (label: 'Football', sports: {SportType.nfl, SportType.ncaaFB}),
-    (
-      label: 'Basketball',
-      sports: {SportType.nba, SportType.wnba, SportType.ncaaMB},
-    ),
-    (label: 'Baseball', sports: {SportType.mlb}),
-    (label: 'Hockey', sports: {SportType.nhl}),
-    (
-      label: 'Soccer',
-      sports: {
-        SportType.mls,
-        SportType.nwsl,
-        SportType.fifa,
-        SportType.championsLeague,
-      },
-    ),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(gameDayTeamSearchProvider.notifier).state = '';
-    });
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    var teams = ref.watch(gameDayFilteredTeamsProvider);
-    if (_categoryFilter != null) {
-      final allowed = _categories
-              .firstWhere((c) => c.label == _categoryFilter)
-              .sports;
-      teams = teams.where((e) => allowed.contains(e.value.sport)).toList();
-    }
-
-    return Column(
-      children: [
-        // Handle bar
-        Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 8),
-          child: Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: NexGenPalette.textMedium.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-        ),
-
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
-          child: Text(
-            'Choose a Team',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: NexGenPalette.textHigh,
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Search bar
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: TextField(
-            controller: _searchController,
-            onChanged: (v) =>
-                ref.read(gameDayTeamSearchProvider.notifier).state = v,
-            decoration: InputDecoration(
-              hintText: 'Search teams...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () {
-                        _searchController.clear();
-                        ref.read(gameDayTeamSearchProvider.notifier).state =
-                            '';
-                      },
-                    )
-                  : null,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-
-        // Sport filter chips
-        SizedBox(
-          height: 40,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              _FilterChip(
-                label: 'All',
-                selected: _categoryFilter == null,
-                onTap: () => setState(() => _categoryFilter = null),
-              ),
-              for (final category in _categories)
-                _FilterChip(
-                  label: category.label,
-                  selected: _categoryFilter == category.label,
-                  onTap: () =>
-                      setState(() => _categoryFilter = category.label),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-
-        // Team list
-        Expanded(
-          child: ListView.builder(
-            controller: widget.scrollController,
-            itemCount: teams.length,
-            // Bottom padding clears the persistent GlassDockNavBar so the
-            // last team rows (e.g. the bottom Tigers entries) aren't
-            // hidden behind it and can be tapped.
-            padding: EdgeInsets.fromLTRB(
-                16, 0, 16, navBarTotalHeight(context) + 16),
-            itemBuilder: (context, index) {
-              final entry = teams[index];
-              final slug = entry.key;
-              final team = entry.value;
-              final alreadyAdded = widget.existingTeamSlugs.contains(slug);
-
-              return ListTile(
-                leading: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: team.primary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Container(
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: team.secondary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ],
-                ),
-                title: Text(
-                  team.teamName,
-                  style: TextStyle(
-                    color: alreadyAdded
-                        ? NexGenPalette.textMedium
-                        : NexGenPalette.textHigh,
-                  ),
-                ),
-                subtitle: Text(
-                  team.sport.displayName,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: NexGenPalette.textMedium,
-                  ),
-                ),
-                trailing: alreadyAdded
-                    ? Icon(Icons.check_circle,
-                        color: NexGenPalette.green, size: 20)
-                    : Icon(Icons.add_circle_outline,
-                        color: NexGenPalette.cyan, size: 20),
-                onTap: alreadyAdded
-                    ? null
-                    : () => _addTeam(context, ref, slug, team),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _addTeam(BuildContext context, WidgetRef ref, String slug,
-      TeamColors team) async {
-    // Capture messenger before any awaits — context may be unmounted by the
-    // time the future resolves if the bottom sheet is dismissed mid-flight.
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      debugPrint('[GameDay] Adding team: $slug (${team.teamName})');
-      // Add the team with autopilot OFF — user must explicitly opt in
-      // via the Autopilot toggle on the team card.
-      await ref
-          .read(gameDayAutopilotNotifierProvider.notifier)
-          .toggleAutopilot(teamSlug: slug, enabled: false);
-
-      if (!context.mounted) return;
-      Navigator.pop(context);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('${team.teamName} added to Game Day!'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    } catch (e, st) {
-      debugPrint('[GameDay] Failed to add team $slug: $e\n$st');
-      if (!context.mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Could not add ${team.teamName}: $e'),
-          backgroundColor: Colors.red.shade700,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
+    // League-folder picker (team_picker_sheet.dart): Explore Designs' Sports
+    // tree, league → teams, with cross-league search.
+    showTeamPickerSheet(context, existingTeamSlugs: existingTeamSlugs);
   }
 }
 
@@ -2318,53 +1998,6 @@ class _JoinCrewCardState extends ConsumerState<_JoinCrewCard> {
 // ===========================================================================
 // Filter chip
 // ===========================================================================
-
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? NexGenPalette.cyan.withValues(alpha: 0.2)
-                : NexGenPalette.gunmetal90,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected
-                  ? NexGenPalette.cyan.withValues(alpha: 0.5)
-                  : NexGenPalette.line,
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: selected
-                  ? NexGenPalette.cyan
-                  : NexGenPalette.textMedium,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ===========================================================================
 // Small action button

@@ -26,6 +26,7 @@ import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
+import 'package:nexgen_command/widgets/navigation/nav_bar_inset.dart';
 
 /// iPhone SE (2nd/3rd gen) logical size — the narrowest/shortest class the app
 /// supports, and the worst case for this bug.
@@ -77,15 +78,19 @@ Future<void> _pump(WidgetTester tester, CustomDesign design) async {
     ],
     child: MaterialApp(
       home: MediaQuery(
-        // The inset navBarTotalHeight() reads. Injecting it here is what makes
-        // the assertion meaningful — without it the helper returns the bare
-        // dock height and the test would pass on a device that still clips.
+        // The device inset. Injecting it here is what makes the assertion
+        // meaningful — without it the test would pass on a device that still
+        // clips.
         data: const MediaQueryData(
           size: kPhoneSe,
           padding: EdgeInsets.only(bottom: kHomeIndicatorInset),
           viewPadding: EdgeInsets.only(bottom: kHomeIndicatorInset),
         ),
-        child: DesignDetailScreen(designId: design.id),
+        // The dock inset. Since 2026-09-25 the shell reserves the dock's
+        // height in MediaQuery (NavBarInsetShell) and navBarTotalHeight()
+        // reads it back, so the screen is mounted under the same inset
+        // widget the shell uses.
+        child: NavBarInset(child: DesignDetailScreen(designId: design.id)),
       ),
     ),
   ));

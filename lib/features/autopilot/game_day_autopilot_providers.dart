@@ -10,15 +10,14 @@
 //   - AutopilotProfile.preferredEffectStyles (design auto-selection)
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app_providers.dart';
-import '../../services/user_service.dart';
 import '../../models/roofline_segment.dart';
+import '../game_day/game_day_design_write.dart';
 import '../design/roofline_config_providers.dart';
 import '../neighborhood/services/channel_participation_resolver.dart';
 import '../neighborhood/services/path1_game_day_snapshot.dart';
@@ -270,6 +269,13 @@ final gameDayAutopilotServiceProvider =
 /// `userSchedulesStreamProvider` (schedule_providers.dart:57-73): migrate, then
 /// read. A migration failure is logged, never surfaced — we fall through and
 /// read the subcollection as-is, and the unstamped marker retries next launch.
+/// The Firestore instance the Game Day plan is written to. The body only runs
+/// when read, so a test that overrides it never touches Firebase. Used by
+/// [GameDayAutopilotNotifier.saveDesign]; the other writers still reach for
+/// `FirebaseFirestore.instance` directly.
+final gameDayFirestoreProvider =
+    Provider<FirebaseFirestore>((_) => FirebaseFirestore.instance);
+
 final gameDayAutopilotConfigsProvider =
     StreamProvider<List<GameDayAutopilotConfig>>((ref) async* {
   final user = ref.watch(authStateProvider).maybeWhen(
@@ -1426,46 +1432,45 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   }
 
   /// Save a custom design for a team's autopilot.
+  /// Persist a base design for [teamSlug].
+  ///
+  /// [wledPayload] is the ONE representation: `effect_id` / `speed` /
+  /// `intensity` / `brightness` are read from its first segment (the
+  /// optional parameters only override when the payload lacks the field),
+  /// so the plan's summary fields can never disagree with what it fires, and
+  /// [GameDayAutopilotConfig.designLabel] derives the card's text from it.
+  /// [designName] is the palette's name; the effect suffix is NOT stored.
+  ///
+  /// Throws when the user is signed out or the document does not exist, so
+  /// a caller can report a save that did not happen.
   Future<void> saveDesign({
     required String teamSlug,
     required String designName,
     required Map<String, dynamic> wledPayload,
-    required int effectId,
-    int speed = 128,
-    int intensity = 128,
-    int brightness = 200,
+    int? effectId,
+    int? speed,
+    int? intensity,
+    int? brightness,
   }) async {
     final user = ref.read(authStateProvider).maybeWhen(
           data: (u) => u,
           orElse: () => null,
         );
-    if (user == null) return;
+    if (user == null) {
+      throw StateError('saveDesign: no signed-in user');
+    }
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('game_day_autopilot')
-        .doc(teamSlug)
-        .update(UserService.sanitizeForFirestore({
-      'design_mode': AutopilotDesignMode.saved.name,
-      'saved_design_name': designName,
-      // BUG-GD-PICKER-1 (#84 sibling): the WLED payload carries
-      // seg[].col = [[r,g,b,w],…] — directly-nested arrays that Firestore's
-      // native iOS codec aborts on (SIGABRT) and Android rejects. jsonEncode
-      // to an opaque String on write; GameDayAutopilotConfig.fromFirestore
-      // jsonDecodes on read. Mirrors favorites/scenes/schedules/remote_command
-      // — the eight other WLED-payload write paths already do this.
-      'saved_design_payload': jsonEncode(wledPayload),
-      'effect_id': effectId,
-      'speed': speed,
-      'intensity': intensity,
-      'brightness': brightness,
-      'updated_at': Timestamp.fromDate(DateTime.now()),
-      // sanitizeForFirestore is the guard, not the fix: it turns any FUTURE
-      // raw nested-array added to this write into a clean
-      // FirestoreSerializationError (caught by the picker's try/catch →
-      // SnackBar) instead of a native crash. Closes the sanitizer bypass.
-    }));
+    await writeGameDayDesign(
+      ref.read(gameDayFirestoreProvider),
+      uid: user.uid,
+      teamSlug: teamSlug,
+      designName: designName,
+      wledPayload: wledPayload,
+      effectId: effectId,
+      speed: speed,
+      intensity: intensity,
+      brightness: brightness,
+    );
   }
 
   /// Get the next game info for a team (for UI display).

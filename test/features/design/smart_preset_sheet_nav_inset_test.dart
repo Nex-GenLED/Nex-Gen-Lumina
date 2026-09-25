@@ -21,15 +21,22 @@ void main() {
   const bottomSafeArea = 34.0;
   const screenSize = Size(390, 844);
 
-  /// The safe area must be set on the VIEW, not via a MediaQuery inside
+  /// The inset must be set on the VIEW, not via a MediaQuery inside
   /// `home:` — the modal sheet is a route in MaterialApp's Navigator, which
   /// sits ABOVE anything `home:` wraps, so an inner MediaQuery never reaches
   /// the sheet.
+  ///
+  /// Since 2026-09-25 the shell reserves the dock's height in MediaQuery
+  /// (NavBarInsetShell) for the branch navigator this sheet opens in, and
+  /// navBarTotalHeight() reads that inset back. The view padding therefore
+  /// carries what the shell injects: dock content + device safe area.
   Future<void> openSheet(WidgetTester tester) async {
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = screenSize;
-    tester.view.padding = const FakeViewPadding(bottom: bottomSafeArea);
-    tester.view.viewPadding = const FakeViewPadding(bottom: bottomSafeArea);
+    tester.view.padding = const FakeViewPadding(
+        bottom: kNavBarContentHeight + bottomSafeArea);
+    tester.view.viewPadding = const FakeViewPadding(
+        bottom: kNavBarContentHeight + bottomSafeArea);
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(

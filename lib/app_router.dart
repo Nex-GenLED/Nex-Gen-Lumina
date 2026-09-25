@@ -78,6 +78,7 @@ import 'package:nexgen_command/features/sales/screens/day2_wrap_up_screen.dart';
 import 'package:nexgen_command/features/referrals/screens/payout_approval_screen.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
 import 'package:nexgen_command/features/game_day/game_day_screen.dart';
+import 'package:nexgen_command/features/game_day/game_day_design_save.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
 import 'package:nexgen_command/features/autopilot/screens/first_week_reveal_screen.dart';
@@ -794,12 +795,12 @@ class AppRouter {
                         parentNavigatorKey: _rootNavigatorKey,
                         pageBuilder: (context, state) {
                           final nodeId = state.pathParameters['nodeId']!;
-                          // The path param is now the REAL catalog leaf node id
+                          // The path param is the REAL catalog leaf node id
                           // (resolved by SportsLibraryBuilder.resolveTeamNodeId),
-                          // which no longer encodes the team slug. teamSlug is
-                          // therefore passed EXPLICITLY via extra so it still
-                          // reaches GameDayAutopilotNotifier.saveDesign through
-                          // LibraryBrowserScreen → ColorwayEffectSelectorPage.
+                          // which does not encode the team slug. teamSlug is
+                          // passed EXPLICITLY via extra; GameDayDesignPickerScreen
+                          // runs the library in SAVE mode for that team (the
+                          // selector no longer persists to Game Day itself).
                           // Legacy fallback: older deep links of the form
                           // 'team_<slug>' still recover the slug by prefix strip.
                           final extra = state.extra;
@@ -810,10 +811,12 @@ class AppRouter {
                             teamSlug = nodeId.substring('team_'.length);
                           }
                           return NoTransitionPage(
-                            child: LibraryBrowserScreen(
-                              nodeId: nodeId,
-                              teamSlug: teamSlug,
-                            ),
+                            child: teamSlug == null
+                                ? LibraryBrowserScreen(nodeId: nodeId)
+                                : GameDayDesignPickerScreen(
+                                    nodeId: nodeId,
+                                    teamSlug: teamSlug,
+                                  ),
                           );
                         },
                       ),

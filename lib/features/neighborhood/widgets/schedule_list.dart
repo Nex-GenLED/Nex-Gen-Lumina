@@ -11,8 +11,8 @@ import '../../../app_colors.dart';
 import '../../../app_router.dart';
 import '../../../utils/time_format.dart';
 import '../../../widgets/schedule_type_badge.dart';
-import '../../wled/pattern_explore_screen.dart';
-import '../../wled/wled_providers.dart';
+import '../../wled/colorway_effect_selector.dart' show LibraryDesignSelection;
+import '../../wled/pattern_theme_selection.dart' show LibraryBrowserScreen;
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../providers/group_autopilot_providers.dart';
@@ -143,17 +143,30 @@ class NeighborhoodScheduleList extends ConsumerWidget {
   }
 
   void _openLibraryFlow(BuildContext context, WidgetRef ref) async {
-    // Open Explore Patterns as a full-screen modal.
-    // User browses and taps patterns to preview on device as normal.
-    // "Use This Pattern" FAB captures the current WLED state as the selection.
-    final result = await Navigator.of(context).push<_SelectedPatternResult>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => _ExplorePatternsPicker(groupId: group.id),
+    // Open the design library in SAVE mode (apply-vs-save split,
+    // 2026-09-25). It used to wrap the Explore tab, where every card tap
+    // APPLIED to this member's controller while merely choosing a design for
+    // the group's schedule, and "Use This Pattern" then read the selection
+    // back off the device state. Now the chosen design is handed back as a
+    // payload; only the selector's explicit "Preview on lights" writes.
+    const routeName = 'neighborhood-schedule-pattern-picker';
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    _SelectedPatternResult? result;
+    await rootNav.push(MaterialPageRoute<void>(
+      settings: const RouteSettings(name: routeName),
+      builder: (_) => LibraryBrowserScreen(
+        nodeId: null,
+        saveDestinationLabel: 'schedule',
+        onDesignSelected: (s) {
+          result = _SelectedPatternResult.fromSelection(s);
+          rootNav.popUntil((r) => r.settings.name == routeName);
+          rootNav.pop();
+        },
       ),
-    );
+    ));
 
-    if (result != null && context.mounted) {
+    final picked = result;
+    if (picked != null && context.mounted) {
       // Pattern was selected — open time config sheet with pre-populated data
       showModalBottomSheet(
         context: context,
@@ -164,9 +177,9 @@ class NeighborhoodScheduleList extends ConsumerWidget {
         ),
         builder: (ctx) => _ScheduleTimeConfigSheet(
           groupId: group.id,
-          patternName: result.patternName,
-          effectId: result.effectId,
-          colors: result.colors,
+          patternName: picked.patternName,
+          effectId: picked.effectId,
+          colors: picked.colors,
         ),
       );
     }
@@ -679,107 +692,34 @@ class _SelectedPatternResult {
     required this.effectId,
     required this.colors,
   });
-}
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EXPLORE PATTERNS PICKER (full library browser in a modal route)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// Full-screen modal that wraps [ExplorePatternsScreen] with a "Use This
-/// Pattern" FAB. The user browses and taps patterns to preview on device
-/// as normal. Tapping the FAB captures the current WLED state and returns
-/// it as a [_SelectedPatternResult].
-class _ExplorePatternsPicker extends ConsumerWidget {
-  final String groupId;
-
-  const _ExplorePatternsPicker({required this.groupId});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      backgroundColor: NexGenPalette.matteBlack,
-      body: Stack(
-        children: [
-          // The full Explore Patterns library, unmodified
-          const ExplorePatternsScreen(),
-
-          // Close button overlaid at top-left (above the library's own app bar)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 8,
-            child: Material(
-              color: Colors.transparent,
-              child: IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: NexGenPalette.gunmetal90,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: NexGenPalette.line),
-                  ),
-                  child: const Icon(Icons.close, color: Colors.white, size: 20),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-
-      // FAB: "Use This Pattern" — reads current WLED state and pops with result
-      floatingActionButton: Padding(
-        // Use navBarTotalHeight() so the offset includes the device bottom
-        // safe-area inset (e.g. iPhone home indicator, modern Android tablet
-        // gesture bar). The shell-branch navigator overlays the glass dock
-        // even on routes pushed from inside the branch. See
-        // main_scaffold.dart:187-198 for the convention.
-        padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
-        child: FloatingActionButton.extended(
-          onPressed: () => _confirmSelection(context, ref),
-          backgroundColor: NexGenPalette.violet,
-          foregroundColor: Colors.white,
-          icon: const Icon(Icons.check, size: 20),
-          label: const Text(
-            'Use This Pattern',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-    );
-  }
-
-  void _confirmSelection(BuildContext context, WidgetRef ref) {
-    final wledState = ref.read(wledStateProvider);
-
-    // Extract colors as ARGB ints from the current device state
-    final colors = wledState.displayColors
-        .take(3)
-        .map((c) => ((c.a * 255).round() << 24) |
-            ((c.r * 255).round() << 16) |
-            ((c.g * 255).round() << 8) |
-            (c.b * 255).round())
-        .toList();
-
-    Navigator.pop(
-      context,
-      _SelectedPatternResult(
-        patternName: wledState.effectName,
-        effectId: wledState.effectId,
-        colors: colors,
-      ),
+  /// From a library SAVE-mode selection: effect and colours come from the
+  /// payload's first segment (what the picker committed), never from the
+  /// member's live device state.
+  factory _SelectedPatternResult.fromSelection(LibraryDesignSelection s) {
+    final seg = s.wledPayload['seg'];
+    final first = seg is List && seg.isNotEmpty ? seg.first : seg;
+    final map = first is Map ? first : const <String, dynamic>{};
+    final rawCols = map['col'];
+    final colors = <int>[];
+    if (rawCols is List) {
+      for (final c in rawCols.take(3)) {
+        if (c is List && c.length >= 3) {
+          colors.add((0xFF << 24) |
+              ((c[0] as num).toInt() << 16) |
+              ((c[1] as num).toInt() << 8) |
+              (c[2] as num).toInt());
+        }
+      }
+    }
+    return _SelectedPatternResult(
+      patternName: s.name,
+      effectId: (map['fx'] as num?)?.toInt() ?? 0,
+      colors: colors,
     );
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SCHEDULE TIME CONFIG SHEET (Step 2: days/time/recurrence)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// Bottom sheet for configuring schedule timing after a pattern has been
-/// selected from the Explore Patterns library. The back arrow re-opens the
-/// library picker (by closing this sheet and letting the caller re-trigger).
 class _ScheduleTimeConfigSheet extends ConsumerStatefulWidget {
   final String groupId;
   final String patternName;
