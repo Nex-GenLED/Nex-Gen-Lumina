@@ -4,6 +4,8 @@
 /// organized by category for easy browsing in the UI.
 library;
 
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
+
 /// Describes how an effect handles colors.
 enum ColorBehavior {
   /// Effect uses your selected colors as-is (solid, chase, wipe, etc.)
@@ -506,9 +508,18 @@ class WledEffectsCatalog {
   /// Get effect name by ID. Returns 'Effect #id' if not found.
   static String getName(int id) => _effectsById[id]?.name ?? 'Effect #$id';
 
+  /// Every effect a customer can be OFFERED: [allEffects] minus the retired
+  /// ones (pattern_flash_safety.dart — Strobe Mega, owner decision
+  /// 2026-09-29). Every list below derives from this, so no picker, filter,
+  /// category or colour-behaviour list shows a retired effect. [allEffects],
+  /// [getById] and [getName] still resolve one, so a stored reference can be
+  /// named (and the wire normalizer plays Strobe in its place).
+  static List<WledEffect> get offeredEffects =>
+      allEffects.where((e) => !isRetiredEffect(e.id)).toList();
+
   /// Get all effects in a specific category.
   static List<WledEffect> getByCategory(String category) {
-    return allEffects.where((e) => e.category == category).toList();
+    return offeredEffects.where((e) => e.category == category).toList();
   }
 
   /// Get effects grouped by category (for UI display).
@@ -525,7 +536,9 @@ class WledEffectsCatalog {
 
   /// Get only 1D effects (excludes 2D and audio-reactive).
   static List<WledEffect> get standardEffects {
-    return allEffects.where((e) => !e.requires2D && !e.requiresAudio).toList();
+    return offeredEffects
+        .where((e) => !e.requires2D && !e.requiresAudio)
+        .toList();
   }
 
   /// Get all effect IDs suitable for pattern generation (excludes 2D/audio).
@@ -668,45 +681,45 @@ class WledEffectsCatalog {
 
   /// Get all effects that use the user's selected colors.
   static List<WledEffect> get effectsUsingSelectedColors {
-    return allEffects
+    return offeredEffects
         .where((e) => e.colorBehavior == ColorBehavior.usesSelectedColors)
         .toList();
   }
 
   /// Get all effects that blend/animate the user's selected colors.
   static List<WledEffect> get effectsBlendingColors {
-    return allEffects
+    return offeredEffects
         .where((e) => e.colorBehavior == ColorBehavior.blendsSelectedColors)
         .toList();
   }
 
   /// Get all effects that generate their own colors (ignoring user selection).
   static List<WledEffect> get effectsGeneratingOwnColors {
-    return allEffects
+    return offeredEffects
         .where((e) => e.colorBehavior == ColorBehavior.generatesOwnColors)
         .toList();
   }
 
   /// Get all effects that use WLED palettes.
   static List<WledEffect> get effectsUsingPalette {
-    return allEffects
+    return offeredEffects
         .where((e) => e.colorBehavior == ColorBehavior.usesPalette)
         .toList();
   }
 
   /// Get all effects that respect user's color selection (uses or blends).
   static List<WledEffect> get effectsRespectingUserColors {
-    return allEffects.where((e) => e.usesUserColors).toList();
+    return offeredEffects.where((e) => e.usesUserColors).toList();
   }
 
   /// Get all effects that override/ignore user's color selection.
   static List<WledEffect> get effectsOverridingColors {
-    return allEffects.where((e) => e.overridesColors).toList();
+    return offeredEffects.where((e) => e.overridesColors).toList();
   }
 
   /// Get effects by color behavior.
   static List<WledEffect> getByColorBehavior(ColorBehavior behavior) {
-    return allEffects.where((e) => e.colorBehavior == behavior).toList();
+    return offeredEffects.where((e) => e.colorBehavior == behavior).toList();
   }
 
   /// Get color behavior for an effect ID. Returns null if not found.
@@ -1046,8 +1059,9 @@ class WledEffectsCatalog {
     64,  // Juggle
     48,  // Rolling Balls
     57,  // Lightning
-    23,  // Strobe
-    25,  // Strobe Mega
+    23,  // Strobe (speed capped at 240 — pattern_flash_safety.dart)
+    // 25 Strobe Mega: RETIRED 2026-09-29 (bursts at 11–15 Hz whatever the
+    // speed). Not offered as a celebration; a stored one plays Strobe.
     42,  // Fireworks
     90,  // Fireworks 1D
     89,  // Fireworks Starburst

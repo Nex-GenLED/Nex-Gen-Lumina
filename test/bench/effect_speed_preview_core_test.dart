@@ -6,6 +6,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 
 import '../../bench/src/effect_speed_preview_core.dart';
@@ -80,17 +81,22 @@ void main() {
   });
 
   group('the review list', () {
-    test('the owner\'s nine come first (flash included on request)', () {
+    test('the owner\'s report comes first (flash included on request) — '
+        'minus Strobe Mega, which is retired', () {
       final list = previewEffects(includeFlash: true);
-      expect(list.take(kOwnerReportedTooFast.length).map((e) => e.id).toList(),
-          kOwnerReportedTooFast);
+      final expected = [
+        for (final id in kOwnerReportedTooFast)
+          if (!isRetiredEffect(id)) id,
+      ];
+      expect(list.take(expected.length).map((e) => e.id).toList(), expected);
+      expect(list.any((e) => e.id == 25), isFalse);
     });
     test('flash effects are left out unless asked for', () {
       expect(previewEffects().where((e) => e.isFlash), isEmpty);
     });
     test('every 1D, non-audio catalog effect is reviewable', () {
       final ids = {for (final e in previewEffects(includeFlash: true)) e.id};
-      for (final e in WledEffectsCatalog.allEffects) {
+      for (final e in WledEffectsCatalog.offeredEffects) {
         if (e.requires2D || e.requiresAudio) continue;
         expect(ids, contains(e.id), reason: 'fx ${e.id} ${e.name}');
       }

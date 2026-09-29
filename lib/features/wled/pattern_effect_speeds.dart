@@ -95,7 +95,9 @@ int? effectDefaultIntensity(int effectId) => kEffectDefaultIntensity[effectId];
 ///     sets the pause between bursts (`50 + 20*(255-sx)` ms). A speed floor
 ///     cannot make it safe; only `ix < 10` (one flash per burst) does.
 ///
-/// Flagged for the owner's decision; nothing here restricts them.
+/// DECIDED 2026-09-29 (owner): Strobe and Strobe Rainbow are capped at sx 240,
+/// and Strobe Mega is retired — see pattern_flash_safety.dart, which enforces
+/// both. This set stays the record of which effects flash the whole field.
 const Set<int> kPhotosensitiveFlashEffectIds = {23, 24, 25};
 
 /// Effect id → default roofline speed (`sx`).
@@ -180,7 +182,6 @@ const Map<int, int> kEffectDefaultSpeed = <int, int>{
   63: 40, // roofline pace · Pride 2015
   23: 48, // too fast (owner 09-29) · FLASH — see kPhotosensitiveFlashEffectIds · Strobe
   24: 48, // FLASH — same blink() as Strobe; matched to Strobe · Strobe Rainbow
-  25: 40, // too fast (owner 09-29) · FLASH — see kPhotosensitiveFlashEffectIds · Strobe Mega
   57: 60, // roofline pace · Lightning
   38: 30, // roofline pace · Aurora
   39: 30, // roofline pace · Stream

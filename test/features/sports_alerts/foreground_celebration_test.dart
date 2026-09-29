@@ -270,7 +270,9 @@ void main() {
 
     test('different picks put different effects on the wire', () async {
       final seen = <int>{};
-      for (final fx in [28, 76, 113, 25]) {
+      // 23 Strobe, not 25 Strobe Mega: Mega was retired 2026-09-29 (+110 E1)
+      // and is covered by the withdrawn-pick test below.
+      for (final fx in [28, 76, 113, 23]) {
         final d = _FakeDelivery()..captureReturn = look(0);
         final c = build(_FakeMonitor(), d);
         c.syncLiveTeams([picked(fx)]);
@@ -292,8 +294,11 @@ void main() {
         'LEGACY sequence — nothing withdrawn reaches the lights', () async {
       final legacy = AlertTriggerService.buildAnimationSteps(
           AlertEventType.touchdown, teamColors);
-      // 91 Bouncing Balls, 32 Chase Flash Rnd, 29 Chase Random.
-      for (final stale in [91, 32, 29]) {
+      // 91 Bouncing Balls, 32 Chase Flash Rnd, 29 Chase Random — and 25
+      // Strobe Mega, retired 2026-09-29 (+110 E1, pattern_flash_safety.dart):
+      // a pick saved before the retirement fires the legacy sequence
+      // (Breathe / Wipe / Running — no strobe).
+      for (final stale in [91, 32, 29, 25]) {
         expect(WledEffectsCatalog.celebrationPickIds.contains(stale), isFalse);
 
         final d = _FakeDelivery()..captureReturn = look(0);
@@ -470,7 +475,7 @@ void main() {
       await _settle();
       c.handleAlert(_event(anySlug)); // coalesced follow-up
 
-      c.syncLiveTeams([picked(25)]); // user switches to Strobe Mega
+      c.syncLiveTeams([picked(23)]); // user switches to Strobe
       await _settle();
       expect(m.checkCalls, hasLength(1),
           reason: 'a re-baseline here would replay or swallow a score');
@@ -481,7 +486,7 @@ void main() {
       await _settle();
 
       expect(segsOf(d.plays[0]).map((s) => s['fx']), everyElement(76));
-      expect(segsOf(d.plays[1]).map((s) => s['fx']), everyElement(25));
+      expect(segsOf(d.plays[1]).map((s) => s['fx']), everyElement(23));
     });
 
     test('CelebrationTeam: the pick is part of identity and of the alert '

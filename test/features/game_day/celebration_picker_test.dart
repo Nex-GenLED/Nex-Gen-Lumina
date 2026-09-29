@@ -43,7 +43,8 @@ const List<String> kCuratedNames = [
   'Rolling Balls',
   'Lightning',
   'Strobe',
-  'Strobe Mega',
+  // 'Strobe Mega' — RETIRED 2026-09-29 (owner decision, +110 E1): it bursts
+  // at 11–15 Hz whatever the speed. See pattern_flash_safety.dart.
   'Fireworks',
   'Fireworks 1D',
   'Fireworks Starburst',
@@ -208,7 +209,7 @@ Future<void> _pumpCelebration(
 
 void main() {
   group('P2 — the curated list resolves against the real catalog', () {
-    test('all 14 names resolve to an id, in the order given', () {
+    test('all 13 names resolve to an id, in the order given', () {
       final resolved =
           WledEffectsCatalog.celebrationPicks.map((e) => e.name).toList();
       expect(resolved, kCuratedNames,
@@ -281,6 +282,8 @@ void main() {
       expect(find.text('Solid'), findsNothing);
       expect(find.text('Rainbow'), findsNothing);
       expect(find.text('Fire 2012'), findsNothing);
+      expect(find.text('Strobe Mega'), findsNothing,
+          reason: 'retired 2026-09-29 — never offered');
     });
 
     testWidgets('no filter chips and no "N EFFECTS / Clear filters" row',

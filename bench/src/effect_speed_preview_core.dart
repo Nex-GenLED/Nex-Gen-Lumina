@@ -50,7 +50,7 @@ const List<int> kOwnerReportedTooFast = [
   90, // Fireworks 1D
   89, // Fireworks Starburst
   112, // Dancing Shadows
-  25, // Strobe Mega
+  25, // Strobe Mega — RETIRED 2026-09-29, so never previewed (skipped below)
 ];
 
 /// The highest Strobe / Strobe Rainbow / Strobe Mega speed the PREVIEW will
@@ -157,8 +157,10 @@ List<PreviewEffect> previewEffects({
     );
   }
 
+  // Offered effects only: a retired one (Strobe Mega) is never selected, so
+  // there is no speed to review (pattern_flash_safety.dart).
   final eligible = [
-    for (final e in WledEffectsCatalog.allEffects)
+    for (final e in WledEffectsCatalog.offeredEffects)
       if (includeAll || (!e.requires2D && !e.requiresAudio)) e,
   ];
   final byId = {for (final e in eligible) e.id: e};

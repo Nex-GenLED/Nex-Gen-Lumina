@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -38,13 +39,21 @@ List<int> _before(int fx) => [
     ];
 
 void main() {
-  test('every catalog effect is covered — exactly once', () {
-    for (final e in WledEffectsCatalog.allEffects) {
+  test('every OFFERED catalog effect is covered — exactly once', () {
+    for (final e in WledEffectsCatalog.offeredEffects) {
       final inPace = kEffectDefaultSpeed.containsKey(e.id);
       final notPace = kSpeedIsNotPace.contains(e.id);
       expect(inPace ^ notPace, isTrue,
           reason: 'fx ${e.id} ${e.name}: in pace table $inPace, '
               'not-a-pace $notPace — must be exactly one');
+    }
+  });
+
+  test('a retired effect (Strobe Mega) has no default — it is never '
+      'selected, and a stored one plays Strobe', () {
+    for (final id in kRetiredEffectIds) {
+      expect(kEffectDefaultSpeed.containsKey(id), isFalse, reason: 'fx $id');
+      expect(kSpeedIsNotPace.contains(id), isFalse, reason: 'fx $id');
     }
   });
 
@@ -69,6 +78,14 @@ void main() {
     for (final entry in _ownerTooFast.entries) {
       test('fx ${entry.key} ${entry.value}', () {
         final fx = entry.key;
+        if (isRetiredEffect(fx)) {
+          // Strobe Mega: RETIRED 2026-09-29 rather than slowed — no speed
+          // makes it safe (pattern_flash_safety.dart). Never offered, so no
+          // default; a stored one plays Strobe.
+          expect(effectDefaultSpeed(fx), isNull);
+          expect(offeredEffectId(fx), 23);
+          return;
+        }
         final speed = effectDefaultSpeed(fx);
         if (speed == null) {
           // Fireworks: the firmware ignores speed; its rate is intensity.
