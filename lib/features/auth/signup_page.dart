@@ -206,6 +206,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Display Name',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -227,6 +228,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Email',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -249,6 +251,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Password',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -275,6 +278,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Confirm Password',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -308,6 +312,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           },
                           decoration: InputDecoration(
                             hintText: 'Referral code (optional)',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             counterText: '',
                             filled: true,
@@ -358,7 +363,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Wrap(alignment: WrapAlignment.center, crossAxisAlignment: WrapCrossAlignment.center, children: [
                           Text('Already have an account?', style: TextStyle(color: Colors.white.withValues(alpha: 0.85))),
                           TextButton(onPressed: () => context.pop(), child: const Text('Log In')),
                         ]),

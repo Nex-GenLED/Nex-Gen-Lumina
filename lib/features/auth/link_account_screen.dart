@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 
@@ -17,11 +17,19 @@ class LinkAccountScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = FirebaseAuth.instance.currentUser;
+    final session = ref.watch(accountSessionProvider);
+    final signedInEmail = session.isSignedIn ? session.email : null;
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
       body: SafeArea(
+        // Scrolls when large text makes the page taller than the screen; the
+        // Spacers still centre it when it fits.
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: IntrinsicHeight(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -68,9 +76,10 @@ class LinkAccountScreen extends ConsumerWidget {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
-              if (user != null)
+              if (signedInEmail != null)
                 Text(
-                  'Signed in as ${user.email}',
+                  'Signed in as $signedInEmail',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     color: NexGenPalette.textMedium.withValues(alpha: 0.7),
                     fontSize: 14,
@@ -171,12 +180,14 @@ class LinkAccountScreen extends ConsumerWidget {
                       children: [
                         Icon(Icons.badge_outlined, size: 18, color: NexGenPalette.textMedium),
                         const SizedBox(width: 8),
-                        Text(
-                          'Nex-Gen Professional Access',
-                          style: TextStyle(
-                            color: NexGenPalette.textMedium,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
+                        Expanded(
+                          child: Text(
+                            'Nex-Gen Professional Access',
+                            style: TextStyle(
+                              color: NexGenPalette.textMedium,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],
@@ -223,7 +234,7 @@ class LinkAccountScreen extends ConsumerWidget {
               // Sign out option
               TextButton(
                 onPressed: () async {
-                  await FirebaseAuth.instance.signOut();
+                  await ref.read(accountSessionProvider).signOut();
                   if (context.mounted) {
                     context.go(AppRoutes.login);
                   }
@@ -238,6 +249,10 @@ class LinkAccountScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
             ],
+          ),
+        ),
+          ),
+        ),
           ),
         ),
       ),
@@ -284,7 +299,7 @@ class LinkAccountScreen extends ConsumerWidget {
       children: [
         Icon(icon, color: NexGenPalette.cyan, size: 20),
         const SizedBox(width: 12),
-        Text(text, style: const TextStyle(color: Colors.white)),
+        Flexible(child: Text(text, style: const TextStyle(color: Colors.white))),
       ],
     );
   }
@@ -321,12 +336,14 @@ class _ProfessionalButton extends StatelessWidget {
           children: [
             Icon(icon, color: color, size: 20),
             const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/features/corporate/providers/corporate_providers.dart';
 import 'package:nexgen_command/features/installer/admin/admin_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
@@ -125,6 +125,20 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
   static const int _maxAttempts = 5;
   static const Duration _lockoutDuration = Duration(seconds: 30);
 
+  // ── Row 16 (+110): the anonymous session this screen created ────────────
+  //
+  // Opening this screen signs the device in anonymously (below). Closing it
+  // without a matching PIN used to leave that session in place, and the
+  // router then sent "Create One" and the demo back to /login on every launch
+  // until an email sign-in replaced it. The session is now signed out when
+  // the screen closes without a match — by Close, system back, or any other
+  // way the route goes away. A session the customer already had is never
+  // touched, and nothing is signed out after a match.
+  late final AccountSession _session = ref.read(accountSessionProvider);
+  String? _anonymousUidWeCreated;
+  bool _matched = false;
+  bool _discarded = false;
+
   @override
   void initState() {
     super.initState();
@@ -150,10 +164,12 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
   }
 
   Future<void> _ensureAuthSession() async {
-    if (FirebaseAuth.instance.currentUser != null) return;
+    if (_session.isSignedIn) return;
     try {
-      await FirebaseAuth.instance.signInAnonymously();
+      _anonymousUidWeCreated = await _session.signInAnonymously();
       debugPrint('StaffPinScreen: anonymous auth session established');
+      // Closed before the sign-in came back: discard it now.
+      if (!mounted) unawaited(_discardUnmatchedSession());
     } catch (e) {
       debugPrint('StaffPinScreen: signInAnonymously failed: $e');
       if (mounted) {
@@ -165,8 +181,32 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
     }
   }
 
+  /// Signs out the anonymous session this screen created, unless a PIN
+  /// matched. Idempotent.
+  Future<void> _discardUnmatchedSession() async {
+    if (_matched || _discarded) return;
+    final created = _anonymousUidWeCreated;
+    if (created == null) return;
+    if (!_session.isAnonymous || _session.uid != created) return;
+    _discarded = true;
+    await discardAnonymousSession(_session);
+  }
+
+  Future<void> _close() async {
+    await _discardUnmatchedSession();
+    if (!mounted) return;
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      context.go(AppRoutes.login);
+    }
+  }
+
   @override
   void dispose() {
+    // System back, a route replaced from elsewhere: the Close button's
+    // discard never ran. Fire and forget — nothing waits on it.
+    unawaited(_discardUnmatchedSession());
     _shakeController.dispose();
     _lockoutTimer?.cancel();
     super.dispose();
@@ -263,6 +303,7 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
 
   void _onSuccess(String route) {
     HapticFeedback.mediumImpact();
+    _matched = true;
     _failedAttempts = 0;
     context.go(route);
   }
@@ -327,18 +368,28 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
+          key: const ValueKey('staff-pin-close'),
+          tooltip: 'Close',
           icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              context.go('/');
-            }
-          },
+          onPressed: _close,
         ),
       ),
       body: SafeArea(
-        child: Column(
+        // Scrolls at large text; the Spacers still centre it when it fits.
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: IntrinsicHeight(child: _buildBody()),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    return Column(
           children: [
             const Spacer(flex: 2),
 
@@ -403,11 +454,12 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
 
             // Status row — error message OR validating spinner
             const SizedBox(height: 16),
-            SizedBox(
-              height: 20,
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 20),
               child: _errorMessage != null
                   ? Text(
                       _errorMessage!,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: _isLockedOut
                             ? NexGenPalette.amber
@@ -467,8 +519,6 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
 
             const Spacer(flex: 2),
           ],
-        ),
-      ),
     );
   }
 
@@ -490,14 +540,19 @@ class _StaffPinScreenState extends ConsumerState<StaffPinScreen>
           shape: const CircleBorder(),
           backgroundColor: Colors.white.withValues(alpha: 0.06),
         ),
-        child: Text(
-          digit,
-          style: GoogleFonts.montserrat(
-            fontSize: 28,
-            fontWeight: FontWeight.w400,
-            color: disabled
-                ? Colors.white.withValues(alpha: 0.2)
-                : Colors.white,
+        // One digit in a fixed round key: scale it down to fit rather than
+        // clip it at large text sizes.
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            digit,
+            style: GoogleFonts.montserrat(
+              fontSize: 28,
+              fontWeight: FontWeight.w400,
+              color: disabled
+                  ? Colors.white.withValues(alpha: 0.2)
+                  : Colors.white,
+            ),
           ),
         ),
       ),

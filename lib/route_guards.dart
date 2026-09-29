@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
@@ -90,6 +91,22 @@ bool hasProvisionedProfile(DocumentSnapshot<Map<String, dynamic>> doc) {
   final ownerId = doc.data()?['owner_id'];
   return ownerId is String && ownerId.isNotEmpty;
 }
+
+/// Whether [appRedirect] holds [uid] on the forced password reset.
+///
+/// Row 14 (+110): a reset finished in this session counts even while its
+/// flag write is still in flight or retrying ([SessionAccountFlags]).
+bool mustResetPasswordFor(String uid, Map<String, dynamic>? userData) =>
+    (userData?['must_reset_password'] as bool? ?? false) &&
+    !SessionAccountFlags.isCleared(uid, AccountFlag.passwordResetDone);
+
+/// Whether [uid] has finished first run, for [appRedirect].
+///
+/// Row 15 (+110): finishing first run in this session counts even while its
+/// flag write is still in flight or retrying.
+bool welcomeCompletedFor(String uid, Map<String, dynamic> userData) =>
+    (userData['welcome_completed'] as bool? ?? true) ||
+    SessionAccountFlags.isCleared(uid, AccountFlag.welcomeCompleted);
 
 /// Global redirect function for GoRouter.
 /// Handles auth checks, role-based access, and installation validation.
@@ -200,8 +217,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   try {
     final userDoc = await _readUserDocForRedirect(user.uid);
     if (userDoc.exists) {
-      final mustReset =
-          userDoc.data()?['must_reset_password'] as bool? ?? false;
+      final mustReset = mustResetPasswordFor(user.uid, userDoc.data());
       if (mustReset && !isForcedResetRoute) {
         return AppRoutes.forcedPasswordReset;
       }
@@ -266,7 +282,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     final userDoc = await _readUserDocForRedirect(user.uid);
     if (userDoc.exists) {
       final data = userDoc.data()!;
-      final welcomeCompleted = data['welcome_completed'] as bool? ?? true;
+      final welcomeCompleted = welcomeCompletedFor(user.uid, data);
       final role = data['installation_role'] as String?;
       // Only redirect primary/subUser roles (not installers/admins)
       if (!welcomeCompleted &&

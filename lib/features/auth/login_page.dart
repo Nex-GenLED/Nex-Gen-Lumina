@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_version.dart';
 import 'package:nexgen_command/auth/auth_manager.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -93,6 +94,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // reviewer button stays visible (no auto-hide) so the App Store
   // reviewer can use it without re-tapping. No time window — the
   // reviewer flow doesn't need rate limiting.
+
+  /// "Create One" and the demo link.
+  ///
+  /// Row 16 (+110): an anonymous session left behind by the staff PIN screen
+  /// (the screen now signs it out on close, but older builds did not) makes
+  /// the router send both of these straight back here. A customer tapping
+  /// either one is not in a staff flow, so the leftover session goes first.
+  Future<void> _openCustomerRoute(String route) async {
+    await discardAnonymousSession(ref.read(accountSessionProvider));
+    if (mounted) context.push(route);
+  }
 
   void _onSubtitleTap() {
     if (_showReviewerButton) return;
@@ -185,6 +197,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
                       hintText: 'Email',
+                      hintMaxLines: 3,
                       hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                       filled: true,
                       fillColor: Colors.white.withValues(alpha: 0.06),
@@ -385,6 +398,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Email',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -408,6 +422,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Password',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -467,15 +482,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                         const SizedBox(height: 20),
                         // Create Account link row
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Text(
                               "Don't have an account? ",
                               style: GoogleFonts.montserrat(color: Colors.white70, fontWeight: FontWeight.w500),
                             ),
                             TextButton(
-                              onPressed: _loading ? null : () => context.push(AppRoutes.signUp),
+                              onPressed: _loading ? null : () => _openCustomerRoute(AppRoutes.signUp),
                               child: Text(
                                 'Create One',
                                 style: GoogleFonts.montserrat(color: Colors.cyanAccent, fontWeight: FontWeight.w700),
@@ -487,7 +503,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         // Demo Experience link
                         Center(
                           child: TextButton.icon(
-                            onPressed: _loading ? null : () => context.push(AppRoutes.demoCode),
+                            onPressed: _loading ? null : () => _openCustomerRoute(AppRoutes.demoCode),
                             icon: Icon(
                               Icons.play_circle_outline,
                               size: 18,

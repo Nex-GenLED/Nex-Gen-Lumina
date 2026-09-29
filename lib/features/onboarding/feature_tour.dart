@@ -258,22 +258,23 @@ class _TourOverlayContent extends StatelessWidget {
             ),
           ),
 
-          // Tooltip card
+          // Tooltip card. Scrolls when a step (or large text) is taller than
+          // the screen — the Next button used to be pushed off-screen, which
+          // left the tour with no way forward.
           Positioned.fill(
             child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisAlignment: _getMainAxisAlignment(),
-                  children: [
-                    if (step.tooltipAlignment == Alignment.bottomCenter)
-                      const Spacer(),
-
-                    _buildTooltipCard(context),
-
-                    if (step.tooltipAlignment == Alignment.topCenter)
-                      const Spacer(),
-                  ],
+              child: LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: (constraints.maxHeight - 48).clamp(0, double.infinity),
+                    ),
+                    child: Align(
+                      alignment: _cardAlignment(),
+                      child: _buildTooltipCard(context),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -283,13 +284,13 @@ class _TourOverlayContent extends StatelessWidget {
     );
   }
 
-  MainAxisAlignment _getMainAxisAlignment() {
+  Alignment _cardAlignment() {
     if (step.tooltipAlignment == Alignment.topCenter) {
-      return MainAxisAlignment.start;
+      return Alignment.topCenter;
     } else if (step.tooltipAlignment == Alignment.bottomCenter) {
-      return MainAxisAlignment.end;
+      return Alignment.bottomCenter;
     }
-    return MainAxisAlignment.center;
+    return Alignment.center;
   }
 
   Widget _buildTooltipCard(BuildContext context) {
@@ -382,8 +383,9 @@ class _TourOverlayContent extends StatelessWidget {
   Widget _buildProgressBar() {
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          spacing: 12,
           children: [
             Text(
               'Step ${stepIndex + 1} of $totalSteps',
@@ -418,9 +420,15 @@ class _TourOverlayContent extends StatelessWidget {
   }
 
   Widget _buildNavigationButtons(BuildContext context) {
-    return Row(
+    // Wraps rather than overflowing when large text makes the three buttons
+    // wider than the card.
+    return Wrap(
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 8,
       children: [
-        // Skip button (left side)
+        // Skip button
         if (step.showSkip && !isLastStep)
           TextButton(
             onPressed: onSkip,
@@ -430,11 +438,7 @@ class _TourOverlayContent extends StatelessWidget {
                 color: Colors.white.withValues(alpha: 0.5),
               ),
             ),
-          )
-        else
-          const SizedBox(width: 80),
-
-        const Spacer(),
+          ),
 
         // Back button
         if (stepIndex > 0)
@@ -446,8 +450,6 @@ class _TourOverlayContent extends StatelessWidget {
               foregroundColor: Colors.white70,
             ),
           ),
-
-        const SizedBox(width: 12),
 
         // Next/Done button
         FilledButton.icon(
@@ -502,16 +504,16 @@ List<TourStep> getDefaultTourSteps() {
       tooltipAlignment: Alignment.bottomCenter,
     ),
 
-    // Quick Presets
+    // My Favorites. Row 84 (+110): this step described "Quick Presets"
+    // buttons (Run Schedule / Warm White / Bright White / Holiday Mode) that
+    // do not exist on Home in this build.
     const TourStep(
-      id: 'presets',
-      title: 'Quick Presets',
-      description: 'One-tap buttons for your most common lighting modes:\n\n'
-          '• Run Schedule - Follow your automated schedule\n'
-          '• Warm White - Cozy, relaxed ambiance\n'
-          '• Bright White - Full illumination\n'
-          '• Holiday Mode - Festive seasonal colors',
-      icon: Icons.touch_app,
+      id: 'favorites',
+      title: 'My Favorites',
+      description: 'Your favorite looks live under My Favorites on Home. '
+          'Tap one to put it on your lights.\n\n'
+          'To add a look, tap the heart on it in Explore.',
+      icon: Icons.favorite_border,
       tooltipAlignment: Alignment.center,
     ),
 
@@ -558,17 +560,16 @@ List<TourStep> getDefaultTourSteps() {
       tooltipAlignment: Alignment.topCenter,
     ),
 
-    // Connection Status
+    // Channels. Row 84 (+110): this step described a green/yellow
+    // connection-status indicator that is not on Home in this build.
     const TourStep(
-      id: 'connection',
-      title: 'Connection Status',
-      description: 'The status indicator shows your connection to the lighting system:\n\n'
-          '• Green pulse - Connected and responsive\n'
-          '• Yellow - Slow connection\n'
-          '• Reconnecting - Temporarily disconnected\n\n'
-          'The app works both at home (direct) and away (cloud).',
-      icon: Icons.wifi,
-      tooltipAlignment: Alignment.bottomCenter,
+      id: 'channels',
+      title: 'Choose Your Channels',
+      description: 'The channel chips on Home choose which parts of your '
+          'roofline a change goes to. Leave them all selected to change the '
+          'whole house, or pick one to change just that part.',
+      icon: Icons.linear_scale,
+      tooltipAlignment: Alignment.center,
     ),
 
     // Completion
