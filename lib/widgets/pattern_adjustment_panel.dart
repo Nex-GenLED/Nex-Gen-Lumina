@@ -4,11 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/channel_direction.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
-import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
+import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
+import 'package:nexgen_command/features/wled/pattern_tweak_sender.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_effect_metadata.dart';
 import 'package:nexgen_command/features/patterns/color_sequence_builder.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 
@@ -188,6 +191,8 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
     super.initState();
     _speed = widget.initialSpeed;
     _intensity = widget.initialIntensity;
+    _acceptedSpeed = _speed;
+    _acceptedIntensity = _intensity;
     _reverse = widget.initialReverse;
     _effectId = widget.initialEffectId;
     _colors = widget.initialColors;
@@ -199,9 +204,11 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
     // Update values if the widget is rebuilt with new initial values
     if (oldWidget.initialSpeed != widget.initialSpeed) {
       _speed = widget.initialSpeed;
+      _acceptedSpeed = _speed;
     }
     if (oldWidget.initialIntensity != widget.initialIntensity) {
       _intensity = widget.initialIntensity;
+      _acceptedIntensity = _intensity;
     }
     if (oldWidget.initialReverse != widget.initialReverse) {
       _reverse = widget.initialReverse;
@@ -233,103 +240,199 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
     ));
   }
 
+  // ── Writes ──────────────────────────────────────────────────────────────
+  //
+  // Every control here is an ADJUSTMENT of the look that is playing, and goes
+  // out through `sendChannelTweak` (pattern_tweak_sender.dart): only the
+  // selected channels, only the changed fields, and never `on`.
+  //
+  // PRIORITY FIX (+110 E1, the foundation's customer walk B1). These used to
+  // go through `applyChannelFilter`, the DESIGN-apply shape, which emits
+  // `{id, on:false}` for every channel not selected and `on:true` for every
+  // one that is. With the channel bar narrowed to channel 1, a speed drag
+  // switched channel 2 off; with a channel left out of shows, the same drag
+  // switched that one off even under "All Channels"; and a drag re-lit a
+  // channel the customer had switched off by hand.
+
+  /// The values the lights last accepted, so a refused write can put the
+  /// control back where the lights actually are (row 80).
+  late int _acceptedSpeed;
+  late int _acceptedIntensity;
+  int _acceptedGrouping = 1;
+  int _acceptedSpacing = 0;
+
+  /// Sends [fields] as an adjustment and reports a failure on screen through
+  /// the shared failure state. Returns whether the lights took it.
+  ///
+  /// Reads through the ProviderContainer, not `ref`: the write can outlive
+  /// this panel (the Tune section collapses), and a disposed `ref` throws.
+  Future<bool> _sendAdjustment(Map<String, dynamic> fields) async {
+    final container = ProviderScope.containerOf(context, listen: false);
+    final result = await container
+        .read(wledStateProvider.notifier)
+        .runAndReport(
+          sendChannelTweak(container.read, fields),
+          onFailure: kAdjustmentFailedMessage,
+        );
+    return result.ok;
+  }
+
+  /// The live grouping/spacing, carried on a colour or effect change. The wire
+  /// normalizer states `grp:1, spc:0` on any segment that names a colour or an
+  /// effect and leaves them out, so without these a colour-sequence tweak
+  /// flattened a "1 On 2 Off" look the customer had not touched.
+  Map<String, dynamic> _liveLayout() {
+    final s = ref.read(wledStateProvider);
+    return {'grp': s.colorGroupSize, 'spc': s.spacing};
+  }
+
+  /// Mirrors an accepted adjustment into the dashboard preview so the Home
+  /// hero shows what the lights are doing (row 80). Only while the house is
+  /// lit: the preview sync marks the lights on.
+  void _syncAcceptedPreview({
+    int? effectId,
+    List<List<int>>? colors,
+  }) {
+    if (!mounted) return;
+    final s = ref.read(wledStateProvider);
+    if (!s.isOn) return;
+    final previewColors = colors == null
+        ? s.displayColors
+        : [
+            for (final c in colors)
+              if (c.length >= 3)
+                Color.fromARGB(255, c[0].clamp(0, 255), c[1].clamp(0, 255),
+                    c[2].clamp(0, 255)),
+          ];
+    ref.read(wledStateProvider.notifier).applyPreviewSync(
+          colors: previewColors.isEmpty ? s.displayColors : previewColors,
+          effectId: effectId ?? s.effectId,
+          speed: _speed,
+          intensity: _intensity,
+          brightness: s.brightness,
+          colorGroupSize: _groupingForPreview(s.colorGroupSize),
+          spacing: _spacingForPreview(s.spacing),
+          paletteId: s.paletteId,
+        );
+  }
+
+  int _groupingForPreview(int live) =>
+      widget.showPixelLayout ? _grouping : live;
+  int _spacingForPreview(int live) => widget.showPixelLayout ? _spacing : live;
+
   Future<void> _applyEffect(int effectId) async {
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) return;
-    try {
-      var payload = <String, dynamic>{
-        'seg': [
-          {'fx': effectId}
-        ]
-      };
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isEmpty) {
-        debugPrint('PatternAdjustmentPanel effect apply: skip (no effective channels — U1 gate)');
-        return;
-      }
-      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
-    } catch (e) {
-      debugPrint('PatternAdjustmentPanel effect apply failed: $e');
+    // Selecting an effect starts it at its curated roofline speed (item D);
+    // the slider stays free above and below it. An effect whose speed is not
+    // a pace keeps the current speed.
+    final speed = effectDefaultSpeedOr(effectId, _speed);
+    final intensity = effectDefaultIntensity(effectId) ?? _intensity;
+    setState(() {
+      _speed = speed;
+      _intensity = intensity;
+    });
+    _notifyChanged();
+    final ok = await _sendAdjustment({
+      'fx': effectId,
+      'sx': speed,
+      'ix': intensity,
+      'pal': WledEffectsCatalog.paletteForEffect(effectId),
+      ..._liveLayout(),
+    });
+    if (!mounted) return;
+    if (ok) {
+      _acceptedSpeed = speed;
+      _acceptedIntensity = intensity;
+      _syncAcceptedPreview(effectId: effectId);
     }
   }
 
   void _scheduleDebouncedApply() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), () async {
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo == null) return;
-      try {
-        // LOOK ONLY. `rev` used to ride along here, so every speed/intensity
-        // DRAG re-asserted direction from this panel's local state — an
-        // incidental geometry write on a control that had nothing to do with
-        // direction. Direction now has its own discrete path
-        // (`_applyDirection`) through the provisioning door.
-        var payload = <String, dynamic>{
-          'seg': [
-            {
-              'sx': _speed,
-              'ix': _intensity,
-            }
-          ]
-        };
-        final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isEmpty) {
-          debugPrint('PatternAdjustmentPanel debounced apply: skip (U1 gate)');
-          return;
-        }
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
-      } catch (e) {
-        debugPrint('PatternAdjustmentPanel apply failed: $e');
+      // LOOK ONLY. `rev` used to ride along here, so every speed/intensity
+      // DRAG re-asserted direction from this panel's local state — an
+      // incidental geometry write on a control that had nothing to do with
+      // direction. Direction has its own discrete path (`_applyDirection`)
+      // through the provisioning door.
+      final sent = (speed: _speed, intensity: _intensity);
+      final ok = await _sendAdjustment({'sx': sent.speed, 'ix': sent.intensity});
+      if (!mounted) return;
+      if (ok) {
+        _acceptedSpeed = sent.speed;
+        _acceptedIntensity = sent.intensity;
+        _syncAcceptedPreview();
+      } else {
+        // Row 80: the control shows what the lights are doing, not what was
+        // asked of them. The reason is already on screen.
+        setState(() {
+          _speed = _acceptedSpeed;
+          _intensity = _acceptedIntensity;
+        });
+        _notifyChanged();
       }
     });
   }
 
   /// User-initiated DIRECTION change → the provisioning door. Discrete, not
   /// debounced. See `channel_direction.dart` (incl. the #102 tension).
+  ///
+  /// Row 81: the toggle used to flip before the write and stay flipped when
+  /// the write was refused. It now flips back and says so.
   Future<void> _applyDirection(bool reverse) async {
-    final channels = ref.read(effectiveChannelIdsProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
+    final notifier = container.read(wledStateProvider.notifier);
+    final channels = await resolveEffectiveChannelIds(container.read);
+    final WriteResult result;
     if (channels.isEmpty) {
-      debugPrint('PatternAdjustmentPanel _applyDirection: skip (U1 gate)');
-      return;
+      result = WriteResult.blocked(
+          applyBlockedReason(container.read) ?? kApplyBlockedFallback);
+    } else {
+      final ok = await applyChannelDirection(
+        repo: container.read(wledRepositoryProvider),
+        channelIds: channels,
+        reverse: reverse,
+      );
+      result = ok
+          ? const WriteResult.success()
+          : WriteResult.failed(
+              WriteFailureKind.unsupported,
+              message: container.read(isLanConnectedProvider)
+                  ? "Direction couldn't be changed — your lights didn't take "
+                      'it.'
+                  : kLanOnlyMessage,
+            );
     }
-    final ok = await applyChannelDirection(
-      repo: ref.read(wledRepositoryProvider),
-      channelIds: channels,
-      reverse: reverse,
-    );
-    if (!ok) {
-      debugPrint('PatternAdjustmentPanel _applyDirection: transport cannot '
-          'state geometry (off-LAN or demo) — direction NOT applied');
-    }
+    final reported = await notifier.runAndReport(Future.value(result),
+        onFailure: "Direction couldn't be changed.");
+    if (!mounted || reported.ok) return;
+    setState(() => _reverse = !reverse);
+    _notifyChanged();
   }
 
   void _scheduleDebouncedLayoutApply() {
     _layoutDebounce?.cancel();
     _layoutDebounce = Timer(const Duration(milliseconds: 180), () async {
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo == null) return;
-      try {
-        var payload = <String, dynamic>{
-          'seg': [
-            {
-              'grp': _grouping,
-              'spc': _spacing,
-            }
-          ]
-        };
-        final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isEmpty) {
-          debugPrint('PatternAdjustmentPanel layout apply: skip (U1 gate)');
-          return;
-        }
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        await repo.applyJson(payload);
-      } catch (e) {
-        debugPrint('PatternAdjustmentPanel layout apply failed: $e');
+      final sent = (grp: _grouping, spc: _spacing);
+      final ok = await _sendAdjustment({'grp': sent.grp, 'spc': sent.spc});
+      if (!mounted) return;
+      if (ok) {
+        _acceptedGrouping = sent.grp;
+        _acceptedSpacing = sent.spc;
+        _syncAcceptedPreview();
+      } else {
+        setState(() {
+          _grouping = _acceptedGrouping;
+          _spacing = _acceptedSpacing;
+        });
+        _notifyChanged();
       }
     });
+  }
+
+  Future<void> _applyColorSequence(List<List<int>> seq) async {
+    final ok = await _sendAdjustment({'col': seq, ..._liveLayout()});
+    if (!mounted || !ok) return;
+    _syncAcceptedPreview(colors: seq);
   }
 
   @override
@@ -383,18 +486,34 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
               ),
               const SizedBox(height: 10),
             ],
-            // Direction toggle
-            Row(
+            // Direction toggle. A Wrap, not a Row: on a 390-point phone the
+            // label plus the toggle overflowed by 24 points even at default
+            // text size (found by the +110 E1 Home tests); now the toggle
+            // drops under the label when there is no room.
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 6,
               children: [
-                const Icon(Icons.swap_horiz, color: NexGenPalette.cyan, size: 20),
-                const SizedBox(width: 8),
-                Text('Direction', style: Theme.of(context).textTheme.labelLarge),
-                const Spacer(),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.swap_horiz,
+                        color: NexGenPalette.cyan, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Direction',
+                        style: Theme.of(context).textTheme.labelLarge),
+                  ],
+                ),
                 SegmentedButton<bool>(
                   segments: const [
                     ButtonSegment(value: false, label: Text('L→R')),
                     ButtonSegment(value: true, label: Text('R→L')),
                   ],
+                  // The filled segment already shows the choice; the check
+                  // mark only cost width.
+                  showSelectedIcon: false,
                   selected: {_reverse},
                   // #91 - LAN-ONLY, disabled not hidden. See the same gate in
                   // pattern_grid_widgets.dart.
@@ -488,7 +607,6 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                         onChanged: (effectId) {
                           if (effectId == null) return;
                           setState(() => _effectId = effectId);
-                          _notifyChanged();
                           _applyEffect(effectId);
                         },
                       ),
@@ -561,26 +679,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                 return ColorSequenceBuilder(
                   baseColors: baseColors.isNotEmpty ? baseColors : _colors!,
                   initialSequence: _colors!,
-                  onChanged: (seq) async {
-                    final repo = ref.read(wledRepositoryProvider);
-                    if (repo == null) return;
-                    try {
-                      var payload = <String, dynamic>{
-                        'seg': [
-                          {'col': seq}
-                        ]
-                      };
-                      final channels = ref.read(effectiveChannelIdsProvider);
-                      if (channels.isEmpty) {
-                        debugPrint('ColorSequenceBuilder apply: skip (U1 gate)');
-                        return;
-                      }
-                      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-                      await repo.applyJson(payload);
-                    } catch (e) {
-                      debugPrint('Apply custom palette failed: $e');
-                    }
-                  },
+                  onChanged: _applyColorSequence,
                   onCustomized: widget.onCustomized,
                 );
               }),
