@@ -7,10 +7,12 @@ import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_preview.dart';
 import 'package:nexgen_command/features/design/refine/boundary_nudge_logic.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
-import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/design/roofline_target_bar.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/device_write_reporter.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -44,6 +46,21 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
   Map<String, dynamic>? _priorState;
   int? _litChannel;
 
+  /// Row 70 (+110): the map loaded from, lit on, and saved to ONE controller
+  /// — the one [RooflineTargetBar] names. Refine used to read the selected
+  /// controller's map, light the selected ADDRESS, and save to the selected
+  /// controller or else the newest record, so it could light one controller
+  /// while saving to another.
+  bool _loading = true;
+  RooflineConfiguration? _loaded;
+  WledRepository? _litRepo;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
   @override
   void dispose() {
     _throttle?.cancel();
@@ -51,19 +68,41 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
     super.dispose();
   }
 
-  void _ensureLoaded() {
-    if (_edited.isNotEmpty || _activeChannel != null) return;
-    final config = ref.read(currentRooflineConfigProvider).valueOrNull;
-    if (config == null) return;
-    for (final ch in config.allChannelIndices) {
-      _edited[ch] = config.segmentsForChannel(ch);
-    }
-    _activeChannel = config.allChannelIndices.isNotEmpty
-        ? config.allChannelIndices.first
-        : null;
+  Future<void> _load() async {
+    await _restorePrior();
+    final notifier = ref.read(rooflineConfigEditorProvider.notifier);
+    await notifier.initialize();
+    if (!mounted) return;
+    final config = ref.read(rooflineConfigEditorProvider);
+    setState(() {
+      _loading = false;
+      _dirty = false;
+      _selectedFeature = null;
+      _edited.clear();
+      _loaded = config == null || config.segments.isEmpty ? null : config;
+      if (_loaded != null) {
+        for (final ch in _loaded!.allChannelIndices) {
+          _edited[ch] = _loaded!.segmentsForChannel(ch);
+        }
+      }
+      _activeChannel = _edited.isEmpty ? null : (_edited.keys.toList()..sort()).first;
+    });
   }
 
+  /// The target as a routable controller, or null when none is chosen.
+  ControllerTarget? get _target {
+    final c = ref.read(rooflineEditTargetProvider).value;
+    if (c == null || c.ip.isEmpty) return null;
+    return ControllerTarget(ip: c.ip, controllerId: c.id, name: c.name);
+  }
+
+  /// Live strip lengths — only when the target is the controller the app is
+  /// connected to (the only one whose channels are read live).
   Map<int, int> _busLen() {
+    final target = _target;
+    if (target == null || target.ip != ref.read(selectedDeviceIpProvider)) {
+      return const {};
+    }
     final channels = ref.read(deviceChannelsProvider);
     return {for (final c in channels) c.id: (c.stop - c.start).clamp(0, 100000)};
   }
@@ -75,16 +114,25 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
   final _spotlightReporter = DeviceWriteReporter(what: 'highlight');
 
   PerPixelWriter? get _writer {
-    final repo = ref.read(wledRepositoryProvider);
+    final target = _target;
+    if (target == null) return null;
+    final repo = ref.read(controllerRepositoryProvider(target));
     return repo is PerPixelWriter ? repo as PerPixelWriter : null;
   }
 
   Future<void> _enterChannel(int ch) async {
     if (_litChannel == ch) return;
     await _restorePrior();
+    final target = _target;
+    if (target == null) return;
+    final repo = ref.read(controllerRepositoryProvider(target));
+    if (repo == null) return;
     _litChannel = ch;
+    // Kept so the restore on dispose needs no `ref`: reading ref in dispose
+    // throws, and the old restore therefore never ran on leaving the screen.
+    _litRepo = repo;
     try {
-      _priorState = await ref.read(wledRepositoryProvider)?.getState();
+      _priorState = await repo.getState();
     } catch (_) {
       _priorState = null;
     }
@@ -116,10 +164,10 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
 
   Future<void> _restorePrior() async {
     final lit = _litChannel;
-    if (lit == null) return;
+    final repo = _litRepo;
+    if (lit == null || repo == null) return;
     _litChannel = null;
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) return;
+    _litRepo = null;
     try {
       final prior = _priorState;
       Map<String, dynamic>? seg;
@@ -197,69 +245,55 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
   }
 
   Future<void> _save() async {
-    final uid = ref.read(effectiveUserUidProvider);
-    final controllerId = ref.read(activePixelMapControllerIdProvider);
-    if (uid == null || controllerId == null) {
-      // P1 (residential path audit §9.1 item 10 / S16): returning here in
-      // silence left the Save button looking like a no-op.
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(uid == null
-              ? 'Not signed in — your refinements were not saved.'
-              : 'No controller selected — your refinements were not saved.'),
-          backgroundColor: Colors.red,
-        ));
-      }
-      return;
-    }
+    final loaded = _loaded;
+    if (loaded == null) return;
     setState(() => _busy = true);
-    try {
-      await _restorePrior();
-      final segments = <RooflineSegment>[
-        for (final ch in (_edited.keys.toList()..sort())) ..._edited[ch]!,
-      ];
-      // source_pixel_count = mapped total per channel → a rescaled channel now
-      // matches live bus.len and its stale flag clears.
-      final sourceCounts = {
-        for (final ch in _edited.keys) ch: channelTotal(_edited[ch]!),
-      };
-      final config = RooflineConfiguration(
-        id: controllerId,
-        controllerId: controllerId,
-        name: 'Roofline',
-        segments: segments,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-        totalChannelCount: _edited.length,
-      );
-      await ref.read(rooflineConfigServiceProvider).savePixelMap(
-            uid, controllerId, config,
-            sourceCounts: sourceCounts, createdBy: uid,
-          );
-      if (mounted) {
-        setState(() => _dirty = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Saved'), backgroundColor: NexGenPalette.cyan));
+    await _restorePrior();
+    final segments = <RooflineSegment>[
+      for (final ch in (_edited.keys.toList()..sort())) ..._edited[ch]!,
+    ];
+    // Carry the map's name, photo and aspect forward — this used to rebuild
+    // the configuration as "Roofline" with no photo path, and the full set()
+    // per channel dropped the stored photo_path.
+    final notifier = ref.read(rooflineConfigEditorProvider.notifier);
+    notifier.loadConfiguration(loaded.copyWith(
+      segments: segments,
+      updatedAt: DateTime.now(),
+      totalChannelCount: loaded.totalChannelCount > _edited.length
+          ? loaded.totalChannelCount
+          : _edited.length,
+    ));
+    // Saves to the controller this map was loaded from, and only that one
+    // (row 70). P1 (audit §9.1 item 10 / S16): a failure is shown, never
+    // swallowed, and the refinements stay on screen.
+    final ok = await notifier.save();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (ok) {
+        _dirty = false;
+        _loaded = ref.read(rooflineConfigEditorProvider);
       }
-    } catch (e, st) {
-      // P1 (audit §9.1 item 10 / S16): there was NO catch at all. A failed
-      // savePixelMap escaped as an unhandled async error — the "Saved" toast
-      // was skipped, `_dirty` stayed true, and the screen said nothing, so the
-      // refinements looked like they had simply not been tapped.
-      debugPrint('RefineRoofline: save FAILED for '
-          'uid=$uid controller=$controllerId: $e');
-      debugPrint('$st');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Could not save your refinements ($e). They are still '
-              'here — check your connection and tap Save again.'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 8),
-        ));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(ok
+        ? const SnackBar(
+            content: Text('Saved'), backgroundColor: NexGenPalette.cyan)
+        : SnackBar(
+            content: Text('${notifier.lastSaveMessage ?? 'Could not save your '
+                'refinements.'} They are still here — tap Save again.'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 8),
+          ));
+  }
+
+  /// Channels whose live strip length no longer matches the map. Known only
+  /// for the controller the app is connected to.
+  Map<int, bool> _staleness() {
+    final live = _busLen();
+    return {
+      for (final ch in _edited.keys)
+        ch: live[ch] != null && live[ch] != channelTotal(_segs(ch)),
+    };
   }
 
   // ── Preview frame (feature-colored) ─────────────────────────────────────
@@ -293,9 +327,15 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _ensureLoaded();
-    final config = ref.watch(currentRooflineConfigProvider).valueOrNull;
-    final staleness = ref.watch(pixelMapStalenessProvider);
+    final staleness = _staleness();
+    final targetBar = RooflineTargetBar(
+      verb: 'Refining',
+      enabled: !_dirty && !_busy,
+      onChanged: (_) {
+        setState(() => _loading = true);
+        _load();
+      },
+    );
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -305,18 +345,23 @@ class _RefineRooflineScreenState extends ConsumerState<RefineRooflineScreen> {
         actions: [
           TextButton(
             onPressed: _dirty && !_busy ? _save : null,
-            child: const Text('Save'),
+            // An app-bar action cannot wrap: scale the word to fit instead
+            // of clipping it at the largest text sizes.
+            child: const FittedBox(fit: BoxFit.scaleDown, child: Text('Save')),
           ),
         ],
       ),
       body: SafeArea(
-        child: (config == null || _edited.isEmpty)
-            ? const _EmptyRefine()
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : (_loaded == null || _edited.isEmpty)
+            ? ListView(children: [targetBar, const _EmptyRefine()])
             : SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    targetBar,
                     DesignPreview(frame: _frame(), height: 190),
                     const SizedBox(height: 12),
                     if (_edited.length > 1)

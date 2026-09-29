@@ -14,7 +14,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/design/manual_editor/selection_logic.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 const _uid = 'user-fixture';
@@ -67,6 +70,11 @@ ProviderContainer _container(FakeFirebaseFirestore db, Map<int, int> busLengths)
     demoExperienceActiveProvider.overrideWith((ref) => false),
     effectiveUserUidProvider.overrideWithValue(_uid),
     activePixelMapControllerIdProvider.overrideWithValue(_ctrl),
+    // +110 row 70: the editor loads and saves the explicitly targeted
+    // controller — here the account's only one, connected on Home.
+    controllersStreamProvider.overrideWith((ref) =>
+        Stream.value(const [ControllerInfo(id: _ctrl, ip: '192.0.2.50')])),
+    selectedDeviceIpProvider.overrideWith((ref) => '192.0.2.50'),
     rooflineConfigServiceProvider.overrideWithValue(RooflineConfigService(firestore: db)),
     deviceChannelsProvider.overrideWithValue(channels),
   ]);

@@ -6,14 +6,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/pixel_map_channel.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/services/user_service.dart';
+import 'package:nexgen_command/shared/explicit_selection.dart';
 import 'package:uuid/uuid.dart';
 
 /// Service for CRUD operations on roofline / pixel-map configurations.
@@ -251,6 +254,66 @@ final activePixelMapControllerIdProvider = Provider<String?>((ref) {
       );
 });
 
+// ── Row 70 (+110): the controller a roofline edit belongs to ──────────────
+//
+// The four roofline editors (Roofline Setup Wizard, Segment Setup, Refine,
+// Trace) named no controller and saved to [activePixelMapControllerIdProvider]
+// — the selected address's controller, else the NEWEST controller record.
+// Refine even lit up one controller while saving to the other. Every roofline
+// load and save now goes through [rooflineEditTargetProvider], which the
+// screens show by name, and which never falls back to "first" or "newest".
+// [activePixelMapControllerIdProvider] is unchanged for the READ paths other
+// packages use (Design Studio, zone labels, the installer's Map step).
+
+/// The controller the customer picked on a roofline screen this session.
+/// Null until they pick one.
+final rooflineTargetControllerIdProvider =
+    StateProvider<String?>((ref) => null);
+
+/// Which controller the roofline screens load from and save to.
+///
+///  * the one picked on a roofline screen, else
+///  * the one selected in the Home menu (the controller the app is driving,
+///    which the screens name before any save), else
+///  * the account's only controller.
+///
+/// With two or more controllers and neither choice made, there is NO target
+/// and the reason says so: the customer picks one. Never `.first`.
+final rooflineEditTargetProvider =
+    Provider<SelectionDecision<ControllerInfo>>((ref) {
+  final controllersAsync = ref.watch(controllersStreamProvider);
+  final controllers =
+      controllersAsync.valueOrNull ?? const <ControllerInfo>[];
+  if (controllers.isEmpty && controllersAsync.isLoading) {
+    return const SelectionDecision.none('Loading your controllers…');
+  }
+  if (controllers.isEmpty) {
+    return const SelectionDecision.none(
+        'Add a controller before setting up your roofline.');
+  }
+  final pickedId = ref.watch(rooflineTargetControllerIdProvider) ??
+      ref.watch(selectedControllerIdProvider);
+  final decision = requireExplicitSelection<ControllerInfo>(
+    candidates: controllers,
+    tapped: pickedId == null ? null : ControllerInfo(id: pickedId, ip: ''),
+    noun: 'controller',
+    allowSoleCandidate: true,
+    equals: (a, b) => a.id == b.id,
+  );
+  if (!decision.hasSelection && pickedId == null) {
+    return const SelectionDecision.none(
+        'Choose which controller this roofline belongs to.');
+  }
+  return decision;
+});
+
+/// What the customer calls a controller.
+String controllerDisplayName(ControllerInfo c) {
+  final name = c.name?.trim();
+  if (name != null && name.isNotEmpty) return name;
+  return c.ip.isEmpty ? 'Controller' : 'Controller at ${c.ip}';
+}
+
 /// One-shot lazy migration of the legacy per-user config into the active
 /// controller's per-channel pixelMap. No-op when already migrated or no legacy
 /// config exists. Activated transitively by [currentRooflineConfigProvider].
@@ -419,17 +482,51 @@ class RooflineConfigEditorNotifier
 
   RooflineConfigEditorNotifier(this._ref) : super(null);
 
-  /// Initialize the editor with the active controller's map, or a new empty
-  /// one. Migrates any legacy per-user config into the pixelMap first so an
-  /// existing home isn't lost on first open (Slice 1).
+  /// Why [initialize] loaded nothing, in the customer's words: no controller
+  /// chosen, not signed in. Null when a controller's map (or a fresh empty
+  /// one for it) is loaded.
+  String? loadProblem;
+
+  /// The controller [state] was loaded from — the only one [save] will write
+  /// to (row 70).
+  String? get loadedControllerId {
+    final id = state?.controllerId;
+    return id == null || id.isEmpty ? null : id;
+  }
+
+  /// Initialize the editor with the TARGET controller's map
+  /// ([rooflineEditTargetProvider]), or a new empty one for it. Migrates any
+  /// legacy per-user config into the pixelMap first so an existing home
+  /// isn't lost on first open (Slice 1). With no target, loads an empty
+  /// editor bound to no controller and says why in [loadProblem].
   Future<void> initialize() async {
     final uid = _ref.read(effectiveUserUidProvider);
-    final controllerId = _ref.read(activePixelMapControllerIdProvider);
+    loadProblem = null;
+    // A screen opened before the account's controllers have loaded would
+    // otherwise see "no controller" and open an empty editor over an
+    // existing map. Wait (bounded) for the list first.
+    if (uid != null && _ref.read(controllersStreamProvider).isLoading) {
+      try {
+        await _ref
+            .read(controllersStreamProvider.future)
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        // Still loading or failed: the target below says so.
+      }
+    }
+    final target = _ref.read(rooflineEditTargetProvider);
 
-    if (uid == null || controllerId == null) {
+    if (uid == null) {
+      loadProblem = 'Sign in to set up your roofline.';
       state = RooflineConfiguration.empty();
       return;
     }
+    if (!target.hasSelection) {
+      loadProblem = target.reason;
+      state = RooflineConfiguration.empty();
+      return;
+    }
+    final controllerId = target.value!.id;
 
     final service = _ref.read(rooflineConfigServiceProvider);
     await service.migrateLegacyToPixelMap(uid, controllerId);
@@ -463,10 +560,12 @@ class RooflineConfigEditorNotifier
     int level = 1,
     List<Offset> points = const [],
     bool isConnectedToPrevious = false,
+    bool featureConfirmed = false,
   }) {
     if (state == null) return;
 
     final segment = RooflineSegment(
+      featureConfirmed: featureConfirmed,
       id: _uuid.v4(),
       name: name,
       pixelCount: pixelCount,
@@ -542,6 +641,7 @@ class RooflineConfigEditorNotifier
     int? channelIndex,
     int? level,
     List<Offset>? points,
+    bool? featureConfirmed,
   }) {
     if (state == null) return;
 
@@ -557,6 +657,7 @@ class RooflineConfigEditorNotifier
       channelIndex: channelIndex,
       level: level,
       points: points,
+      featureConfirmed: featureConfirmed,
     );
 
     state = state!.updateSegment(segmentId, updated);
@@ -656,30 +757,56 @@ class RooflineConfigEditorNotifier
   /// path audit §9.1 item 10 / S15).
   Object? lastSaveError;
 
-  /// Save the current map to the active controller's per-channel pixelMap
-  /// (Slice 1). Per-channel `source_pixel_count` is seeded from device-truth
-  /// `WledLedBus.len` via [deviceChannelsProvider] — never hand-typed. Returns
-  /// false if there's no user or active controller, or if the write failed;
-  /// [lastSaveError] then says which.
+  /// [lastSaveError] in the customer's words.
+  String? lastSaveMessage;
+
+  bool _failSave(String message, [Object? error]) {
+    lastSaveMessage = message;
+    lastSaveError = error ?? StateError(message);
+    return false;
+  }
+
+  /// Save the current map to the per-channel pixelMap of the controller it
+  /// was LOADED from (row 70: never the selected-or-newest fallback). Per-
+  /// channel `source_pixel_count` is seeded from device-truth `WledLedBus.len`
+  /// via [deviceChannelsProvider] when that controller is the one the app is
+  /// connected to — never hand-typed. Returns false with [lastSaveMessage]
+  /// when there is no user, no controller, the chosen controller changed since
+  /// loading, or the write failed.
   Future<bool> save() async {
     lastSaveError = null;
+    lastSaveMessage = null;
     if (state == null) {
-      lastSaveError = StateError('nothing to save — the editor is empty');
-      return false;
+      return _failSave('There is nothing to save yet.');
     }
 
     final uid = _ref.read(effectiveUserUidProvider);
-    final controllerId = _ref.read(activePixelMapControllerIdProvider);
-    if (uid == null || controllerId == null) {
-      lastSaveError = StateError(uid == null
-          ? 'no signed-in session to save under'
-          : 'no controller selected to save this roofline onto');
-      return false;
+    if (uid == null) {
+      return _failSave('Sign in to save your roofline.');
+    }
+    final target = _ref.read(rooflineEditTargetProvider);
+    if (!target.hasSelection) {
+      return _failSave(
+          target.reason ?? 'Choose which controller this roofline belongs to.');
+    }
+    final controllerId = target.value!.id;
+    final loadedFrom = loadedControllerId;
+    if (loadedFrom != null && loadedFrom != controllerId) {
+      return _failSave('The controller changed since this roofline was '
+          'opened. Reopen it for ${controllerDisplayName(target.value!)} '
+          'before saving.');
     }
 
     try {
       final service = _ref.read(rooflineConfigServiceProvider);
-      final deviceChannels = _ref.read(deviceChannelsProvider);
+      // Live bus lengths describe the SELECTED controller only; seed them
+      // only when that is the controller being saved.
+      final selectedIsTarget =
+          _ref.read(selectedDeviceIpProvider) == target.value!.ip &&
+              target.value!.ip.isNotEmpty;
+      final deviceChannels = selectedIsTarget
+          ? _ref.read(deviceChannelsProvider)
+          : const <DeviceChannel>[];
       final sourceCounts = <int, int>{
         for (final ch in deviceChannels) ch.id: ch.stop - ch.start,
       };
@@ -698,10 +825,12 @@ class RooflineConfigEditorNotifier
       state = configToSave;
       return true;
     } catch (e, st) {
-      lastSaveError = e;
       debugPrint('RooflineConfigEditor: pixelMap save FAILED for '
           'uid=$uid controller=$controllerId: $e\n$st');
-      return false;
+      return _failSave(
+          "Your roofline didn't save ($e). Check your connection and try "
+          'again.',
+          e);
     }
   }
 
