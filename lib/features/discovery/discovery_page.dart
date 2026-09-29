@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 
@@ -25,6 +26,16 @@ class DiscoveryPage extends ConsumerWidget {
     });
     final asyncDevices = ref.watch(discoveredDevicesProvider);
     final selectedIp = ref.watch(selectedDeviceIpProvider);
+    // Row 68 (+110): "Connected to <address>" used to be printed for any
+    // selection, connected or not. The header now comes from the connection.
+    final connected =
+        ref.watch(wledStateProvider.select((s) => s.connected));
+    final header = discoveryHeader(
+      scanning: asyncDevices.isLoading,
+      found: asyncDevices.valueOrNull?.length ?? 0,
+      selectedIp: selectedIp,
+      connected: connected,
+    );
 
     ref.listen<String?>(selectedDeviceIpProvider, (prev, next) {
       if (next != null && ModalRoute.of(context)?.isCurrent == true) {
@@ -59,9 +70,14 @@ class DiscoveryPage extends ConsumerWidget {
           // reason this button exists.
           TextButton(
             onPressed: () => context.go(AppRoutes.dashboard),
-            child: Text(
-              'Skip',
-              style: TextStyle(color: NexGenPalette.textMedium),
+            // An app-bar action cannot wrap: the one word scales down to fit
+            // the toolbar at the largest text sizes instead of being clipped.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                'Skip',
+                style: TextStyle(color: NexGenPalette.textMedium),
+              ),
             ),
           ),
         ],
@@ -83,7 +99,8 @@ class DiscoveryPage extends ConsumerWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  asyncDevices.isLoading ? 'Scanning local network for Lumina controllers…' : (selectedIp != null ? 'Connected to $selectedIp' : 'Select a device to continue'),
+                  header,
+                  key: const ValueKey('discovery-header'),
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
               ),
@@ -106,7 +123,7 @@ class DiscoveryPage extends ConsumerWidget {
                     final ip = d.address.address;
                     final isSel = ip == selectedIp;
                     return ListTile(
-                      title: Text(d.name, overflow: TextOverflow.ellipsis),
+                      title: Text(d.name),
                       subtitle: Text(ip),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSel ? NexGenPalette.cyan : Theme.of(context).colorScheme.outline.withValues(alpha: 0.2))),
                       tileColor: isSel ? NexGenPalette.cyan.withValues(alpha: 0.06) : null,
@@ -124,6 +141,25 @@ class DiscoveryPage extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// The discovery status line, from what is actually known: scanning, how
+/// many controllers answered, and whether the selected one is connected.
+@visibleForTesting
+String discoveryHeader({
+  required bool scanning,
+  required int found,
+  required String? selectedIp,
+  required bool connected,
+}) {
+  if (scanning) return 'Scanning local network for Lumina controllers…';
+  if (selectedIp != null) {
+    return connected ? 'Connected to $selectedIp' : 'Connecting to $selectedIp…';
+  }
+  if (found == 0) return 'No controllers found yet';
+  return found == 1
+      ? 'Found 1 controller — tap it to continue'
+      : 'Found $found controllers — tap yours to continue';
 }
 
 /// Animated neon dot indicator

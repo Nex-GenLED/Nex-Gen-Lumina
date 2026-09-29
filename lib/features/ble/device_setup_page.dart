@@ -23,7 +23,27 @@ import 'package:nexgen_command/models/user_role.dart';
 
 /// Device Setup screen with a specialized BLE scanner for Improv Standard.
 class DeviceSetupPage extends ConsumerStatefulWidget {
-  const DeviceSetupPage({super.key});
+  const DeviceSetupPage({
+    super.key,
+    @visibleForTesting this.testConnectedDevice,
+    @visibleForTesting this.testShowWifiPrompt = false,
+    @visibleForTesting this.testOutcome,
+    @visibleForTesting this.testSkipScan = false,
+  });
+
+  /// Tests only: start already connected over Bluetooth to this device, on
+  /// the Wi-Fi form, without scanning or checking pairing permission.
+  final BluetoothDevice? testConnectedDevice;
+
+  /// Tests only (with [testConnectedDevice]): open on the "Use your current
+  /// Wi-Fi network?" prompt instead of the form.
+  final bool testShowWifiPrompt;
+
+  /// Tests only (with [testConnectedDevice]): open showing this outcome.
+  final ProvisionResult? testOutcome;
+
+  /// Tests only: do not scan or check permission; show the empty scan state.
+  final bool testSkipScan;
 
   @override
   ConsumerState<DeviceSetupPage> createState() => _DeviceSetupPageState();
@@ -62,9 +82,25 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
 
   late final AnimationController _radarCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
 
+  // Row 67 (+110): what the last "Connect & Finish Setup" actually achieved.
+  ProvisionResult? _provisionResult;
+  String? _provisionedSsid;
+  bool _retrying = false;
+
   @override
   void initState() {
     super.initState();
+
+    final testDevice = widget.testConnectedDevice;
+    if (testDevice != null) {
+      _device = testDevice;
+      _connected = true;
+      _showWifiPrompt = widget.testShowWifiPrompt;
+      _wifiFormVisible = !widget.testShowWifiPrompt;
+      _provisionResult = widget.testOutcome;
+      return;
+    }
+    if (widget.testSkipScan) return;
 
     // Check user permissions before allowing controller pairing
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -307,12 +343,16 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
   @override
   void dispose() {
     _scanSub?.cancel();
-    unawaited(FlutterBluePlus.stopScan());
+    unawaited(FlutterBluePlus.stopScan().catchError((Object e) {
+      debugPrint('BLE stopScan on dispose failed: $e');
+    }));
     _radarCtrl.dispose();
     _notifySub?.cancel();
     if (_device != null && !(kIsWeb || kSimulationMode)) {
       // Best-effort disconnect; don't await in dispose.
-      unawaited(_device!.disconnect());
+      unawaited(_device!.disconnect().catchError((Object e) {
+        debugPrint('BLE disconnect on dispose failed: $e');
+      }));
     }
     _ssidCtrl.dispose();
     _passCtrl.dispose();
@@ -439,28 +479,11 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       // #96 — the provisioned controller is saved under the impersonation-aware
       // uid, so an installer in the Existing Customer flow provisions INTO the
       // customer's account rather than their own.
-      final service = ProvisioningService(
-        targetUserId: ref.read(effectiveUserUidProvider) ?? '',
-      );
+      final service = _provisioningService();
       final result = await service.provisionDevice(device: d, ssid: ssid, password: pass);
       if (!mounted) return;
-      // Persisted inside service; update UI state and navigate
-      ref.read(selectedDeviceIpProvider.notifier).state = result.ip;
-      setState(() {
-        _provisioning = false;
-        _statusText = 'Connected to Wi‑Fi';
-        _provisionSuccess = true;
-        _provisionedIp = result.ip;
-        _showSuccessOverlay = true;
-      });
-      // Proactively refresh dashboard-related providers to reflect new device immediately
-      try {
-        ref.invalidate(controllersStreamProvider);
-        ref.invalidate(activeAreaControllerIpsProvider);
-      } catch (e) {
-        debugPrint('Provider refresh failed: $e');
-      }
-      Future.delayed(const Duration(seconds: 2), _exitAfterSetup);
+      _provisionedSsid = ssid;
+      _applyProvisionResult(result);
     } catch (e) {
       debugPrint('Provisioning via service failed: $e');
       if (!mounted) return;
@@ -474,6 +497,113 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         backgroundColor: Theme.of(context).colorScheme.error,
       ));
     }
+  }
+
+  ProvisioningService _provisioningService() =>
+      ref.read(provisioningServiceFactoryProvider)(
+          ref.read(effectiveUserUidProvider) ?? '');
+
+  /// Row 67 (+110): shows what provisioning actually achieved. "Device
+  /// Connected!" only when the controller is BOTH on the account and
+  /// answering on the network. Otherwise the page stays, says which part is
+  /// missing, and offers the one action that can finish it.
+  void _applyProvisionResult(ProvisionResult result) {
+    final saved = result.savedToAccount;
+    final done = saved && result.reachable;
+    if (saved) {
+      ref.read(selectedDeviceIpProvider.notifier).state = result.ip;
+      // Proactively refresh dashboard-related providers to reflect the new
+      // device immediately.
+      try {
+        ref.invalidate(controllersStreamProvider);
+        ref.invalidate(activeAreaControllerIpsProvider);
+      } catch (e) {
+        debugPrint('Provider refresh failed: $e');
+      }
+    }
+    setState(() {
+      _provisioning = false;
+      _retrying = false;
+      _provisionResult = result;
+      _provisionedIp = result.ip;
+      _provisionSuccess = done;
+      _statusText = done ? 'Connected to Wi‑Fi' : null;
+      _showSuccessOverlay = done;
+    });
+    if (done) Future.delayed(const Duration(seconds: 2), _exitAfterSetup);
+  }
+
+  /// "Try again" after the account save failed: saves only, the controller
+  /// already has its Wi-Fi details.
+  Future<void> _retrySave() async {
+    final prior = _provisionResult;
+    if (prior == null || _retrying) return;
+    setState(() => _retrying = true);
+    final service = _provisioningService();
+    final saved = await service.saveController(
+        ip: prior.ip, serial: prior.serial, ssid: _provisionedSsid);
+    if (!mounted) return;
+    _applyProvisionResult(ProvisionResult(
+      ip: prior.ip,
+      serial: prior.serial,
+      accountSave: saved,
+      reachable: prior.reachable,
+    ));
+  }
+
+  /// "Check again" while the controller is still joining the network.
+  Future<void> _recheckReachable() async {
+    final prior = _provisionResult;
+    if (prior == null || _retrying) return;
+    setState(() => _retrying = true);
+    final reachable = await _provisioningService().verifyReachable(prior.ip);
+    if (!mounted) return;
+    _applyProvisionResult(ProvisionResult(
+      ip: prior.ip,
+      serial: prior.serial,
+      accountSave: prior.accountSave,
+      reachable: reachable,
+    ));
+  }
+
+  Widget _buildProvisionOutcome(ProvisionResult result) {
+    final saved = result.savedToAccount;
+    final title = saved ? 'Wi‑Fi details sent' : 'Not added to your account';
+    final body = saved
+        ? "Your controller has your Wi‑Fi details and is saved to your "
+            "account, but it hasn't appeared on your network yet. It can "
+            'take a minute or two to join.'
+        : 'Your controller received your Wi‑Fi details, but it was not '
+            'added to your account. '
+            '${result.accountSave.message ?? 'The save did not complete.'}';
+    return Card(
+      key: const ValueKey('provision-outcome'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(saved ? Icons.hourglass_top_rounded : Icons.error_outline,
+                color: saved ? Colors.amber : Theme.of(context).colorScheme.error),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: Theme.of(context).textTheme.titleMedium)),
+          ]),
+          const SizedBox(height: 8),
+          Text(body, style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 12),
+          Wrap(spacing: 12, runSpacing: 8, children: [
+            FilledButton.icon(
+              onPressed: _retrying ? null : (saved ? _recheckReachable : _retrySave),
+              icon: _retrying
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.refresh),
+              label: Text(saved ? 'Check again' : 'Try again'),
+            ),
+            if (saved)
+              TextButton(onPressed: _exitAfterSetup, child: const Text('Done')),
+          ]),
+        ]),
+      ),
+    );
   }
 
   /// Where to go once this page is done.
@@ -544,7 +674,32 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       body: Stack(children: [
         Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // Once connected there is no scan list to fill the space: the Wi-Fi
+          // form, and the setup outcome under it, scroll (they did not, and
+          // the outcome's buttons could end up off-screen).
+          child: Flex(
+            direction: Axis.vertical,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _connected
+                    ? ListView(children: _bodyChildren(context))
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: _bodyChildren(context),
+                      ),
+              ),
+            ],
+          ),
+        ),
+        // Success overlay animation
+        _buildSuccessOverlay(context),
+      ]),
+    );
+  }
+
+  List<Widget> _bodyChildren(BuildContext context) {
+    return [
           // Header with radar animation
           Container(
             padding: const EdgeInsets.all(16),
@@ -598,19 +753,17 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 12),
-                  Row(children: [
+                  Wrap(spacing: 12, runSpacing: 8, children: [
                     FilledButton.icon(
                       onPressed: _useCurrentNetwork,
                       icon: const Icon(Icons.check_circle_outline),
                       label: const Text('Use This Network'),
                     ),
-                    const SizedBox(width: 12),
                     OutlinedButton.icon(
                       onPressed: _enterWifiManually,
                       icon: const Icon(Icons.edit_outlined),
                       label: const Text('Enter Manually'),
                     ),
-                    const SizedBox(width: 8),
                     TextButton(onPressed: _skipWifiForNow, child: const Text('Set up later')),
                   ])
                 ]),
@@ -629,16 +782,22 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
                     Expanded(child: Text('Connect Controller to Wi‑Fi', style: Theme.of(context).textTheme.titleMedium)),
                   ]),
                   const SizedBox(height: 12),
+                  // Labels above the fields: a floating label is one line and
+                  // is cut off at large text sizes.
+                  const Text('Home Wi‑Fi Name (SSID)'),
+                  const SizedBox(height: 4),
                   TextField(
+                    key: const ValueKey('wifi-ssid'),
                     controller: _ssidCtrl,
-                    decoration: const InputDecoration(labelText: 'Home Wi‑Fi Name (SSID)'),
                   ),
                   const SizedBox(height: 12),
+                  const Text('Password'),
+                  const SizedBox(height: 4),
                   TextField(
+                    key: const ValueKey('wifi-password'),
                     controller: _passCtrl,
                     obscureText: !_showPassword,
                     decoration: InputDecoration(
-                      labelText: 'Password',
                       suffixIcon: IconButton(
                         tooltip: _showPassword ? 'Hide Password' : 'Show Password',
                         icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility),
@@ -647,27 +806,26 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Row(children: [
+                  Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
                     FilledButton.icon(
                       onPressed: _provisioning || !_connected ? null : _provisionWifi,
                       icon: const Icon(Icons.send_rounded),
                       label: const Text('Connect & Finish Setup'),
                     ),
-                    const SizedBox(width: 12),
                     if (_provisioning) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                     if (_provisionSuccess) ...[
-                      const SizedBox(width: 8),
                       Icon(Icons.check_circle, color: Theme.of(context).colorScheme.tertiary),
-                      const SizedBox(width: 6),
-                      Flexible(child: Text(_provisionedIp != null ? 'Success: '+_provisionedIp! : 'Success', overflow: TextOverflow.ellipsis)),
-                    ] else ...[
-                      const SizedBox(width: 8),
-                      if (_statusText != null) Expanded(child: Text(_statusText!, overflow: TextOverflow.ellipsis)),
-                    ]
+                      Text(_provisionedIp != null ? 'Success: $_provisionedIp' : 'Success'),
+                    ] else if (_statusText != null)
+                      Text(_statusText!),
                   ])
                 ]),
               ),
             ),
+            const SizedBox(height: 16),
+          ],
+          if (_provisionResult != null && !_provisionSuccess) ...[
+            _buildProvisionOutcome(_provisionResult!),
             const SizedBox(height: 16),
           ],
           if (!_connected && _results.isEmpty && !_isScanning)
@@ -691,19 +849,21 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
               ),
             ),
           if (_connected && !_wifiFormVisible && !_showWifiPrompt)
-            Expanded(
-              child: Center(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.bluetooth_connected, color: NexGenPalette.cyan),
-                  const SizedBox(height: 8),
-                  Text('Connected. You can set up Wi‑Fi now or later.', style: Theme.of(context).textTheme.bodyMedium),
-                ]),
-              ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.bluetooth_connected, color: NexGenPalette.cyan),
+                const SizedBox(height: 8),
+                Text('Connected. You can set up Wi‑Fi now or later.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium),
+              ]),
             ),
-          ]),
-        ),
-        // Success overlay animation
-        IgnorePointer(
+    ];
+  }
+
+  Widget _buildSuccessOverlay(BuildContext context) {
+    return IgnorePointer(
           ignoring: true,
           child: AnimatedOpacity(
             opacity: _showSuccessOverlay ? 1 : 0,
@@ -725,14 +885,14 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.check_circle_rounded, color: Theme.of(context).colorScheme.tertiary, size: 28),
                     const SizedBox(width: 10),
-                    Text('Device Connected!', style: Theme.of(context).textTheme.titleMedium),
+                    Flexible(
+                      child: Text('Device Connected!', style: Theme.of(context).textTheme.titleMedium),
+                    ),
                   ]),
                 ),
               ),
             ),
           ),
-        ),
-      ]),
     );
   }
 }

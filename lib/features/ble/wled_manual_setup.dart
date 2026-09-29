@@ -9,12 +9,38 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/shared/explicit_selection.dart';
 import 'package:http/http.dart' as http;
+
+/// Reads a controller's `/json/info` at [ip]. Throws when it does not answer
+/// with HTTP 200. Overridden in tests.
+final controllerInfoProbeProvider =
+    Provider<Future<Map<String, dynamic>> Function(String ip)>((ref) {
+  return (ip) async {
+    final response = await http
+        .get(Uri.parse('http://$ip/json/info'))
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) {
+      throw Exception('Controller returned HTTP ${response.statusCode}');
+    }
+    final decoded = jsonDecode(response.body);
+    return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+  };
+});
 
 /// Manual WLED controller setup
 /// Guides user through WLED's web interface, then discovers and saves the controller
 class WledManualSetup extends ConsumerStatefulWidget {
-  const WledManualSetup({super.key});
+  const WledManualSetup({
+    super.key,
+    @visibleForTesting this.testInitialStep = 0,
+    @visibleForTesting this.testFound = const [],
+  });
+
+  /// Tests only: the step to open on (see `_step`), and what discovery
+  /// "found" for the choose step.
+  final int testInitialStep;
+  final List<DeviceEndpoint> testFound;
 
   @override
   ConsumerState<WledManualSetup> createState() => _WledManualSetupState();
@@ -26,7 +52,12 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
   bool _processing = false;
   String? _errorMessage;
-  int _step = 0; // 0=instructions, 1=discovering, 2=manual IP, 3=done
+  // 0=instructions, 1=discovering, 2=manual IP, 3=done, 4=choose a controller
+  late int _step = widget.testInitialStep;
+
+  /// Row 69 (+110): every controller discovery found. The customer taps
+  /// theirs; nothing is saved until they do.
+  late List<DeviceEndpoint> _found = widget.testFound;
 
   @override
   void dispose() {
@@ -56,10 +87,15 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
       }
 
       if (devices.isNotEmpty) {
-        final ip = devices.first.address.address;
-        debugPrint('✅ Found controller at $ip');
-
-        await _saveController(ip);
+        // Row 69 (+110): this saved devices.first — on a network with two
+        // controllers, possibly someone else's — and said "Controller
+        // Added!". Show every controller found and save the one tapped.
+        if (!mounted) return;
+        setState(() {
+          _found = devices;
+          _processing = false;
+          _step = 4;
+        });
       } else {
         debugPrint('⚠️ No WLED devices found on network');
 
@@ -102,20 +138,41 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
     }
   }
 
+  /// The customer tapped a discovered controller.
+  Future<void> _chooseDiscovered(DeviceEndpoint tapped) async {
+    final decision = requireExplicitSelection<DeviceEndpoint>(
+      candidates: _found,
+      tapped: tapped,
+      noun: 'controller',
+      equals: (a, b) => a.address.address == b.address.address,
+    );
+    if (!decision.hasSelection) {
+      setState(() => _errorMessage = decision.reason);
+      return;
+    }
+    setState(() {
+      _processing = true;
+      _errorMessage = null;
+    });
+    try {
+      await _saveController(decision.value!.address.address);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _processing = false;
+        _errorMessage = 'Could not add that controller: $e';
+      });
+    }
+  }
+
   Future<void> _saveController(String ip) async {
     debugPrint('🔍 Testing connection to $ip');
 
     try {
-      final infoUri = Uri.parse('http://$ip/json/info');
-      final response = await http.get(infoUri).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode != 200) {
-        throw Exception('Controller returned HTTP ${response.statusCode}');
-      }
+      final info = await ref.read(controllerInfoProbeProvider)(ip);
 
       debugPrint('✅ Controller is reachable!');
 
-      final info = jsonDecode(response.body);
       // Prioritize user-provided name over WLED device name
       final deviceName = _nameCtrl.text.trim().isNotEmpty
           ? _nameCtrl.text.trim()
@@ -153,7 +210,7 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
       debugPrint('💾 Saving to Firebase');
 
-      final repository = DeviceRepository();
+      final repository = ref.read(deviceRepositoryProvider);
       await repository.saveDevice(
         userId: uid,
         serial: ip.replaceAll('.', '_'),
@@ -220,6 +277,8 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
         return _buildManualIpStep();
       case 3:
         return _buildSuccessStep();
+      case 4:
+        return _buildChooseStep();
       default:
         return const SizedBox();
     }
@@ -269,11 +328,14 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
 
           const SizedBox(height: 32),
 
+          // Label above the field: a floating label is cut off at large text.
+          const Text('Controller Name (Optional)'),
+          const SizedBox(height: 4),
           TextField(
             controller: _nameCtrl,
             decoration: const InputDecoration(
-              labelText: 'Controller Name (Optional)',
               hintText: 'e.g., Front Yard Lights',
+              hintMaxLines: 2,
               prefixIcon: Icon(Icons.label),
             ),
           ),
@@ -324,12 +386,16 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
                   shape: BoxShape.circle,
                 ),
                 child: Center(
-                  child: Text(
-                    number,
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                  // One digit in a fixed circle: scale it rather than clip it.
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      number,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
                 ),
@@ -456,6 +522,83 @@ class _WledManualSetupState extends ConsumerState<WledManualSetup> {
             onPressed: _startDiscovery,
             icon: const Icon(Icons.refresh),
             label: const Text('Try Auto-Discovery Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChooseStep() {
+    final count = _found.length;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.router, size: 64, color: NexGenPalette.cyan),
+          const SizedBox(height: 24),
+          Text(
+            'Choose your controller',
+            style: Theme.of(context).textTheme.headlineMedium,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            count == 1
+                ? 'We found one controller on this network. Tap it to add it '
+                    'to your account.'
+                : 'We found $count controllers on this network. Tap the one '
+                    "you're setting up — the others may belong to another part "
+                    'of your home, or to a neighbour.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 24),
+          for (final device in _found) ...[
+            Card(
+              key: ValueKey('found-${device.address.address}'),
+              child: ListTile(
+                enabled: !_processing,
+                leading: const Icon(Icons.settings_remote, color: NexGenPalette.cyan),
+                title: Text(device.name),
+                subtitle: Text(device.address.address),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _chooseDiscovered(device),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          if (_processing) ...[
+            const SizedBox(height: 8),
+            const Center(child: CircularProgressIndicator()),
+          ],
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange),
+              ),
+              child: Text(_errorMessage!, style: const TextStyle(color: Colors.orange)),
+            ),
+          ],
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: _processing ? null : _startDiscovery,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Search again'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _processing
+                ? null
+                : () => setState(() {
+                      _errorMessage = null;
+                      _step = 2;
+                    }),
+            child: const Text('Enter the address instead'),
           ),
         ],
       ),
