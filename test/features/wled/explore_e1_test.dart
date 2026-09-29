@@ -342,7 +342,10 @@ void main() {
       await _settle(tester);
       expect(repo.applied, hasLength(1), reason: 'the card applied');
 
-      // The adjustment sheet opened; nudge Intensity.
+      // Follow-up 1: the sheet opens from "Adjust" on the confirmation.
+      await tester.tap(find.text('Adjust'));
+      await _settle(tester);
+      // Nudge Intensity.
       final intensity = find.byType(Slider).last;
       await tester.drag(intensity, const Offset(60, 0));
       await _settle(tester);

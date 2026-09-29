@@ -11,7 +11,9 @@ import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/features/wled/rainbow_scope.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
+import 'package:nexgen_command/features/wled/pattern_adjustment_pacer.dart';
 import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/shared/write_result.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
@@ -289,7 +291,14 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
 
 class _ColorwayEffectSelectorPageState
     extends ConsumerState<ColorwayEffectSelectorPage> {
-  Timer? _debounceTimer;
+  /// When the live preview goes out: a short debounce at home, ONE write
+  /// when a drag settles away from home, never two in flight
+  /// (pattern_adjustment_pacer.dart — +110 E1 follow-up 4).
+  late final AdjustmentPacer _previewPacer = AdjustmentPacer(
+    flush: _flushPreview,
+    isRemote: () => ref.read(isRemoteModeProvider),
+    localDelay: const Duration(milliseconds: 150),
+  );
 
   /// SAVE mode: true once the user tapped "Preview on lights". Until then no
   /// adjustment reaches the controller — choosing a design for a schedule,
@@ -443,12 +452,12 @@ class _ColorwayEffectSelectorPageState
       // on what the card shows), else the historical effect-0 seed.
       final seedFx = widget.celebrationMode
           ? _celebrationSeedEffectId()
-          : (widget.initialEffectId ?? 0);
+          : offeredEffectId(widget.initialEffectId ?? 0);
       ref.read(selectorEffectIdProvider.notifier).state = seedFx;
       // Item D: the curated roofline speed table (pattern_effect_speeds.dart)
       // unless the caller seeds a stored choice.
-      ref.read(selectorSpeedProvider.notifier).state =
-          widget.initialSpeed ?? effectDefaultSpeedOr(seedFx, 128);
+      ref.read(selectorSpeedProvider.notifier).state = capFlashSpeed(
+          seedFx, widget.initialSpeed ?? effectDefaultSpeedOr(seedFx, 128));
       ref.read(selectorIntensityProvider.notifier).state =
           widget.initialIntensity ?? effectDefaultIntensity(seedFx) ?? 128;
       ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
@@ -507,10 +516,13 @@ class _ColorwayEffectSelectorPageState
   /// is a rendering of it.
   void _seedFromDesign(CustomDesign design) {
     final ch = design.channels.where((c) => c.included).firstOrNull;
+    // A stored Strobe Mega is retired and plays Strobe; a strobe never runs
+    // above the flash cap (pattern_flash_safety.dart). Seed what will play.
+    final seedFx = offeredEffectId(ch?.effectId ?? 0);
     _writeSelectorState(
       SelectorState(
-        effectId: ch?.effectId ?? 0,
-        speed: ch?.speed ?? 128,
+        effectId: seedFx,
+        speed: capFlashSpeed(seedFx, ch?.speed ?? 128),
         intensity: ch?.intensity ?? 128,
         // Were not passed at all → the tuner opened every design at grp 1 /
         // spc 0 whatever it had been saved with (followup N3b).
@@ -639,7 +651,7 @@ class _ColorwayEffectSelectorPageState
 
   @override
   void dispose() {
-    _debounceTimer?.cancel();
+    _previewPacer.dispose();
     // CANCEL exit (selection AND design-edit): if a pre-preview look was
     // captured and NOT yet consumed, the user is backing out of the editor
     // (the parent LibraryBrowserScreen owns the back button, so its pop
@@ -833,75 +845,79 @@ class _ColorwayEffectSelectorPageState
     return _solidFieldsFor(ref.read(selectorEffectIdProvider));
   }
 
-  void _sendToWled() {
+  /// [dragging]: a slider step — away from home the preview waits for the
+  /// drag to settle ([AdjustmentPacer]).
+  void _sendToWled({bool dragging = false}) {
     // SAVE mode: the lights are untouched until "Preview on lights".
     if (_isSaveMode && !_livePreviewOn) return;
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 150), () async {
-      final demoMode = ref.read(demoModeProvider);
-      if (demoMode) return;
+    _previewPacer.changed(dragging: dragging);
+  }
 
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo == null) return;
+  Future<void> _flushPreview() async {
+    if (!mounted) return;
+    final demoMode = ref.read(demoModeProvider);
+    if (demoMode) return;
 
-      final colorGroup = ref.read(selectorColorGroupProvider);
-      final spacing = ref.read(selectorSpacingProvider);
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo == null) return;
 
-      // For brightness gradients, derive colors and effect from gradient state
-      final List<List<int>> cols;
-      final int fxId;
-      final int speed;
-      if (_isBrightnessGradient) {
-        final presetIdx = ref.read(selectorGradientPresetProvider);
-        final breathing = ref.read(selectorBreathingProvider);
-        final gradColors = _gradientColorsForPreset(presetIdx);
-        cols = PatternRepository.colorsToWledCol(gradColors);
-        fxId = breathing ? 2 : 83;
-        speed = breathing ? 100 : 0;
-      } else {
-        final effectId = ref.read(selectorEffectIdProvider);
-        cols = _paletteColors
-            .take(3)
-            .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
-            .toList();
-        if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
-        fxId = _effectiveEffectId(effectId);
-        speed = ref.read(selectorSpeedProvider);
-      }
+    final colorGroup = ref.read(selectorColorGroupProvider);
+    final spacing = ref.read(selectorSpacingProvider);
 
-      // ONE builder for every exit (selector_payload.dart). `pal` is derived
-      // from the effect's colour behaviour there, not hardcoded — palette-
-      // driven effects sweep a gradient of the USER's colours (pal 4);
-      // col-based effects keep them discrete (pal 5).
-      // Solid layout (Blocks/Alternating) may pin sx/ix/grp/pal; a Rainbow-
-      // folder card pins pal:0 for rainbow-family effects. Both are explicit,
-      // deliberate exceptions to the derived-palette rule — see SelectorState.
-      final solid = _activeSolidFields();
-      var payload = buildSelectorPayload(SelectorState(
-        effectId: fxId,
-        speed: solid?.sx ?? speed,
-        intensity: solid?.ix ?? ref.read(selectorIntensityProvider),
-        grouping: solid?.grp ?? colorGroup,
-        spacing: spacing,
-        colors: cols,
-        paletteOverride: solid?.pal ??
-            rainbowPaletteOverride(
-                effectId: fxId, rainbowScope: _isRainbowPalette),
-      ));
+    // For brightness gradients, derive colors and effect from gradient state
+    final List<List<int>> cols;
+    final int fxId;
+    final int speed;
+    if (_isBrightnessGradient) {
+      final presetIdx = ref.read(selectorGradientPresetProvider);
+      final breathing = ref.read(selectorBreathingProvider);
+      final gradColors = _gradientColorsForPreset(presetIdx);
+      cols = PatternRepository.colorsToWledCol(gradColors);
+      fxId = breathing ? 2 : 83;
+      speed = breathing ? 100 : 0;
+    } else {
+      final effectId = ref.read(selectorEffectIdProvider);
+      cols = _paletteColors
+          .take(3)
+          .map((c) => rgbToRgbw((c.r * 255).round(), (c.g * 255).round(), (c.b * 255).round(), forceZeroWhite: true))
+          .toList();
+      if (cols.isEmpty) cols.add(rgbToRgbw(255, 255, 255));
+      fxId = _effectiveEffectId(effectId);
+      speed = ref.read(selectorSpeedProvider);
+    }
 
-      payload = designEditPreviewPayload(payload, widget.editingDesign);
+    // ONE builder for every exit (selector_payload.dart). `pal` is derived
+    // from the effect's colour behaviour there, not hardcoded — palette-
+    // driven effects sweep a gradient of the USER's colours (pal 4);
+    // col-based effects keep them discrete (pal 5).
+    // Solid layout (Blocks/Alternating) may pin sx/ix/grp/pal; a Rainbow-
+    // folder card pins pal:0 for rainbow-family effects. Both are explicit,
+    // deliberate exceptions to the derived-palette rule — see SelectorState.
+    final solid = _activeSolidFields();
+    var payload = buildSelectorPayload(SelectorState(
+      effectId: fxId,
+      speed: solid?.sx ?? speed,
+      intensity: solid?.ix ?? ref.read(selectorIntensityProvider),
+      grouping: solid?.grp ?? colorGroup,
+      spacing: spacing,
+      colors: cols,
+      paletteOverride: solid?.pal ??
+          rainbowPaletteOverride(
+              effectId: fxId, rainbowScope: _isRainbowPalette),
+    ));
 
-      // Apply channel filter so all targeted segments receive the change
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isEmpty) {
-        debugPrint('ColorwayEffectSelector preview apply: skip (U1 gate)');
-        return;
-      }
-      payload = applyChannelFilter(payload, channels, ref.read(applyFilterChannelsProvider));
+    payload = designEditPreviewPayload(payload, widget.editingDesign);
 
-      final ok = await repo.applyJson(payload);
-      if (ok) _previewWritten = true;
-    });
+    // Apply channel filter so all targeted segments receive the change
+    final channels = ref.read(effectiveChannelIdsProvider);
+    if (channels.isEmpty) {
+      debugPrint('ColorwayEffectSelector preview apply: skip (U1 gate)');
+      return;
+    }
+    payload = applyChannelFilter(payload, channels, ref.read(applyFilterChannelsProvider));
+
+    final ok = await repo.applyJson(payload);
+    if (ok) _previewWritten = true;
   }
 
   /// What a failed restore reports (row 93).
@@ -1559,8 +1575,9 @@ class _ColorwayEffectSelectorPageState
               effectId: effectId,
               onChanged: (raw) {
                 ref.read(selectorSpeedProvider.notifier).state = raw;
-                _sendToWled();
+                _sendToWled(dragging: true);
               },
+              onChangeEnd: _previewPacer.settled,
             ),
           ),
 
@@ -1571,8 +1588,9 @@ class _ColorwayEffectSelectorPageState
               value: intensity,
               onChanged: (v) {
                 ref.read(selectorIntensityProvider.notifier).state = v.round();
-                _sendToWled();
+                _sendToWled(dragging: true);
               },
+              onChangeEnd: _previewPacer.settled,
             ),
           ),
 
@@ -1839,7 +1857,10 @@ class _ColorwayEffectSelectorPageState
   /// id that is no longer offered, and selecting nothing is worse than
   /// selecting the first pick.
   int _celebrationSeedEffectId() {
-    final stored = widget.initialEffectId;
+    // A stored Strobe Mega opens on Strobe — what it now plays.
+    final stored = widget.initialEffectId == null
+        ? null
+        : offeredEffectId(widget.initialEffectId!);
     if (stored != null &&
         WledEffectsCatalog.celebrationPickIds.contains(stored)) {
       return stored;
@@ -1884,8 +1905,9 @@ class _ColorwayEffectSelectorPageState
                 effectId: effectId,
                 onChanged: (raw) {
                   ref.read(selectorSpeedProvider.notifier).state = raw;
-                  _sendToWled();
+                  _sendToWled(dragging: true);
                 },
+                onChangeEnd: _previewPacer.settled,
               ),
             ),
 
@@ -1896,8 +1918,9 @@ class _ColorwayEffectSelectorPageState
                 value: intensity,
                 onChanged: (v) {
                   ref.read(selectorIntensityProvider.notifier).state = v.round();
-                  _sendToWled();
+                  _sendToWled(dragging: true);
                 },
+                onChangeEnd: _previewPacer.settled,
               ),
             ),
 
@@ -2547,6 +2570,7 @@ class _ColorwayEffectSelectorPageState
     required String label,
     required int value,
     required ValueChanged<double> onChanged,
+    VoidCallback? onChangeEnd,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -2576,6 +2600,8 @@ class _ColorwayEffectSelectorPageState
                 min: 0,
                 max: 255,
                 onChanged: onChanged,
+                onChangeEnd:
+                    onChangeEnd == null ? null : (_) => onChangeEnd(),
               ),
             ),
           ),

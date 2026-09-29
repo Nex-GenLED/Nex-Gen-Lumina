@@ -9,6 +9,8 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/pattern_tweak_payload.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -19,6 +21,16 @@ import 'package:nexgen_command/shared/write_result.dart';
 const String kAdjustmentFailedMessage =
     "Your lights didn't take that change — check your connection and try "
     'again.';
+
+/// Why DIRECTION cannot be changed away from home, in the customer's words.
+///
+/// `kLanOnlyMessage` ("Connect to venue Wi-Fi to change hardware settings")
+/// is commercial copy, and it was shown to homeowners on the Tune panel, the
+/// Explore sheet and the Pattern Editor (+110 E1 follow-up 3). A commercial
+/// site keeps the venue wording.
+String directionLanOnlyMessage(SiteMode mode) => mode == SiteMode.commercial
+    ? "Direction can only be changed on the venue's Wi-Fi."
+    : 'Direction can only be changed when your phone is on your home Wi-Fi.';
 
 /// Sends [fields] to every effective channel as an adjustment: only those
 /// channels, only those fields, never a power change.
@@ -41,7 +53,12 @@ Future<WriteResult> sendChannelTweak(
   if (repo == null) {
     return WriteResult.blocked(applyBlockedReason(read) ?? kApplyBlockedFallback);
   }
-  final payload = buildChannelTweakPayload(fields, channels);
+  // A bare `{sx: N}` names no effect, so the wire normalizer cannot tell it
+  // is for a strobe; cap it against the effect that is playing
+  // (pattern_flash_safety.dart).
+  final safeFields =
+      capAdjustmentForLiveEffect(fields, read(wledStateProvider).effectId);
+  final payload = buildChannelTweakPayload(safeFields, channels);
   // Belt and braces: the builder cannot emit `on`, and this says so loudly in
   // debug if it ever learns to.
   assert(!payloadTouchesPower(payload),

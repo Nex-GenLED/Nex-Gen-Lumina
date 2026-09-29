@@ -54,3 +54,10 @@ Map<String, dynamic> favoritePayloadForApply(Map<String, dynamic> stored) {
         e.key: e.value,
   };
 }
+
+/// The same rule for ANY stored look a customer taps — an Explore search
+/// result or catalogue card included (+110 E1 follow-up 1): the catalogue
+/// states `bri` 200/230/255 on its patterns, and nobody chose those either.
+/// Keeps `bri` only when the payload carries [kFavoriteBrightnessStatedKey].
+Map<String, dynamic> lookPayloadForApply(Map<String, dynamic> stored) =>
+    favoritePayloadForApply(stored);

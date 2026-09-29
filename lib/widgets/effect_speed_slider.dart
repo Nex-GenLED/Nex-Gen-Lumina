@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// A speed slider that uses per-effect speed profiles for non-linear mapping.
@@ -9,6 +10,8 @@ import 'package:nexgen_command/theme.dart';
 ///  - Constrains the range to the effect's usable speed window
 ///  - Shows a human-readable speed label instead of raw numbers
 ///  - Offers an "extended range" toggle at the far-right end
+///  - Never offers Strobe or Strobe Rainbow above the flash-safety cap
+///    (sx 240 ≈ 2.9 Hz — pattern_flash_safety.dart)
 class EffectSpeedSlider extends StatefulWidget {
   /// Current raw WLED speed value (0-255).
   final int rawSpeed;
@@ -18,6 +21,10 @@ class EffectSpeedSlider extends StatefulWidget {
 
   /// Called with the new raw speed value when the user drags the slider.
   final ValueChanged<int> onChanged;
+
+  /// Called once when a drag (or a tap on the track) ends — the moment to
+  /// send a paced write away from home (pattern_adjustment_pacer.dart).
+  final VoidCallback? onChangeEnd;
 
   /// If true, the slider starts in extended-range mode.
   /// Typically set when loading a saved pattern whose speed exceeds
@@ -29,6 +36,7 @@ class EffectSpeedSlider extends StatefulWidget {
     required this.rawSpeed,
     required this.effectId,
     required this.onChanged,
+    this.onChangeEnd,
     this.initialExtended = false,
   });
 
@@ -171,10 +179,13 @@ class _EffectSpeedSliderState extends State<EffectSpeedSlider> {
                     min: 0.0,
                     max: 1.0,
                     onChanged: (v) {
-                      final raw =
-                          profile.mapSliderToRaw(v, extended: _extended);
+                      final raw = capFlashSpeed(widget.effectId,
+                          profile.mapSliderToRaw(v, extended: _extended));
                       widget.onChanged(raw);
                     },
+                    onChangeEnd: widget.onChangeEnd == null
+                        ? null
+                        : (_) => widget.onChangeEnd!(),
                   ),
                 ),
               ),

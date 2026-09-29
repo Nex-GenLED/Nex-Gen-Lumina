@@ -28,7 +28,12 @@ import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
 import 'package:nexgen_command/features/favorites/favorite_brightness.dart';
 import 'package:nexgen_command/features/wled/channel_direction.dart';
+import 'package:nexgen_command/features/site/site_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_adjustment_pacer.dart';
 import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
+import 'package:nexgen_command/features/wled/pattern_tweak_sender.dart'
+    show directionLanOnlyMessage;
 import 'package:nexgen_command/features/wled/pattern_editor_design.dart';
 import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
 import 'package:nexgen_command/shared/apply_blocked_reason.dart';
@@ -50,7 +55,14 @@ class EditPatternScreen extends ConsumerStatefulWidget {
 class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   late TextEditingController _nameController;
   late EditablePattern _pattern;
-  Timer? _debounceTimer;
+
+  /// When a change goes to the lights: a short debounce at home, ONE write
+  /// when a drag settles away from home, never two in flight
+  /// (pattern_adjustment_pacer.dart — +110 E1 follow-up 4).
+  late final AdjustmentPacer _pacer = AdjustmentPacer(
+    flush: _sendToWled,
+    isRemote: () => ref.read(isRemoteModeProvider),
+  );
   int _selectedColorIndex = 0;
   bool _editingBgColor = false;
   int _colorPickerTab = 0; // 0=Common, 1=Picker, 2=Slider
@@ -96,7 +108,15 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   @override
   void initState() {
     super.initState();
-    _pattern = widget.initialPattern ?? EditablePattern.blank();
+    // Show the effect that will actually play: a stored Strobe Mega is
+    // retired and plays Strobe, and a strobe never runs above the flash cap
+    // (pattern_flash_safety.dart).
+    final initial = widget.initialPattern ?? EditablePattern.blank();
+    final fx = offeredEffectId(initial.effectId);
+    _pattern = fx == initial.effectId &&
+            capFlashSpeed(fx, initial.speed) == initial.speed
+        ? initial
+        : initial.copyWith(effectId: fx, speed: capFlashSpeed(fx, initial.speed));
     _nameController = TextEditingController(text: _pattern.name);
 
     // Sync slider to first action color
@@ -111,21 +131,18 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   @override
   void dispose() {
     _nameController.dispose();
-    _debounceTimer?.cancel();
+    _pacer.dispose();
     super.dispose();
   }
 
-  void _updatePattern(EditablePattern newPattern) {
+  /// [dragging]: the change is a step of a drag (a slider, the colour wheel)
+  /// — away from home it waits for the drag to settle.
+  void _updatePattern(EditablePattern newPattern, {bool dragging = false}) {
     setState(() => _pattern = newPattern);
-    _sendToWledDebounced();
+    _pacer.changed(dragging: dragging);
   }
 
-  void _sendToWledDebounced() {
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 200), () {
-      _sendToWled();
-    });
-  }
+  void _sendToWledDebounced() => _pacer.changed(dragging: false);
 
   /// The channels the editor is lighting — what the user is looking at, and
   /// therefore what Save stores. The effective set, or every device channel
@@ -677,8 +694,8 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       result = WriteResult.blocked(
           applyBlockedReason(container.read) ?? kApplyBlockedFallback);
     } else if (!container.read(isLanConnectedProvider)) {
-      result = const WriteResult.failed(WriteFailureKind.unsupported,
-          message: kLanOnlyMessage);
+      result = WriteResult.failed(WriteFailureKind.unsupported,
+          message: directionLanOnlyMessage(container.read(siteModeProvider)));
     } else {
       final ok = await applyChannelDirection(
         repo: container.read(wledRepositoryProvider),
@@ -1061,7 +1078,7 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     return HsvWheelPicker(
       key: const ValueKey('edit-pattern-color-wheel'),
       color: _currentEditingColor(),
-      onChanged: _applyColor,
+      onChanged: (c) => _applyColor(c, dragging: true),
     );
   }
 
@@ -1070,17 +1087,17 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       children: [
         _buildColorSlider('R', _sliderR, Colors.red, (v) {
           setState(() => _sliderR = v);
-          _applyColor(Color.fromARGB(255, v.round(), _sliderG.round(), _sliderB.round()));
+          _applyColor(Color.fromARGB(255, v.round(), _sliderG.round(), _sliderB.round()), dragging: true);
         }),
         const SizedBox(height: 8),
         _buildColorSlider('G', _sliderG, Colors.green, (v) {
           setState(() => _sliderG = v);
-          _applyColor(Color.fromARGB(255, _sliderR.round(), v.round(), _sliderB.round()));
+          _applyColor(Color.fromARGB(255, _sliderR.round(), v.round(), _sliderB.round()), dragging: true);
         }),
         const SizedBox(height: 8),
         _buildColorSlider('B', _sliderB, Colors.blue, (v) {
           setState(() => _sliderB = v);
-          _applyColor(Color.fromARGB(255, _sliderR.round(), _sliderG.round(), v.round()));
+          _applyColor(Color.fromARGB(255, _sliderR.round(), _sliderG.round(), v.round()), dragging: true);
         }),
       ],
     );
@@ -1098,7 +1115,13 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
               thumbColor: trackColor,
               trackHeight: 6,
             ),
-            child: Slider(value: value, min: 0, max: 255, onChanged: onChanged),
+            child: Slider(
+              value: value,
+              min: 0,
+              max: 255,
+              onChanged: onChanged,
+              onChangeEnd: (_) => _pacer.settled(),
+            ),
           ),
         ),
         SizedBox(
@@ -1110,13 +1133,15 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   }
 
 
-  void _applyColor(Color color) {
+  void _applyColor(Color color, {bool dragging = false}) {
     if (_editingBgColor) {
-      _updatePattern(_pattern.copyWith(backgroundColor: color));
+      _updatePattern(_pattern.copyWith(backgroundColor: color),
+          dragging: dragging);
     } else if (_selectedColorIndex < _pattern.actionColors.length) {
       final newColors = List<Color>.from(_pattern.actionColors);
       newColors[_selectedColorIndex] = color;
-      _updatePattern(_pattern.copyWith(actionColors: newColors));
+      _updatePattern(_pattern.copyWith(actionColors: newColors),
+          dragging: dragging);
     }
     // Sync RGB sliders
     setState(() {
@@ -1138,7 +1163,8 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       displayValue: '${(_pattern.brightness / 255 * 100).round()}%',
       onChanged: (v) {
         _brightnessTouched = true;
-        _updatePattern(_pattern.copyWith(brightness: v.round()));
+        _updatePattern(_pattern.copyWith(brightness: v.round()),
+            dragging: true);
       },
     );
   }
@@ -1150,7 +1176,9 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       initialExtended: getSpeedProfile(_pattern.effectId)
           .mapRawToSlider(_pattern.speed)
           .needsExtended,
-      onChanged: (raw) => _updatePattern(_pattern.copyWith(speed: raw)),
+      onChanged: (raw) =>
+          _updatePattern(_pattern.copyWith(speed: raw), dragging: true),
+      onChangeEnd: _pacer.settled,
     );
   }
 
@@ -1194,6 +1222,7 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
               min: 0,
               max: max,
               onChanged: onChanged,
+              onChangeEnd: (_) => _pacer.settled(),
             ),
           ),
         ],

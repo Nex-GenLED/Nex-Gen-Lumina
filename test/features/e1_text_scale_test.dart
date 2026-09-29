@@ -33,6 +33,7 @@ import 'package:nexgen_command/features/wled/pattern_theme_selection.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
+import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/shared/accessibility/text_scale_clamp.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
@@ -145,8 +146,13 @@ CustomDesign _editorDesign() => CustomDesign(
       tags: const [kPatternEditorDesignTag],
     );
 
-List<Override> _explore({List<CustomDesign> designs = const []}) => [
-      ...homeDashboardOverrides(repo: RecordingWledRepository()),
+List<Override> _explore({
+  List<CustomDesign> designs = const [],
+  ConnectivityStatus connectivity = ConnectivityStatus.local,
+}) =>
+    [
+      ...homeDashboardOverrides(
+          repo: RecordingWledRepository(), connectivity: connectivity),
       patternCategoriesProvider.overrideWith((_) async => const [
             PatternCategory(id: 'cat_holiday', name: 'Holidays', imageUrl: ''),
             PatternCategory(id: 'cat_sports', name: 'Game Day Fan Zone', imageUrl: ''),
@@ -267,6 +273,44 @@ void main() {
         allowEllipsis: dataLabels,
       );
     });
+
+    // +110 E1 follow-ups 2 and 3: the lights-off notice, and the direction
+    // wording away from home.
+    for (final (name, overrides) in [
+      (
+        'Home — Tune panel, lights off',
+        homeDashboardOverrides(
+          repo: RecordingWledRepository(),
+          state: kHomeLitState.copyWith(isOn: false),
+        ),
+      ),
+      (
+        'Home — Tune panel, away',
+        homeDashboardOverrides(
+          repo: RecordingWledRepository(),
+          connectivity: ConnectivityStatus.remote,
+        ),
+      ),
+    ]) {
+      testWidgets(name, (tester) async {
+        await _check(
+          tester,
+          name,
+          _scoped(
+            overrides,
+            const Scaffold(
+              body: SingleChildScrollView(
+                padding: EdgeInsets.all(16),
+                child: PatternAdjustmentPanel(
+                  initialEffectId: 28,
+                  effectName: 'Chase',
+                ),
+              ),
+            ),
+          ),
+        );
+      });
+    }
 
     testWidgets('Tune panel', (tester) async {
       await _check(
@@ -425,10 +469,11 @@ void main() {
               const CategoryDetailScreen(categoryId: 'cat_holiday', categoryName: 'Holidays')));
     });
 
-    testWidgets('pattern card + adjustment sheet', (tester) async {
+    testWidgets('pattern card applied — the confirmation with "Adjust"',
+        (tester) async {
       await _check(
         tester,
-        'Explore adjustment sheet',
+        'Explore card confirmation',
         _app(
           _explore(),
           _TapAfterFirstFrame(
@@ -437,8 +482,51 @@ void main() {
           ),
         ),
         host: TextScaleHost.none,
-        frames: 6,
-        settle: const Duration(milliseconds: 900),
+        frames: 8,
+        settle: const Duration(milliseconds: 1200),
+      );
+      if (!_survey) {
+        expect(find.byType(SnackBar), findsOneWidget,
+            reason: 'the confirmation was measured');
+      }
+    });
+
+    testWidgets('adjustment sheet, away from home', (tester) async {
+      await _check(
+        tester,
+        'Explore adjustment sheet — away',
+        _app(
+          _explore(connectivity: ConnectivityStatus.remote),
+          _TapAfterFirstFrame(
+            target: find.text('Blue Chase'),
+            then: [find.text('Adjust')],
+            child: const _PatternCardHost(),
+          ),
+        ),
+        host: TextScaleHost.none,
+        frames: 12,
+        settle: const Duration(milliseconds: 1500),
+      );
+      _expectSheetMeasured();
+    });
+
+    testWidgets('pattern card + adjustment sheet', (tester) async {
+      await _check(
+        tester,
+        'Explore adjustment sheet',
+        _app(
+          _explore(),
+          // +110 E1 follow-up 1: the sheet opens only from "Adjust" on the
+          // confirmation, no longer on every tap.
+          _TapAfterFirstFrame(
+            target: find.text('Blue Chase'),
+            then: [find.text('Adjust')],
+            child: const _PatternCardHost(),
+          ),
+        ),
+        host: TextScaleHost.none,
+        frames: 12,
+        settle: const Duration(milliseconds: 1500),
       );
       _expectSheetMeasured();
     });
@@ -514,10 +602,13 @@ class _ExpandedChannelBarState extends State<_ExpandedChannelBar> {
 
 /// Taps whatever [target] finds on the first frame it appears in (it may
 /// arrive from a stream a frame or two late), so the harness measures the
-/// sheet or dialog that tap opens.
+/// sheet or dialog that tap opens. [then] are tapped next, in order, each as
+/// soon as it appears (e.g. a snackbar's action).
 class _TapAfterFirstFrame extends StatefulWidget {
-  const _TapAfterFirstFrame({required this.target, required this.child});
+  const _TapAfterFirstFrame(
+      {required this.target, this.then = const [], required this.child});
   final Finder target;
+  final List<Finder> then;
   final Widget child;
   @override
   State<_TapAfterFirstFrame> createState() => _TapAfterFirstFrameState();
@@ -525,6 +616,10 @@ class _TapAfterFirstFrame extends StatefulWidget {
 
 class _TapAfterFirstFrameState extends State<_TapAfterFirstFrame> {
   var _attempts = 0;
+  var _next = 0;
+  var _seenFor = 0;
+
+  List<Finder> get _targets => [widget.target, ...widget.then];
 
   @override
   void initState() {
@@ -532,20 +627,34 @@ class _TapAfterFirstFrameState extends State<_TapAfterFirstFrame> {
     WidgetsBinding.instance.addPostFrameCallback(_tryTap);
   }
 
+  void _again() {
+    if (++_attempts < 40) {
+      WidgetsBinding.instance.addPostFrameCallback(_tryTap);
+    }
+  }
+
   void _tryTap(Duration _) {
-    if (!mounted) return;
-    final hits = widget.target.evaluate();
+    if (_next >= _targets.length) return;
+    final hits = _targets[_next].evaluate();
     if (hits.isEmpty) {
-      if (++_attempts < 10) {
-        WidgetsBinding.instance.addPostFrameCallback(_tryTap);
-      }
+      _seenFor = 0;
+      _again();
       return;
     }
+    // A follow-up target (a snackbar action) slides in: tap it once it has
+    // been on screen for a few frames, not mid-entrance.
+    if (_next > 0 && ++_seenFor < 4) {
+      _again();
+      return;
+    }
+    _seenFor = 0;
     final box = hits.first.renderObject! as RenderBox;
     final center = box.localToGlobal(box.size.center(Offset.zero));
     GestureBinding.instance
       ..handlePointerEvent(PointerDownEvent(position: center))
       ..handlePointerEvent(PointerUpEvent(position: center));
+    _next++;
+    if (_next < _targets.length) _again();
   }
 
   @override

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/channel_direction.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/site/site_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_adjustment_pacer.dart';
 import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
 import 'package:nexgen_command/features/wled/pattern_tweak_sender.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -84,7 +86,7 @@ const List<_EffectOption> _commonEffects = [
 
   // Strobe effects
   _EffectOption(23, 'Strobe', Icons.flash_on),
-  _EffectOption(25, 'Strobe Mega', Icons.flash_auto),
+  // 25 Strobe Mega: retired 2026-09-29 (pattern_flash_safety.dart).
   _EffectOption(57, 'Lightning', Icons.bolt),
 
   // Ambient effects (that use selected colors)
@@ -183,8 +185,18 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
   late List<List<int>>? _colors;
   int _grouping = 1;
   int _spacing = 0;
-  Timer? _debounce;
-  Timer? _layoutDebounce;
+
+  /// When speed/intensity and grouping/spacing go out: a short debounce at
+  /// home, ONE write when the drag settles away from home, never two in
+  /// flight (pattern_adjustment_pacer.dart — +110 E1 follow-up 4).
+  late final AdjustmentPacer _lookPacer = AdjustmentPacer(
+    flush: _flushLook,
+    isRemote: () => ref.read(isRemoteModeProvider),
+  );
+  late final AdjustmentPacer _layoutPacer = AdjustmentPacer(
+    flush: _flushLayout,
+    isRemote: () => ref.read(isRemoteModeProvider),
+  );
 
   @override
   void initState() {
@@ -223,8 +235,8 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
 
   @override
   void dispose() {
-    _debounce?.cancel();
-    _layoutDebounce?.cancel();
+    _lookPacer.dispose();
+    _layoutPacer.dispose();
     super.dispose();
   }
 
@@ -346,31 +358,30 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
     }
   }
 
-  void _scheduleDebouncedApply() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 200), () async {
-      // LOOK ONLY. `rev` used to ride along here, so every speed/intensity
-      // DRAG re-asserted direction from this panel's local state — an
-      // incidental geometry write on a control that had nothing to do with
-      // direction. Direction has its own discrete path (`_applyDirection`)
-      // through the provisioning door.
-      final sent = (speed: _speed, intensity: _intensity);
-      final ok = await _sendAdjustment({'sx': sent.speed, 'ix': sent.intensity});
-      if (!mounted) return;
-      if (ok) {
-        _acceptedSpeed = sent.speed;
-        _acceptedIntensity = sent.intensity;
-        _syncAcceptedPreview();
-      } else {
-        // Row 80: the control shows what the lights are doing, not what was
-        // asked of them. The reason is already on screen.
-        setState(() {
-          _speed = _acceptedSpeed;
-          _intensity = _acceptedIntensity;
-        });
-        _notifyChanged();
-      }
-    });
+  Future<void> _flushLook() async {
+    if (!mounted) return;
+    // LOOK ONLY. `rev` used to ride along here, so every speed/intensity
+    // DRAG re-asserted direction from this panel's local state — an
+    // incidental geometry write on a control that had nothing to do with
+    // direction. Direction has its own discrete path (`_applyDirection`)
+    // through the provisioning door.
+    final sent = (speed: _speed, intensity: _intensity);
+    final ok = await _sendAdjustment({'sx': sent.speed, 'ix': sent.intensity});
+    if (!mounted) return;
+    if (ok) {
+      _acceptedSpeed = sent.speed;
+      _acceptedIntensity = sent.intensity;
+      _syncAcceptedPreview();
+    } else if (!_lookPacer.hasPending) {
+      // Row 80: the control shows what the lights are doing, not what was
+      // asked of them. The reason is already on screen. (Not while a newer
+      // value is waiting to go: that one gets its own answer.)
+      setState(() {
+        _speed = _acceptedSpeed;
+        _intensity = _acceptedIntensity;
+      });
+      _notifyChanged();
+    }
   }
 
   /// User-initiated DIRECTION change → the provisioning door. Discrete, not
@@ -399,7 +410,7 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
               message: container.read(isLanConnectedProvider)
                   ? "Direction couldn't be changed — your lights didn't take "
                       'it.'
-                  : kLanOnlyMessage,
+                  : directionLanOnlyMessage(container.read(siteModeProvider)),
             );
     }
     final reported = await notifier.runAndReport(Future.value(result),
@@ -409,24 +420,34 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
     _notifyChanged();
   }
 
-  void _scheduleDebouncedLayoutApply() {
-    _layoutDebounce?.cancel();
-    _layoutDebounce = Timer(const Duration(milliseconds: 180), () async {
-      final sent = (grp: _grouping, spc: _spacing);
-      final ok = await _sendAdjustment({'grp': sent.grp, 'spc': sent.spc});
-      if (!mounted) return;
-      if (ok) {
-        _acceptedGrouping = sent.grp;
-        _acceptedSpacing = sent.spc;
-        _syncAcceptedPreview();
-      } else {
-        setState(() {
-          _grouping = _acceptedGrouping;
-          _spacing = _acceptedSpacing;
-        });
-        _notifyChanged();
-      }
-    });
+  Future<void> _flushLayout() async {
+    if (!mounted) return;
+    final sent = (grp: _grouping, spc: _spacing);
+    final ok = await _sendAdjustment({'grp': sent.grp, 'spc': sent.spc});
+    if (!mounted) return;
+    if (ok) {
+      _acceptedGrouping = sent.grp;
+      _acceptedSpacing = sent.spc;
+      _syncAcceptedPreview();
+    } else if (!_layoutPacer.hasPending) {
+      setState(() {
+        _grouping = _acceptedGrouping;
+        _spacing = _acceptedSpacing;
+      });
+      _notifyChanged();
+    }
+  }
+
+  /// "Turn on" in the lights-off notice: the explicit power action. An
+  /// adjustment never changes power (the PRIORITY rule), so the sliders do not
+  /// switch the house on themselves.
+  Future<void> _turnOn() async {
+    final container = ProviderScope.containerOf(context, listen: false);
+    final notifier = container.read(wledStateProvider.notifier);
+    await notifier.runAndReport(
+      notifier.togglePower(true),
+      onFailure: kTurnOnFailedMessage,
+    );
   }
 
   Future<void> _applyColorSequence(List<List<int>> seq) async {
@@ -439,16 +460,29 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
   Widget build(BuildContext context) {
     final state = ref.watch(wledStateProvider);
     final isConnected = state.connected;
+    // +110 E1 follow-up 2: with the house OFF an adjustment changes a look
+    // nobody can see, so the sliders read as broken. They are disabled, with
+    // the reason and the explicit way on. (Not "an adjustment turns the lights
+    // on": the PRIORITY rule is that an adjustment never changes power.)
+    final lightsOff = isConnected && !state.isOn;
+    final enabled = isConnected && !lightsOff;
     // #91 — gates the LAN-only direction toggle below.
     final onLan = ref.watch(isLanConnectedProvider);
+    final directionAwayMessage =
+        directionLanOnlyMessage(ref.watch(siteModeProvider));
 
     // Get effect metadata for context-aware labeling
     final effectMetadata = getEffectMetadata(_effectId ?? state.effectId);
 
-    return IgnorePointer(
-      ignoring: !isConnected,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (lightsOff) LightsOffNotice(onTurnOn: _turnOn),
+        IgnorePointer(
+      ignoring: !enabled,
       child: Opacity(
-        opacity: isConnected ? 1.0 : 0.5,
+        opacity: enabled ? 1.0 : 0.5,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -464,8 +498,9 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                 onChanged: (raw) {
                   setState(() => _speed = raw);
                   _notifyChanged();
-                  _scheduleDebouncedApply();
+                  _lookPacer.changed();
                 },
+                onChangeEnd: _lookPacer.settled,
               ),
               const SizedBox(height: 4),
             ],
@@ -480,8 +515,9 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                 onChanged: (v) {
                   setState(() => _intensity = v.round().clamp(0, 255));
                   _notifyChanged();
-                  _scheduleDebouncedApply();
+                  _lookPacer.changed();
                 },
+                onChangeEnd: _lookPacer.settled,
                 displayValue: '$_intensity',
               ),
               const SizedBox(height: 10),
@@ -537,7 +573,8 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  kLanOnlyMessage,
+                  directionAwayMessage,
+                  key: const ValueKey('tune-direction-away'),
                   style: TextStyle(
                     fontSize: 11,
                     color: Colors.white.withValues(alpha: 0.45),
@@ -636,8 +673,9 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                 onChanged: (v) {
                   setState(() => _grouping = v.round().clamp(1, 10));
                   _notifyChanged();
-                  _scheduleDebouncedLayoutApply();
+                  _layoutPacer.changed();
                 },
+                onChangeEnd: _layoutPacer.settled,
                 displayValue: '$_grouping',
               ),
               const SizedBox(height: 6),
@@ -651,8 +689,9 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
                 onChanged: (v) {
                   setState(() => _spacing = v.round().clamp(0, 10));
                   _notifyChanged();
-                  _scheduleDebouncedLayoutApply();
+                  _layoutPacer.changed();
                 },
+                onChangeEnd: _layoutPacer.settled,
                 displayValue: '$_spacing',
               ),
             ],
@@ -687,6 +726,53 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
           ],
         ),
       ),
+        ),
+      ],
+    );
+  }
+}
+
+/// What "Turn on" says when the lights did not come on.
+const String kTurnOnFailedMessage =
+    "Couldn't turn your lights on — check your connection.";
+
+/// Shown over adjustment controls while the house is off (+110 E1 follow-up
+/// 2): the controls are disabled, this says why, and "Turn on" is the one
+/// explicit way on. Shared with the Explore adjustment sheet.
+class LightsOffNotice extends StatelessWidget {
+  const LightsOffNotice({super.key, required this.onTurnOn});
+  final VoidCallback onTurnOn;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('tune-lights-off'),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.power_settings_new,
+              size: 18, color: NexGenPalette.textMedium),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Your lights are off. Turn them on to adjust them.',
+              style: TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            key: const ValueKey('tune-turn-on'),
+            onPressed: onTurnOn,
+            child: const Text('Turn on'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -700,6 +786,7 @@ class _SliderRow extends StatelessWidget {
   final double max;
   final int? divisions;
   final ValueChanged<double> onChanged;
+  final VoidCallback? onChangeEnd;
   final String displayValue;
 
   const _SliderRow({
@@ -710,6 +797,7 @@ class _SliderRow extends StatelessWidget {
     required this.max,
     this.divisions,
     required this.onChanged,
+    this.onChangeEnd,
     required this.displayValue,
   });
 
@@ -732,6 +820,7 @@ class _SliderRow extends StatelessWidget {
               max: max,
               divisions: divisions,
               onChanged: onChanged,
+              onChangeEnd: onChangeEnd == null ? null : (_) => onChangeEnd!(),
               activeColor: NexGenPalette.cyan,
               inactiveColor: Colors.white.withValues(alpha: 0.2),
             ),

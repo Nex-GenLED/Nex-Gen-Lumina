@@ -16,7 +16,12 @@ import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/channel_direction.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/favorites/favorite_brightness.dart'
+    show lookPayloadForApply;
+import 'package:nexgen_command/features/site/site_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_adjustment_pacer.dart';
 import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/features/wled/pattern_tweak_sender.dart';
 import 'package:nexgen_command/shared/apply_blocked_reason.dart';
@@ -848,9 +853,13 @@ class LibraryNodeCard extends StatelessWidget {
     // Item C: a saved EFFECT design (My Designs) renders as a pattern card —
     // its effect running in its own colours, the effect's name and its
     // speed — instead of a bare row of dots.
-    final savedEffectId = node.metadata?['isSavedDesign'] == true
+    // Shown as what will play: a stored Strobe Mega plays Strobe
+    // (pattern_flash_safety.dart).
+    final storedEffectId = node.metadata?['isSavedDesign'] == true
         ? (node.metadata?['effectId'] as int?)
         : null;
+    final savedEffectId =
+        storedEffectId == null ? null : offeredEffectId(storedEffectId);
     final savedSpeed = node.metadata?['speed'] as int?;
 
     return Material(
@@ -1844,8 +1853,13 @@ class _PatternCardState extends ConsumerState<PatternCard> {
         _ledsPerColor,
       );
 
+      // +110 E1 follow-up 1: the catalogue states `bri` (200/230/255) on its
+      // patterns, and nobody chose it — a tap on a search result used to jump
+      // the whole house to that level. Same rule as favourites: dropped
+      // unless a writer marked it as the customer's own.
+      final sentPayload = lookPayloadForApply(preparedPayload);
       if (!isCustomEffect) {
-        var payload = preparedPayload;
+        var payload = sentPayload;
         // Row 1: wait for a channel source still answering; a closed gate is
         // explained on screen, never a silent return.
         final channels = await resolveChannelsForTap(container);
@@ -1882,7 +1896,10 @@ class _PatternCardState extends ConsumerState<PatternCard> {
           speed: patternSpeed,
           intensity: patternIntensity,
           effectName: widget.pattern.name,
-          brightness: preparedPayload['bri'] as int? ?? 255,
+          // The level the lights are actually at: the apply no longer sets
+          // one (unless the pattern's own level was chosen by the customer).
+          brightness: sentPayload['bri'] as int? ??
+              ref.read(wledStateProvider).brightness,
           colorGroupSize: patternGrp,
           spacing: patternSpc,
         );
@@ -1894,14 +1911,28 @@ class _PatternCardState extends ConsumerState<PatternCard> {
       // Patterns. Explore never recorded one, so Recent could only list
       // scenes and designs.
       unawaited(ref.trackWledPayload(
-        payload: preparedPayload,
+        payload: sentPayload,
         patternName: widget.pattern.name,
         source: 'explore',
       ));
 
       if (context.mounted) {
-        // Show pattern adjustment panel in a bottom sheet
-        _showAdjustmentPanel(context, ref);
+        // +110 E1 follow-up 1: the adjustment sheet used to open on EVERY
+        // tap, over the results the customer was browsing. It opens now only
+        // when asked — "Adjust" on the confirmation.
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text('Applied ${widget.pattern.name}'),
+            duration: const Duration(seconds: 6),
+            action: SnackBarAction(
+              key: const ValueKey('pattern-applied-adjust'),
+              label: 'Adjust',
+              onPressed: () {
+                if (context.mounted) _showAdjustmentPanel(context, ref);
+              },
+            ),
+          ));
 
         // If this is a team-associated pattern, check for a live/upcoming
         // game and offer to enable live scoring celebrations.
@@ -2086,7 +2117,14 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   late int _spacing;
   late int _effectId;
   late bool _reverse;
-  Timer? _debounce;
+
+  /// When the pending adjustment goes out: a short debounce at home, ONE
+  /// write when the drag settles away from home, never two in flight
+  /// (pattern_adjustment_pacer.dart — +110 E1 follow-up 4).
+  late final AdjustmentPacer _pacer = AdjustmentPacer(
+    flush: _flushChange,
+    isRemote: () => ref.read(isRemoteModeProvider),
+  );
 
   // Brightness gradient state
   late bool _isGradient;
@@ -2118,11 +2156,11 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _pacer.dispose();
     super.dispose();
   }
 
-  // Keys changed since the last send. ONE debounce serves every slider, so the
+  // Keys changed since the last send. ONE pacer serves every slider, so the
   // pending update has to ACCUMULATE: it used to be replaced, which meant
   // moving Grouping and then Spacing within 200 ms sent only `spc` and the
   // `grp` change was silently dropped.
@@ -2140,33 +2178,40 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   /// go through `applyChannelFilter` — the design-apply shape — so a slider
   /// drag with one channel selected switched the other channels OFF, and a
   /// refused write left the slider where it was with no message.
-  void _applyChange(Map<String, dynamic> segUpdate) {
+  ///
+  /// [dragging]: a slider step (away from home it waits for the drag to
+  /// settle); false for a discrete tap.
+  void _applyChange(Map<String, dynamic> segUpdate, {bool dragging = true}) {
     _pendingSegUpdate.addAll(segUpdate);
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 200), () async {
-      final fields = Map<String, dynamic>.from(_pendingSegUpdate);
-      _pendingSegUpdate.clear();
-      final container = ProviderScope.containerOf(context, listen: false);
-      final result = await container
-          .read(wledStateProvider.notifier)
-          .runAndReport(
-            sendChannelTweak(container.read, fields),
-            onFailure: kAdjustmentFailedMessage,
-          );
-      if (!mounted) return;
-      if (result.ok) {
-        _acceptedSpeed = _speed;
-        _acceptedIntensity = _intensity;
-        _acceptedGrouping = _grouping;
-        _acceptedSpacing = _spacing;
-        return;
-      }
-      setState(() {
-        _speed = _acceptedSpeed;
-        _intensity = _acceptedIntensity;
-        _grouping = _acceptedGrouping;
-        _spacing = _acceptedSpacing;
-      });
+    _pacer.changed(dragging: dragging);
+  }
+
+  Future<void> _flushChange() async {
+    if (!mounted || _pendingSegUpdate.isEmpty) return;
+    final fields = Map<String, dynamic>.from(_pendingSegUpdate);
+    _pendingSegUpdate.clear();
+    final container = ProviderScope.containerOf(context, listen: false);
+    final result = await container
+        .read(wledStateProvider.notifier)
+        .runAndReport(
+          sendChannelTweak(container.read, fields),
+          onFailure: kAdjustmentFailedMessage,
+        );
+    if (!mounted) return;
+    if (result.ok) {
+      _acceptedSpeed = _speed;
+      _acceptedIntensity = _intensity;
+      _acceptedGrouping = _grouping;
+      _acceptedSpacing = _spacing;
+      return;
+    }
+    // A newer value is already waiting: it gets its own answer.
+    if (_pacer.hasPending) return;
+    setState(() {
+      _speed = _acceptedSpeed;
+      _intensity = _acceptedIntensity;
+      _grouping = _acceptedGrouping;
+      _spacing = _acceptedSpacing;
     });
   }
 
@@ -2196,7 +2241,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
               message: container.read(isLanConnectedProvider)
                   ? "Direction couldn't be changed — your lights didn't take "
                       'it.'
-                  : kLanOnlyMessage,
+                  : directionLanOnlyMessage(container.read(siteModeProvider)),
             );
     }
     final reported = await container
@@ -2248,7 +2293,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
       'spc': 0,
       'sx': sx,
       'pal': 5,
-    });
+    }, dragging: false);
   }
 
   @override
@@ -2271,7 +2316,10 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
         ],
       ),
       child: SafeArea(
-        child: Padding(
+        // Scrolls when it is taller than the screen — at Larger Text, away
+        // from home (the direction note wraps), it ran 42 points off the
+        // bottom (+110 E1 accessibility).
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2445,6 +2493,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                     setState(() => _speed = raw);
                     _applyChange({'sx': _speed});
                   },
+                  onChangeEnd: _pacer.settled,
                 ),
                 const SizedBox(height: 4),
               ],
@@ -2457,6 +2506,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                   setState(() => _intensity = v.round());
                   _applyChange({'ix': _intensity});
                 },
+                onChangeEnd: _pacer.settled,
               ),
               const SizedBox(height: 12),
               // Direction toggle (hide for static effects)
@@ -2497,7 +2547,8 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
-                      kLanOnlyMessage,
+                      directionLanOnlyMessage(ref.watch(siteModeProvider)),
+                      key: const ValueKey('sheet-direction-away'),
                       style: TextStyle(
                         fontSize: 11,
                         color: Colors.white.withValues(alpha: 0.45),
@@ -2528,6 +2579,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                     setState(() => _grouping = v.round());
                     _applyChange({'grp': _grouping});
                   },
+                  onChangeEnd: _pacer.settled,
                 ),
                 const SizedBox(height: 8),
                 // Spacing slider
@@ -2542,6 +2594,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                     setState(() => _spacing = v.round());
                     _applyChange({'spc': _spacing});
                   },
+                  onChangeEnd: _pacer.settled,
                 ),
                 const SizedBox(height: 16),
               ],
@@ -2561,6 +2614,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     required String label,
     required double value,
     required ValueChanged<double> onChanged,
+    VoidCallback? onChangeEnd,
     double min = 0,
     double max = 255,
     int? divisions,
@@ -2580,6 +2634,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
             max: max,
             divisions: divisions,
             onChanged: onChanged,
+            onChangeEnd: onChangeEnd == null ? null : (_) => onChangeEnd(),
           ),
         ),
         SizedBox(
