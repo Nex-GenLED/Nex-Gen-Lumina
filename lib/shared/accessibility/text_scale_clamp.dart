@@ -12,6 +12,11 @@ import 'package:flutter/widgets.dart';
 /// gets exactly the size they chose.
 const double kMaxTextScaleFactor = 2.0;
 
+/// The cap may never be set at or below this. 1.75x is the size every screen
+/// is tested at (`test/helpers/text_scale_harness.dart`), so a cap here or
+/// lower would take a tested, supported size away from the user.
+const double kMinPermittedTextScaleCap = 1.75;
+
 /// Caps the ambient [MediaQueryData.textScaler] at [maxScaleFactor] for
 /// everything below it, leaving every other [MediaQueryData] field — including
 /// [MediaQueryData.boldText] — untouched.
@@ -32,7 +37,11 @@ class TextScaleClamp extends StatelessWidget {
     super.key,
     required this.child,
     this.maxScaleFactor = kMaxTextScaleFactor,
-  }) : assert(maxScaleFactor >= 1.0);
+  }) : assert(
+          maxScaleFactor > kMinPermittedTextScaleCap,
+          'The cap must stay above $kMinPermittedTextScaleCap: that is the '
+          'size screens are tested at, and a user must be able to reach it.',
+        );
 
   /// The subtree that sees the capped scaler.
   final Widget child;
