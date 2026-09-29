@@ -23,6 +23,8 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 
 /// Defensive int coercion used by [WledNotifier.applyPayloadWithLabel] when
 /// reading WLED JSON payload fields that may be `int`, `num`, or absent.
@@ -387,18 +389,79 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   }
 
   // ── 4. Offline → no repository ───────────────────────────────────────────
+  // Decided here as well as in [buildRoutedRepository] so an offline phone
+  // takes no dependency on the profile or the controller list.
   if (connectivityStatus == ConnectivityStatus.offline) {
     debugPrint('RepositoryInit: selected=null, network=offline, hasControllerId=n/a');
     return null;
   }
 
-  // ── Shared lookups for steps 5-7 ─────────────────────────────────────────
+  // ── 5-7. Local / relay / nothing ─────────────────────────────────────────
   final userProfile = ref.watch(currentUserProfileProvider).maybeWhen(
     data: (user) => user,
     orElse: () => null,
   );
-  final controllerId = ref.watch(selectedControllerIdProvider);
-  final webhookUrl = userProfile?.webhookUrl;
+  return buildRoutedRepository(ControllerRoute(
+    ip: ip,
+    controllerId: ref.watch(selectedControllerIdProvider),
+    userId: userId,
+    connectivity: connectivityStatus,
+    webhookUrl: userProfile?.webhookUrl,
+  ));
+});
+
+/// Everything the transport decision reads, for ONE controller.
+class ControllerRoute {
+  final String ip;
+
+  /// The controller's account record id. Null when the address is not a
+  /// registered controller (first-run discovery), which rules out the relay.
+  final String? controllerId;
+  final String? userId;
+  final ConnectivityStatus connectivity;
+  final String? webhookUrl;
+
+  const ControllerRoute({
+    required this.ip,
+    required this.controllerId,
+    required this.userId,
+    required this.connectivity,
+    required this.webhookUrl,
+  });
+}
+
+/// THE transport decision — steps 4-7 of [wledRepositoryProvider], as a
+/// function of one controller, so the selected controller and every other
+/// linked controller are routed by the same code:
+///
+///   offline                        → null
+///   home network                   → [WledService] (direct, identity-checked)
+///   away + account + controller id → [CloudRelayRepository]
+///   anything else                  → null
+///
+/// There is deliberately no second way to reach a controller. A helper that
+/// builds its own `WledService('http://…')` talks to the home network whatever
+/// the phone is actually on: away from home it times out silently, and it
+/// skips the identity check that stops a write landing on the wrong device.
+///
+/// [firestore] is for tests; production leaves it null and the relay uses the
+/// app's own instance.
+WledRepository? buildRoutedRepository(
+  ControllerRoute route, {
+  FirebaseFirestore? firestore,
+}) {
+  final connectivityStatus = route.connectivity;
+  final controllerId = route.controllerId;
+  final userId = route.userId;
+  final ip = route.ip;
+
+  // ── 4. Offline → no repository ───────────────────────────────────────────
+  if (connectivityStatus == ConnectivityStatus.offline) {
+    debugPrint('RepositoryInit: selected=null, network=offline, hasControllerId=n/a');
+    return null;
+  }
+
+  final webhookUrl = route.webhookUrl;
 
   // ── 5. Local WiFi → always use direct HTTP ───────────────────────────────
   //
@@ -440,6 +503,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
       controllerId: controllerId,
       controllerIp: ip,
       webhookUrl: webhookUrl ?? '',
+      firestore: firestore,
     );
   }
 
@@ -447,6 +511,76 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
   debugPrint('RepositoryInit: selected=null, '
       'network=${connectivityStatus.name}, hasControllerId=$controllerId');
   return null;
+}
+
+/// One controller to send to: its address, and its account record id when it
+/// has one.
+@immutable
+class ControllerTarget {
+  final String ip;
+  final String? controllerId;
+
+  /// What the customer called it, for messages. Never used for routing.
+  final String? name;
+
+  const ControllerTarget({required this.ip, this.controllerId, this.name});
+
+  @override
+  bool operator ==(Object other) =>
+      other is ControllerTarget &&
+      other.ip == ip &&
+      other.controllerId == controllerId;
+
+  @override
+  int get hashCode => Object.hash(ip, controllerId);
+
+  @override
+  String toString() =>
+      'ControllerTarget(${name ?? controllerId ?? 'unregistered'})';
+}
+
+/// THE per-controller repository factory: the repository for [target], routed
+/// exactly as [wledRepositoryProvider] routes the selected controller.
+///
+/// The SELECTED controller is answered with [wledRepositoryProvider]'s own
+/// instance rather than a second one. Two instances for one device would mean
+/// two identity checks and two connections to a controller that accepts very
+/// few, and it would let the two disagree about which transport is in use.
+///
+/// Cached per target by Riverpod, so a fan-out that runs on every tap does not
+/// build a new repository — and open a new connection — every time.
+final controllerRepositoryProvider =
+    Provider.family<WledRepository?, ControllerTarget>((ref, target) {
+  if (target.ip.isEmpty) return null;
+  if (target.ip == ref.watch(selectedDeviceIpProvider)) {
+    return ref.watch(wledRepositoryProvider);
+  }
+
+  if (ref.watch(demoModeProvider)) return DemoWledRepository();
+  final authUser = ref.watch(authStateProvider).maybeWhen(
+        data: (user) => user,
+        orElse: () => null,
+      );
+  if (ReviewerSeedService.isReviewer(authUser)) return DemoWledRepository();
+
+  final connectivityStatus =
+      ref.watch(wledConnectivityStatusProvider).maybeWhen(
+            data: (status) => status,
+            orElse: () => _fallbackStatus(ref),
+          );
+  if (connectivityStatus == null) return null;
+
+  final userProfile = ref.watch(currentUserProfileProvider).maybeWhen(
+        data: (user) => user,
+        orElse: () => null,
+      );
+  return buildRoutedRepository(ControllerRoute(
+    ip: target.ip,
+    controllerId: target.controllerId,
+    userId: authUser?.uid,
+    connectivity: connectivityStatus,
+    webhookUrl: userProfile?.webhookUrl,
+  ));
 });
 
 /// Provider for the currently selected controller's Firestore document ID.
@@ -1336,12 +1470,13 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
   }
 
-  Future<void> togglePower(bool value, {bool isManualChange = true}) async {
+  Future<WriteResult> togglePower(bool value,
+      {bool isManualChange = true}) async {
     debugPrint('🔌 togglePower called: $value (manual: $isManualChange)');
     _stateApplySeq++;
     state = state.copyWith(isOn: value);
     // Only send power state - don't include brightness when turning off
-    await _postUpdate(on: value, isManualChange: isManualChange);
+    return _postUpdate(on: value, isManualChange: isManualChange);
   }
 
   /// PER-CHANNEL power (P1-43) — the ADDITIVE seg-scoped counterpart to the
@@ -1353,13 +1488,13 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// through applyJson (`/json/state` only — NO cfg writes). Leaves
   /// [togglePower] and its master callers (dashboard circle, voice, Game Day /
   /// Neighborhood resume) untouched.
-  Future<void> setChannelPower(int channelId, bool on,
+  Future<WriteResult> setChannelPower(int channelId, bool on,
       {bool isManualChange = true}) async {
     debugPrint('🔌 setChannelPower ch$channelId → $on');
     final service = ref.read(wledRepositoryProvider);
     if (service == null) {
       if (state.connected) state = state.copyWith(connected: false);
-      return;
+      return _blockedResult();
     }
 
     // 1. LIVE state — master + which channels' segments are currently on.
@@ -1454,16 +1589,17 @@ class WledNotifier extends Notifier<WledStateModel> {
         state = state.copyWith(connected: false);
         _scheduleNextPoll();
       }
-      ref.read(wledCommandFailureProvider.notifier).state = WledCommandFailure(
-          refusal ?? "Couldn't reach your lights — check your connection");
+      return _reportFailure(_failedWrite(refusal));
     }
+    return const WriteResult.success();
   }
 
-  Future<void> setBrightness(int bri, {bool isManualChange = true}) async {
+  Future<WriteResult> setBrightness(int bri,
+      {bool isManualChange = true}) async {
     _stateApplySeq++;
     state = state.copyWith(brightness: bri);
     // Always send power state with brightness to ensure WLED interprets correctly
-    await _postUpdate(
+    return _postUpdate(
       on: state.isOn,
       brightness: bri,
       isManualChange: isManualChange,
@@ -1471,17 +1607,18 @@ class WledNotifier extends Notifier<WledStateModel> {
     );
   }
 
-  Future<void> setSpeed(int sx, {bool isManualChange = true}) async {
+  Future<WriteResult> setSpeed(int sx, {bool isManualChange = true}) async {
     _stateApplySeq++;
     state = state.copyWith(speed: sx);
-    await _postUpdate(
+    return _postUpdate(
       speed: sx,
       isManualChange: isManualChange,
       transientType: _kTransientSpeed,
     );
   }
 
-  Future<void> setColor(Color color, {bool isManualChange = true}) async {
+  Future<WriteResult> setColor(Color color,
+      {bool isManualChange = true}) async {
     _stateApplySeq++;
     state = state.copyWith(color: color);
     // Force W=0 unconditionally so the dedicated white LED never mixes into a
@@ -1496,7 +1633,7 @@ class WledNotifier extends Notifier<WledStateModel> {
     // Pure dark red (G=B=0) is byte-identical either way (min=0), so it stays
     // unaffected. Intentional white (setWarmWhite) is a separate path and still
     // honors supportsRgbw.
-    await _postUpdate(
+    return _postUpdate(
       color: color,
       forceRgbwZeroWhite: true,
       isManualChange: isManualChange,
@@ -1504,14 +1641,15 @@ class WledNotifier extends Notifier<WledStateModel> {
     );
   }
 
-  Future<void> setWarmWhite(int white, {bool isManualChange = true}) async {
+  Future<WriteResult> setWarmWhite(int white,
+      {bool isManualChange = true}) async {
     _stateApplySeq++;
     final clamped = white.clamp(0, 255);
     state = state.copyWith(warmWhite: clamped);
     // Send an update including current color and the updated white channel
     // (same _kTransientColor channel as setColor — both write the col[] array,
     // so they coalesce together latest-wins).
-    await _postUpdate(
+    return _postUpdate(
       color: state.color,
       white: state.supportsRgbw ? clamped : null,
       isManualChange: isManualChange,
@@ -1756,11 +1894,31 @@ class WledNotifier extends Notifier<WledStateModel> {
   Future<bool> applyToDevice(
     Map<String, dynamic> payload, {
     required String? labelHint,
+  }) async =>
+      (await applyToDeviceResult(payload, labelHint: labelHint)).ok;
+
+  /// [applyToDevice], returning WHY when nothing was applied.
+  ///
+  /// Differs from the bool form in nothing but the return value: same gate,
+  /// same filter, same write, same preview and label fan-out. A closed gate
+  /// comes back as [WriteResult.blocked] carrying `applyBlockedReason`'s
+  /// sentence; a write the controller did not take comes back as a failure.
+  ///
+  /// Neither form puts anything on the shared failure state by itself —
+  /// automated callers (geofence, schedule, Game Day) come through here too,
+  /// and a snackbar for a command the customer did not just issue would be
+  /// its own confusion. A caller acting on a TAP wraps this in [runAndReport].
+  Future<WriteResult> applyToDeviceResult(
+    Map<String, dynamic> payload, {
+    required String? labelHint,
   }) async {
-    final channels = ref.read(effectiveChannelIdsProvider);
+    // Waits only when a channel source is still being read (first seconds
+    // after launch; first command away from home). Returns at once otherwise.
+    final channels = await resolveEffectiveChannelIds(ref.read);
+    if (_disposed) return const WriteResult.failed(WriteFailureKind.error);
     if (channels.isEmpty) {
       debugPrint('applyToDevice: skip (U1 gate — no effective channels)');
-      return false;
+      return _blockedResult();
     }
 
     // Discriminator: expand only a single template seg with no explicit id.
@@ -1771,10 +1929,85 @@ class WledNotifier extends Notifier<WledStateModel> {
         !(seg.first as Map).containsKey('id');
 
     final outgoing = isRawBroadcast
-        ? applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider))
+        ? applyChannelFilter(
+            payload, channels, ref.read(applyFilterChannelsProvider))
         : payload;
-    return applyPayloadWithLabel(outgoing, labelHint: labelHint);
+    if (ref.read(wledRepositoryProvider) == null) return _blockedResult();
+    final ok = await applyPayloadWithLabel(outgoing, labelHint: labelHint);
+    return ok ? const WriteResult.success() : _failedWrite(null);
   }
+
+  // ── Write-and-report ────────────────────────────────────────────────────
+
+  /// Awaits [write], puts a failure on the shared failure state the dashboard
+  /// already renders ([wledCommandFailureProvider]), and returns the result so
+  /// the caller's snackbar can branch on it.
+  ///
+  /// THE ONE SHAPE for "do the thing, then tell the customer what happened":
+  ///
+  /// ```dart
+  /// final result = await ref.read(wledStateProvider.notifier).runAndReport(
+  ///   service.saveSomething(),
+  ///   onSuccess: 'Saved',
+  ///   onFailure: "Couldn't save — try again",
+  /// );
+  /// if (result.ok) showSuccess(result.message!);
+  /// // On failure there is nothing more to show: it is already on screen.
+  /// ```
+  ///
+  ///  * Success → the result, carrying [onSuccess] as its message.
+  ///  * Failure → the message is the result's OWN reason when it has one (a
+  ///    closed gate, a refused device), else [onFailure]. It is shown once,
+  ///    through the shared state, and the returned result has `reported` set
+  ///    so the caller does not show it a second time.
+  ///  * A write that throws is a failure, not an unhandled error.
+  ///
+  /// Takes a `Future<WriteResult>`; a `Future<bool>` write adapts with
+  /// `.then(WriteResult.fromBool)`.
+  Future<WriteResult> runAndReport(
+    Future<WriteResult> write, {
+    String? onSuccess,
+    required String onFailure,
+  }) async {
+    WriteResult result;
+    try {
+      result = await write;
+    } catch (e) {
+      debugPrint('runAndReport: write threw — $e');
+      result = WriteResult.failed(WriteFailureKind.error, error: e);
+    }
+    if (result.ok) {
+      return onSuccess == null ? result : result.copyWith(message: onSuccess);
+    }
+    return _reportFailure(result.copyWith(message: result.message ?? onFailure));
+  }
+
+  /// Puts [result]'s message on the shared failure state, once.
+  WriteResult _reportFailure(WriteResult result) {
+    if (result.ok || result.reported) return result;
+    final message = result.message ?? _kUnreachableMessage;
+    if (!_disposed) {
+      ref.read(wledCommandFailureProvider.notifier).state =
+          WledCommandFailure(message);
+    }
+    return result.copyWith(message: message, reported: true);
+  }
+
+  /// A write that was attempted and did not land. [refusal] is the identity
+  /// guard's sentence when the failure was a refusal, else null.
+  WriteResult _failedWrite(String? refusal) => refusal == null
+      ? const WriteResult.failed(
+          WriteFailureKind.unreachable,
+          message: _kUnreachableMessage,
+        )
+      : WriteResult.failed(WriteFailureKind.refused, message: refusal);
+
+  /// Nothing was sent. Carries the shared "why not".
+  WriteResult _blockedResult() => WriteResult.blocked(
+      applyBlockedReason(ref.read) ?? kApplyBlockedFallback);
+
+  static const String _kUnreachableMessage =
+      "Couldn't reach your lights — check your connection";
 
   /// Test-only knob: rewind the poll-suppression timestamp so the next
   /// poll behaves as if the [_kLocalApplyPollSuppressWindow] has expired.
@@ -1794,7 +2027,7 @@ class WledNotifier extends Notifier<WledStateModel> {
     debugPrint('🗑️ Cleared Lumina pattern metadata');
   }
 
-  Future<void> _postUpdate({
+  Future<WriteResult> _postUpdate({
     bool? on,
     int? brightness,
     int? speed,
@@ -1822,14 +2055,17 @@ class WledNotifier extends Notifier<WledStateModel> {
         forceRgbwZeroWhite: forceRgbwZeroWhite,
         isManualChange: isManualChange,
       );
-      return;
+      // Not a failure: the in-flight write replays this value when it lands.
+      return const WriteResult.success();
     }
 
     // If DDP streaming is active, avoid HTTP state updates to prevent conflicts.
     final ddpStreaming = ref.read(ddpStreamingProvider);
     if (ddpStreaming) {
       debugPrint('Skipping HTTP update because DDP streaming is active');
-      return;
+      return const WriteResult.blocked(
+          "Your lights are showing a live stream right now, so this change "
+          "wasn't sent.");
     }
     final service = ref.read(wledRepositoryProvider);
     if (service == null) {
@@ -1851,7 +2087,7 @@ class WledNotifier extends Notifier<WledStateModel> {
       if (state.connected) {
         state = state.copyWith(connected: false);
       }
-      return;
+      return _blockedResult();
     }
 
     // Record manual override for schedule enforcement
@@ -1873,6 +2109,7 @@ class WledNotifier extends Notifier<WledStateModel> {
       _transientInFlight.add(transientType);
     }
     bool ok = false;
+    var result = const WriteResult.success();
     try {
       // Check if a channel filter is active (user selected specific channels).
       var effectiveChannels = ref.read(effectiveChannelIdsProvider);
@@ -1969,9 +2206,7 @@ class WledNotifier extends Notifier<WledStateModel> {
       if (!ok) {
         // Surface failure so the dashboard can show a non-blocking snackbar.
         // Optimistic state updates above are preserved — this only notifies.
-        ref.read(wledCommandFailureProvider.notifier).state =
-            WledCommandFailure(refusal ??
-                "Couldn't reach your lights — check your connection");
+        result = _reportFailure(_failedWrite(refusal));
       }
       // Wait before allowing poller to read back state.
       // In remote mode the bridge processes commands sequentially, so give it
@@ -2008,6 +2243,7 @@ class WledNotifier extends Notifier<WledStateModel> {
     if (ok) {
       unawaited(_pollOnce());
     }
+    return result;
   }
 
 }

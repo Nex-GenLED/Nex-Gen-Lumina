@@ -18,6 +18,11 @@ enum FavoriteApplyStatus {
   /// A write was refused. For a per-pixel favorite the lights may be showing
   /// the base without (all of) the painted pixels.
   failed,
+
+  /// The stored payload describes no look at all — no effect, no colour on
+  /// any channel. Nothing was sent: sending it would switch the channels on
+  /// and change nothing else, under an "Applied" message.
+  noDesign,
 }
 
 class FavoriteApplyOutcome {
@@ -75,8 +80,13 @@ Future<FavoriteApplyOutcome> applyFavoritePayloadWith(
     );
   }
 
-  final filtered =
-      applyChannelFilter(payload, channels, read(deviceChannelsProvider));
+  // applyChannelFilter templates from the first REAL design segment, so a
+  // favourite stored with a leading `{id: 0, on: false}` re-applies its look.
+  if (payload['seg'] is List && firstRealDesignSegment(payload) == null) {
+    return FavoriteApplyOutcome(FavoriteApplyStatus.noDesign, payload);
+  }
+  final filtered = applyChannelFilter(
+      payload, channels, read(applyFilterChannelsProvider));
   final ok = await repo.applyJson(filtered);
   return FavoriteApplyOutcome(
     ok ? FavoriteApplyStatus.applied : FavoriteApplyStatus.failed,

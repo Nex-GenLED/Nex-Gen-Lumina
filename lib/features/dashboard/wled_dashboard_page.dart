@@ -24,7 +24,6 @@ import 'package:nexgen_command/features/wled/participation_reconciler.dart';
 import 'package:nexgen_command/features/dashboard/hero_image_resolution.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/dashboard/widgets/route_path_badge.dart';
-import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
@@ -51,6 +50,7 @@ import 'package:nexgen_command/features/favorites/favorite_apply.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
 import 'package:nexgen_command/features/dashboard/widgets/feature_button.dart';
 import 'package:nexgen_command/features/game_day/game_day_entry_button.dart';
+import 'package:nexgen_command/shared/controller_targeting.dart';
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
@@ -64,26 +64,25 @@ import 'package:nexgen_command/features/game_day/game_day_entry_button.dart';
   final colors = <Color>[];
 
   try {
-    final seg = payload['seg'];
-    if (seg is List && seg.isNotEmpty) {
-      final first = seg.first;
-      if (first is Map) {
-        effectId = (first['fx'] as int?) ?? 0;
-        speed = (first['sx'] as int?) ?? 128;
-        intensity = (first['ix'] as int?) ?? 128;
-        colorGroupSize = (first['grp'] as int?) ?? 1;
-        spacing = (first['spc'] as int?) ?? 0;
-        final cols = first['col'];
-        if (cols is List) {
-          for (final col in cols) {
-            if (col is List && col.length >= 3) {
-              colors.add(Color.fromARGB(
-                255,
-                (col[0] as num).toInt().clamp(0, 255),
-                (col[1] as num).toInt().clamp(0, 255),
-                (col[2] as num).toInt().clamp(0, 255),
-              ));
-            }
+    // The DESIGN segment, not seg[0]: on anything scoped away from channel 1
+    // seg[0] is the `{id: 0, on: false}` exclusion marker.
+    final first = firstRealDesignSegment(payload);
+    if (first != null) {
+      effectId = (first['fx'] as int?) ?? 0;
+      speed = (first['sx'] as int?) ?? 128;
+      intensity = (first['ix'] as int?) ?? 128;
+      colorGroupSize = (first['grp'] as int?) ?? 1;
+      spacing = (first['spc'] as int?) ?? 0;
+      final cols = first['col'];
+      if (cols is List) {
+        for (final col in cols) {
+          if (col is List && col.length >= 3) {
+            colors.add(Color.fromARGB(
+              255,
+              (col[0] as num).toInt().clamp(0, 255),
+              (col[1] as num).toInt().clamp(0, 255),
+              (col[2] as num).toInt().clamp(0, 255),
+            ));
           }
         }
       }
@@ -959,19 +958,23 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                 final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
                                 if (!shouldProceed) return;
                                 try {
-                                  final current = ref.read(wledStateProvider);
-                                  await ref.read(wledStateProvider.notifier).togglePower(!current.isOn);
-                                  final currentIps = ref.read(activeAreaControllerIpsProvider);
-                                  if (currentIps.isNotEmpty) {
-                                    await Future.wait(currentIps.map((ip) async {
-                                      try {
-                                        final svc = WledService('http://$ip');
-                                        return await svc.setState(on: !current.isOn);
-                                      } catch (_) {
-                                        return false;
-                                      }
-                                    }));
-                                  }
+                                  final turnOn = !ref.read(wledStateProvider).isOn;
+                                  // The selected controller goes through the
+                                  // notifier, which owns its optimistic state
+                                  // and its failure message. Every OTHER linked
+                                  // controller goes through its own routed
+                                  // repository — relayed when away from home.
+                                  await ref.read(wledStateProvider.notifier).togglePower(turnOn);
+                                  final others = await forEachLinkedController(
+                                    ref.read,
+                                    (repo, _) => repo.setState(on: turnOn),
+                                    includeSelected: false,
+                                  );
+                                  if (!mounted) return;
+                                  await ref.read(wledStateProvider.notifier).runAndReport(
+                                        Future.value(summarizeFanOut(others)),
+                                        onFailure: "Couldn't reach your other controllers",
+                                      );
                                 } catch (e) {
                                   debugPrint('Now Playing power toggle error: $e');
                                 }

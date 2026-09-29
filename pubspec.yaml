@@ -80,6 +80,59 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/demo/
+    # Static font files (SIL OFL 1.1; licence texts alongside). Listed as
+    # assets so google_fonts finds them by file name and never fetches a font
+    # over the network.
+    - assets/google_fonts/
+  # The same files declared as real multi-weight families, under the fallback
+  # family name google_fonts puts on every style it returns.
+  fonts:
+    - family: DMSans
+      fonts:
+        - asset: assets/google_fonts/DMSans-Regular.ttf
+          weight: 400
+        - asset: assets/google_fonts/DMSans-Medium.ttf
+          weight: 500
+        - asset: assets/google_fonts/DMSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/google_fonts/DMSans-Bold.ttf
+          weight: 700
+        - asset: assets/google_fonts/DMSans-ExtraBold.ttf
+          weight: 800
+    - family: Exo2
+      fonts:
+        - asset: assets/google_fonts/Exo2-Regular.ttf
+          weight: 400
+        - asset: assets/google_fonts/Exo2-Medium.ttf
+          weight: 500
+        - asset: assets/google_fonts/Exo2-SemiBold.ttf
+          weight: 600
+        - asset: assets/google_fonts/Exo2-Bold.ttf
+          weight: 700
+        - asset: assets/google_fonts/Exo2-ExtraBold.ttf
+          weight: 800
+        - asset: assets/google_fonts/Exo2-Black.ttf
+          weight: 900
+    - family: Montserrat
+      fonts:
+        - asset: assets/google_fonts/Montserrat-Regular.ttf
+          weight: 400
+        - asset: assets/google_fonts/Montserrat-Medium.ttf
+          weight: 500
+        - asset: assets/google_fonts/Montserrat-SemiBold.ttf
+          weight: 600
+        - asset: assets/google_fonts/Montserrat-Bold.ttf
+          weight: 700
+        - asset: assets/google_fonts/Montserrat-ExtraBold.ttf
+          weight: 800
+        - asset: assets/google_fonts/Montserrat-Black.ttf
+          weight: 900
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/google_fonts/JetBrainsMono-Regular.ttf
+          weight: 400
+        - asset: assets/google_fonts/JetBrainsMono-Bold.ttf
+          weight: 700
 
 flutter_launcher_icons:
   android: true

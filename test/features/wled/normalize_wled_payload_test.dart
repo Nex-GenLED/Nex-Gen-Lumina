@@ -354,8 +354,17 @@ void main() {
       expect(WledEffectsCatalog.kColorsOnlyVerifiedEffects, {64, 42, 90, 89});
     });
 
-    test('absent pal is left absent (no synthesis)', () {
+    // +110 changed this contract on purpose (complete segment state, item 8):
+    // a COMPLETE design (fx + col) with no pal now gets paletteForEffect, so a
+    // channel can no longer inherit a stale palette. An effect-only tweak still
+    // gets none — it keeps the palette the customer already has.
+    test('absent pal on a complete design is filled from paletteForEffect', () {
       final s = seg0({'seg': [{'fx': 9, 'col': [[255, 0, 0, 0]]}]});
+      expect(s['pal'], WledEffectsCatalog.paletteForEffect(9));
+    });
+
+    test('absent pal on an effect-only change is left absent', () {
+      final s = seg0({'seg': [{'fx': 9}]});
       expect(s.containsKey('pal'), isFalse);
     });
 

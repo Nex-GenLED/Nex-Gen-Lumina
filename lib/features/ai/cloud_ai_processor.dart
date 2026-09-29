@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/ai/lumina_schedule_flags.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart'
@@ -171,6 +172,13 @@ class CloudAIProcessor {
     // path is wrapped into a one-element list inside normalizeSchedulingIntents.
     // Drop malformed entries defensively — never throw on a bad model response.
     final normalizedIntents = normalizeSchedulingIntents(obj);
+
+    // Multi-night schedule flags (`isSchedule`, `dayCount`, `schedule[]`, …)
+    // sit at the TOP LEVEL of the reply, beside `wled`. The payload merge
+    // below copies only `wled` plus a fixed set of display keys, so the flags
+    // never reached it — read them here and carry them on the typed result
+    // field instead (UX audit row 7).
+    final scheduleFlags = LuminaScheduleFlags.fromResponseJson(obj);
 
     // Extract WLED payload
     Map<String, dynamic>? wled;
@@ -347,6 +355,9 @@ class CloudAIProcessor {
       // (:193) is only populated when wled is a Map; this field is the
       // canonical carrier so intents survive a null/absent top-level wled.
       schedulingIntents: normalizedIntents,
+      // Same carry for the multi-night schedule flags — independent of the
+      // wled branch, so they survive a null/absent top-level wled too.
+      scheduleFlags: scheduleFlags,
     );
   }
 

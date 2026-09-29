@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'ephemeral_session_intent.dart';
+import 'lumina_schedule_flags.dart';
 import 'recurring_sports_autopilot_intent.dart';
 import 'scheduling_intent.dart';
 
@@ -135,6 +136,14 @@ class LuminaCommandResult {
   bool get hasSchedulingIntents =>
       schedulingIntents != null && schedulingIntents!.isNotEmpty;
 
+  /// Multi-night schedule flags (`isSchedule`, `dayCount`, `schedule[]`, …)
+  /// parsed from the TOP LEVEL of the reply by
+  /// [LuminaScheduleFlags.fromResponseJson]. Carried here, not inside
+  /// [wledPayload], because the payload only ever receives `wled` plus a fixed
+  /// set of display keys — the flags never survived that copy (UX audit
+  /// row 7). Null when the reply did not set `isSchedule: true`.
+  final LuminaScheduleFlags? scheduleFlags;
+
   const LuminaCommandResult({
     this.command,
     required this.responseText,
@@ -145,5 +154,6 @@ class LuminaCommandResult {
     this.ephemeralSession,
     this.recurringSportsAutopilot,
     this.schedulingIntents,
+    this.scheduleFlags,
   });
 }

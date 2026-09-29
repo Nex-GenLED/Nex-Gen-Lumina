@@ -372,6 +372,181 @@ final participatingChannelIdsProvider = Provider<List<int>?>((ref) {
   return peekCachedParticipatingChannels();
 });
 
+// ---------------------------------------------------------------------------
+// APPLY channel census — which channels exist, for the apply gate
+// ---------------------------------------------------------------------------
+
+/// Where [ApplyChannelCensus.ids] came from.
+enum ApplyChannelSource {
+  /// `/json/cfg hw.led.ins[]`, read directly. The home-network answer.
+  device,
+
+  /// The id list a home-network session published onto the controller's
+  /// account record ([cachedChannelIdsProvider]).
+  cached,
+
+  /// The controller's live segment list, fetched through the relay
+  /// ([segmentDerivedChannelsProvider]).
+  relay,
+
+  /// No source has an answer.
+  none,
+}
+
+/// The channel ids an apply may target, with where they came from.
+///
+/// IDS ONLY, on purpose. An apply states a look per channel id and never a
+/// bound (`applyChannelFilter` rule 2, pinned again at the wire), so a census
+/// that knows which channels exist but not where they start and stop is
+/// sufficient for it. That is what makes the away-from-home sources sound
+/// here when they are NOT sound for anything that provisions.
+class ApplyChannelCensus {
+  final List<int> ids;
+  final ApplyChannelSource source;
+
+  /// True while a source that could still answer is being read. An empty
+  /// [ids] with [pending] set means "not known yet", not "there are none".
+  final bool pending;
+
+  const ApplyChannelCensus(this.ids, this.source, {this.pending = false});
+
+  static const ApplyChannelCensus none =
+      ApplyChannelCensus(<int>[], ApplyChannelSource.none);
+
+  static const ApplyChannelCensus loading =
+      ApplyChannelCensus(<int>[], ApplyChannelSource.none, pending: true);
+}
+
+/// The channel census behind [effectiveChannelIdsProvider].
+///
+/// WHY THIS EXISTS. The gate used to read [deviceChannelsProvider] alone, and
+/// away from home that is always empty: the relay cannot read `/json/cfg`. So
+/// every favourite, pattern, design and Light Up Now stopped before sending,
+/// on a controller that was relaying power, brightness and colour perfectly.
+///
+/// PRECEDENCE:
+///   1. [ApplyChannelSource.device] — on the home network this is the only
+///      source consulted, and the early return is what keeps a healthy local
+///      session free of any extra account read or relay command.
+///   2. [ApplyChannelSource.cached] — away from home only. Bus-derived ids
+///      that a home-network session published for THIS controller.
+///   3. [ApplyChannelSource.relay] — away from home, and only once the cached
+///      list has come back empty: one relayed state read. Last, because
+///      segment layout can drift from the buses (a reboot can collapse two
+///      segments) and because every relay command has a real cost.
+///
+/// On the home network with the hardware read still in flight the census is
+/// empty and [ApplyChannelCensus.pending]; the cached list is deliberately not
+/// used to fill that gap, so a stale account record can never outvote the
+/// controller the phone is standing next to.
+final applyChannelCensusProvider = Provider<ApplyChannelCensus>((ref) {
+  final live = ref.watch(deviceChannelsProvider);
+  if (live.isNotEmpty) {
+    return ApplyChannelCensus(
+      [for (final c in live) c.id],
+      ApplyChannelSource.device,
+    );
+  }
+
+  if (!ref.watch(isRemoteModeProvider)) {
+    return ref.watch(deviceHardwareConfigProvider).isLoading
+        ? ApplyChannelCensus.loading
+        : ApplyChannelCensus.none;
+  }
+
+  final cached = ref.watch(cachedChannelIdsProvider);
+  final cachedIds = cached.valueOrNull ?? const <int>[];
+  if (cachedIds.isNotEmpty) {
+    return ApplyChannelCensus(
+      List<int>.unmodifiable(cachedIds),
+      ApplyChannelSource.cached,
+    );
+  }
+  if (cached.isLoading) return ApplyChannelCensus.loading;
+
+  final relayed = ref.watch(segmentDerivedChannelsProvider);
+  final relayedIds = [
+    for (final c in relayed.valueOrNull ?? const <DeviceChannel>[]) c.id,
+  ];
+  if (relayedIds.isNotEmpty) {
+    return ApplyChannelCensus(relayedIds, ApplyChannelSource.relay);
+  }
+  return relayed.isLoading ? ApplyChannelCensus.loading : ApplyChannelCensus.none;
+});
+
+/// The channel list to hand `applyChannelFilter` as its census: the hardware
+/// buses when they are known, else the [applyChannelCensusProvider] ids with
+/// no bounds at all.
+///
+/// Sound for the same reason [ApplyChannelCensus] is — `applyChannelFilter`
+/// reads ids from it and nothing else. NOT a bounds source: away from home
+/// every `start`/`stop` in it is zero.
+final applyFilterChannelsProvider = Provider<List<DeviceChannel>>((ref) {
+  final live = ref.watch(deviceChannelsProvider);
+  if (live.isNotEmpty) return live;
+  return deviceChannelsFromIds(ref.watch(applyChannelCensusProvider).ids);
+});
+
+/// How long [resolveEffectiveChannelIds] waits on each source.
+class ApplyGateTimeouts {
+  const ApplyGateTimeouts._();
+
+  /// The hardware read on the home network. Matches the notifier's existing
+  /// cold-start bound for colour and speed.
+  static const Duration hardware = Duration(seconds: 3);
+
+  /// The account read for the cached list.
+  static const Duration cached = Duration(seconds: 5);
+
+  /// One relayed state read. A relay round trip is typically 5–10 s.
+  static const Duration relay = Duration(seconds: 15);
+}
+
+/// [effectiveChannelIdsProvider], but willing to WAIT for a source that has
+/// not answered yet — so the first tap after launch, or the first tap away
+/// from home, is not refused just because a read was still in flight.
+///
+/// Returns immediately when the gate already has an answer, and whenever no
+/// source is pending. Never throws. An empty result means the gate is closed;
+/// ask `applyBlockedReason` why.
+Future<List<int>> resolveEffectiveChannelIds(
+  T Function<T>(ProviderListenable<T> provider) read, {
+  Duration hardwareTimeout = ApplyGateTimeouts.hardware,
+  Duration cachedTimeout = ApplyGateTimeouts.cached,
+  Duration relayTimeout = ApplyGateTimeouts.relay,
+}) async {
+  Future<void> settle<T>(Future<T> source, Duration limit) async {
+    try {
+      await source.timeout(limit);
+    } catch (_) {
+      // A source that fails or times out simply does not answer; the census
+      // reports that on the next read.
+    }
+  }
+
+  // Each source is waited on at most once: a source that timed out is still
+  // "pending" on the next read, and waiting on it again would only multiply
+  // the delay before the customer is told.
+  final waited = <ApplyChannelSource>{};
+  while (true) {
+    final ids = read(effectiveChannelIdsProvider);
+    if (ids.isNotEmpty) return ids;
+    if (!read(applyChannelCensusProvider).pending) return ids;
+
+    if (!read(isRemoteModeProvider)) {
+      if (!waited.add(ApplyChannelSource.device)) return ids;
+      await settle(read(deviceHardwareConfigProvider.future), hardwareTimeout);
+    } else if (read(cachedChannelIdsProvider).isLoading) {
+      if (!waited.add(ApplyChannelSource.cached)) return ids;
+      await settle(read(cachedChannelIdsProvider.future), cachedTimeout);
+    } else {
+      if (!waited.add(ApplyChannelSource.relay)) return ids;
+      await settle(
+          read(segmentDerivedChannelsProvider.future), relayTimeout);
+    }
+  }
+}
+
 /// Returns the effective list of channel (bus) IDs that should receive
 /// dashboard apply commands.
 ///
@@ -388,20 +563,26 @@ final participatingChannelIdsProvider = Provider<List<int>?>((ref) {
 /// Empty effective → callers MUST skip-apply (never broadcast an empty
 /// seg array). "All Zones" means all PARTICIPATING zones, not all
 /// physical channels.
+///
+/// "Device channel ids" is [applyChannelCensusProvider], which on the home
+/// network is exactly [deviceChannelsProvider] and away from home is the
+/// relay-capable census — see there. Callers that find this empty should ask
+/// `applyBlockedReason` (lib/shared/apply_blocked_reason.dart) what to tell
+/// the customer rather than returning silently.
 final effectiveChannelIdsProvider = Provider<List<int>>((ref) {
   final filter = ref.watch(selectedChannelIdsProvider);
-  final channels = ref.watch(deviceChannelsProvider);
+  final channelIds = ref.watch(applyChannelCensusProvider).ids;
   final participating = ref.watch(participatingChannelIdsProvider);
 
-  if (channels.isEmpty) return const <int>[];
+  if (channelIds.isEmpty) return const <int>[];
 
   // Start with the selector-narrowed set, or all device channels if no
   // selector active.
   Iterable<int> baseIds;
   if (filter == null) {
-    baseIds = channels.map((c) => c.id);
+    baseIds = channelIds;
   } else {
-    baseIds = channels.where((c) => filter.contains(c.id)).map((c) => c.id);
+    baseIds = channelIds.where(filter.contains);
   }
 
   // Apply participation gate. null = no preference, so don't narrow.

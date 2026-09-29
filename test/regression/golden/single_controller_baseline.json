@@ -1,0 +1,1310 @@
+{
+  "target": {
+    "selectedControllerId": "controller-one",
+    "type": "WledService",
+    "baseUrl": "http://192.0.2.10",
+    "expectedControllerId": "controller-one",
+    "recordsRouting": true
+  },
+  "writes": [
+    {
+      "scenario": "apply: raw pattern",
+      "call": "applyJson",
+      "boundary": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "id": 0,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ]
+            ],
+            "on": true
+          },
+          {
+            "id": 1,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ]
+            ],
+            "on": true
+          }
+        ]
+      },
+      "wire": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "id": 0,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "apply: as-sent multi-segment",
+      "call": "applyJson",
+      "boundary": {
+        "on": true,
+        "bri": 180,
+        "seg": [
+          {
+            "id": 0,
+            "on": true,
+            "fx": 12,
+            "sx": 90,
+            "ix": 128,
+            "pal": 0,
+            "grp": 1,
+            "spc": 0,
+            "col": [
+              [
+                0,
+                200,
+                80,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          {
+            "id": 1,
+            "on": true,
+            "fx": 0,
+            "sx": 128,
+            "ix": 128,
+            "pal": 0,
+            "grp": 2,
+            "spc": 1,
+            "col": [
+              [
+                255,
+                255,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "wire": {
+        "on": true,
+        "bri": 180,
+        "seg": [
+          {
+            "id": 0,
+            "on": true,
+            "fx": 12,
+            "sx": 90,
+            "ix": 128,
+            "pal": 0,
+            "grp": 1,
+            "spc": 0,
+            "col": [
+              [
+                0,
+                200,
+                80,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "frz": false
+          },
+          {
+            "id": 1,
+            "on": true,
+            "fx": 0,
+            "sx": 128,
+            "ix": 128,
+            "pal": 0,
+            "grp": 2,
+            "spc": 1,
+            "col": [
+              [
+                255,
+                255,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "apply: with label, no filter",
+      "call": "applyJson",
+      "boundary": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "wire": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "apply: one channel selected",
+      "call": "applyJson",
+      "boundary": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "id": 0,
+            "on": false
+          },
+          {
+            "id": 1,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ]
+            ],
+            "on": true
+          }
+        ]
+      },
+      "wire": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "id": 0,
+            "on": false,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "controls",
+      "call": "applyJson",
+      "boundary": {
+        "on": false
+      },
+      "wire": {
+        "on": false
+      }
+    },
+    {
+      "scenario": "controls",
+      "call": "applyJson",
+      "boundary": {
+        "on": true
+      },
+      "wire": {
+        "on": true
+      }
+    },
+    {
+      "scenario": "controls",
+      "call": "applyJson",
+      "boundary": {
+        "on": true,
+        "bri": 128
+      },
+      "wire": {
+        "on": true,
+        "bri": 128
+      }
+    },
+    {
+      "scenario": "controls",
+      "call": "applyJson",
+      "boundary": {
+        "seg": [
+          {
+            "id": 0,
+            "sx": 200,
+            "on": true,
+            "start": 0,
+            "stop": 100
+          },
+          {
+            "id": 1,
+            "sx": 200,
+            "on": true,
+            "start": 100,
+            "stop": 200
+          }
+        ]
+      },
+      "wire": {
+        "seg": [
+          {
+            "id": 0,
+            "sx": 200,
+            "on": true,
+            "start": 0,
+            "stop": 100,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "sx": 200,
+            "on": true,
+            "start": 100,
+            "stop": 200,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "controls",
+      "call": "applyJson",
+      "boundary": {
+        "seg": [
+          {
+            "id": 0,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 0,
+            "stop": 100
+          },
+          {
+            "id": 1,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 100,
+            "stop": 200
+          }
+        ]
+      },
+      "wire": {
+        "seg": [
+          {
+            "id": 0,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 0,
+            "stop": 100,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 100,
+            "stop": 200,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "controls",
+      "call": "applyJson",
+      "boundary": {
+        "seg": [
+          {
+            "id": 0,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 0,
+            "stop": 100
+          },
+          {
+            "id": 1,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 100,
+            "stop": 200
+          }
+        ]
+      },
+      "wire": {
+        "seg": [
+          {
+            "id": 0,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 0,
+            "stop": 100,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "start": 100,
+            "stop": 200,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "controls",
+      "call": "applyJson",
+      "boundary": {
+        "seg": [
+          {
+            "id": 1,
+            "on": false
+          }
+        ]
+      },
+      "wire": {
+        "seg": [
+          {
+            "id": 1,
+            "on": false,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "favourite",
+      "call": "applyJson",
+      "boundary": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "id": 0,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ]
+            ],
+            "on": true
+          },
+          {
+            "id": 1,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ]
+            ],
+            "on": true
+          }
+        ]
+      },
+      "wire": {
+        "on": true,
+        "bri": 200,
+        "seg": [
+          {
+            "id": 0,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "fx": 28,
+            "sx": 160,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "on": true,
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "savePreset",
+      "boundary": {
+        "presetId": 1,
+        "presetName": "NGL On",
+        "state": {
+          "on": true,
+          "bri": 200,
+          "ib": true,
+          "seg": [
+            {
+              "id": 0,
+              "on": true
+            },
+            {
+              "id": 1,
+              "on": true
+            }
+          ]
+        }
+      },
+      "wire": {
+        "on": true,
+        "bri": 200,
+        "ib": true,
+        "seg": [
+          {
+            "id": 0,
+            "on": true,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "on": true,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "savePreset",
+      "boundary": {
+        "presetId": 2,
+        "presetName": "NGL Off",
+        "state": {
+          "on": false,
+          "ib": true,
+          "seg": [
+            {
+              "id": 0,
+              "on": false
+            },
+            {
+              "id": 1,
+              "on": false
+            }
+          ]
+        }
+      },
+      "wire": {
+        "on": false,
+        "ib": true,
+        "seg": [
+          {
+            "id": 0,
+            "on": false,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "on": false,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "savePreset",
+      "boundary": {
+        "presetId": 3,
+        "presetName": "NGL Dim",
+        "state": {
+          "on": true,
+          "bri": 51,
+          "ib": true,
+          "seg": [
+            {
+              "id": 0,
+              "on": true
+            },
+            {
+              "id": 1,
+              "on": true
+            }
+          ]
+        }
+      },
+      "wire": {
+        "on": true,
+        "bri": 51,
+        "ib": true,
+        "seg": [
+          {
+            "id": 0,
+            "on": true,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "on": true,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "savePreset",
+      "boundary": {
+        "presetId": 4,
+        "presetName": "NGL Low",
+        "state": {
+          "on": true,
+          "bri": 102,
+          "ib": true,
+          "seg": [
+            {
+              "id": 0,
+              "on": true
+            },
+            {
+              "id": 1,
+              "on": true
+            }
+          ]
+        }
+      },
+      "wire": {
+        "on": true,
+        "bri": 102,
+        "ib": true,
+        "seg": [
+          {
+            "id": 0,
+            "on": true,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "on": true,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "savePreset",
+      "boundary": {
+        "presetId": 5,
+        "presetName": "NGL Medium",
+        "state": {
+          "on": true,
+          "bri": 153,
+          "ib": true,
+          "seg": [
+            {
+              "id": 0,
+              "on": true
+            },
+            {
+              "id": 1,
+              "on": true
+            }
+          ]
+        }
+      },
+      "wire": {
+        "on": true,
+        "bri": 153,
+        "ib": true,
+        "seg": [
+          {
+            "id": 0,
+            "on": true,
+            "frz": false
+          },
+          {
+            "id": 1,
+            "on": true,
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "savePreset",
+      "boundary": {
+        "presetId": 10,
+        "presetName": "Pattern: Evening",
+        "state": {
+          "on": true,
+          "bri": 160,
+          "seg": [
+            {
+              "fx": 28,
+              "sx": 140,
+              "ix": 128,
+              "pal": 5,
+              "col": [
+                [
+                  255,
+                  120,
+                  0,
+                  0
+                ],
+                [
+                  255,
+                  255,
+                  255,
+                  0
+                ]
+              ]
+            }
+          ],
+          "ib": true
+        }
+      },
+      "wire": {
+        "on": true,
+        "bri": 160,
+        "seg": [
+          {
+            "fx": 28,
+            "sx": 140,
+            "ix": 128,
+            "pal": 5,
+            "col": [
+              [
+                255,
+                120,
+                0,
+                0
+              ],
+              [
+                255,
+                255,
+                255,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "grp": 1,
+            "spc": 0,
+            "frz": false
+          }
+        ],
+        "ib": true
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "applyJson",
+      "boundary": {
+        "transition": 0,
+        "on": true,
+        "bri": 128,
+        "seg": [
+          {
+            "id": 0,
+            "start": 0,
+            "stop": 100,
+            "on": true,
+            "fx": 0,
+            "sx": 128,
+            "ix": 128,
+            "pal": 0,
+            "grp": 1,
+            "spc": 0,
+            "col": [
+              [
+                255,
+                160,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ]
+          },
+          {
+            "id": 1,
+            "start": 100,
+            "stop": 200,
+            "on": true,
+            "fx": 0,
+            "sx": 128,
+            "ix": 128,
+            "pal": 0,
+            "grp": 1,
+            "spc": 0,
+            "col": [
+              [
+                255,
+                160,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "wire": {
+        "transition": 0,
+        "on": true,
+        "bri": 128,
+        "seg": [
+          {
+            "id": 0,
+            "start": 0,
+            "stop": 100,
+            "on": true,
+            "fx": 0,
+            "sx": 128,
+            "ix": 128,
+            "pal": 0,
+            "grp": 1,
+            "spc": 0,
+            "col": [
+              [
+                255,
+                160,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "frz": false
+          },
+          {
+            "id": 1,
+            "start": 100,
+            "stop": 200,
+            "on": true,
+            "fx": 0,
+            "sx": 128,
+            "ix": 128,
+            "pal": 0,
+            "grp": 1,
+            "spc": 0,
+            "col": [
+              [
+                255,
+                160,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                0,
+                0
+              ]
+            ],
+            "frz": false
+          }
+        ]
+      }
+    },
+    {
+      "scenario": "schedule sync",
+      "call": "applyConfig",
+      "boundary": {
+        "timers": {
+          "ins": [
+            {
+              "en": 1,
+              "hour": 19,
+              "min": 0,
+              "macro": 10,
+              "dow": 21
+            },
+            {
+              "en": 1,
+              "hour": 23,
+              "min": 0,
+              "macro": 2,
+              "dow": 21
+            },
+            {
+              "en": 1,
+              "hour": 18,
+              "min": 30,
+              "macro": 1,
+              "dow": 96
+            },
+            {
+              "en": 0,
+              "hour": 0,
+              "min": 0,
+              "macro": 0,
+              "dow": 0
+            },
+            {
+              "en": 0,
+              "hour": 0,
+              "min": 0,
+              "macro": 0,
+              "dow": 0
+            },
+            {
+              "en": 0,
+              "hour": 0,
+              "min": 0,
+              "macro": 0,
+              "dow": 0
+            },
+            {
+              "en": 0,
+              "hour": 0,
+              "min": 0,
+              "macro": 0,
+              "dow": 0
+            },
+            {
+              "en": 0,
+              "hour": 0,
+              "min": 0,
+              "macro": 0,
+              "dow": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

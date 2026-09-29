@@ -484,6 +484,13 @@ class WledService
   @visibleForTesting
   Map<String, dynamic>? lastSimulatedSetStatePayload;
 
+  /// Every `/json/state` body that reached the wire exit in simulation mode,
+  /// in order, exactly as it would have been posted — after normalization,
+  /// participation expansion and the geometry pin. Lets a test drive the REAL
+  /// apply path and assert what a controller would have received.
+  @visibleForTesting
+  final List<Map<String, dynamic>> simulatedStatePosts = [];
+
   /// Per-pixel (`i`) chunk payloads captured in simulation mode, in the order
   /// [applyPerPixel] posted them. Tests assert chunk count, ordering, segment
   /// targeting (no channel fan-out), and canonical nested-`i` shape without an
@@ -853,6 +860,12 @@ class WledService
       data = pinNoGeometryOnWire(data, caller: 'local', onViolation: debugPrint);
     }
     if (_simulate) {
+      try {
+        simulatedStatePosts
+            .add(jsonDecode(jsonEncode(data)) as Map<String, dynamic>);
+      } catch (e) {
+        debugPrint('WledService simulation: payload not recordable — $e');
+      }
       // Best-effort: update local state from payload and pretend success.
       try {
         final on = data['on'];

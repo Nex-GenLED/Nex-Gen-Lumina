@@ -296,8 +296,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('preview-on-lights')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
+    // The preview states no brightness (UX audit row 22 — it used to force
+    // 255); the restore write is the one that carries the captured level.
     final previewWrites =
-        repo.applyJsonCalls.where((c) => c['bri'] == 255).toList();
+        repo.applyJsonCalls.where((c) => !c.containsKey('bri')).toList();
     expect(previewWrites, isNotEmpty,
         reason: '"Preview on lights" must apply the current look');
 

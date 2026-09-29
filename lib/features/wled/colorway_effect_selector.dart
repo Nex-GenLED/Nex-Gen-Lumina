@@ -110,6 +110,57 @@ class LibraryDesignSelection {
   String get baseName => paletteName ?? name;
 }
 
+/// Which of its four jobs the tuner is doing. See [resolveSelectorMode].
+enum SelectorMode {
+  /// Browsing Explore. Adjustments preview on the lights; the commit button
+  /// applies. Nothing is persisted.
+  catalog,
+
+  /// Choosing a design FOR somewhere (a schedule, Game Day, Favorites). The
+  /// lights are untouched until "Preview on lights"; the commit hands the
+  /// design back; both exits restore whatever the house was showing.
+  selection,
+
+  /// Picking a celebration: always-live preview, the choice is handed back.
+  celebration,
+
+  /// Editing a stored design; the commit updates it.
+  designEdit,
+}
+
+/// THE rule for the tuner's mode.
+///
+/// A caller that names a destination — a [saveDestinationLabel], or an
+/// [onDesignSelected] to hand the design to — gets SELECTION mode by default,
+/// even with no callback: the design is then returned as the route's result
+/// (`Navigator.pop(selection)`). Choosing a design for somewhere must never
+/// apply it to the house now. Only a caller that names no destination at all
+/// gets catalog mode.
+///
+/// So for a package opening the tuner to choose a design, the change is:
+///
+/// ```dart
+/// final selection = await Navigator.of(context).push<LibraryDesignSelection>(
+///   MaterialPageRoute(builder: (_) => ColorwayEffectSelectorPage(
+///     paletteNode: node,
+///     saveDestinationLabel: 'schedule',
+///   )),
+/// );
+/// ```
+SelectorMode resolveSelectorMode({
+  required bool hasDesignCallback,
+  required String? saveDestinationLabel,
+  required bool isDesignEdit,
+  required bool celebrationMode,
+}) {
+  if (isDesignEdit) return SelectorMode.designEdit;
+  if (celebrationMode) return SelectorMode.celebration;
+  if (hasDesignCallback || saveDestinationLabel != null) {
+    return SelectorMode.selection;
+  }
+  return SelectorMode.catalog;
+}
+
 /// Effect selector page that replaces the pattern grid.
 /// Shows a large live preview with filter chips and curated effect grid.
 class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
@@ -144,6 +195,18 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   final CustomDesign? editingDesign;
 
   bool get isDesignEdit => editingDesign != null;
+
+  /// See [resolveSelectorMode].
+  SelectorMode get mode => resolveSelectorMode(
+        hasDesignCallback: onDesignSelected != null,
+        saveDestinationLabel: saveDestinationLabel,
+        isDesignEdit: isDesignEdit,
+        celebrationMode: celebrationMode,
+      );
+
+  /// True when a commit hands the design back rather than applying it.
+  bool get handsBack =>
+      mode == SelectorMode.selection || mode == SelectorMode.celebration;
 
   /// CELEBRATION MODE. When true the effect list is replaced by
   /// [WledEffectsCatalog.celebrationPicks] — the attention-grabbing subset —
@@ -226,8 +289,7 @@ class _ColorwayEffectSelectorPageState
 
   /// SAVE mode that is not the celebration picker (celebration keeps its
   /// always-live preview and its own "Set celebration" commit).
-  bool get _isSaveMode =>
-      widget.onDesignSelected != null && !widget.celebrationMode;
+  bool get _isSaveMode => widget.mode == SelectorMode.selection;
 
   /// SELECTION and DESIGN-EDIT modes. The pre-preview device look, snapshotted
   /// on entry (see [initState]) so the CANCEL exit can RESTORE it. The live
@@ -311,7 +373,7 @@ class _ColorwayEffectSelectorPageState
     // from the polled wledStateProvider so it reflects the device state the
     // user is leaving — held in a local field, NOT re-read later (the poll
     // would pick up our own preview writes and pollute it).
-    if (widget.onDesignSelected != null || widget.isDesignEdit) {
+    if (widget.handsBack || widget.isDesignEdit) {
       _capturedLook = ref.read(wledStateProvider);
       _refreshRestoreCache();
     }
@@ -381,7 +443,7 @@ class _ColorwayEffectSelectorPageState
         grouping: ref.read(selectorColorGroupProvider),
         spacing: ref.read(selectorSpacingProvider),
         colors: _paletteColsRgbw(),
-        brightness: widget.editingDesign?.brightness ?? 255,
+        brightness: widget.editingDesign?.brightness,
       );
 
   /// Write a [SelectorState] and the Solid [layout] into the ten providers.
@@ -800,7 +862,11 @@ class _ColorwayEffectSelectorPageState
   /// Everything a commit needs, from the SAME builder the live preview uses
   /// ([_sendToWled]), so what was previewed is what gets applied, saved or
   /// handed back — and so a Save never needs a device to build its payload.
-  _Commit _buildCommit() {
+  ///
+  /// [brightness] is stated only for a design handed to a destination (see
+  /// [kHandedBackDesignBrightness]); a commit to the lights leaves the house
+  /// at its own level.
+  _Commit _buildCommit({int? brightness}) {
     final colorGroup = ref.read(selectorColorGroupProvider);
     final spacing = ref.read(selectorSpacingProvider);
     final intensity = ref.read(selectorIntensityProvider);
@@ -847,6 +913,7 @@ class _ColorwayEffectSelectorPageState
       grouping: solid?.grp ?? colorGroup,
       spacing: spacing,
       colors: cols,
+      brightness: brightness,
       paletteOverride: solid?.pal ??
           rainbowPaletteOverride(
               effectId: fxId, rainbowScope: _isRainbowPalette),
@@ -868,7 +935,9 @@ class _ColorwayEffectSelectorPageState
   /// write of its own); APPLY mode writes it to the lights and persists
   /// nothing.
   Future<void> _applyPattern() async {
-    final commit = _buildCommit();
+    final commit = _buildCommit(
+      brightness: widget.handsBack ? kHandedBackDesignBrightness : null,
+    );
     final fxId = commit.fxId;
     final speed = commit.speed;
     final intensity = commit.intensity;
@@ -885,7 +954,7 @@ class _ColorwayEffectSelectorPageState
     // and — only if "Preview on lights" was used — RESTORE the pre-preview
     // look, because choosing a design for later must not leave it applied
     // now. Nothing is applied and nothing is persisted here.
-    if (widget.onDesignSelected != null) {
+    if (widget.handsBack) {
       final selection = LibraryDesignSelection(
         id: widget.paletteNode.id,
         name: '${widget.paletteNode.name} - $effectName',
@@ -899,7 +968,13 @@ class _ColorwayEffectSelectorPageState
       // back the design regardless.
       await _restoreCapturedLook();
       if (!mounted) return;
-      widget.onDesignSelected!(selection);
+      final handBack = widget.onDesignSelected;
+      if (handBack != null) {
+        handBack(selection);
+      } else {
+        // A destination with no callback: the route's result is the design.
+        Navigator.of(context).pop(selection);
+      }
       return;
     }
 
@@ -1096,7 +1171,8 @@ class _ColorwayEffectSelectorPageState
   /// APPLY mode's secondary: persist the current design somewhere without
   /// touching the lights.
   Future<void> _showSaveSheet() async {
-    final commit = _buildCommit();
+    // Persisted somewhere, not applied: states the level destinations store.
+    final commit = _buildCommit(brightness: kHandedBackDesignBrightness);
     final selection = LibraryDesignSelection(
       id: widget.paletteNode.id,
       name: '${widget.paletteNode.name} - ${commit.effectName}',
