@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show listEquals, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
@@ -8,6 +9,40 @@ import 'package:nexgen_command/features/neighborhood/services/sync_event_backgro
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
+import 'package:nexgen_command/shared/write_result.dart';
+
+/// Row 23 — "All Channels On": an explicit ON for every channel the bar
+/// shows, and nothing else.
+///
+/// It used to be an empty design template through the apply path, i.e.
+/// `applyChannelFilter` — so a channel marked "leave it out" of shows got an
+/// explicit OFF from the one button that says every channel goes on, while
+/// the include-back sheet promised "Its power switch still works". Power is
+/// not a show: no participation, no exclusion pass, no look fields.
+@visibleForTesting
+Map<String, dynamic> buildAllChannelsOnPayload(Iterable<int> channelIds) {
+  final ids = channelIds.toSet().toList()..sort();
+  return <String, dynamic>{
+    'on': true,
+    'seg': [
+      for (final id in ids) <String, dynamic>{'id': id, 'on': true},
+    ],
+  };
+}
+
+/// Row 82 — true when a poll shows something that can change which channels
+/// are lit: master power, the effect, the colours or the preset. The chips'
+/// power icons are re-read then, instead of only after their own tap.
+@visibleForTesting
+bool channelPowerMayHaveChanged(WledStateModel? prev, WledStateModel next) {
+  if (prev == null) return false;
+  return prev.isOn != next.isOn ||
+      prev.effectId != next.effectId ||
+      prev.presetId != next.presetId ||
+      !listEquals(prev.colorSequence, next.colorSequence);
+}
 
 /// A compact, expandable bar that lets the user choose which WLED channels
 /// (hardware buses) should receive aesthetic commands (patterns, colors, effects).
@@ -71,6 +106,22 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     }
 
     final hasZoneNames = zoneLabels.isNotEmpty;
+
+    // Row 82: master power, favourites, "All Channels On" and schedules all
+    // change channel power; the icons were read once and refreshed only
+    // after a chip's own tap. Re-read them when the regular poll shows a
+    // change — only while the chips are on screen, so a closed bar costs
+    // nothing, and only riding a poller that is already running (this bar
+    // must never be the thing that starts one).
+    if (_expanded &&
+        ProviderScope.containerOf(context, listen: false)
+            .exists(wledStateProvider)) {
+      ref.listen<WledStateModel>(wledStateProvider, (prev, next) {
+        if (channelPowerMayHaveChanged(prev, next)) {
+          ref.invalidate(channelPowerStatesProvider);
+        }
+      });
+    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
@@ -137,7 +188,11 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
     }
 
     return InkWell(
-      onTap: () => setState(() => _expanded = !_expanded),
+      onTap: () {
+        setState(() => _expanded = !_expanded);
+        // Opening the chips shows the lights as they are NOW (row 82).
+        if (_expanded) ref.invalidate(channelPowerStatesProvider);
+      },
       borderRadius: BorderRadius.circular(14),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -367,20 +422,29 @@ class _ChannelSelectorBarState extends ConsumerState<ChannelSelectorBar> {
 
   /// Recover from a partial-on channel state: clear the selector filter so
   /// every channel is selected again (subsequent colour/effect changes hit
-  /// all channels), then power every channel on through the EXISTING apply
-  /// path. The empty seg template carries no fx/col, so applyChannelFilter
-  /// just adds `{id, on:true}` per channel — lighting each one without
-  /// altering its current colour. Honors participation (applyToDevice targets
-  /// effectiveChannelIds), matching the rest of the dashboard.
+  /// all channels), then switch every channel the bar shows ON — explicitly,
+  /// one `{id, on:true}` each, with no exclusion pass (row 23, see
+  /// [buildAllChannelsOnPayload]). The result is reported instead of ignored,
+  /// and the chips re-read the device.
   Future<void> _turnAllOn() async {
+    final container = ProviderScope.containerOf(context, listen: false);
     ref.read(selectedChannelIdsProvider.notifier).state = null;
-    await ref.read(wledStateProvider.notifier).applyToDevice(
-      {
-        'on': true,
-        'seg': [<String, dynamic>{}],
-      },
-      labelHint: null,
+    final ids = [
+      for (final c in ref.read(displayChannelsProvider).channels) c.id,
+    ];
+    final notifier = container.read(wledStateProvider.notifier);
+    final repo = container.read(wledRepositoryProvider);
+    final Future<WriteResult> write = repo == null || ids.isEmpty
+        ? Future.value(WriteResult.blocked(
+            applyBlockedReason(container.read) ?? kApplyBlockedFallback))
+        : repo
+            .applyJson(buildAllChannelsOnPayload(ids))
+            .then(WriteResult.fromBool);
+    final result = await notifier.runAndReport(
+      write,
+      onFailure: "Couldn't turn every channel on — check your connection",
     );
+    if (result.ok) container.invalidate(channelPowerStatesProvider);
   }
 
   /// Footer shown while an explicit participation set is in force.

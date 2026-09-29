@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/design/editable_pattern_design.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
 import 'package:nexgen_command/features/favorites/favorite_apply.dart';
+import 'package:nexgen_command/features/favorites/favorite_brightness.dart';
 import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
@@ -122,9 +123,11 @@ void main() {
     expect(outcome.perPixel, isTrue);
     expect(repo.refused, isEmpty, reason: 'nothing was sent as one message');
 
-    // The base write: solid black on both channels, carrying the brightness.
+    // The base write: solid black on both channels. +110 E1 item B: NO
+    // brightness — a favourite applies at the house's own level unless the
+    // customer saved one on purpose (next test).
     expect(repo.json, hasLength(1));
-    expect(repo.json.single['bri'], 180);
+    expect(repo.json.single.containsKey('bri'), isFalse);
     expect(repo.json.single.containsKey(kFavoriteDesignKey), isFalse,
         reason: 'the design never reaches the wire');
 
@@ -142,8 +145,20 @@ void main() {
     }
   });
 
-  test('…and it is byte-for-byte what My Designs sends for the same pattern',
+  test('item B: a per-pixel favourite whose level the customer SET restores it',
       () async {
+    final repo = _Repo();
+    final c = _container(repo);
+    addTearDown(c.dispose);
+
+    await applyFavoritePayloadWith(
+        c.read, markFavoriteBrightnessStated(_staticFavorite()));
+
+    expect(repo.json.single['bri'], 180);
+  });
+
+  test('…and it is byte-for-byte what My Designs sends for the same pattern '
+      "(a stated level, like the design's)", () async {
     final design = customDesignFromEditablePattern(
       pattern: _chiefs(0),
       name: 'Kansas City Chiefs',
@@ -156,7 +171,8 @@ void main() {
     addTearDown(b.dispose);
 
     await applyPositionalDesignWith(a.read, design);
-    await applyFavoritePayloadWith(b.read, _staticFavorite());
+    await applyFavoritePayloadWith(
+        b.read, markFavoriteBrightnessStated(_staticFavorite()));
 
     expect(jsonEncode(viaFavorites.json), jsonEncode(viaDesigns.json));
     expect('${viaFavorites.pixels}', '${viaDesigns.pixels}');

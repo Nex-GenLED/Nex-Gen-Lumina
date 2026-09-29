@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:ui';
 import 'package:go_router/go_router.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -51,6 +49,14 @@ import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide
 import 'package:nexgen_command/features/dashboard/widgets/feature_button.dart';
 import 'package:nexgen_command/features/game_day/game_day_entry_button.dart';
 import 'package:nexgen_command/shared/controller_targeting.dart';
+import 'package:nexgen_command/shared/explicit_selection.dart';
+import 'package:nexgen_command/shared/write_result.dart';
+import 'package:nexgen_command/models/usage_analytics_models.dart'
+    show FavoritePattern, SmartSuggestion, SuggestionType;
+import 'package:nexgen_command/features/autopilot/learning_providers.dart'
+    show suggestionsNotifierProvider;
+import 'package:nexgen_command/features/wled/pattern_models.dart'
+    show GradientPattern;
 
 /// Extract colors and effect parameters from a WLED JSON payload so the
 /// local preview can be updated immediately without waiting for the next poll.
@@ -101,6 +107,30 @@ import 'package:nexgen_command/shared/controller_targeting.dart';
   );
 }
 
+/// +110 E1, owner item E — Smart Presets on Home, OFF until the owner turns
+/// them on. Build with `--dart-define=LUMINA_SMART_PRESETS=true` to show them.
+///
+/// (Behind the flag because they inherit audit rows 40 and 42 — they switch
+/// unselected channels off, and every failure reads "Couldn't reach your
+/// lights" — foundation walk B5; the fix belongs to lib/features/design.)
+const bool kSmartPresetsOnHome = bool.fromEnvironment('LUMINA_SMART_PRESETS');
+
+/// Overridable in tests; reads [kSmartPresetsOnHome].
+final smartPresetsOnHomeProvider = Provider<bool>((_) => kSmartPresetsOnHome);
+
+/// Row 79 — the account has no controller registered. Reads the SHARED
+/// controller stream (the account being viewed, installer impersonation
+/// included) rather than a one-off query of the signed-in account.
+@visibleForTesting
+bool showNoControllerBanner({
+  required AsyncValue<List<ControllerInfo>> controllers,
+  required bool isReviewer,
+}) =>
+    !isReviewer && controllers.hasValue && controllers.value!.isEmpty;
+
+/// Row 83 — what the Now Playing bar says when the lights cannot be reached.
+const String kNowPlayingUnreachable = "Can't reach your lights";
+
 /// Main dashboard page for WLED control
 class WledDashboardPage extends ConsumerStatefulWidget {
   const WledDashboardPage({super.key});
@@ -110,11 +140,8 @@ class WledDashboardPage extends ConsumerStatefulWidget {
 }
 
 class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
-  bool _checkedFirstRun = false;
-  bool _pushedSetup = false;
-  // Set to true when the user has no controllers registered. Drives the
-  // top-of-screen MaterialBanner instead of the previous force-redirect.
-  bool _showControllerBanner = false;
+  // Row 79: the "no controller" banner is derived from the shared controller
+  // stream in build (showNoControllerBanner); only its dismissal is state.
   bool _bannerDismissed = false;
   ImageProvider? _heroImageProvider;
   String? _heroImageId;
@@ -162,8 +189,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       const Duration(minutes: 1),
       (_) => setState(() {}),
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkControllersAndMaybeLaunchWizard());
-
     // Stale participation-cache reconciliation. See
     // docs/audits/CHANNEL_MAPPING_AUDIT_2026-05.md + Addendum 1. The
     // helper self-gates: returns early until BOTH deviceChannels and
@@ -210,40 +235,6 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     // The WledNotifier._postUpdate also handles this, but this catches
     // dashboard-specific actions that may not route through _postUpdate.
     return SyncWarningDialog.checkAndProceed(context, ref);
-  }
-
-  Future<void> _checkControllersAndMaybeLaunchWizard() async {
-    if (_checkedFirstRun || _pushedSetup) return;
-    _checkedFirstRun = true;
-    try {
-      final current = GoRouter.of(context).routerDelegate.currentConfiguration.uri.toString();
-      if (!current.startsWith(AppRoutes.dashboard)) return;
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      // Reviewer account uses DemoWledRepository (see wled_providers.dart);
-      // its users/{uid}/controllers subcollection is intentionally empty
-      // and must NOT trigger the first-run wifi-connect flow.
-      if (ReviewerSeedService.isReviewer(user)) return;
-
-      final col = FirebaseFirestore.instance.collection('users').doc(user.uid).collection('controllers');
-      final snap = await col.limit(1).get();
-      if (snap.docs.isEmpty && mounted && !_bannerDismissed) {
-        // Non-blocking banner — replaces the previous force-navigate to
-        // /wifi-connect, which trapped users on a setup screen even when
-        // their controllers were temporarily unreachable for other reasons.
-        setState(() => _showControllerBanner = true);
-      } else if (snap.docs.isNotEmpty && mounted && _showControllerBanner) {
-        setState(() => _showControllerBanner = false);
-      }
-    } catch (e) {
-      debugPrint('First-run controller check failed: $e');
-    }
-  }
-
-  Future<void> _retryControllerCheck() async {
-    _checkedFirstRun = false;
-    await _checkControllersAndMaybeLaunchWizard();
   }
 
   /// #80 — the assignment is where the defence lives.
@@ -432,28 +423,30 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(0, isViewingAsCustomer ? 56 : 0, 0, navBarTotalHeight(context)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            if (_showControllerBanner)
+            // Row 79: this said "We can't find your lights — check your WiFi
+            // connection" whenever the account had NO controller registered,
+            // without checking any network, and queried the signed-in
+            // account rather than the one being viewed. It now says what the
+            // condition is and follows the shared controller stream.
+            if (!_bannerDismissed &&
+                showNoControllerBanner(
+                  controllers: ref.watch(controllersStreamProvider),
+                  isReviewer: ReviewerSeedService.isReviewer(
+                      ref.watch(authStateProvider).valueOrNull),
+                ))
               MaterialBanner(
-                backgroundColor: Colors.orange.shade900,
+                key: const ValueKey('no-controller-banner'),
+                backgroundColor: NexGenPalette.gunmetal90,
                 content: const Text(
-                  "We can't find your lights — check your WiFi connection",
+                  'No controller is set up yet. Set one up to control your '
+                  'lights.',
                   style: TextStyle(color: Colors.white),
                 ),
-                leading: const Icon(Icons.wifi_off, color: Colors.white),
+                leading: const Icon(Icons.router_outlined, color: Colors.white),
                 actions: [
                   TextButton(
-                    onPressed: _retryControllerCheck,
-                    child: const Text(
-                      'Retry',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                  TextButton(
                     onPressed: () {
-                      setState(() {
-                        _bannerDismissed = true;
-                        _showControllerBanner = false;
-                      });
+                      setState(() => _bannerDismissed = true);
                       context.push(AppRoutes.wifiConnect);
                     },
                     child: const Text(
@@ -464,10 +457,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white),
                     tooltip: 'Dismiss',
-                    onPressed: () => setState(() {
-                      _bannerDismissed = true;
-                      _showControllerBanner = false;
-                    }),
+                    onPressed: () => setState(() => _bannerDismissed = true),
                   ),
                 ],
               ),
@@ -475,15 +465,18 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             _buildAdjustmentPanel(context, ref, state),
             const SizedBox(height: 12),
             // Design Studio + Neighborhood Sync — side by side
+            // IntrinsicHeight + stretch: when one label wraps, both tiles in
+            // the row grow together.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
+              child: IntrinsicHeight(child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   FeatureButton(icon: Icons.brush_outlined, label: 'Design Studio', onTap: () => context.push(AppRoutes.designStudio)),
                   const SizedBox(width: 12),
                   FeatureButton(icon: Icons.groups_rounded, label: 'Neighborhood Sync', onTap: () => context.push(AppRoutes.neighborhoodSync)),
                 ],
-              ),
+              )),
             ),
             const SizedBox(height: 10),
             // Game Day + Audio Mode (or My Designs fallback when controller
@@ -497,7 +490,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             // links on to the Game Day hub. See GameDayEntryButton.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
+              child: IntrinsicHeight(child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const GameDayEntryButton(),
                   const SizedBox(width: 12),
@@ -526,14 +520,16 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                               extra: const {'name': 'My Designs'}),
                     ),
                 ],
-              ),
+              )),
             ),
             const SizedBox(height: 16),
             _buildSmartSuggestions(context, ref),
             const SizedBox(height: 16),
             _buildFavoritesSection(context, ref),
-            const SizedBox(height: 16),
-            const SmartPresetsSection(),
+            if (ref.watch(smartPresetsOnHomeProvider)) ...[
+              const SizedBox(height: 16),
+              const SmartPresetsSection(),
+            ],
             const SizedBox(height: 16),
             _buildTonightCard(context, ref),
           ]),
@@ -1008,6 +1004,16 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                   // ── Row 2: Brightness slider ──
                   const SizedBox(height: 4),
                   _BrightnessSlider(onCheckSyncWarning: _checkSyncWarning),
+                  // Row 83: the power circle and the slider are disabled while
+                  // the lights cannot be reached, and the only explanation
+                  // lived inside the collapsed Tune panel. Say it here, with a
+                  // way to try again.
+                  if (!wledState.connected)
+                    _UnreachableNotice(
+                      onReconnect: () => ref
+                          .read(wledStateProvider.notifier)
+                          .refreshConnection(),
+                    ),
                 ],
               ),
             ),
@@ -1212,75 +1218,104 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   Widget _buildSmartSuggestions(BuildContext context, WidgetRef ref) {
     return SmartSuggestionsList(
       maxSuggestions: 3,
-      onSuggestionAction: (suggestion) async {
-        final repo = ref.read(wledRepositoryProvider);
-        if (repo == null) return;
-        try {
-          switch (suggestion.type.name) {
-            case 'applyPattern':
-              final patternName = suggestion.actionData['pattern_name'] as String?;
-              if (patternName != null) {
-                final library = ref.read(publicPatternLibraryProvider);
-                if (library.all.isEmpty) return;
-                final pattern = library.all.firstWhere(
-                  (p) => p.name.toLowerCase() == patternName.toLowerCase(),
-                  orElse: () => library.all.first,
-                );
-                var payload = pattern.toWledPayload();
-                final channels = ref.read(effectiveChannelIdsProvider);
-                if (channels.isEmpty) {
-                  debugPrint('Suggestion applyPattern: skip (U1 gate)');
-                  return;
-                }
-                payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-                final success = await repo.applyJson(payload);
-                if (success) {
-                  try {
-                    final preview = _extractPreviewFromPayload(payload);
-                    ref.read(wledStateProvider.notifier).applyPreviewSync(
-                      colors: preview.colors,
-                      effectId: preview.effectId,
-                      speed: preview.speed,
-                      intensity: preview.intensity,
-                      effectName: patternName,
-                      colorGroupSize: preview.colorGroupSize,
-                      spacing: preview.spacing,
-                    );
-                    ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(patternName, ref.read(wledStateProvider));
-                  } catch (e) {
-                    debugPrint('Error in AI suggestion applyPreviewSync: $e');
-                  }
-                  // Only record usage + claim success when the write landed
-                  // (Audit-2 S14 — toast was outside the if(success) block).
-                  ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: $patternName')));
-                  }
-                  maybeShowManualApplyOffWarning(ref);
-                } else {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
-                    );
-                  }
-                }
-              }
-              break;
-            case 'createSchedule':
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Create your schedule on the Schedule tab')),
-                );
-              }
-              break;
-            default:
-              break;
-          }
-        } catch (e) {
-          debugPrint('Suggestion action failed: $e');
-        }
-      },
+      // Row 77: a card offers an action only when this page has one for it.
+      isActionable: (s) => _suggestionActionable(ref, s),
+      onSuggestionAction: (suggestion) => _onSuggestionAction(suggestion),
     );
+  }
+
+  /// The suggestion kinds Home can act on. "Action" on anything else used to
+  /// do nothing and leave the card where it was.
+  bool _suggestionActionable(WidgetRef ref, SmartSuggestion s) {
+    switch (s.type) {
+      case SuggestionType.applyPattern:
+      case SuggestionType.createSchedule:
+      case SuggestionType.eventReminder:
+        return true;
+      case SuggestionType.favorite:
+        return _suggestedPattern(ref, s).hasSelection;
+      default:
+        return false;
+    }
+  }
+
+  /// Row 24: the suggested pattern EXACTLY, or nothing — never the first
+  /// catalog pattern under the suggestion's name.
+  SelectionDecision<GradientPattern> _suggestedPattern(
+      WidgetRef ref, SmartSuggestion s) {
+    final name = (s.actionData['pattern_name'] as String?)?.trim() ?? '';
+    return requireExactMatch<GradientPattern>(
+      candidates: ref.read(publicPatternLibraryProvider).all,
+      matches: (p) => p.name.toLowerCase() == name.toLowerCase(),
+      noun: 'pattern',
+      requested: name,
+    );
+  }
+
+  Future<void> _onSuggestionAction(SmartSuggestion suggestion) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final container = ProviderScope.containerOf(context, listen: false);
+    Future<void> dismiss() async {
+      await container
+          .read(suggestionsNotifierProvider.notifier)
+          .dismissSuggestion(suggestion.id);
+    }
+
+    switch (suggestion.type) {
+      case SuggestionType.applyPattern:
+        final decision = _suggestedPattern(ref, suggestion);
+        final pattern = decision.value;
+        if (pattern == null) {
+          messenger.showSnackBar(SnackBar(
+            content: Text(
+                '${decision.reason} Browse Explore for something similar.'),
+          ));
+          return;
+        }
+        // The notifier's gated apply: the shared "why not" when the channel
+        // gate is closed (row 1), the Home preview and Now Playing on success.
+        // No `bri` — a suggestion does not pick the house's brightness.
+        final payload = Map<String, dynamic>.from(pattern.toWledPayload())
+          ..remove('bri');
+        final notifier = container.read(wledStateProvider.notifier);
+        final result = await notifier.runAndReport(
+          notifier.applyToDeviceResult(payload, labelHint: pattern.name),
+          onFailure: "Couldn't apply ${pattern.name} — check your connection",
+        );
+        if (!result.ok || !mounted) return;
+        ref.trackPatternUsage(pattern: pattern, source: 'suggestion');
+        messenger.showSnackBar(
+            SnackBar(content: Text('Applied: ${pattern.name}')));
+        maybeShowManualApplyOffWarning(ref);
+      case SuggestionType.createSchedule:
+        // Row 77: "Create" used to show a snackbar and go nowhere.
+        await dismiss();
+        if (!mounted) return;
+        context.go(AppRoutes.schedule);
+      case SuggestionType.eventReminder:
+        // "Got it" — acknowledged.
+        await dismiss();
+      case SuggestionType.favorite:
+        final pattern = _suggestedPattern(ref, suggestion).value;
+        if (pattern == null) return;
+        try {
+          await container.read(favoritesNotifierProvider.notifier).addToFavorites(
+                patternId: 'suggested_${pattern.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}',
+                patternName: pattern.name,
+                wledPayload: pattern.toWledPayload(),
+              );
+          await dismiss();
+          messenger.showSnackBar(SnackBar(
+              content: Text('Added "${pattern.name}" to My Favorites')));
+        } catch (e) {
+          messenger.showSnackBar(SnackBar(
+            content: Text("Couldn't add \"${pattern.name}\" to favorites."),
+            backgroundColor: Colors.orange.shade800,
+          ));
+        }
+      default:
+        return;
+    }
   }
 
   Widget _buildFavoritesSection(BuildContext context, WidgetRef ref) {
@@ -1296,80 +1331,105 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         ),
         Center(
           child: FavoritesGrid(
-            onPatternTap: (favorite) async {
-            try {
-              if (!mounted) return;
-              final repo = ref.read(wledRepositoryProvider);
-              if (repo == null) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No controller connected')));
-                return;
-              }
-              // ONE routine decides how a favorite reaches the lights: a
-              // per-pixel (Static) favorite goes through the chunked spine My
-              // Designs uses, everything else is one channel-filtered
-              // applyJson. This used to inline the latter for every favorite,
-              // and applyJson refuses anything over 4 KB.
-              final outcome =
-                  await applyFavoritePayloadWith(ref.read, favorite.patternData);
-              if (outcome.status == FavoriteApplyStatus.noChannels) {
-                debugPrint('Favorites apply: skip (U1 gate)');
-                return;
-              }
-              final payload = outcome.payload;
-              final success = outcome.isApplied;
-              if (!mounted) return;
-              if (success) {
-                try {
-                  final preview = _extractPreviewFromPayload(payload);
-                  ref.read(wledStateProvider.notifier).applyPreviewSync(
-                    colors: preview.colors,
-                    effectId: preview.effectId,
-                    speed: preview.speed,
-                    intensity: preview.intensity,
-                    effectName: favorite.patternName,
-                    colorGroupSize: preview.colorGroupSize,
-                    spacing: preview.spacing,
-                  );
-                } catch (e) {
-                  debugPrint('Error in favorite grid applyPreviewSync: $e');
-                }
-                try { ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(favorite.patternName, ref.read(wledStateProvider)); } catch (e) {
-                  debugPrint('Error in favorite grid set active label: $e');
-                }
-                try { ref.read(favoritesNotifierProvider.notifier).recordFavoriteUsage(favorite.id); } catch (e) {
-                  debugPrint('Error in favorite grid recordFavoriteUsage: $e');
-                }
-                try {
-                  if (mounted) ref.trackWledPayload(payload: payload, patternName: favorite.patternName, source: 'favorite');
-                } catch (e) {
-                  debugPrint('Error in favorite grid trackWledPayload: $e');
-                }
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Applied: ${favorite.displayName}'), backgroundColor: Colors.green.shade700),
-                  );
-                }
-                maybeShowManualApplyOffWarning(ref);
-              } else {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
-                  );
-                }
-              }
-            } catch (e) {
-              debugPrint('Apply favorite failed: $e');
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: const Text('Error applying pattern'), backgroundColor: Colors.red),
-                );
-              }
-            }
-          },
+            onPatternTap: (favorite) => _applyFavorite(favorite),
           ),
         ),
       ],
     );
+  }
+
+  /// Applies a My Favorites tile.
+  ///
+  /// * Row 1 — a closed channel gate (away from home, first seconds after
+  ///   launch) used to return with a debug log; the shared "why not" is shown.
+  /// * Item B — the favourite's stored brightness is not sent unless the
+  ///   customer saved one on purpose (favorite_brightness.dart), so the house
+  ///   stays at its own level.
+  /// * Foundation walk 4 — a favourite with no look says so, instead of an
+  ///   orange "Failed to apply pattern" that reads like a connection problem.
+  Future<void> _applyFavorite(FavoritePattern favorite) async {
+    if (!mounted) return;
+    final container = ProviderScope.containerOf(context, listen: false);
+    final messenger = ScaffoldMessenger.of(context);
+    final notifier = container.read(wledStateProvider.notifier);
+    FavoriteApplyOutcome outcome;
+    try {
+      // ONE routine decides how a favorite reaches the lights: a per-pixel
+      // (Static) favorite goes through the chunked spine My Designs uses,
+      // everything else is one channel-filtered applyJson.
+      outcome = await applyFavoritePayloadWith(
+          container.read, favorite.patternData);
+    } catch (e) {
+      debugPrint('Apply favorite failed: $e');
+      await notifier.runAndReport(
+        Future.value(const WriteResult.failed(WriteFailureKind.error)),
+        onFailure: "Couldn't apply ${favorite.displayName} — try again.",
+      );
+      return;
+    }
+    switch (outcome.status) {
+      case FavoriteApplyStatus.noDevice:
+      case FavoriteApplyStatus.noChannels:
+        await notifier.runAndReport(
+          Future.value(WriteResult.blocked(
+              outcome.reason ?? "Your lights weren't changed.")),
+          onFailure: "Your lights weren't changed.",
+        );
+        return;
+      case FavoriteApplyStatus.noDesign:
+        messenger.showSnackBar(SnackBar(
+          content: Text('"${favorite.displayName}" has no saved look to apply. '
+              'Replace it from My Favorites.'),
+        ));
+        return;
+      case FavoriteApplyStatus.failed:
+        await notifier.runAndReport(
+          Future.value(const WriteResult.failed(WriteFailureKind.unreachable)),
+          onFailure:
+              "Couldn't apply ${favorite.displayName} — check your connection",
+        );
+        return;
+      case FavoriteApplyStatus.applied:
+        break;
+    }
+    if (!mounted) return;
+    final payload = outcome.payload;
+    try {
+      final preview = _extractPreviewFromPayload(payload);
+      final live = container.read(wledStateProvider);
+      notifier.applyPreviewSync(
+        colors: preview.colors,
+        effectId: preview.effectId,
+        speed: preview.speed,
+        intensity: preview.intensity,
+        effectName: favorite.patternName,
+        colorGroupSize: preview.colorGroupSize,
+        spacing: preview.spacing,
+        // Item B: the preview shows the level the lights are actually at —
+        // the favourite's own only when it was sent.
+        brightness: (payload['bri'] as num?)?.toInt() ?? live.brightness,
+      );
+    } catch (e) {
+      debugPrint('Error in favorite grid applyPreviewSync: $e');
+    }
+    container
+        .read(activePresetLabelProvider.notifier)
+        .setLabelWithFingerprint(favorite.patternName, container.read(wledStateProvider));
+    try {
+      container
+          .read(favoritesNotifierProvider.notifier)
+          .recordFavoriteUsage(favorite.id);
+    } catch (e) {
+      debugPrint('Error in favorite grid recordFavoriteUsage: $e');
+    }
+    if (!mounted) return;
+    ref.trackWledPayload(
+        payload: payload, patternName: favorite.patternName, source: 'favorite');
+    messenger.showSnackBar(SnackBar(
+      content: Text('Applied: ${favorite.displayName}'),
+      backgroundColor: Colors.green.shade700,
+    ));
+    maybeShowManualApplyOffWarning(ref);
   }
 
   /// The upcoming-schedule card (Scheduling V3 A3).
@@ -1683,6 +1743,43 @@ class _AmbientLedGlowState extends State<_AmbientLedGlow>
           ),
         );
       },
+    );
+  }
+}
+
+/// Row 83 — the Now Playing bar's own explanation when the lights cannot be
+/// reached, with a reconnect action.
+class _UnreachableNotice extends StatelessWidget {
+  final VoidCallback onReconnect;
+  const _UnreachableNotice({required this.onReconnect});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: const ValueKey('now-playing-unreachable'),
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_rounded, size: 14, color: Colors.orange),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              kNowPlayingUnreachable,
+              style: TextStyle(
+                  fontSize: 12, color: Colors.white.withValues(alpha: 0.8)),
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('now-playing-reconnect'),
+            onPressed: onReconnect,
+            style: TextButton.styleFrom(
+              foregroundColor: NexGenPalette.cyan,
+              visualDensity: VisualDensity.compact,
+            ),
+            child: const Text('Reconnect'),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -1,8 +1,10 @@
 import 'package:nexgen_command/features/design/manual_editor/design_apply.dart';
+import 'package:nexgen_command/features/favorites/favorite_brightness.dart';
 import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 
 /// What applying a favorite did.
 enum FavoriteApplyStatus {
@@ -38,7 +40,13 @@ class FavoriteApplyOutcome {
   /// True when the favorite went through the chunked per-pixel spine.
   final bool perPixel;
 
-  const FavoriteApplyOutcome(this.status, this.payload, {this.perPixel = false});
+  /// Why nothing was sent, in the customer's words — set for [noDevice] and
+  /// [noChannels] from `applyBlockedReason` (row 1: the grid used to return
+  /// with only a debug log).
+  final String? reason;
+
+  const FavoriteApplyOutcome(this.status, this.payload,
+      {this.perPixel = false, this.reason});
 
   bool get isApplied => status == FavoriteApplyStatus.applied;
 }
@@ -61,16 +69,25 @@ Future<FavoriteApplyOutcome> applyFavoritePayloadWith(
 ) async {
   final repo = read(wledRepositoryProvider);
   if (repo == null) {
-    return FavoriteApplyOutcome(FavoriteApplyStatus.noDevice, payload);
+    return FavoriteApplyOutcome(FavoriteApplyStatus.noDevice, payload,
+        reason: applyBlockedReason(read) ?? kApplyBlockedFallback);
   }
-  final channels = read(effectiveChannelIdsProvider);
+  // Row 1: waits for a channel source that is still answering (the first
+  // seconds after launch, the first tap away from home) instead of refusing.
+  final channels = await resolveEffectiveChannelIds(read);
   if (channels.isEmpty) {
-    return FavoriteApplyOutcome(FavoriteApplyStatus.noChannels, payload);
+    return FavoriteApplyOutcome(FavoriteApplyStatus.noChannels, payload,
+        reason: applyBlockedReason(read) ?? kApplyBlockedFallback);
   }
 
   final design = perPixelDesignOfFavorite(payload);
   if (design != null) {
-    final result = await applyPositionalDesignWith(read, design);
+    // Item B: the design's stored level is applied only when the customer
+    // chose it; otherwise the house keeps its own brightness.
+    final result = await applyPositionalDesignWith(
+      read,
+      design.copyWith(brightnessStated: favoriteStatesBrightness(payload)),
+    );
     return FavoriteApplyOutcome(
       result == DesignApplyResult.applied
           ? FavoriteApplyStatus.applied
@@ -85,8 +102,10 @@ Future<FavoriteApplyOutcome> applyFavoritePayloadWith(
   if (payload['seg'] is List && firstRealDesignSegment(payload) == null) {
     return FavoriteApplyOutcome(FavoriteApplyStatus.noDesign, payload);
   }
-  final filtered = applyChannelFilter(
-      payload, channels, read(applyFilterChannelsProvider));
+  // Item B: no `bri` unless the customer saved one on purpose, and no
+  // app-private keys on the wire (favorite_brightness.dart).
+  final filtered = applyChannelFilter(favoritePayloadForApply(payload),
+      channels, read(applyFilterChannelsProvider));
   final ok = await repo.applyJson(filtered);
   return FavoriteApplyOutcome(
     ok ? FavoriteApplyStatus.applied : FavoriteApplyStatus.failed,

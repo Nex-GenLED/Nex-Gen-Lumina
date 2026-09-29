@@ -442,11 +442,11 @@ void main() {
       final db = FakeFirebaseFirestore();
       await pumpFavorites(tester, repo, db, favorites: [seedFavorite()]);
 
-      // The real "+" tile in the favorites row (one favorite → one empty
-      // slot; the two white-preset slots above it share the icon).
-      final plus = find.byIcon(Icons.add_rounded);
-      expect(plus, findsNWidgets(3));
-      await tester.tap(plus.last);
+      // The real "+" tile — there is exactly ONE, whatever the number of
+      // favourites (+110 E1, owner item A: no row of empty slots).
+      final plus = find.byKey(const ValueKey('favorites-add-tile'));
+      expect(plus, findsOneWidget);
+      await tester.tap(plus);
       await _settle(tester);
 
       await drillToLeaf(tester);
@@ -470,13 +470,13 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
-    testWidgets('the "No favorites yet" row opens the same SAVE-mode library',
-        (tester) async {
+    testWidgets('with no favourites at all, the one "+" says what it does and '
+        'opens the same SAVE-mode library', (tester) async {
       final repo = _RecordingRepo();
       final db = FakeFirebaseFirestore();
       await pumpFavorites(tester, repo, db, favorites: const []);
 
-      await _tapText(tester, 'No favorites yet — save a pattern from Explore');
+      await _tapText(tester, 'Add a favorite — pick any look from the library');
       await drillToLeaf(tester);
       expect(find.text('Save to Favorites'), findsOneWidget);
       expect(find.text('Apply'), findsNothing);

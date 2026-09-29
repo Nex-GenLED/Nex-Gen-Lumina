@@ -463,6 +463,19 @@ dynamic _withoutCompletion(dynamic wire, dynamic golden) {
   };
 }
 
+/// +110 E1, owner item B — applying a favourite no longer sends the level it
+/// was stored with (only a level the customer saved on purpose is sent; the
+/// golden's favourite carries an incidental `bri: 200`). The ONE intended
+/// difference: [golden] minus its top-level `bri`, for the favourite scenario
+/// only. Everything else about that write must still match byte for byte.
+dynamic _goldenWithoutFavoriteBrightness(dynamic golden, Object? scenario) {
+  if (scenario != 'favourite' || golden is! Map) return golden;
+  return {
+    for (final e in golden.entries)
+      if (e.key != 'bri') e.key: e.value,
+  };
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
@@ -502,11 +515,18 @@ void main() {
       final w = writes[i] as Map;
       final g = goldenWrites[i] as Map;
       final where = '#$i ${w['scenario']} / ${w['call']}';
-      expect(jsonEncode(w['boundary']), jsonEncode(g['boundary']),
+      final goldBoundary =
+          _goldenWithoutFavoriteBrightness(g['boundary'], w['scenario']);
+      final goldWire = _goldenWithoutFavoriteBrightness(g['wire'], w['scenario']);
+      if (w['scenario'] == 'favourite' && w['boundary'] is Map) {
+        expect((w['boundary'] as Map).containsKey('bri'), isFalse,
+            reason: "item B: a favourite applies at the house's own level");
+      }
+      expect(jsonEncode(w['boundary']), jsonEncode(goldBoundary),
           reason: 'boundary payload changed at $where');
       expect(
-        _withoutCompletion(w['wire'], g['wire']),
-        equals(g['wire']),
+        _withoutCompletion(w['wire'], goldWire),
+        equals(goldWire),
         reason: 'wire payload changed beyond the stated fields at $where',
       );
     }

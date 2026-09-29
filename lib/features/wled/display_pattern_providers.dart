@@ -52,7 +52,9 @@ final displayPatternNameProvider = Provider<String>((ref) {
       final target = activePreset.trim().toLowerCase();
       for (final fav in favorites) {
         if (fav.name.trim().toLowerCase() == target) {
-          return fav.name;
+          // Row 85: humanised, exactly as the My Favorites card shows it
+          // (FavoritePattern.displayName). It used to be the raw stored name.
+          return displayNameFor(fav.name);
         }
       }
     }

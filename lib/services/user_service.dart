@@ -736,8 +736,9 @@ class UserService {
     }
   }
 
-  /// Dismiss a suggestion
-  Future<void> dismissSuggestion(String userId, String suggestionId) async {
+  /// Dismiss a suggestion. Returns whether the dismissal was saved, so the
+  /// "dismissed" confirmation can depend on it (UX audit row 78).
+  Future<bool> dismissSuggestion(String userId, String suggestionId) async {
     try {
       await _firestore
           .collection('users')
@@ -745,8 +746,10 @@ class UserService {
           .collection('suggestions')
           .doc(suggestionId)
           .update({'dismissed': true});
+      return true;
     } catch (e) {
       debugPrint('dismissSuggestion failed: $e');
+      return false;
     }
   }
 

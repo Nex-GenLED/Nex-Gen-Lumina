@@ -61,9 +61,13 @@ class FeatureButton extends StatelessWidget {
                   color: hasGradient ? Colors.white : NexGenPalette.cyan,
                 ),
                 const SizedBox(width: 8),
+                // Wraps rather than truncating: "Neighborhood Sync" was cut
+                // short even at default text size on a 390-point phone, and
+                // every label was at Larger Text (+110 E1 accessibility).
                 Flexible(
                   child: Text(
                     label,
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -72,8 +76,6 @@ class FeatureButton extends StatelessWidget {
                           : NexGenPalette.textPrimary,
                       letterSpacing: 0.3,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
