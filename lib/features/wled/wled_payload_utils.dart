@@ -620,15 +620,16 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
     // code they are.
 
     // #110 — COMPLETE SEGMENT STATE. Same rule as the grp/spc assertion above,
-    // for the fields that were still inherited: the effect's own sliders and
-    // checkboxes, the segment's own brightness, and — on a complete design —
-    // speed, intensity and palette. See wled_segment_defaults.dart for what
-    // each is, why the firmware leaves it behind, and what is deliberately
-    // left to provisioning. Runs BEFORE the palette guard so a palette filled
-    // in here is held to the same pal:5 rule as one the caller stated.
+    // for the fields that were still inherited: the options the effect reads,
+    // the segment's own brightness, and — on a complete design — speed,
+    // intensity and palette. See wled_segment_defaults.dart for what each is,
+    // why the firmware leaves it behind, and what is deliberately left to
+    // provisioning. A missing palette is filled from paletteForEffect, the
+    // documented single source of truth every live builder already uses, and
+    // this runs BEFORE the palette guard below so it is held to the same rule.
     completeEffectSegment(
       s,
-      paletteFor: WledEffectsCatalog.setColorsPaletteFor,
+      paletteFor: WledEffectsCatalog.paletteForEffect,
     );
 
     // Palette guard (single chokepoint for the pal:5 strobing/blending bug).

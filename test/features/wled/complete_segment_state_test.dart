@@ -26,11 +26,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../helpers/recording_wled_repository.dart';
 
-/// Every field that decides what a segment shows, other than where it lies.
+/// Every field that decides what a segment shows, other than where it lies —
+/// before the effect's own options, which depend on the effect.
 const _lookFields = [
   'on', 'bri', 'fx', 'sx', 'ix', 'pal', 'col', 'grp', 'spc', 'frz', //
-  'c1', 'c2', 'c3', 'o1', 'o2', 'o3',
 ];
+
+/// The look fields for a segment running [fx]: the common ones plus every
+/// option that effect reads.
+List<String> _lookFieldsFor(int fx) => [..._lookFields, ...optionKeysReadBy(fx)];
 
 /// Where and which way the segment lies. Provisioning's; an apply states none.
 const _geometryFields = ['start', 'stop', 'rev', 'mi', 'of'];
@@ -87,15 +91,16 @@ Map<String, dynamic> _traveling(int fx) => {
     };
 
 Map<String, dynamic> _look(Map seg) => {
-      for (final k in _lookFields)
+      for (final k in [..._lookFields, ...kSegEffectOptionKeys])
         if (seg.containsKey(k)) k: seg[k],
     };
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
 
-  // Scan, Chase, Two Dots, Running, Meteor: traveling effects, three of which
-  // read an option the app never used to send.
+  // Scan, Chase, Two Dots, Running, Meteor: traveling effects. Scan and Two
+  // Dots read "Overlay" (o2), Meteor reads "Gradient" (o1); Chase and Running
+  // read no option, so none is stated for them.
   for (final fx in [10, 28, 50, 15, 76]) {
     for (final count in [2, 4]) {
       test('fx $fx on a $count-segment controller: every targeted segment '
@@ -116,9 +121,14 @@ void main() {
 
         for (final s in segs) {
           s as Map;
-          for (final field in _lookFields) {
+          for (final field in _lookFieldsFor(fx)) {
             expect(s.containsKey(field), isTrue,
                 reason: 'seg ${s['id']} does not state `$field`');
+          }
+          for (final field in kSegEffectOptionKeys) {
+            if (optionKeysReadBy(fx).contains(field)) continue;
+            expect(s.containsKey(field), isFalse,
+                reason: 'fx $fx does not read `$field`; it is not sent');
           }
           for (final field in _geometryFields) {
             expect(s.containsKey(field), isFalse,
@@ -140,8 +150,9 @@ void main() {
         expect(s0['frz'], isFalse);
         expect(s0['on'], isTrue);
         expect(s0['bri'], 255);
-        expect([s0['c1'], s0['c2'], s0['c3']], [128, 128, 16]);
-        expect([s0['o1'], s0['o2'], s0['o3']], [false, false, false]);
+        for (final k in optionKeysReadBy(fx)) {
+          expect(s0[k], k.startsWith('o') ? isFalse : isA<int>(), reason: k);
+        }
         expect(s0['col'], hasLength(3));
       });
     }
@@ -179,7 +190,7 @@ void main() {
     final segs = controller.simulatedStatePosts.single['seg'] as List;
     expect(segs.first, {'id': 0, 'on': false, 'frz': false});
     expect((segs.last as Map)['fx'], 28);
-    expect((segs.last as Map)['o2'], isFalse);
+    expect((segs.last as Map)['bri'], kSegDefaultBri);
   });
 
   test('the recording fake sees one entry per targeted segment too', () async {
@@ -220,8 +231,9 @@ void main() {
     });
 
     test('an option the caller stated is never overwritten', () {
+      // Waterfall (140) reads c1 and c2.
       final s = seg({
-        'fx': 108,
+        'fx': 140,
         'o1': 200,
         'c1': 40,
         'bri': 90,
@@ -245,7 +257,7 @@ void main() {
       });
       expect(s['sx'], 128);
       expect(s['ix'], 128);
-      expect(s['pal'], WledEffectsCatalog.setColorsPaletteFor(28));
+      expect(s['pal'], WledEffectsCatalog.paletteForEffect(28));
     });
 
     test('a palette filled in is held to the same pal:5 rule as a stated one',
@@ -263,7 +275,7 @@ void main() {
     test('an effect-only change resets the options and keeps the tuning', () {
       final s = seg({'fx': 50});
       expect(s['o2'], isFalse);
-      expect(s['c1'], 128);
+      expect(s.containsKey('c1'), isFalse, reason: 'Two Dots does not read c1');
       expect(s.containsKey('sx'), isFalse);
       expect(s.containsKey('ix'), isFalse);
       expect(s.containsKey('pal'), isFalse);
@@ -316,6 +328,32 @@ void main() {
       }
     });
 
+    test('an effect that reads no option gets none', () {
+      final s = seg({
+        'fx': 28,
+        'col': [
+          [255, 0, 0, 0]
+        ]
+      });
+      for (final k in kSegEffectOptionKeys) {
+        expect(s.containsKey(k), isFalse, reason: k);
+      }
+      expect(s['bri'], kSegDefaultBri);
+    });
+
+    test('an effect unknown to the firmware gets all six', () {
+      final s = seg({'fx': kWledKnownEffectIdCeiling + 5});
+      for (final k in kSegEffectOptionKeys) {
+        expect(s.containsKey(k), isTrue, reason: k);
+      }
+    });
+
+    test('the table knows the Overlay family', () {
+      for (final fx in [10, 11, 20, 21, 22, 50, 58, 79, 85, 86, 87, 91, 95]) {
+        expect(optionKeysReadBy(fx), contains('o2'), reason: 'fx $fx');
+      }
+    });
+
     test('idempotent', () {
       final once = normalizeWledPayload(_traveling(28));
       expect(jsonEncode(normalizeWledPayload(once)), jsonEncode(once));
@@ -326,8 +364,10 @@ void main() {
     final state = ensurePsaveClearsFreeze(
         normalizeWledPayload(_traveling(10)), const [0, 1]);
     final s = (state['seg'] as List).single as Map;
-    for (final k in ['c1', 'c2', 'c3', 'o1', 'o2', 'o3', 'bri', 'frz']) {
+    // Scan (10) reads only "Overlay" (o2).
+    for (final k in ['o2', 'bri', 'frz', 'sx', 'ix', 'pal']) {
       expect(s.containsKey(k), isTrue, reason: k);
     }
+    expect(s['o2'], isFalse);
   });
 }

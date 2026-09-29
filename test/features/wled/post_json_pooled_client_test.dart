@@ -27,6 +27,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -193,8 +194,12 @@ void main() {
       final nearCap = <String, dynamic>{
         'on': true,
         'bri': 200,
+        // 24 segments: well inside WLED's 32-segment limit, and — once the
+        // wire normalizer has completed every segment (+110) — as close to
+        // the cap as a real payload gets. The size assertions below are on
+        // the NORMALIZED body, which is what applyJson actually sends.
         'seg': [
-          for (var i = 0; i < 40; i++)
+          for (var i = 0; i < 24; i++)
             {
               'id': i,
               'fx': 27,
@@ -205,9 +210,10 @@ void main() {
             }
         ],
       };
-      expect(jsonEncode(nearCap).length, greaterThan(1500),
+      final onWire = jsonEncode(normalizeWledPayload(nearCap)).length;
+      expect(onWire, greaterThan(1500),
           reason: 'substantially larger than the single-seg case');
-      expect(jsonEncode(nearCap).length, lessThan(kMaxApplyPayloadBytes),
+      expect(onWire, lessThan(kMaxApplyPayloadBytes),
           reason: 'and still inside what Part D allows through applyJson');
 
       final svc = WledService(base!);
