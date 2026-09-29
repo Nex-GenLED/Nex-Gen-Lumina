@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/ai/recurring_sports_autopilot_intent.dar
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/theme.dart';
@@ -855,10 +856,14 @@ LuminaPatternPreview? extractLuminaPreview(Map<String, dynamic> payload) {
 
     // Fallback to wled segment data
     final wled = payload['wled'] ?? payload;
-    final seg = wled['seg'];
     int? pal;
-    if (seg is List && seg.isNotEmpty && seg.first is Map) {
-      final first = seg.first as Map;
+    // The DESIGN segment, not seg[0]: after channel filtering seg[0] can be the
+    // `{id: 0, on: false}` exclusion marker (UX audit pattern P6).
+    // A `wled` that is not a map is an unreadable payload: no preview, as
+    // before.
+    if (wled is! Map) return null;
+    final first = firstRealDesignSegment(wled);
+    if (first != null) {
       effect ??= (first['fx'] as num?)?.toInt();
       pal = (first['pal'] as num?)?.toInt();
       speed ??= (first['sx'] as num?)?.toInt();

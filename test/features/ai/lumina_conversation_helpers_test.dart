@@ -213,11 +213,10 @@ void main() {
       expect(colorlessSeg.effectId, 0);
     });
 
-    // Pins today's behaviour — UX audit pattern P6 (`seg[0]` treated as "the
-    // design segment"). When seg[0] is the `{id:0, on:false}` exclusion
-    // marker, the real design in seg[1] is not read: no effect, and the
-    // fallback swatches instead of the design's colors.
-    test('P6: an exclusion marker in seg[0] hides the design seg behind it',
+    // UX audit pattern P6 — FIXED in +110. When seg[0] is the
+    // `{id:0, on:false}` exclusion marker, the design in seg[1] is read
+    // (firstRealDesignSegment), not replaced with fallback swatches.
+    test('P6: an exclusion marker in seg[0] no longer hides the design',
         () {
       final preview = extractLuminaPreview({
         'on': true,
@@ -238,11 +237,11 @@ void main() {
         ],
       })!;
 
-      expect(preview.colors, const [NexGenPalette.cyan, Color(0xFF102040)]);
-      expect(preview.effectId, isNull);
-      expect(preview.paletteId, isNull);
-      expect(preview.speed, isNull);
-      expect(preview.intensity, isNull);
+      expect(preview.colors, const [Color(0xFFFF0000), Color(0xFF00FF00)]);
+      expect(preview.effectId, 43);
+      expect(preview.paletteId, 5);
+      expect(preview.speed, 128);
+      expect(preview.intensity, 180);
     });
 
     test('rich colors still show when seg[0] is an exclusion marker', () {
