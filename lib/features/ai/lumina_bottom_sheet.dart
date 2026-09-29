@@ -8,25 +8,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import 'package:nexgen_command/theme.dart';
-import 'package:nexgen_command/app_providers.dart' show activePresetLabelProvider;
-import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
-import 'package:nexgen_command/features/ai/lumina_command.dart';
-import 'package:nexgen_command/features/ai/lumina_command_router.dart';
-import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
-import 'package:nexgen_command/features/ai/scheduling_intent.dart';
-import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
+import 'package:nexgen_command/features/ai/lumina_conversation_driver.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_waveform_painter.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
-import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
-import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/app_providers.dart'
-    show selectedTabIndexProvider, authStateProvider;
-import 'package:nexgen_command/features/ai/ephemeral_session_intent.dart';
-import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
-import 'package:nexgen_command/features/ai/recurring_sports_autopilot_handler.dart';
 import 'package:go_router/go_router.dart';
 
 // ---------------------------------------------------------------------------
@@ -519,273 +506,34 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
   // Send message / conversation
   // -------------------------------------------------------------------------
 
-  Future<void> _sendMessage(String text) async {
-    final prompt = text.trim();
-    if (prompt.isEmpty) return;
-
-    _textController.clear();
-    _focusNode.unfocus();
-
-    final controller = ref.read(luminaSheetProvider.notifier);
-    controller.addUserMessage(prompt);
-    controller.updateTranscription('');
-    _animateToMode(LuminaSheetMode.expanded);
-    _scrollToEnd();
-
-    try {
-      final sheetState = ref.read(luminaSheetProvider);
-
-      // Route through the two-tier command pipeline
-      final result = await LuminaCommandRouter.route(
-        ref,
-        prompt,
-        history: sheetState.messages,
-        activePatternContext: sheetState.activePatternContext,
+  /// The shared conversation driver, bound to this surface. Built per use:
+  /// it holds no state, and nothing Riverpod-owned is kept on this State.
+  LuminaConversationDriver get _driver => LuminaConversationDriver(
+        services: RiverpodLuminaConversationServices(ref),
+        host: LuminaConversationHost(
+          surface: LuminaSurface.sheet,
+          isMounted: () => mounted,
+          clearInput: () {
+            _textController.clear();
+            _focusNode.unfocus();
+          },
+          onUserMessagePosted: () =>
+              _animateToMode(LuminaSheetMode.expanded),
+          scrollToEnd: _scrollToEnd,
+          closeSurface: () => Navigator.of(context).pop(),
+          goRoute: (route) => context.go(route),
+          pushRoute: (route) {
+            context.push(route);
+          },
+          showSnackBar: (message) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(message)),
+            );
+          },
+        ),
       );
 
-      // Handle navigation commands (close sheet and navigate)
-      if (result.command?.type == LuminaCommandType.navigate) {
-        _handleNavigation(result);
-        return;
-      }
-
-      // ── Ephemeral session intent (Item #51) ────────────────────────────
-      // When the AI emits ephemeralSession (sports/team event + "after"
-      // state), apply the immediate WLED design AND wire up a one-shot
-      // session that auto-reverts at game end.
-      final ephemeralIntent = result.ephemeralSessionIntent;
-      if (ephemeralIntent != null && ephemeralIntent.isValid) {
-        await _handleEphemeralSession(ephemeralIntent, result, prompt);
-        return;
-      }
-
-      // ── Recurring sports autopilot (every game / all season) ──────────
-      // COMPACT rule → existing Game Day Autopilot enable path (idempotent
-      // per team, rolling 7-day materialize → ≤8 WLED timers via lease
-      // manager). Shared handler keeps this surface in lock-step with the
-      // full-screen chat.
-      final recurringSports = result.recurringSportsAutopilotIntent;
-      if (recurringSports != null && recurringSports.isValid) {
-        await handleRecurringSportsAutopilot(
-          ref: ref,
-          intent: recurringSports,
-          result: result,
-          onMessagePosted: _scrollToEnd,
-        );
-        return;
-      }
-
-      // ── Scheduling intents (recurring weekly/daily, 1 or N) ───────────
-      // The cloud parser canonicalizes both schema shapes into one typed
-      // List<SchedulingIntent> carried on result.schedulingIntents — read
-      // INDEPENDENT of wledPayload so the intents survive a null/absent
-      // top-level wled (#58b). The shared handler iterates the list and
-      // persists atomically via addAll. Same path on full-screen and
-      // bottom-sheet.
-      final intents = result.schedulingIntents ?? const <SchedulingIntent>[];
-      if (intents.isNotEmpty) {
-        LuminaPatternPreview? schedulePreview;
-        if (result.wledPayload != null) {
-          schedulePreview = _extractPreview(result.wledPayload!);
-        } else if (result.previewColors.isNotEmpty) {
-          schedulePreview =
-              LuminaPatternPreview(colors: result.previewColors);
-        }
-        await handleSchedulingIntents(
-          ref: ref,
-          context: context,
-          intents: intents,
-          result: result,
-          preview: schedulePreview,
-          onMessagePosted: _scrollToEnd,
-        );
-        return;
-      }
-
-      // Apply WLED payload to lights if available
-      LuminaPatternPreview? preview;
-      if (result.wledPayload != null) {
-        preview = _extractPreview(result.wledPayload!);
-        final repo = ref.read(wledRepositoryProvider);
-        if (repo != null) {
-          try {
-            final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
-            if (ok && mounted) {
-              if (preview != null) {
-                ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
-                      colorSequence: preview.colors,
-                      colorNames: preview.colorNames,
-                      effectName: preview.effectName,
-                    );
-              }
-              final aiName = preview?.patternName ??
-                  result.command?.parameters['patternName'] as String?;
-              final label = resolveLuminaDisplayName(aiName, prompt);
-              if (label != null) {
-                ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
-              } else {
-                ref.read(activePresetLabelProvider.notifier).clear();
-              }
-            }
-          } catch (e) {
-            debugPrint('Apply from Lumina sheet failed: $e');
-          }
-        }
-      } else if (result.previewColors.isNotEmpty) {
-        // Build a preview from colors even without full WLED payload
-        preview = LuminaPatternPreview(colors: result.previewColors);
-      }
-
-      controller.addAssistantMessage(
-        result.responseText,
-        preview: preview,
-        wledPayload: result.wledPayload,
-      );
-
-      // Sync voice refinement results to the adjustment panel if active
-      final adjState = ref.read(adjustmentStateProvider);
-      if (adjState != null && adjState.isExpanded && preview != null) {
-        final updated = LuminaLightingSuggestion.fromPreview(
-          responseText: result.responseText,
-          preview: preview,
-          wledPayload: result.wledPayload,
-        );
-        ref.read(adjustmentStateProvider.notifier).applyFromVoice(updated);
-      }
-    } catch (e) {
-      debugPrint('Lumina sheet send error: $e');
-      controller.addAssistantMessage('I hit a snag: $e');
-    }
-
-    _scrollToEnd();
-  }
-
-  /// Item #51 Prompt 3 — applies the immediate WLED design then dispatches
-  /// the ephemeral session intent to [EphemeralSessionDispatcher]. Builds
-  /// a chat confirmation that augments the AI's response text with the
-  /// session details (or a no-game-found alternative offer).
-  Future<void> _handleEphemeralSession(
-    EphemeralSessionIntent intent,
-    LuminaCommandResult result,
-    String prompt,
-  ) async {
-    final controller = ref.read(luminaSheetProvider.notifier);
-
-    // 1. Apply the immediate WLED payload (the team design). Mirrors the
-    //    existing single-pattern apply so the user gets the design they
-    //    asked for regardless of the dispatch outcome.
-    LuminaPatternPreview? preview;
-    if (result.wledPayload != null) {
-      preview = _extractPreview(result.wledPayload!);
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo != null) {
-        try {
-          final ok = await ref.read(wledStateProvider.notifier).applyToDevice(result.wledPayload!, labelHint: null);
-          if (ok && mounted) {
-            if (preview != null) {
-              ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
-                    colorSequence: preview.colors,
-                    colorNames: preview.colorNames,
-                    effectName: preview.effectName,
-                  );
-            }
-            final aiName = preview?.patternName ??
-                result.command?.parameters['patternName'] as String?;
-            final label = resolveLuminaDisplayName(aiName, prompt);
-            if (label != null) {
-              ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
-            } else {
-              ref.read(activePresetLabelProvider.notifier).clear();
-            }
-          }
-        } catch (e) {
-          debugPrint('Apply (ephemeral) from Lumina sheet failed: $e');
-        }
-      }
-    }
-
-    // 2. Dispatch the ephemeral session intent.
-    var responseText = result.responseText;
-    final user = ref.read(authStateProvider).maybeWhen(
-          data: (u) => u,
-          orElse: () => null,
-        );
-    if (user == null) {
-      debugPrint(
-          '[Lumina sheet] ephemeral session — no authenticated user; skipping dispatch');
-    } else {
-      final dispatchResult = await EphemeralSessionDispatcher.dispatch(
-        intent: intent,
-        ref: ref,
-        userId: user.uid,
-      );
-      final augmentation = _buildEphemeralAugmentation(dispatchResult);
-      if (augmentation != null) {
-        responseText = '$responseText\n\n$augmentation';
-      }
-    }
-
-    if (!mounted) return;
-    controller.addAssistantMessage(
-      responseText,
-      preview: preview,
-      wledPayload: result.wledPayload,
-    );
-  }
-
-  /// Builds the chat confirmation suffix appended to the AI's response
-  /// text after an ephemeral session dispatch. Returns null when there's
-  /// nothing to add (hard error or empty result).
-  String? _buildEphemeralAugmentation(DispatchResult dispatchResult) {
-    if (dispatchResult.noGameFoundMessage != null) {
-      return dispatchResult.noGameFoundMessage;
-    }
-    if (dispatchResult.createdSessionIds.isEmpty) {
-      debugPrint(
-          '[Lumina sheet] ephemeral dispatch returned no sessions and no message: ${dispatchResult.errorMessage}');
-      return null;
-    }
-    final labels = dispatchResult.sessionLabels;
-    if (labels.length == 1) {
-      return '✓ Will revert to ${dispatchResult.revertLabel} when ${labels.first} ends.';
-    }
-    return '✓ Will revert to ${dispatchResult.revertLabel} after each game ends: ${labels.join(', ')}.';
-  }
-
-  /// Handles navigation commands by closing the sheet and navigating.
-  void _handleNavigation(LuminaCommandResult result) {
-    final params = result.command?.parameters ?? {};
-    final route = params['route'] as String?;
-    final tabIndex = params['tabIndex'] as int?;
-
-    // Close the sheet first
-    Navigator.of(context).pop();
-
-    if (tabIndex != null) {
-      ref.read(selectedTabIndexProvider.notifier).state = tabIndex;
-    } else if (route != null && mounted) {
-      // Use go() for within-shell routes so nav bar stays visible;
-      // use push() for fullscreen/modal routes (outside shell).
-      // Note: '/dashboard/...' (nested home-branch routes like
-      // /dashboard/design-studio, /dashboard/my-designs, /dashboard/game-day)
-      // must also use go() so the home branch navigates to the nested path
-      // instead of pushing on the root navigator.
-      final isShellRoute = route.startsWith('/explore') ||
-          route.startsWith('/settings') ||
-          route.startsWith('/schedule') ||
-          route.startsWith('/wled/') ||
-          route.startsWith('/dashboard');
-      if (isShellRoute) {
-        context.go(route);
-      } else {
-        context.push(route);
-      }
-    }
-
-    ref.read(luminaSheetProvider.notifier).addAssistantMessage(
-          result.responseText,
-        );
-  }
+  Future<void> _sendMessage(String text) => _driver.send(text);
 
   void _scrollToEnd() {
     Future.delayed(const Duration(milliseconds: 120), () {
@@ -797,104 +545,6 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
         );
       }
     });
-  }
-
-  // -------------------------------------------------------------------------
-  // Preview extraction helper
-  // -------------------------------------------------------------------------
-
-  LuminaPatternPreview? _extractPreview(Map<String, dynamic> payload) {
-    try {
-      String? patternName = payload['patternName'] as String?;
-      String? effectName;
-      String? direction;
-      bool isStatic = false;
-      int? speed;
-      int? intensity;
-      List<String> colorNames = [];
-      List<Color> colors = [];
-
-      // Rich colors array
-      final colorsArray = payload['colors'];
-      if (colorsArray is List) {
-        for (final c in colorsArray) {
-          if (c is Map) {
-            final name = c['name'] as String?;
-            if (name != null) colorNames.add(name);
-            final rgb = c['rgb'];
-            if (rgb is List && rgb.length >= 3) {
-              colors.add(Color.fromARGB(
-                255,
-                (rgb[0] as num).toInt(),
-                (rgb[1] as num).toInt(),
-                (rgb[2] as num).toInt(),
-              ));
-            }
-          }
-        }
-      }
-
-      // Rich effect object
-      final effectObj = payload['effect'];
-      int? effect;
-      if (effectObj is Map) {
-        effectName = effectObj['name'] as String?;
-        effect = (effectObj['id'] as num?)?.toInt();
-        direction = effectObj['direction'] as String?;
-        isStatic = effectObj['isStatic'] == true;
-      }
-
-      speed = (payload['speed'] as num?)?.toInt();
-      intensity = (payload['intensity'] as num?)?.toInt();
-
-      // Fallback to wled segment data
-      final wled = payload['wled'] ?? payload;
-      final seg = wled['seg'];
-      int? pal;
-      if (seg is List && seg.isNotEmpty && seg.first is Map) {
-        final first = seg.first as Map;
-        effect ??= (first['fx'] as num?)?.toInt();
-        pal = (first['pal'] as num?)?.toInt();
-        speed ??= (first['sx'] as num?)?.toInt();
-        intensity ??= (first['ix'] as num?)?.toInt();
-
-        if (colors.isEmpty) {
-          final col = first['col'];
-          if (col is List) {
-            for (final c in col) {
-              if (c is List && c.length >= 3) {
-                colors.add(Color.fromARGB(
-                  255,
-                  (c[0] as num).toInt(),
-                  (c[1] as num).toInt(),
-                  (c[2] as num).toInt(),
-                ));
-              }
-            }
-          }
-        }
-      }
-
-      if (colors.isEmpty) {
-        colors = const [NexGenPalette.cyan, Color(0xFF102040)];
-      }
-
-      return LuminaPatternPreview(
-        patternName: patternName,
-        colors: colors.take(5).toList(),
-        colorNames: colorNames,
-        effectId: effect,
-        effectName: effectName,
-        direction: direction,
-        isStatic: isStatic,
-        speed: speed,
-        intensity: intensity,
-        paletteId: pal,
-      );
-    } catch (e) {
-      debugPrint('extractPreview failed: $e');
-      return null;
-    }
   }
 
   // -------------------------------------------------------------------------
@@ -1287,7 +937,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                               msg.wledPayload!,
                               msg.preview,
                               originalPrompt:
-                                  _priorUserPrompt(sheetState.messages, i),
+                                  priorLuminaUserPrompt(sheetState.messages, i),
                             )
                         : null,
                   );
@@ -1319,48 +969,8 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
     Map<String, dynamic> wled,
     LuminaPatternPreview? preview, {
     String? originalPrompt,
-  }) async {
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) return;
-
-    try {
-      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(wled, labelHint: null);
-      if (ok && mounted) {
-        if (preview != null) {
-          ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
-                colorSequence: preview.colors,
-                colorNames: preview.colorNames,
-                effectName: preview.effectName,
-              );
-        }
-        final aiName = preview?.patternName ?? wled['patternName'] as String?;
-        final label = resolveLuminaDisplayName(aiName, originalPrompt);
-        if (label != null) {
-          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(label, ref.read(wledStateProvider));
-        } else {
-          ref.read(activePresetLabelProvider.notifier).clear();
-        }
-        final displayLabel = ref.read(displayPatternNameProvider);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$displayLabel applied!')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Apply from sheet failed: $e');
-    }
-  }
-
-  /// Walks back from [assistantIndex] to find the prompt that produced the
-  /// bubble at that index. Used by the bubble-tap apply path.
-  String? _priorUserPrompt(List<LuminaMessage> messages, int assistantIndex) {
-    for (int i = assistantIndex - 1; i >= 0; i--) {
-      final m = messages[i];
-      if (m.role == LuminaMessageRole.user && m.text.trim().isNotEmpty) {
-        return m.text;
-      }
-    }
-    return null;
-  }
+  }) =>
+      _driver.applyFromBubble(wled, preview, originalPrompt: originalPrompt);
 
   // -------------------------------------------------------------------------
   // Input bar
