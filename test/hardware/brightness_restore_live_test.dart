@@ -186,7 +186,8 @@ void main() {
       return;
     }
     final ch = d.channels.firstWhere((c) => c.included);
-    // `_sendToWled` builds this with NO brightness (→ the catalog's 255)…
+    // `_sendToWled` builds this with NO brightness — it leaves the level to
+    // the lights (UX audit row 22; it used to state the catalog's 255)…
     var payload = buildSelectorPayload(SelectorState(
       effectId: ch.effectId,
       speed: ch.speed,
@@ -195,7 +196,7 @@ void main() {
       spacing: ch.spacing,
       colors: [for (final g in ch.colorGroups.take(3)) g.color],
     ));
-    expect(payload['bri'], 255);
+    expect(payload.containsKey('bri'), isFalse);
     // …and design-edit mode now restates it from the design.
     payload = designEditPreviewPayload(payload, d);
     payload = applyChannelFilter(payload, const [0, 1], _channels);

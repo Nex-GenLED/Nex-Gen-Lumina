@@ -34,9 +34,17 @@ class SelectorState {
   /// `col`, already RGBW-normalised.
   final List<List<int>> colors;
 
-  /// Top-level `bri`. The catalog exits commit at full brightness and let the
-  /// device's own master control the level; a stored design carries its own.
-  final int brightness;
+  /// Top-level `bri`, or null to leave the lights at the brightness they are
+  /// already at.
+  ///
+  /// NULL IS THE DEFAULT (UX audit row 22). The catalog tuner used to state
+  /// 255 on every preview write and on Apply, so touching the speed slider in
+  /// Explore drove the whole house to full brightness and Apply kept it there.
+  /// Browsing a look is not a request to change the level. A caller that
+  /// hands a design to a destination that stores it states the level it
+  /// stores — [kHandedBackDesignBrightness] — and a stored design being edited
+  /// states its own.
+  final int? brightness;
 
   /// An explicit `pal` that beats [WledEffectsCatalog.paletteForEffect].
   ///
@@ -57,7 +65,7 @@ class SelectorState {
     required this.colors,
     this.grouping = kDesignDefaultGrp,
     this.spacing = kDesignDefaultSpc,
-    this.brightness = 255,
+    this.brightness,
     this.paletteOverride,
   });
 
@@ -136,7 +144,7 @@ Map<String, dynamic> buildSelectorPayload(SelectorState s) {
   final sparkle = readableSparkleColors(s.effectId, cols);
   return <String, dynamic>{
     'on': true,
-    'bri': s.brightness,
+    if (s.brightness != null) 'bri': s.brightness,
     'seg': [
       {
         'fx': s.effectId,
@@ -204,7 +212,14 @@ SelectorState selectorStateFromPayload(Map<String, dynamic> payload) {
     grouping: asInt(seg['grp'], kDesignDefaultGrp),
     spacing: asInt(seg['spc'], kDesignDefaultSpc),
     colors: colors,
-    brightness: asInt(payload['bri'], 255),
+    brightness: payload['bri'] is num ? (payload['bri'] as num).toInt() : null,
     paletteOverride: override,
   );
 }
+
+/// The brightness a design HANDED BACK to a destination (a schedule, Game Day,
+/// Favorites) states — full, exactly as it always has, so the payloads those
+/// destinations store and later fire are unchanged. Only the tuner's own
+/// writes to the lights stopped stating a level (see
+/// [SelectorState.brightness]).
+const int kHandedBackDesignBrightness = 255;
