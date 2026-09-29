@@ -26,6 +26,7 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
+import 'package:nexgen_command/shared/accessibility/text_scale_clamp.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
 /// Main entry point for the application
@@ -559,6 +560,9 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       theme: nexGenPremiumDarkTheme,
       darkTheme: nexGenPremiumDarkTheme,
       themeMode: ThemeMode.dark,
+
+      // Accessibility backstop: cap platform text scaling at 2.0x app-wide.
+      builder: TextScaleClamp.appBuilder,
 
       // Router configuration
       routerConfig: AppRouter.router,
