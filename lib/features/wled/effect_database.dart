@@ -13,6 +13,7 @@
 library;
 
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 
 /// Motion types for categorizing how effects animate
 enum MotionType {
@@ -1877,6 +1878,9 @@ class EffectDatabase {
       if (id == null) continue; // dropped: no real 0.15.1 effect by this name
       if (WledEffectsCatalog.getById(id)?.requiresAudio ?? false) {
         continue; // excluded: audio-reactive, never auto-selected
+      }
+      if (isRetiredEffect(id)) {
+        continue; // excluded: retired (Strobe Mega) — pattern_flash_safety.dart
       }
       result.putIfAbsent(id, () => meta.withId(id)); // first writer wins (de-dup)
     }

@@ -11,10 +11,21 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/dashboard/main_scaffold.dart' show showDemoExitSheet;
 import 'package:nexgen_command/features/wled/effect_preview_widget.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/channel_direction.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/favorites/favorite_brightness.dart'
+    show lookPayloadForApply;
+import 'package:nexgen_command/features/site/site_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_adjustment_pacer.dart';
+import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
+import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
+import 'package:nexgen_command/features/wled/pattern_tweak_sender.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
@@ -802,12 +813,16 @@ class LibraryNodeCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Text(
-                          'Tap to explore',
-                          style: TextStyle(
-                            color: accentColor.withValues(alpha: 0.6),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
+                        Flexible(
+                          child: Text(
+                            'Tap to explore',
+                            style: TextStyle(
+                              color: accentColor.withValues(alpha: 0.6),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const SizedBox(width: 3),
@@ -834,6 +849,18 @@ class LibraryNodeCard extends StatelessWidget {
     final grouping = node.metadata?['grouping'] as int?;
     final spacing = node.metadata?['spacing'] as int?;
     final hasSpacing = grouping != null && spacing != null;
+
+    // Item C: a saved EFFECT design (My Designs) renders as a pattern card —
+    // its effect running in its own colours, the effect's name and its
+    // speed — instead of a bare row of dots.
+    // Shown as what will play: a stored Strobe Mega plays Strobe
+    // (pattern_flash_safety.dart).
+    final storedEffectId = node.metadata?['isSavedDesign'] == true
+        ? (node.metadata?['effectId'] as int?)
+        : null;
+    final savedEffectId =
+        storedEffectId == null ? null : offeredEffectId(storedEffectId);
+    final savedSpeed = node.metadata?['speed'] as int?;
 
     return Material(
       color: Colors.transparent,
@@ -891,6 +918,19 @@ class LibraryNodeCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             child: Row(
               children: [
+                if (savedEffectId != null) ...[
+                  SizedBox(
+                    key: ValueKey('saved-design-preview-${node.id}'),
+                    width: 56,
+                    height: 18,
+                    child: EffectPreviewWidget(
+                      effectId: savedEffectId,
+                      colors: hasColors ? colors : const [Colors.white],
+                      borderRadius: 4,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ] else
                 // LED dot preview — 8 dots showing the on/off pattern
                 if (hasSpacing) ...[
                   Row(
@@ -935,16 +975,45 @@ class LibraryNodeCard extends StatelessWidget {
                 ],
                 // Palette name
                 Expanded(
-                  child: Text(
-                    node.name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: savedEffectId == null
+                      ? Text(
+                          node.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              node.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              savedSpeed == null
+                                  ? WledEffectsCatalog.getName(savedEffectId)
+                                  : '${WledEffectsCatalog.getName(savedEffectId)}'
+                                      ' · speed $savedSpeed',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.6),
+                                fontSize: 10,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                 ),
                 _trailing(primaryColor),
               ],
@@ -1745,17 +1814,17 @@ class _PatternCardState extends ConsumerState<PatternCard> {
   }
 
   Future<void> _applyPattern(BuildContext context, WidgetRef ref) async {
+    // Captured before any await: the gate below may wait on a channel source.
+    final container = ProviderScope.containerOf(context, listen: false);
     // Check for active neighborhood sync before changing lights
     final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
     if (!shouldProceed) return;
 
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No device connected')),
-        );
-      }
+      // Row 1: the shared reason (offline, away without remote access, still
+      // connecting, no controller) — not "No device connected" for all four.
+      await reportApplyBlocked(container);
       return;
     }
 
@@ -1784,14 +1853,18 @@ class _PatternCardState extends ConsumerState<PatternCard> {
         _ledsPerColor,
       );
 
+      // +110 E1 follow-up 1: the catalogue states `bri` (200/230/255) on its
+      // patterns, and nobody chose it — a tap on a search result used to jump
+      // the whole house to that level. Same rule as favourites: dropped
+      // unless a writer marked it as the customer's own.
+      final sentPayload = lookPayloadForApply(preparedPayload);
       if (!isCustomEffect) {
-        var payload = preparedPayload;
-        final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isEmpty) {
-          debugPrint('PatternGrid apply: skip (no effective channels — U1 gate)');
-          return;
-        }
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+        var payload = sentPayload;
+        // Row 1: wait for a channel source still answering; a closed gate is
+        // explained on screen, never a silent return.
+        final channels = await resolveChannelsForTap(container);
+        if (channels == null || !context.mounted) return;
+        payload = applyChannelFilter(payload, channels, ref.read(applyFilterChannelsProvider));
         final success = await repo.applyJson(payload);
 
         if (!success) {
@@ -1823,7 +1896,10 @@ class _PatternCardState extends ConsumerState<PatternCard> {
           speed: patternSpeed,
           intensity: patternIntensity,
           effectName: widget.pattern.name,
-          brightness: preparedPayload['bri'] as int? ?? 255,
+          // The level the lights are actually at: the apply no longer sets
+          // one (unless the pattern's own level was chosen by the customer).
+          brightness: sentPayload['bri'] as int? ??
+              ref.read(wledStateProvider).brightness,
           colorGroupSize: patternGrp,
           spacing: patternSpc,
         );
@@ -1831,10 +1907,32 @@ class _PatternCardState extends ConsumerState<PatternCard> {
         debugPrint('Error in pattern grid applyPreviewSync: $e');
       }
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(widget.pattern.name, ref.read(wledStateProvider));
+      // Row 19: an Explore apply is a use, so it appears under Recent
+      // Patterns. Explore never recorded one, so Recent could only list
+      // scenes and designs.
+      unawaited(ref.trackWledPayload(
+        payload: sentPayload,
+        patternName: widget.pattern.name,
+        source: 'explore',
+      ));
 
       if (context.mounted) {
-        // Show pattern adjustment panel in a bottom sheet
-        _showAdjustmentPanel(context, ref);
+        // +110 E1 follow-up 1: the adjustment sheet used to open on EVERY
+        // tap, over the results the customer was browsing. It opens now only
+        // when asked — "Adjust" on the confirmation.
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text('Applied ${widget.pattern.name}'),
+            duration: const Duration(seconds: 6),
+            action: SnackBarAction(
+              key: const ValueKey('pattern-applied-adjust'),
+              label: 'Adjust',
+              onPressed: () {
+                if (context.mounted) _showAdjustmentPanel(context, ref);
+              },
+            ),
+          ));
 
         // If this is a team-associated pattern, check for a live/upcoming
         // game and offer to enable live scoring celebrations.
@@ -2019,7 +2117,14 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   late int _spacing;
   late int _effectId;
   late bool _reverse;
-  Timer? _debounce;
+
+  /// When the pending adjustment goes out: a short debounce at home, ONE
+  /// write when the drag settles away from home, never two in flight
+  /// (pattern_adjustment_pacer.dart — +110 E1 follow-up 4).
+  late final AdjustmentPacer _pacer = AdjustmentPacer(
+    flush: _flushChange,
+    isRemote: () => ref.read(isRemoteModeProvider),
+  );
 
   // Brightness gradient state
   late bool _isGradient;
@@ -2051,32 +2156,62 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _pacer.dispose();
     super.dispose();
   }
 
-  // Keys changed since the last send. ONE debounce serves every slider, so the
+  // Keys changed since the last send. ONE pacer serves every slider, so the
   // pending update has to ACCUMULATE: it used to be replaced, which meant
   // moving Grouping and then Spacing within 200 ms sent only `spc` and the
   // `grp` change was silently dropped.
   final Map<String, dynamic> _pendingSegUpdate = {};
 
-  void _applyChange(Map<String, dynamic> segUpdate) {
+  // What the lights last accepted, so a refused write puts the sliders back
+  // where the lights actually are (row 80).
+  late int _acceptedSpeed = widget.speed;
+  late int _acceptedIntensity = widget.intensity;
+  late int _acceptedGrouping = widget.grouping;
+  late int _acceptedSpacing = widget.spacing;
+
+  /// An ADJUSTMENT of the look just applied: only the selected channels, only
+  /// the changed fields, never `on` (pattern_tweak_sender.dart). This used to
+  /// go through `applyChannelFilter` — the design-apply shape — so a slider
+  /// drag with one channel selected switched the other channels OFF, and a
+  /// refused write left the slider where it was with no message.
+  ///
+  /// [dragging]: a slider step (away from home it waits for the drag to
+  /// settle); false for a discrete tap.
+  void _applyChange(Map<String, dynamic> segUpdate, {bool dragging = true}) {
     _pendingSegUpdate.addAll(segUpdate);
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 200), () async {
-      final repo = ref.read(wledRepositoryProvider);
-      if (repo == null) return;
-      final segUpdate = Map<String, dynamic>.from(_pendingSegUpdate);
-      _pendingSegUpdate.clear();
-      var payload = <String, dynamic>{'seg': [segUpdate]};
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isEmpty) {
-        debugPrint('PatternGrid _applyChange: skip (U1 gate)');
-        return;
-      }
-      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      await repo.applyJson(payload);
+    _pacer.changed(dragging: dragging);
+  }
+
+  Future<void> _flushChange() async {
+    if (!mounted || _pendingSegUpdate.isEmpty) return;
+    final fields = Map<String, dynamic>.from(_pendingSegUpdate);
+    _pendingSegUpdate.clear();
+    final container = ProviderScope.containerOf(context, listen: false);
+    final result = await container
+        .read(wledStateProvider.notifier)
+        .runAndReport(
+          sendChannelTweak(container.read, fields),
+          onFailure: kAdjustmentFailedMessage,
+        );
+    if (!mounted) return;
+    if (result.ok) {
+      _acceptedSpeed = _speed;
+      _acceptedIntensity = _intensity;
+      _acceptedGrouping = _grouping;
+      _acceptedSpacing = _spacing;
+      return;
+    }
+    // A newer value is already waiting: it gets its own answer.
+    if (_pacer.hasPending) return;
+    setState(() {
+      _speed = _acceptedSpeed;
+      _intensity = _acceptedIntensity;
+      _grouping = _acceptedGrouping;
+      _spacing = _acceptedSpacing;
     });
   }
 
@@ -2087,20 +2222,35 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   /// `channel_direction.dart` for why it needs a different door — and for the
   /// #102 tension it inherits.
   Future<void> _applyDirection(bool reverse) async {
-    final channels = ref.read(effectiveChannelIdsProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
+    final channels = await resolveEffectiveChannelIds(container.read);
+    final WriteResult result;
     if (channels.isEmpty) {
-      debugPrint('PatternGrid _applyDirection: skip (U1 gate)');
-      return;
+      result = WriteResult.blocked(
+          applyBlockedReason(container.read) ?? kApplyBlockedFallback);
+    } else {
+      final ok = await applyChannelDirection(
+        repo: container.read(wledRepositoryProvider),
+        channelIds: channels,
+        reverse: reverse,
+      );
+      result = ok
+          ? const WriteResult.success()
+          : WriteResult.failed(
+              WriteFailureKind.unsupported,
+              message: container.read(isLanConnectedProvider)
+                  ? "Direction couldn't be changed — your lights didn't take "
+                      'it.'
+                  : directionLanOnlyMessage(container.read(siteModeProvider)),
+            );
     }
-    final ok = await applyChannelDirection(
-      repo: ref.read(wledRepositoryProvider),
-      channelIds: channels,
-      reverse: reverse,
-    );
-    if (!ok) {
-      debugPrint('PatternGrid _applyDirection: transport cannot state '
-          'geometry (off-LAN or demo) — direction NOT applied');
-    }
+    final reported = await container
+        .read(wledStateProvider.notifier)
+        .runAndReport(Future.value(result),
+            onFailure: "Direction couldn't be changed.");
+    // Same as the Home Tune panel (row 81): a refused flip flips back.
+    if (!mounted || reported.ok) return;
+    setState(() => _reverse = !reverse);
   }
 
   /// Recompute gradient colors from the current preset + base color and
@@ -2143,7 +2293,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
       'spc': 0,
       'sx': sx,
       'pal': 5,
-    });
+    }, dragging: false);
   }
 
   @override
@@ -2166,7 +2316,10 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
         ],
       ),
       child: SafeArea(
-        child: Padding(
+        // Scrolls when it is taller than the screen — at Larger Text, away
+        // from home (the direction note wraps), it ran 42 points off the
+        // bottom (+110 E1 accessibility).
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2340,6 +2493,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                     setState(() => _speed = raw);
                     _applyChange({'sx': _speed});
                   },
+                  onChangeEnd: _pacer.settled,
                 ),
                 const SizedBox(height: 4),
               ],
@@ -2352,6 +2506,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                   setState(() => _intensity = v.round());
                   _applyChange({'ix': _intensity});
                 },
+                onChangeEnd: _pacer.settled,
               ),
               const SizedBox(height: 12),
               // Direction toggle (hide for static effects)
@@ -2392,7 +2547,8 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
-                      kLanOnlyMessage,
+                      directionLanOnlyMessage(ref.watch(siteModeProvider)),
+                      key: const ValueKey('sheet-direction-away'),
                       style: TextStyle(
                         fontSize: 11,
                         color: Colors.white.withValues(alpha: 0.45),
@@ -2423,6 +2579,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                     setState(() => _grouping = v.round());
                     _applyChange({'grp': _grouping});
                   },
+                  onChangeEnd: _pacer.settled,
                 ),
                 const SizedBox(height: 8),
                 // Spacing slider
@@ -2437,6 +2594,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
                     setState(() => _spacing = v.round());
                     _applyChange({'spc': _spacing});
                   },
+                  onChangeEnd: _pacer.settled,
                 ),
                 const SizedBox(height: 16),
               ],
@@ -2456,6 +2614,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     required String label,
     required double value,
     required ValueChanged<double> onChanged,
+    VoidCallback? onChangeEnd,
     double min = 0,
     double max = 255,
     int? divisions,
@@ -2475,6 +2634,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
             max: max,
             divisions: divisions,
             onChanged: onChanged,
+            onChangeEnd: onChangeEnd == null ? null : (_) => onChangeEnd(),
           ),
         ),
         SizedBox(

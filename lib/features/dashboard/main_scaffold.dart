@@ -34,6 +34,12 @@ import 'package:nexgen_command/theme.dart';
 ///   1 = Schedule (/schedule)
 ///   2 = Explore (/explore)
 ///   3 = System (/settings)
+/// Row 86 — what system Back does on a branch ROOT: on Home it leaves the
+/// app (it was intercepted and did nothing at all); on any other tab it goes
+/// to Home first.
+@visibleForTesting
+bool shellRootCanPop(int shellIndex) => shellIndex == 0;
+
 class MainScaffold extends ConsumerStatefulWidget {
   final StatefulNavigationShell navigationShell;
 
@@ -203,7 +209,10 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
 
     return FeatureTourOverlay(
       child: PopScope(
-        canPop: false,
+        // Row 86: Back on the Home root does what Back does — leaves the app.
+        // It used to be intercepted everywhere and did nothing at all on
+        // Home. Every other branch root still goes to Home first.
+        canPop: shellRootCanPop(shellIndex),
         onPopInvokedWithResult: (didPop, _) {
           if (didPop) return;
           // If on a non-Home branch root, switch to Home instead of exiting

@@ -22,11 +22,15 @@ class _SaveCustomPatternDialogState extends State<SaveCustomPatternDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      // Scrolls at large text rather than running off the screen.
+      scrollable: true,
+      // The title wraps: it overflowed its row by 9.5 points at default
+      // text size (+110 E1 accessibility pass).
       title: Row(
         children: [
           Icon(Icons.save, color: NexGenPalette.cyan),
           const SizedBox(width: 12),
-          const Text('Save Custom Pattern'),
+          const Expanded(child: Text('Save Custom Pattern')),
         ],
       ),
       content: Form(
@@ -46,6 +50,7 @@ class _SaveCustomPatternDialogState extends State<SaveCustomPatternDialog> {
               decoration: InputDecoration(
                 labelText: 'Pattern Name',
                 hintText: 'e.g., My Sunset Colors',
+                hintMaxLines: 2,
                 prefixIcon: Icon(Icons.palette, color: NexGenPalette.cyan),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),

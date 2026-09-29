@@ -229,11 +229,13 @@ void main() {
 
     expect(repo.refused, isEmpty,
         reason: 'nothing over the ceiling was attempted');
-    // The base: ONE write — black, at the favorite's brightness, every channel.
+    // The base: ONE write — black, every channel. +110 E1 item B: no
+    // brightness — a favourite (from any door, geofence included) applies at
+    // the house's own level unless the customer saved one on purpose.
     expect(repo.json, hasLength(1));
     final base = repo.json.single;
     expect(base['on'], isTrue);
-    expect(base['bri'], 180);
+    expect(base.containsKey('bri'), isFalse);
     final segs = (base['seg'] as List).cast<Map>();
     expect(segs.map((s) => s['id']).toSet(), {0, 1});
     for (final s in segs) {

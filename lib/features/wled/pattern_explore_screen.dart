@@ -66,6 +66,9 @@ class ExplorePatternsScreen extends ConsumerStatefulWidget {
 
 class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
   final TextEditingController _searchController = TextEditingController();
+
+  /// Row 88: the app-bar Search icon focuses this field. It did nothing.
+  final FocusNode _searchFocus = FocusNode();
   bool _isSearching = false;
   bool _hasSearched = false;
   // Library search results containing existing patterns
@@ -126,6 +129,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -166,7 +170,8 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                 ),
                 actions: [
                   IconButton(
-                    onPressed: () {},
+                    key: const ValueKey('explore-search-icon'),
+                    onPressed: () => _searchFocus.requestFocus(),
                     icon: Icon(Icons.search, color: ExploreDesignTokens.textSecondary),
                     tooltip: 'Search',
                   ),
@@ -176,6 +181,7 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
               pagePadding(
                 child: _LuminaAISearchBar(
                   controller: _searchController,
+                  focusNode: _searchFocus,
                   onSubmitted: _handleSearch,
                   onClear: () => _handleSearch(''),
                 ),
@@ -186,12 +192,16 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
               // Conditional rendering based on search state
               if (_isSearching)
                 Expanded(
-                  child: Column(
-                    children: [
-                      const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
-                      const SizedBox(height: 8),
-                      Text('Searching design library...', style: TextStyle(color: ExploreDesignTokens.textSecondary)),
-                    ],
+                  // Scrolls rather than overflowing when Larger Text makes the
+                  // search bar taller.
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        const ExploreShimmerGrid(crossAxisCount: 2, itemCount: 6),
+                        const SizedBox(height: 8),
+                        Text('Searching design library...', style: TextStyle(color: ExploreDesignTokens.textSecondary)),
+                      ],
+                    ),
                   ),
                 )
               else if (_hasSearched)
@@ -219,11 +229,6 @@ class _ExplorePatternsScreenState extends ConsumerState<ExplorePatternsScreen> {
                       // 2. Recent Patterns section
                       SliverToBoxAdapter(
                         child: pagePadding(child: const RecentPatternsSection()),
-                      ),
-
-                      // 4. Pinned Categories section
-                      SliverToBoxAdapter(
-                        child: pagePadding(child: const PinnedCategoriesSection()),
                       ),
 
                       // 5. Browse Design Library header
@@ -463,9 +468,10 @@ Widget gap(double h) => SizedBox(height: h);
 /// Lumina AI Search input with pill shape, gradient border, and live search.
 class _LuminaAISearchBar extends StatefulWidget {
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final ValueChanged<String> onSubmitted;
   final VoidCallback? onClear;
-  const _LuminaAISearchBar({required this.controller, required this.onSubmitted, this.onClear});
+  const _LuminaAISearchBar({required this.controller, this.focusNode, required this.onSubmitted, this.onClear});
 
   @override
   State<_LuminaAISearchBar> createState() => _LuminaAISearchBarState();
@@ -515,24 +521,31 @@ class _LuminaAISearchBarState extends State<_LuminaAISearchBar> {
         gradient: const LinearGradient(colors: [NexGenPalette.cyan, NexGenPalette.violet]),
         borderRadius: BorderRadius.circular(25),
       ),
+      // A minimum, not a fixed height (+110 E1 accessibility): a fixed 50
+      // cut the text and hint off at Larger Text. At default size it is still
+      // exactly 50 (the 44-point buttons plus 3 above and below).
       child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        constraints: const BoxConstraints(minHeight: 50),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
         decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(25)),
         child: Row(children: [
           const Icon(Icons.auto_awesome, color: NexGenPalette.cyan),
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
+              key: const ValueKey('explore-search-field'),
               controller: widget.controller,
+              focusNode: widget.focusNode,
               onSubmitted: widget.onSubmitted,
               style: Theme.of(context).textTheme.bodyLarge,
               cursorColor: NexGenPalette.cyan,
               decoration: const InputDecoration(
-                hintText: "Search designs... (e.g. 'Christmas', 'Chiefs')",
+                hintText: 'Search designs, e.g. Christmas',
                 hintStyle: TextStyle(color: Colors.white70),
+                hintMaxLines: 3,
                 border: InputBorder.none,
-                isCollapsed: true,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 4),
               ),
             ),
           ),

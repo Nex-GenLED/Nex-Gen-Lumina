@@ -1,9 +1,9 @@
 // Audit-2 S4 + S5 — favorites write paths actually persist (and surface
 // failures) instead of faking success.
 //
-// S4: PatternControlCard's "Save to Favorites" button previously ONLY showed a
-//     'Saved to Favorites' toast and called nothing — a dead success toast. It
-//     now calls FavoritesNotifier.addFavorite and gates the toast on the write.
+// S4 covered PatternControlCard's "Save to Favorites" button. That widget was
+//     never built by any screen and was removed in +110 E1 (follow-up 5), so
+//     its group went with it.
 //
 // S5: FavoriteHeartButton previously fired addFavorite/removeFromFavorites with
 //     no await and no try/catch — they rethrow on failure → unhandled async
@@ -22,24 +22,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
-import 'package:nexgen_command/features/wled/pattern_category_detail.dart';
-import 'package:nexgen_command/models/smart_pattern.dart';
 import 'package:nexgen_command/widgets/favorite_heart_button.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  const pattern = SmartPattern(
-    id: 'patt-1',
-    name: 'Evening Glow',
-    colors: [
-      [255, 0, 0],
-      [0, 0, 255],
-    ],
-    effectId: 0,
-    speed: 128,
-    intensity: 200,
-  );
 
   // Pumps a widget under a ProviderScope + MaterialApp, then resolves the
   // (stream-backed) authStateProvider so the handler's synchronous
@@ -70,76 +56,6 @@ void main() {
     await tester.pump();
     return fake;
   }
-
-  group('S4 — PatternControlCard "Save to Favorites" actually persists', () {
-    Future<void> expandCard(WidgetTester tester) async {
-      // The Save buttons live behind the expander.
-      await tester.tap(find.byIcon(Icons.expand_more));
-      await tester.pumpAndSettle();
-    }
-
-    testWidgets('tapping the button calls addFavorite with the pattern data '
-        'and shows the success toast', (tester) async {
-      final fake = await pumpAndResolveAuth(
-        tester,
-        child: const PatternControlCard(pattern: pattern),
-        user: _StubUser('u1'),
-      );
-
-      await expandCard(tester);
-      await tester.tap(find.text('Save to Favorites'));
-      await tester.pump(); // run the async handler
-      await tester.pump(); // surface the SnackBar
-
-      expect(fake.addCalls, 1, reason: 'the button must actually persist');
-      expect(fake.lastPatternId, 'patt-1');
-      expect(fake.lastPatternName, 'Evening Glow');
-      expect(fake.lastPatternData, isNotNull);
-      expect(fake.lastPatternData!['seg'], isA<List>());
-      // What My Favorites POSTs to the controller when the card is tapped: a
-      // favorite that does not turn the lights on is not a favorite.
-      expect(fake.lastPatternData!['on'], isTrue);
-      expect(find.text('Saved to Favorites'), findsOneWidget);
-    });
-
-    testWidgets('a failing write surfaces an error instead of a fake success',
-        (tester) async {
-      final fake = await pumpAndResolveAuth(
-        tester,
-        child: const PatternControlCard(pattern: pattern),
-        user: _StubUser('u1'),
-        throwOnWrite: true,
-      );
-
-      await expandCard(tester);
-      await tester.tap(find.text('Save to Favorites'));
-      await tester.pump();
-      await tester.pump();
-
-      expect(fake.addCalls, 1);
-      expect(find.text('Failed to save to Favorites'), findsOneWidget);
-      expect(find.text('Saved to Favorites'), findsNothing,
-          reason: 'must not claim success on a failed write');
-    });
-
-    testWidgets('signed-out user is prompted to sign in and nothing is written',
-        (tester) async {
-      final fake = await pumpAndResolveAuth(
-        tester,
-        child: const PatternControlCard(pattern: pattern),
-        user: null,
-      );
-
-      await expandCard(tester);
-      await tester.tap(find.text('Save to Favorites'));
-      await tester.pump();
-      await tester.pump();
-
-      expect(fake.addCalls, 0);
-      expect(find.text('Please sign in to save favorites'), findsOneWidget);
-      expect(find.text('Saved to Favorites'), findsNothing);
-    });
-  });
 
   group('S5 — FavoriteHeartButton awaits + surfaces failures', () {
     const heart = FavoriteHeartButton(

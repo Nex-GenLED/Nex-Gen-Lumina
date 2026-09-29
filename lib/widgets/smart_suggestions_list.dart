@@ -9,10 +9,16 @@ class SmartSuggestionsList extends ConsumerWidget {
   final Function(SmartSuggestion)? onSuggestionAction;
   final int maxSuggestions;
 
+  /// Whether the host can act on a suggestion. A card whose kind the host
+  /// cannot act on shows no action button (row 77: "Add", "Action" and the
+  /// like used to do nothing at all). Null = every card is actionable.
+  final bool Function(SmartSuggestion)? isActionable;
+
   const SmartSuggestionsList({
     super.key,
     this.onSuggestionAction,
     this.maxSuggestions = 5,
+    this.isActionable,
   });
 
   @override
@@ -65,9 +71,11 @@ class SmartSuggestionsList extends ConsumerWidget {
               separatorBuilder: (context, index) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final suggestion = displaySuggestions[index];
+                final actionable =
+                    isActionable == null || isActionable!(suggestion);
                 return _SuggestionCard(
                   suggestion: suggestion,
-                  onAction: onSuggestionAction != null
+                  onAction: onSuggestionAction != null && actionable
                       ? () => onSuggestionAction!(suggestion)
                       : null,
                 );
@@ -108,8 +116,12 @@ class _SuggestionCard extends ConsumerWidget {
           color: Colors.red,
         ),
       ),
+      // Row 78: the dismissal is saved FIRST, and the card goes — and says so
+      // — only when it was. The write used to be fired and forgotten with its
+      // error swallowed, and "Suggestion dismissed" showed regardless; a card
+      // that failed to dismiss came straight back.
+      confirmDismiss: (direction) => _dismiss(context, ref),
       onDismissed: (direction) {
-        ref.read(suggestionsNotifierProvider.notifier).dismissSuggestion(suggestion.id);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Suggestion dismissed'),
@@ -200,29 +212,29 @@ class _SuggestionCard extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: () {
-                      ref
-                          .read(suggestionsNotifierProvider.notifier)
-                          .dismissSuggestion(suggestion.id);
-                    },
+                    key: ValueKey('suggestion-dismiss-${suggestion.id}'),
+                    onPressed: () => _dismiss(context, ref),
                     child: Text(
                       'Dismiss',
                       style: TextStyle(color: NexGenPalette.textSecondary),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: onAction,
-                    icon: Icon(_getActionIcon(suggestion.type), size: 18),
-                    label: Text(_getActionLabel(suggestion.type)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _getIconColor(suggestion.type),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                  if (onAction != null) ...[
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      key: ValueKey('suggestion-action-${suggestion.id}'),
+                      onPressed: onAction,
+                      icon: Icon(_getActionIcon(suggestion.type), size: 18),
+                      label: Text(_getActionLabel(suggestion.type)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _getIconColor(suggestion.type),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ],
@@ -230,6 +242,23 @@ class _SuggestionCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Saves the dismissal and says so when it did not land. Returns whether it
+  /// did (the swipe's `confirmDismiss`).
+  Future<bool> _dismiss(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await ref
+        .read(suggestionsNotifierProvider.notifier)
+        .dismissSuggestion(suggestion.id);
+    if (!ok) {
+      messenger.showSnackBar(SnackBar(
+        content: const Text("Couldn't dismiss that suggestion — try again."),
+        backgroundColor: Colors.orange.shade800,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    return ok;
   }
 
   Color _getCardColor(SuggestionType type) {

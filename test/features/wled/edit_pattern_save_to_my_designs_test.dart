@@ -19,6 +19,7 @@ import 'package:nexgen_command/features/installer/installer_access_providers.dar
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_screen.dart';
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
+import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
@@ -121,8 +122,11 @@ void main() {
     expect(find.byTooltip('Save to My Designs'), findsOneWidget);
   });
 
-  testWidgets('Static: saves a per-pixel design named after the source card, '
-      'and says where it went', (tester) async {
+  testWidgets('Static (3 colours): saves a PALETTE/EFFECT design — not a '
+      'per-pixel one — named after the source card, and says where it went',
+      (tester) async {
+    // +110 E1 item C: filing Static as a per-pixel design is what made an
+    // edited Explore pattern come back from My Designs stripped down.
     final service = _RecordingDesignService();
     await _pump(tester, service);
 
@@ -134,11 +138,87 @@ void main() {
     expect(d.id, isEmpty, reason: 'a NEW design → createDesign → unique auto-id');
     expect(d.name, 'Kansas City Chiefs');
     expect(d.ownerId, 'u1');
-    expect(d.perPixel, isTrue);
+    expect(d.perPixel, isFalse);
+    expect(d.isPositional, isFalse);
     expect(d.channels.map((c) => c.ledCount), [128, 162]);
+    expect(d.channels.every((c) => c.effectId == 0), isTrue);
+    expect(d.channels.every((c) => c.solidLayout == SolidLayout.alternating),
+        isTrue,
+        reason: "the editor's Static bands ARE the alternating layout");
+    expect(d.channels.first.colorGroups.map((g) => g.color), [
+      [227, 24, 55, 0],
+      [255, 184, 28, 0],
+      [255, 255, 255, 0],
+    ]);
     expect(d.tags, contains(kPatternEditorDesignTag));
     expect(find.text('Saved "Kansas City Chiefs" to My Designs'), findsOneWidget);
     expect(find.textContaining('Saved to device'), findsNothing);
+  });
+
+  testWidgets('Static with more than 3 colours stays per-pixel — the one '
+      'case an effect design cannot hold', (tester) async {
+    final service = _RecordingDesignService();
+    await _pump(tester, service,
+        pattern: _chiefs().copyWith(actionColors: const [
+          Color(0xFFFF0000),
+          Color(0xFF00FF00),
+          Color(0xFF0000FF),
+          Color(0xFFFFFFFF),
+        ]));
+
+    await tester.tap(find.text('SAVE'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(service.saved.single.perPixel, isTrue);
+  });
+
+  testWidgets('item C: Save persists the FULL set — colours, effect, speed, '
+      'intensity, layout, direction, background', (tester) async {
+    final service = _RecordingDesignService();
+    await _pump(tester, service,
+        pattern: EditablePattern(
+          id: 'edit_x',
+          name: 'Blue Chase',
+          actionColors: const [Color(0xFF0000FF)],
+          backgroundColor: const Color(0xFF200000),
+          effectId: 28,
+          direction: PatternDirection.left,
+          speed: 44,
+          intensity: 90,
+          brightness: 150,
+          colorGroupSize: 3,
+        ));
+
+    await tester.tap(find.text('SAVE'));
+    await tester.pump();
+    await tester.pump();
+
+    final d = service.saved.single;
+    final ch = d.channels.first;
+    expect(d.perPixel, isFalse);
+    expect(ch.effectId, 28);
+    expect(ch.speed, 44);
+    expect(ch.intensity, 90);
+    expect(ch.grouping, 3);
+    expect(ch.spacing, 0);
+    expect(ch.reverse, isTrue, reason: 'row 94: Left is stored');
+    expect(ch.colorGroups.map((g) => g.color), [
+      [0, 0, 255, 0],
+      [32, 0, 0, 0],
+    ], reason: "row 95: the background is WLED's background slot (col[1])");
+    expect(d.brightness, 150);
+    expect(d.brightnessStated, isTrue);
+    // And the design fires as exactly that look.
+    final seg = (d.toWledPayload()['seg'] as List).first as Map;
+    expect(seg['fx'], 28);
+    expect(seg['sx'], 44);
+    expect(seg['ix'], 90);
+    expect(seg['grp'], 3);
+    expect(seg['col'], [
+      [0, 0, 255, 0],
+      [32, 0, 0, 0],
+    ]);
   });
 
   testWidgets('Animated: saves an effect design with the editor\'s effect',
@@ -258,10 +338,30 @@ void main() {
     expect(find.text('Sign in to save designs. Nothing was saved.'), findsOneWidget);
   });
 
-  testWidgets('Static with no channel lengths: refuses with a reason instead '
-      'of saving a guess', (tester) async {
+  testWidgets('Static with no channel lengths: a ≤3-colour pattern saves (an '
+      'effect design needs no LED counts)', (tester) async {
     final service = _RecordingDesignService();
     await _pump(tester, service, channels: const []);
+
+    await tester.tap(find.text('SAVE'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(service.saved.single.perPixel, isFalse);
+    expect(service.saved.single.channels.single.channelName, 'All');
+  });
+
+  testWidgets('Static with no channel lengths and >3 colours: refuses with a '
+      'reason instead of saving a guess', (tester) async {
+    final service = _RecordingDesignService();
+    await _pump(tester, service,
+        channels: const [],
+        pattern: _chiefs().copyWith(actionColors: const [
+          Color(0xFFFF0000),
+          Color(0xFF00FF00),
+          Color(0xFF0000FF),
+          Color(0xFFFFFFFF),
+        ]));
 
     await tester.tap(find.text('SAVE'));
     await tester.pump();

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,11 +60,25 @@ List<FavoritePattern> _buildWhiteSlots(Ref ref) {
   ];
 }
 
-/// Slots 1-2 of My Favorites: the user's preferred whites, permanently
-/// reserved. Built locally (defaults until the profile carries preferences),
-/// so this row renders at once and never waits on Firestore.
+/// The first tiles of My Favorites: the user's preferred whites. Built
+/// locally (defaults until the profile carries preferences), so they render at
+/// once and never wait on the favorites query.
+///
+/// No longer PERMANENT (+110 E1, owner item A): a white the customer removed
+/// or replaced is listed in the profile's `favorite_whites_hidden` and is left
+/// out here. Until the profile has loaded, both show — the instant render the
+/// reserved row was built for.
 final favoriteWhiteSlotsProvider =
-    Provider.autoDispose<List<FavoritePattern>>((ref) => _buildWhiteSlots(ref));
+    Provider.autoDispose<List<FavoritePattern>>((ref) {
+  final hidden = ref.watch(currentUserProfileProvider.select(
+      (p) => (p.valueOrNull?.favoriteWhitesHidden ?? const <String>[])
+          .join(',')));
+  final hiddenIds = hidden.isEmpty ? const <String>{} : hidden.split(',').toSet();
+  return [
+    for (final w in _buildWhiteSlots(ref))
+      if (!hiddenIds.contains(w.id)) w,
+  ];
+});
 
 /// Where the signed-in account's OWN profile stands.
 enum ProfileProvisioning {
@@ -261,13 +276,14 @@ class SuggestionsNotifier extends AutoDisposeAsyncNotifier<void> {
     // Nothing to build
   }
 
-  /// Dismiss a suggestion
-  Future<void> dismissSuggestion(String suggestionId) async {
+  /// Dismiss a suggestion. True only when the dismissal was saved (row 78:
+  /// "Suggestion dismissed" used to show whatever happened).
+  Future<bool> dismissSuggestion(String suggestionId) async {
     final user = ref.read(authStateProvider).value;
-    if (user == null) return;
+    if (user == null) return false;
 
     final userService = ref.read(userServiceProvider);
-    await userService.dismissSuggestion(user.uid, suggestionId);
+    return userService.dismissSuggestion(user.uid, suggestionId);
   }
 
   /// Generate new suggestions based on current habits
@@ -360,7 +376,12 @@ final recentUsageProvider = StreamProvider.autoDispose.family<List<PatternUsageE
           brightness: (data['brightness'] as num?)?.toInt(),
           speed: (data['speed'] as num?)?.toInt(),
           intensity: (data['intensity'] as num?)?.toInt(),
-          wledPayload: data['wled'] as Map<String, dynamic>?,
+          // Row 19: stored `jsonEncode`d (a WLED payload holds arrays of
+          // arrays, which Firestore's iOS codec aborts on). The cast here
+          // threw on every such event and hid Recent Patterns for anyone who
+          // had ever applied a scene or saved a design. Decoded the way
+          // PatternUsageEvent.fromFirestore does.
+          wledPayload: decodeUsageWledPayload(data['wled']),
           patternName: data['pattern_name'] as String?,
         );
       }).toList();
@@ -369,6 +390,23 @@ final recentUsageProvider = StreamProvider.autoDispose.family<List<PatternUsageE
     }
   },
 );
+
+/// A usage event's stored `wled` field as a map: a JSON string (every event
+/// written since the #84 fix), a raw map (older), or null. Never throws — a
+/// payload that will not parse reads as absent, not as a broken section.
+@visibleForTesting
+Map<String, dynamic>? decodeUsageWledPayload(Object? raw) {
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  if (raw is String && raw.isNotEmpty) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
 
 /// Provider for pattern usage frequency
 final patternFrequencyProvider = FutureProvider.autoDispose.family<Map<String, int>, int>(

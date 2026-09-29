@@ -3,6 +3,7 @@ import 'package:nexgen_command/features/wled/sparkle_background.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
 import 'package:nexgen_command/features/wled/lumina_custom_effects.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/sports_library_builder.dart';
@@ -321,7 +322,11 @@ class PatternRepository {
     for (final fxId in kColorwayEffectIds) {
       // Use creative naming for consistency
       final creativeName = _creativePatternName(fxId, subCat.name);
-      final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, 128);
+      // Item D: the curated roofline speed table — the same answer the
+      // palette tuner and the Home Tune panel read. It used to be
+      // 128 × WledEffectsCatalog.speedMultipliers, which left Bouncing Balls,
+      // Chunchun, Strobe and Dancing Shadows at WLED's desk-strip 128.
+      final adjustedSpeed = scaledEffectDefaultSpeed(fxId, 128);
       final payload = {
         'seg': [
           {
@@ -1197,7 +1202,8 @@ class PatternRepository {
           : _creativePatternName(fxId, node.name);
 
       // Apply speed adjustment from catalog
-      final adjustedSpeed = WledEffectsCatalog.getAdjustedSpeed(fxId, node.defaultSpeed);
+      // Item D: the roofline table, scaled by the folder's own pace.
+      final adjustedSpeed = scaledEffectDefaultSpeed(fxId, node.defaultSpeed);
 
       // Build segment data.
       // Palette is resolved per effect color-behavior (see paletteForEffect):

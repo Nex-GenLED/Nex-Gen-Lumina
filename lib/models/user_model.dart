@@ -292,6 +292,10 @@ class UserModel {
   /// User's preferred complement white (RGBW map from WhitePreset.toJson())
   final Map<String, dynamic>? preferredWhiteComplement;
 
+  /// My Favorites' reserved white tiles the customer removed or replaced
+  /// (`white_primary`, `white_complement`). Empty = both shown.
+  final List<String> favoriteWhitesHidden;
+
   // ========== Commercial Profile ==========
 
   /// Full commercial business profile (null for residential users).
@@ -390,6 +394,7 @@ class UserModel {
     // White preferences
     this.preferredWhitePrimary,
     this.preferredWhiteComplement,
+    this.favoriteWhitesHidden = const [],
     // Commercial profile
     this.commercialProfile,
     this.channelRoles = const [],
@@ -546,6 +551,10 @@ class UserModel {
       // White preferences
       preferredWhitePrimary: json['preferred_white_primary'] as Map<String, dynamic>?,
       preferredWhiteComplement: json['preferred_white_complement'] as Map<String, dynamic>?,
+      favoriteWhitesHidden: (json['favorite_whites_hidden'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
       // Commercial profile
       commercialProfile: json['commercial_profile'] != null
           ? BusinessProfile.fromJson(json['commercial_profile'] as Map<String, dynamic>)
@@ -680,6 +689,7 @@ class UserModel {
       // White preferences
       if (preferredWhitePrimary != null) 'preferred_white_primary': preferredWhitePrimary,
       if (preferredWhiteComplement != null) 'preferred_white_complement': preferredWhiteComplement,
+      if (favoriteWhitesHidden.isNotEmpty) 'favorite_whites_hidden': favoriteWhitesHidden,
       // Commercial profile
       if (commercialProfile != null) 'commercial_profile': commercialProfile!.toJson(),
       if (channelRoles.isNotEmpty) 'channel_roles': channelRoles.map((e) => e.toJson()).toList(),
@@ -768,6 +778,7 @@ class UserModel {
     // White preferences
     Map<String, dynamic>? preferredWhitePrimary,
     Map<String, dynamic>? preferredWhiteComplement,
+    List<String>? favoriteWhitesHidden,
     // Commercial profile
     BusinessProfile? commercialProfile,
     List<ChannelRole>? channelRoles,
@@ -854,6 +865,7 @@ class UserModel {
       // White preferences
       preferredWhitePrimary: preferredWhitePrimary ?? this.preferredWhitePrimary,
       preferredWhiteComplement: preferredWhiteComplement ?? this.preferredWhiteComplement,
+      favoriteWhitesHidden: favoriteWhitesHidden ?? this.favoriteWhitesHidden,
       // Commercial profile
       commercialProfile: commercialProfile ?? this.commercialProfile,
       channelRoles: channelRoles ?? this.channelRoles,

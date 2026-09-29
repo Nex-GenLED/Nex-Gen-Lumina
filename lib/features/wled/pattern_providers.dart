@@ -10,6 +10,7 @@ import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/effect_mood_system.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
@@ -60,25 +61,57 @@ const String kMyDesignsCategoryId = LibraryCategoryIds.myDesigns;
 /// uses to route taps through [applySavedDesign] instead of the catalog
 /// palette tuner.
 LibraryNode _customDesignToLibraryNode(CustomDesign design) {
-  final colors = <Color>[];
-  for (final ch in design.channels.where((c) => c.included)) {
-    for (final group in ch.colorGroups.take(2)) {
-      colors.add(group.flutterColor);
-      if (colors.length >= 3) break;
-    }
-    if (colors.length >= 3) break;
-  }
+  final lead = design.channels.where((c) => c.included).firstOrNull;
+  final positional = design.isPositional;
   return LibraryNode(
     id: 'design_${design.id}',
     name: design.name,
     nodeType: LibraryNodeType.palette,
     parentId: kMyDesignsCategoryId,
-    themeColors: colors.isEmpty ? const <Color>[Colors.white] : colors,
+    themeColors: designDisplayColors(design),
     metadata: <String, dynamic>{
       'isSavedDesign': true,
       'sourceDesignId': design.id,
+      'isPositional': positional,
+      // Item C: an effect design's card shows its effect running, its name
+      // and its speed — the same things the tuner it came from shows — so an
+      // edited pattern no longer comes back as a bare row of dots.
+      if (!positional && lead != null) ...{
+        'effectId': lead.effectId,
+        'speed': lead.speed,
+        'intensity': lead.intensity,
+      },
+      'isPatternEditorDesign': design.tags.contains(kPatternEditorDesignTag),
     },
   );
+}
+
+/// The colours a saved design is SHOWN with — its card swatches and the
+/// tuner's palette when it is opened (row 119).
+///
+/// The card used to take the first two colour groups of each channel in
+/// storage order. A painted design stores its BASE run first, and the paint
+/// editor's base is near-black, so its swatches came out black. This skips
+/// dark runs (unless the design has nothing else), de-duplicates, and keeps
+/// the design's own order.
+List<Color> designDisplayColors(CustomDesign design, {int max = 3}) {
+  final seen = <int>{};
+  final bright = <Color>[];
+  final dark = <Color>[];
+  for (final ch in design.channels.where((c) => c.included)) {
+    for (final g in ch.colorGroups) {
+      final c = g.color;
+      if (c.length < 3) continue;
+      final w = c.length > 3 ? c[3] : 0;
+      final key = (c[0] << 24) | (c[1] << 16) | (c[2] << 8) | w;
+      if (!seen.add(key)) continue;
+      final isDark = c[0] + c[1] + c[2] + w < 48;
+      (isDark ? dark : bright).add(g.flutterColor);
+    }
+  }
+  final picked = bright.isNotEmpty ? bright : dark;
+  if (picked.isEmpty) return const <Color>[Colors.white];
+  return picked.take(max).toList(growable: false);
 }
 
 /// Loads all pattern categories (folders) for the Explore root grid.
@@ -482,25 +515,20 @@ final recentPatternsProvider = Provider<AsyncValue<List<GradientPattern>>>((ref)
 List<Color> _extractColorsFromUsageEvent(PatternUsageEvent event) {
   final colors = <Color>[];
 
-  // Try to extract from wled payload first
-  if (event.wledPayload != null) {
-    final seg = event.wledPayload!['seg'];
-    if (seg is List && seg.isNotEmpty) {
-      final firstSeg = seg[0];
-      if (firstSeg is Map) {
-        final col = firstSeg['col'];
-        if (col is List) {
-          for (final c in col) {
-            if (c is List && c.length >= 3) {
-              colors.add(Color.fromARGB(
-                255,
-                (c[0] as num).toInt().clamp(0, 255),
-                (c[1] as num).toInt().clamp(0, 255),
-                (c[2] as num).toInt().clamp(0, 255),
-              ));
-            }
-          }
-        }
+  // Try to extract from wled payload first. The DESIGN segment, not seg[0]:
+  // an Explore apply logs the channel-filtered payload, whose seg[0] is the
+  // `{id: 0, on: false}` marker whenever channel 1 was left out (P6).
+  final firstSeg = firstRealDesignSegment(event.wledPayload);
+  final col = firstSeg?['col'];
+  if (col is List) {
+    for (final c in col) {
+      if (c is List && c.length >= 3) {
+        colors.add(Color.fromARGB(
+          255,
+          (c[0] as num).toInt().clamp(0, 255),
+          (c[1] as num).toInt().clamp(0, 255),
+          (c[2] as num).toInt().clamp(0, 255),
+        ));
       }
     }
   }

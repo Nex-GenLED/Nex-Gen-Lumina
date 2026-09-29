@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:nexgen_command/app_providers.dart';
 
 /// Model representing the current colors being used by the WLED system
 class CurrentColorsState {
@@ -223,7 +223,9 @@ class CurrentColorsNotifier extends StateNotifier<CurrentColorsState> {
   /// Uses the proper CustomDesign format so it appears in "My Designs"
   Future<bool> saveAsCustomPattern(String patternName, WidgetRef ref) async {
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      // The app's auth stream, not FirebaseAuth.instance directly — the same
+      // account every other writer saves under, and testable.
+      final user = this.ref.read(authStateProvider).valueOrNull;
       if (user == null) {
         debugPrint('Error saving custom pattern: No user logged in');
         return false;

@@ -192,13 +192,17 @@ void main() {
           reason: 'palette groups must never read as a painted picture');
     });
 
-    test('the background colour rides in slot 3, as it does live', () {
+    test('the background colour rides in WLED\'s background slot (col[1]), '
+        'as it does live', () {
+      // +110 E1 row 95: slot 2 (`col[1]`) is the effect's "Bg"; it used to go
+      // in slot 3 with slot 2 padded by duplicating colour 1.
       final p = _chiefs(fx: 17, colors: const [_red])
           .copyWith(backgroundColor: const Color(0xFF000040));
       final d = _save(p);
       expect([for (final g in d.channels.first.colorGroups) g.color],
           p.effectColorSlots());
-      expect(p.effectColorSlots(), hasLength(3));
+      expect(p.effectColorSlots(), hasLength(2));
+      expect(p.effectColorSlots()[1], [0, 0, 64, 0]);
     });
 
     test('Static never reports lost layers; a 3-colour effect does not either',

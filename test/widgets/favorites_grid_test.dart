@@ -156,7 +156,9 @@ void main() {
         userService: svc, provisioning: ProfileProvisioning.notProvisioned);
     await tester.pump();
 
-    expect(find.textContaining('No favorites yet'), findsOneWidget);
+    // The empty state is the whites and the ONE "+" (+110 E1, item A).
+    expect(find.text('Warm White'), findsOneWidget);
+    expect(find.byKey(const ValueKey('favorites-add-tile')), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(svc.listens, 0);
 
@@ -203,7 +205,8 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.textContaining('No favorites yet'), findsOneWidget);
+    expect(find.byKey(const ValueKey('favorites-add-tile')), findsOneWidget);
+    expect(find.text('Candy Cane Chase'), findsNothing);
 
     await tester.runAsync(() => svc.addFavorite(_uid, {
           'pattern_name': 'Candy Cane Chase',
@@ -214,7 +217,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Candy Cane Chase'), findsOneWidget);
-    expect(find.textContaining('No favorites yet'), findsNothing);
+    expect(find.byKey(const ValueKey('favorites-add-tile')), findsOneWidget,
+        reason: 'still exactly one "+"');
 
     await _unmount(tester);
   });
