@@ -1,15 +1,27 @@
 // lib/features/game_day/team_picker_sheet.dart
 //
-// "Add a Team" bottom sheet for the Game Day screen.
+// THE Game Day team chooser — the only team-selection UI in the app.
 //
 // Browses teams through Explore Designs' Sports folder tree
-// (team_picker_folders.dart) — league → teams, with Soccer grouping its
-// leagues exactly as Explore does — instead of one flat list per sport that
-// lumped NFL and NCAA football together. Search stays flat and spans every
-// league, so a partial name still finds a team without knowing its folder.
+// (team_picker_folders.dart): league → teams, with Soccer grouping its
+// leagues exactly as Explore does, and college leagues seated beside their
+// pro league (kGameDayPickerLeagueOrder). Search stays flat and spans every
+// league. It replaced the flat per-sport chip pickers ("Football",
+// "Basketball", …) that mixed NCAA and pro teams; every entry point — the
+// Game Day screen's "Add a Team", the Neighborhood Game Day setup and the
+// sync-event setup — now renders this widget, either as a sheet
+// ([showGameDayTeamPickerSheet]) or embedded in a screen (`embedded: true`).
 //
-// Lived as a private class inside game_day_screen.dart until the folder
-// browsing needed its own widget tests.
+// Three commit modes:
+//   • ADD (default): tapping a team adds it to Game Day (autopilot off) and
+//     pops the sheet.
+//   • PICK ([onTeamPicked] set): tapping a team hands it to the caller and
+//     does nothing else — for screens that need ONE team for their own flow
+//     (Neighborhood Game Day setup, sync-event setup).
+//   • MULTI ([onTeamToggled] set): tapping toggles a team in or out of the
+//     caller's selection, with a check on each chosen team and a "Done"
+//     button — for the onboarding paths that collect several teams at once
+//     (installer handoff "Favorite Teams", commercial "Your Teams").
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,10 +36,23 @@ import '../wled/pattern_grid_widgets.dart' show LibraryNodeCard;
 import 'game_day_providers.dart';
 import 'team_picker_folders.dart';
 
+/// A team chosen in PICK mode.
+typedef GameDayTeamPicked = void Function(String slug, TeamColors team);
+
+/// A team toggled in MULTI mode; [selected] is its new state.
+typedef GameDayTeamToggled = void Function(
+    String slug, TeamColors team, bool selected);
+
 /// Opens the team picker as a modal sheet on the branch navigator (the same
-/// navigator the Game Day screen lives on).
-void showTeamPickerSheet(BuildContext context,
-    {required Set<String> existingTeamSlugs}) {
+/// navigator the Game Day screen lives on). ADD mode unless [onTeamPicked]
+/// is given.
+void showGameDayTeamPickerSheet(
+  BuildContext context, {
+  required Set<String> existingTeamSlugs,
+  GameDayTeamPicked? onTeamPicked,
+  GameDayTeamToggled? onTeamToggled,
+  Set<String> selectedTeamSlugs = const {},
+}) {
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -40,33 +65,74 @@ void showTeamPickerSheet(BuildContext context,
       minChildSize: 0.5,
       maxChildSize: 0.95,
       expand: false,
-      builder: (_, scrollController) => TeamPickerSheet(
+      builder: (_, scrollController) => GameDayTeamPickerSheet(
         scrollController: scrollController,
         existingTeamSlugs: existingTeamSlugs,
+        onTeamPicked: onTeamPicked,
+        onTeamToggled: onTeamToggled,
+        selectedTeamSlugs: selectedTeamSlugs,
       ),
     ),
   );
 }
 
-class TeamPickerSheet extends ConsumerStatefulWidget {
+class GameDayTeamPickerSheet extends ConsumerStatefulWidget {
   final ScrollController scrollController;
+
+  /// Teams already on Game Day (ADD mode shows them checked and inert).
   final Set<String> existingTeamSlugs;
 
-  const TeamPickerSheet({
+  /// PICK mode: hand the team to the caller instead of adding it.
+  final GameDayTeamPicked? onTeamPicked;
+
+  /// PICK mode: the caller's current choice, shown checked.
+  final String? selectedTeamSlug;
+
+  /// MULTI mode: toggle a team in or out of the caller's selection.
+  final GameDayTeamToggled? onTeamToggled;
+
+  /// MULTI mode: the caller's selection when the sheet opens.
+  final Set<String> selectedTeamSlugs;
+
+  /// True when hosted inside a screen rather than a bottom sheet: no drag
+  /// handle, and the list keeps the screen's own bottom inset.
+  final bool embedded;
+
+  const GameDayTeamPickerSheet({
     super.key,
     required this.scrollController,
     required this.existingTeamSlugs,
+    this.onTeamPicked,
+    this.selectedTeamSlug,
+    this.onTeamToggled,
+    this.selectedTeamSlugs = const {},
+    this.embedded = false,
   });
 
   @override
-  ConsumerState<TeamPickerSheet> createState() => _TeamPickerSheetState();
+  ConsumerState<GameDayTeamPickerSheet> createState() =>
+      _GameDayTeamPickerSheetState();
 }
 
-class _TeamPickerSheetState extends ConsumerState<TeamPickerSheet> {
+class _GameDayTeamPickerSheetState
+    extends ConsumerState<GameDayTeamPickerSheet> {
   final _searchController = TextEditingController();
 
   /// The folder being browsed. Starts at Explore's Sports root.
   String _folderId = GameDayTeamFolders.rootId;
+
+  /// MULTI mode's live selection. The sheet is its own route, so it cannot
+  /// wait for the caller to rebuild it; it tracks the toggles itself and
+  /// reports each one.
+  late final Set<String> _toggled = {...widget.selectedTeamSlugs};
+
+  bool get _multi => widget.onTeamToggled != null;
+
+  void _toggle(String slug, TeamColors team) {
+    final selected = !_toggled.contains(slug);
+    setState(() => selected ? _toggled.add(slug) : _toggled.remove(slug));
+    widget.onTeamToggled!(slug, team, selected);
+  }
 
   @override
   void initState() {
@@ -99,20 +165,21 @@ class _TeamPickerSheetState extends ConsumerState<TeamPickerSheet> {
 
     return Column(
       children: [
-        // Handle bar
-        Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 8),
-          child: Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: NexGenPalette.textMedium.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
+        if (!widget.embedded)
+          // Handle bar
+          Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 8),
+            child: Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
           ),
-        ),
 
         _buildHeader(searching),
         const SizedBox(height: 12),
@@ -157,38 +224,26 @@ class _TeamPickerSheetState extends ConsumerState<TeamPickerSheet> {
   /// folder's breadcrumb (e.g. "Soccer › MLS"). While searching the title
   /// stays put so results read as global, not as the open folder's.
   Widget _buildHeader(bool searching) {
-    if (_atRoot || searching) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 20),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            'Choose a Team',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: NexGenPalette.textHigh,
-            ),
-          ),
-        ),
-      );
-    }
-    final crumbs = GameDayTeamFolders.ancestry(_folderId)
-        .map((n) => n.name)
-        .join(' › ');
+    final showBack = !(_atRoot || searching);
+    final title = showBack
+        ? GameDayTeamFolders.ancestry(_folderId)
+            .map((n) => n.name)
+            .join(' › ')
+        : 'Choose a Team';
     return Padding(
-      padding: const EdgeInsets.only(left: 8, right: 20),
+      padding: EdgeInsets.only(left: showBack ? 8 : 20, right: 12),
       child: Row(
         children: [
-          IconButton(
-            tooltip: 'Back',
-            icon: const Icon(Icons.arrow_back_rounded),
-            color: NexGenPalette.cyan,
-            onPressed: _goUp,
-          ),
+          if (showBack)
+            IconButton(
+              tooltip: 'Back',
+              icon: const Icon(Icons.arrow_back_rounded),
+              color: NexGenPalette.cyan,
+              onPressed: _goUp,
+            ),
           Expanded(
             child: Text(
-              crumbs,
+              title,
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
@@ -198,6 +253,12 @@ class _TeamPickerSheetState extends ConsumerState<TeamPickerSheet> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (_multi && !widget.embedded)
+            TextButton(
+              key: const ValueKey('team-picker-done'),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
         ],
       ),
     );
@@ -261,7 +322,11 @@ class _TeamPickerSheetState extends ConsumerState<TeamPickerSheet> {
       {required bool showLeague}) {
     final slug = entry.key;
     final team = entry.value;
-    final alreadyAdded = widget.existingTeamSlugs.contains(slug);
+    final pickMode = widget.onTeamPicked != null || _multi;
+    final alreadyAdded = !pickMode && widget.existingTeamSlugs.contains(slug);
+    final picked = _multi
+        ? _toggled.contains(slug)
+        : widget.onTeamPicked != null && widget.selectedTeamSlug == slug;
     // Search results come from every league, so name the league on each row;
     // inside a league folder it would just repeat the breadcrumb.
     final leagueName =
@@ -309,11 +374,19 @@ class _TeamPickerSheetState extends ConsumerState<TeamPickerSheet> {
               ),
             )
           : null,
-      trailing: alreadyAdded
-          ? const Icon(Icons.check_circle, color: NexGenPalette.green, size: 20)
+      trailing: alreadyAdded || picked
+          ? Icon(Icons.check_circle,
+              color: picked ? NexGenPalette.cyan : NexGenPalette.green,
+              size: 20)
           : const Icon(Icons.add_circle_outline,
               color: NexGenPalette.cyan, size: 20),
-      onTap: alreadyAdded ? null : () => _addTeam(context, ref, slug, team),
+      onTap: _multi
+          ? () => _toggle(slug, team)
+          : pickMode
+              ? () => widget.onTeamPicked!(slug, team)
+              : alreadyAdded
+                  ? null
+                  : () => _addTeam(context, ref, slug, team),
     );
   }
 

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_colors.dart';
+import 'package:nexgen_command/features/game_day/team_picker_sheet.dart';
 import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
-import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
 import 'package:nexgen_command/models/commercial/commercial_team_profile.dart';
 import 'package:nexgen_command/screens/commercial/onboarding/commercial_onboarding_state.dart';
 import 'package:nexgen_command/services/commercial/commercial_providers.dart';
@@ -16,19 +16,12 @@ class YourTeamsScreen extends ConsumerStatefulWidget {
 }
 
 class _YourTeamsScreenState extends ConsumerState<YourTeamsScreen> {
-  final _searchCtrl = TextEditingController();
   bool _suggestionsLoaded = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadSuggestions());
-  }
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
   }
 
   void _loadSuggestions() {
@@ -80,26 +73,50 @@ class _YourTeamsScreenState extends ConsumerState<YourTeamsScreen> {
     });
   }
 
-  void _addFromSearch(CommercialTeamProfile team) {
+  void _addTeam(CommercialTeamProfile team) {
     final draft = ref.read(commercialOnboardingProvider);
     if (draft.teams.any((t) => t.teamId == team.teamId && t.sport == team.sport)) return;
     final ranked = team.copyWith(priorityRank: draft.teams.length + 1);
     ref.read(commercialOnboardingProvider.notifier).update(
           (d) => d.copyWith(teams: [...d.teams, ranked]),
         );
-    _searchCtrl.clear();
-    setState(() {});
   }
 
-  List<MapEntry<String, TeamColors>> _searchResults(String query) {
-    if (query.length < 2) return [];
-    final q = query.toLowerCase();
-    return kTeamColors.entries.where((e) {
-      final tc = e.value;
-      return tc.teamName.toLowerCase().contains(q) ||
-          e.key.toLowerCase().contains(q) ||
-          tc.sport.displayName.toLowerCase().contains(q);
-    }).take(8).toList();
+  static bool _isTeam(CommercialTeamProfile t, TeamColors tc) =>
+      t.teamId == tc.espnTeamId && t.sport == tc.sport.name;
+
+  /// Teams are chosen with the SAME league-folder picker the Game Day screen
+  /// uses (it replaced a flat search list over the same table).
+  void _openTeamPicker() {
+    final teams = ref.read(commercialOnboardingProvider).teams;
+    showGameDayTeamPickerSheet(
+      context,
+      existingTeamSlugs: const {},
+      selectedTeamSlugs: {
+        for (final e in kTeamColors.entries)
+          if (teams.any((t) => _isTeam(t, e.value))) e.key,
+      },
+      onTeamToggled: (slug, tc, selected) {
+        if (selected) {
+          _addTeam(CommercialTeamProfile(
+            priorityRank: 0,
+            teamId: tc.espnTeamId,
+            teamName: tc.teamName,
+            sport: tc.sport.name,
+            primaryColor:
+                tc.primary.toARGB32().toRadixString(16).substring(2),
+            secondaryColor:
+                tc.secondary.toARGB32().toRadixString(16).substring(2),
+          ));
+        } else {
+          final i = ref
+              .read(commercialOnboardingProvider)
+              .teams
+              .indexWhere((t) => _isTeam(t, tc));
+          if (i >= 0) _removeTeam(i);
+        }
+      },
+    );
   }
 
   bool get _showBrandColorToggle {
@@ -111,7 +128,6 @@ class _YourTeamsScreenState extends ConsumerState<YourTeamsScreen> {
   Widget build(BuildContext context) {
     final draft = ref.watch(commercialOnboardingProvider);
     final teams = draft.teams;
-    final query = _searchCtrl.text;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
@@ -144,65 +160,21 @@ class _YourTeamsScreenState extends ConsumerState<YourTeamsScreen> {
           const SizedBox(height: 12),
         ],
 
-        // Search field
-        TextField(
-          controller: _searchCtrl,
-          style: const TextStyle(color: NexGenPalette.textHigh),
-          decoration: InputDecoration(
-            hintText: 'Search by city, team, or sport...',
-            hintStyle: const TextStyle(color: NexGenPalette.textMedium),
-            prefixIcon: const Icon(Icons.search, color: NexGenPalette.textMedium),
-            filled: true,
-            fillColor: NexGenPalette.gunmetal90,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: NexGenPalette.line),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: NexGenPalette.line),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: NexGenPalette.cyan),
+        // Add a team — the shared Game Day league-folder picker.
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            key: const ValueKey('commercial-add-team'),
+            onPressed: _openTeamPicker,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Add a team'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: NexGenPalette.cyan,
+              side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
             ),
           ),
-          onChanged: (_) => setState(() {}),
         ),
-
-        // Search results
-        if (query.length >= 2) ...[
-          const SizedBox(height: 8),
-          ..._searchResults(query).map((e) {
-            final tc = e.value;
-            return ListTile(
-              dense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(tc.sport.sportEmoji, style: const TextStyle(fontSize: 18)),
-                  const SizedBox(width: 8),
-                  _ColorDot(tc.primary),
-                  const SizedBox(width: 2),
-                  _ColorDot(tc.secondary),
-                ],
-              ),
-              title: Text(tc.teamName,
-                  style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 14)),
-              trailing: const Icon(Icons.add_circle_outline,
-                  color: NexGenPalette.cyan, size: 20),
-              onTap: () => _addFromSearch(CommercialTeamProfile(
-                priorityRank: 0,
-                teamId: tc.espnTeamId,
-                teamName: tc.teamName,
-                sport: tc.sport.name,
-                primaryColor: tc.primary.toARGB32().toRadixString(16).substring(2),
-                secondaryColor: tc.secondary.toARGB32().toRadixString(16).substring(2),
-              )),
-            );
-          }),
-        ],
 
         const SizedBox(height: 16),
 

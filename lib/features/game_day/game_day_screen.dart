@@ -35,6 +35,8 @@ import 'game_day_apply.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
 import 'game_day_config_row.dart';
+import '../../widgets/navigation/nav_bar_inset.dart'
+    show showDockSafeModalBottomSheet;
 import 'team_picker_sheet.dart';
 import '../autopilot/team_priority.dart';
 import '../site/user_profile_providers.dart';
@@ -834,14 +836,14 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     WidgetRef ref,
     GameDayAutopilotConfig config,
   ) async {
-    final picked = await showModalBottomSheet<AlertSensitivity>(
+    // Dock-safe on every screen size: see showDockSafeModalBottomSheet.
+    final picked = await showDockSafeModalBottomSheet<AlertSensitivity>(
       context: context,
       backgroundColor: NexGenPalette.gunmetal,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
+      builder: (ctx) => Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -874,7 +876,6 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
             const SizedBox(height: 8),
           ],
         ),
-      ),
     );
 
     if (picked == null || picked == config.alertSensitivity) return;
@@ -1211,13 +1212,17 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                color: config.designVariety == mode
-                    ? NexGenPalette.textHigh
-                    : NexGenPalette.textMedium,
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: config.designVariety == mode
+                      ? NexGenPalette.textHigh
+                      : NexGenPalette.textMedium,
+                ),
               ),
             ),
           ],
@@ -1548,7 +1553,8 @@ class _CrewStatusSection extends StatelessWidget {
   }
 
   void _showCrewManagement(BuildContext context, GameDayCrew crew) {
-    showModalBottomSheet(
+    // Dock-safe on every screen size: see showDockSafeModalBottomSheet.
+    showDockSafeModalBottomSheet<void>(
       context: context,
       backgroundColor: NexGenPalette.gunmetal,
       shape: const RoundedRectangleBorder(
@@ -1871,7 +1877,7 @@ class _AddTeamButton extends ConsumerWidget {
   void _showTeamPicker(BuildContext context, WidgetRef ref) {
     // League-folder picker (team_picker_sheet.dart): Explore Designs' Sports
     // tree, league → teams, with cross-league search.
-    showTeamPickerSheet(context, existingTeamSlugs: existingTeamSlugs);
+    showGameDayTeamPickerSheet(context, existingTeamSlugs: existingTeamSlugs);
   }
 }
 

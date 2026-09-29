@@ -162,3 +162,40 @@ class _RenderMeasureHeight extends RenderProxyBox {
     });
   }
 }
+
+/// Shows a modal bottom sheet from a tab page whose content always clears
+/// the glass dock, on any screen size and text scale.
+///
+/// A sheet opened from a tab page lives on that tab's (branch) navigator,
+/// which renders UNDER the dock; [NavBarInsetShell] puts the dock's height in
+/// the sheet's MediaQuery.padding, so a SafeArea inside the sheet clears it.
+/// That is necessary but not sufficient: a default modal sheet is capped at
+/// 9/16 of the SCREEN height, and the dock band counts against that cap. On a
+/// 375×667 phone the cap is 375 pt, 100 of which are dock, and the Game Day
+/// "Alert Sensitivity" sheet overflowed its Column by 40 pt (192 pt at 1.3×
+/// text), painting its last option under the dock.
+///
+/// This helper lifts the cap (`isScrollControlled`: the sheet is as tall as
+/// its content, up to the screen), keeps it below the status bar
+/// (`useSafeArea`), and wraps the content in SafeArea + a scroll view, so
+/// content that still does not fit scrolls ABOVE the dock instead of being
+/// painted under it. [builder] returns the sheet's content without its own
+/// SafeArea.
+Future<T?> showDockSafeModalBottomSheet<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  Color? backgroundColor,
+  ShapeBorder? shape,
+}) {
+  return showModalBottomSheet<T>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: backgroundColor,
+    shape: shape,
+    builder: (ctx) => SafeArea(
+      top: false,
+      child: SingleChildScrollView(child: builder(ctx)),
+    ),
+  );
+}

@@ -137,7 +137,7 @@ void main() {
         ProviderScope(
           child: MaterialApp(
             home: Scaffold(
-              body: TeamPickerSheet(
+              body: GameDayTeamPickerSheet(
                 scrollController: controller,
                 existingTeamSlugs: existing,
               ),

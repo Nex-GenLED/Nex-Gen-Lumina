@@ -12,7 +12,9 @@ import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
-import 'package:nexgen_command/widgets/team_autocomplete.dart';
+import 'package:nexgen_command/features/game_day/team_picker_sheet.dart';
+import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
+import 'package:nexgen_command/features/sports_alerts/services/team_registration_service.dart';
 
 /// Test-visible key for the pre-flight verification section. Tests use
 /// `find.descendant(of: find.byKey(handoffVerificationSectionKey), ...)`
@@ -47,7 +49,6 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   int _autonomyLevel = 1;
 
   final _managerEmailController = TextEditingController();
-  final _teamInputCtrl = TextEditingController();
 
   // Verification state — keyed by controller doc id. Starts empty; the
   // sweep fills entries as probes resolve. Complete Setup stays disabled
@@ -85,8 +86,39 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
   @override
   void dispose() {
     _managerEmailController.dispose();
-    _teamInputCtrl.dispose();
     super.dispose();
+  }
+
+  /// The customer's teams, chosen with the SAME league-folder picker the
+  /// Game Day screen uses (it replaced a free-text autocomplete over a
+  /// different team database). The picker lists exactly the teams Game Day
+  /// supports, and each choice is stored as its kTeamColors display name, so
+  /// the install commit's resolveFreeTextToKTeamSlug always resolves it and
+  /// no choice is silently skipped.
+  void _openTeamPicker() {
+    final selected = <String>{};
+    for (final name in _selectedSportsTeams) {
+      final slug = TeamRegistrationService.resolveFreeTextToKTeamSlug(name);
+      if (slug != null) selected.add(slug);
+    }
+    showGameDayTeamPickerSheet(
+      context,
+      existingTeamSlugs: const {},
+      selectedTeamSlugs: selected,
+      onTeamToggled: (slug, team, isSelected) => setState(() {
+        if (isSelected) {
+          if (!_selectedSportsTeams.contains(team.teamName)) {
+            _selectedSportsTeams.add(team.teamName);
+          }
+        } else {
+          // Remove every entry naming this team, including one typed as
+          // free text before the picker existed (e.g. "Packers").
+          _selectedSportsTeams.removeWhere((n) =>
+              n == team.teamName ||
+              TeamRegistrationService.resolveFreeTextToKTeamSlug(n) == slug);
+        }
+      }),
+    );
   }
 
   List<ControllerInfo> _selectedControllers() {
@@ -324,18 +356,17 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
                 _buildSectionLabel('Favorite Teams'),
                 const SizedBox(height: 8),
                 const Text(
-                  'Search for your customer’s favorite teams. They '
-                  'can add more later from their profile.',
+                  'Pick your customer’s favorite teams. Each one is '
+                  'set up in Game Day (autopilot off); they can add more '
+                  'later.',
                   style: TextStyle(
                       color: NexGenPalette.textMedium, fontSize: 13),
                 ),
                 const SizedBox(height: 12),
-                TeamSelector(
-                  controller: _teamInputCtrl,
-                  selectedTeams: _selectedSportsTeams,
-                  onAddTeam: (name) =>
-                      setState(() => _selectedSportsTeams.add(name)),
-                  onRemoveTeam: (name) =>
+                _InstallerTeams(
+                  teamNames: _selectedSportsTeams,
+                  onAdd: _openTeamPicker,
+                  onRemove: (name) =>
                       setState(() => _selectedSportsTeams.remove(name)),
                 ),
                 Align(
@@ -1036,5 +1067,67 @@ class _StatusIcon extends StatelessWidget {
       case VerificationStatus.fail:
         return const Icon(Icons.cancel, color: Colors.red, size: 18);
     }
+  }
+}
+
+/// The installer's chosen teams as removable chips, plus the button that
+/// opens the shared Game Day team picker.
+class _InstallerTeams extends StatelessWidget {
+  final List<String> teamNames;
+  final VoidCallback onAdd;
+  final ValueChanged<String> onRemove;
+
+  const _InstallerTeams({
+    required this.teamNames,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (teamNames.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final name in teamNames)
+                InputChip(
+                  key: ValueKey('installer-team-$name'),
+                  label: Text(name),
+                  avatar: _dot(name),
+                  onDeleted: () => onRemove(name),
+                  deleteIconColor: Colors.white54,
+                ),
+            ],
+          ),
+        if (teamNames.isNotEmpty) const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const ValueKey('installer-add-team'),
+          onPressed: onAdd,
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('Add a team'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: NexGenPalette.cyan,
+            side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.5)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _dot(String name) {
+    final slug = TeamRegistrationService.resolveFreeTextToKTeamSlug(name);
+    final team = slug == null ? null : kTeamColors[slug];
+    return CircleAvatar(
+      radius: 9,
+      backgroundColor: team?.primary ?? Colors.grey,
+      child: CircleAvatar(
+        radius: 4,
+        backgroundColor: team?.secondary ?? Colors.grey,
+      ),
+    );
   }
 }

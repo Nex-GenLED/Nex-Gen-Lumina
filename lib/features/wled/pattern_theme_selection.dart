@@ -228,12 +228,23 @@ class LibraryBrowserScreen extends ConsumerStatefulWidget {
 }
 
 class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
+  /// Resets the mood filter. Captured while `ref` is valid so [dispose] can
+  /// run it without touching `ref`.
+  late final void Function() _clearMoodFilter;
+
   bool _isPaletteView = false;
 
   /// One-shot guard so the saved-design intercept fires its post-frame apply
   /// + pop exactly once per mount. Without this, rebuilds during the async
   /// apply would re-schedule the callback and stack snackbars / double-pop.
   bool _savedDesignApplyKicked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final moodFilter = ref.read(selectedMoodFilterProvider.notifier);
+    _clearMoodFilter = () => moodFilter.state = null;
+  }
 
   @override
   void dispose() {
@@ -249,10 +260,12 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
       // is valid); the notifier itself is owned by Riverpod's
       // ProviderContainer, independent of this widget's lifecycle, so
       // mutating it from the microtask is safe.
-      final notifier = ref.read(selectedMoodFilterProvider.notifier);
-      Future.microtask(() {
-        notifier.state = null;
-      });
+      // Captured in initState, NOT read here: by the time dispose() runs the
+      // element is already marked disposed, so `ref.read` throws the very
+      // StateError this block was written to avoid (seen tearing down the
+      // browser in test/features/game_day/entry_point_wiring_test.dart).
+      final clear = _clearMoodFilter;
+      Future.microtask(clear);
     }
     super.dispose();
   }

@@ -43,8 +43,8 @@ import '../../../utils/time_format.dart';
 import '../../autopilot/game_day_autopilot_providers.dart';
 import '../../autopilot/game_day_autopilot_service.dart';
 import '../../game_day/light_it_up_now.dart';
+import '../../game_day/team_picker_sheet.dart';
 import '../../sports_alerts/data/team_colors.dart';
-import '../../sports_alerts/models/sport_type.dart';
 import '../../wled/wled_providers.dart';
 import '../../wled/zone_providers.dart';
 import '../neighborhood_providers.dart';
@@ -57,40 +57,6 @@ import '../services/path2_setup_resolution.dart';
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Sport filter for the Game Day team picker.
-final _gameDaySportFilterProvider = StateProvider<SportType?>((ref) => null);
-
-/// Search query for the Game Day team picker.
-final _gameDaySearchProvider = StateProvider<String>((ref) => '');
-
-/// Filtered teams for Game Day picker.
-final _gameDayFilteredTeamsProvider =
-    Provider<List<MapEntry<String, TeamColors>>>((ref) {
-  final query = ref.watch(_gameDaySearchProvider).toLowerCase().trim();
-  final sport = ref.watch(_gameDaySportFilterProvider);
-
-  var entries = kTeamColors.entries.toList()
-    ..sort((a, b) => a.value.teamName.compareTo(b.value.teamName));
-
-  if (sport != null) {
-    entries = entries.where((e) => e.value.sport == sport).toList();
-  }
-
-  if (query.isEmpty) return entries;
-
-  return entries.where((entry) {
-    final slug = entry.key.toLowerCase();
-    final name = entry.value.teamName.toLowerCase();
-    final sportName = entry.value.sport.displayName.toLowerCase();
-    return name.contains(query) ||
-        slug.contains(query) ||
-        sportName.contains(query);
-  }).toList();
-});
-
-// ═════════════════════════════════════════════════════════════════════════════
-// GAME DAY PATH 2 SCREEN
-// ═════════════════════════════════════════════════════════════════════════════
-
 /// Path 2 entry: pick a Path 1-configured team, preview its current
 /// design, and Light it Up (optionally broadcasting to the
 /// neighborhood). Returns the [Path1GameDaySnapshot] of the team the
@@ -107,7 +73,6 @@ class GameDayPath2Screen extends ConsumerStatefulWidget {
 }
 
 class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
-  final _searchController = TextEditingController();
 
   // Step 1 → 2 transition state. Both set when the user picks a team
   // that has Path 1 configured; both null on Step 1.
@@ -123,18 +88,11 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
 
   bool get _isStep2 => _selectedSnapshot != null;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(_gameDaySearchProvider.notifier).state = '';
-      ref.read(_gameDaySportFilterProvider.notifier).state = null;
-    });
-  }
+  final _teamScroll = ScrollController();
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _teamScroll.dispose();
     super.dispose();
   }
 
@@ -174,13 +132,12 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
   // unconfigured teams into Path 1 setup before allowing Light-it-Up.
   // ─────────────────────────────────────────────────────────────────────────
 
+  /// Step 1: pick the team. The shared Game Day picker (league folders,
+  /// college beside pro, cross-league search) in PICK mode — this screen
+  /// used to carry its own flat per-sport chip list.
   Widget _buildStep1() {
-    final teams = ref.watch(_gameDayFilteredTeamsProvider);
-    final activeSport = ref.watch(_gameDaySportFilterProvider);
-
     return Column(
       children: [
-        // Header prompt
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
           child: Text(
@@ -193,110 +150,18 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
             textAlign: TextAlign.center,
           ),
         ),
-
-        // Search bar
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: TextField(
-            controller: _searchController,
-            onChanged: (v) =>
-                ref.read(_gameDaySearchProvider.notifier).state = v,
-            decoration: InputDecoration(
-              hintText: 'Search teams...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: () {
-                        _searchController.clear();
-                        ref.read(_gameDaySearchProvider.notifier).state = '';
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: NexGenPalette.gunmetal,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: NexGenPalette.line),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: NexGenPalette.line),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: NexGenPalette.cyan),
-              ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
-            style: const TextStyle(color: Colors.white),
-          ),
-        ),
-
-        // Sport filter chips
-        SizedBox(
-          height: 44,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              _SportChip(
-                label: 'ALL',
-                selected: activeSport == null,
-                onTap: () =>
-                    ref.read(_gameDaySportFilterProvider.notifier).state = null,
-              ),
-              ...SportType.values.map((s) => _SportChip(
-                    label: s.displayName,
-                    selected: activeSport == s,
-                    onTap: () => ref
-                        .read(_gameDaySportFilterProvider.notifier)
-                        .state = s,
-                  )),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        // Team list
         Expanded(
-          child: teams.isEmpty
-              ? Center(
-                  child: Text(
-                    'No teams found',
-                    style: TextStyle(color: Colors.grey.shade500),
-                  ),
-                )
-              : ListView.builder(
-                  padding: EdgeInsets.fromLTRB(
-                      16, 4, 16, navBarTotalHeight(context) + 16),
-                  itemCount: teams.length,
-                  itemBuilder: (context, i) {
-                    final entry = teams[i];
-                    return _GameDayTeamRow(
-                      slug: entry.key,
-                      team: entry.value,
-                      onTap: () => _handleTeamTap(entry.key, entry.value),
-                    );
-                  },
-                ),
+          child: GameDayTeamPickerSheet(
+            embedded: true,
+            scrollController: _teamScroll,
+            existingTeamSlugs: const {},
+            onTeamPicked: _handleTeamTap,
+          ),
         ),
       ],
     );
   }
 
-  /// Decide whether the chosen team has Path 1 set up. Branches on the
-  /// 3-state [Path1SnapshotResolution]:
-  ///   - Loading → no-op (the row's tap is already disabled in this
-  ///     state; this is defense-in-depth in case the user somehow
-  ///     fires the tap mid-load).
-  ///   - Ready   → advance to Step 2 read-only preview.
-  ///   - Absent  → deep-link to the Path 1 Fan Zone.
-  ///
-  /// The 3-state resolution is the same signal the row badge reads, so
-  /// badge-shown ⇔ tap-advances. They can never disagree.
   void _handleTeamTap(String slug, TeamColors team) {
     final resolution = resolvePath2GameDaySetup(
       resolution:
@@ -923,223 +788,7 @@ class _GameDayAutopilotSectionState
 // HELPER WIDGETS
 // ═════════════════════════════════════════════════════════════════════════════
 
-class _SportChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
 
-  const _SportChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? NexGenPalette.cyan.withValues(alpha: 0.15)
-                : NexGenPalette.gunmetal,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: selected
-                  ? NexGenPalette.cyan.withValues(alpha: 0.6)
-                  : NexGenPalette.line,
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? NexGenPalette.cyan : NexGenPalette.textMedium,
-              fontSize: 13,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Team row in Step 1. Renders one of three states from the same
-/// upstream [path1GameDaySnapshotResolutionProvider] the tap handler
-/// reads, so the badge and tap-routing CAN NEVER DISAGREE:
-///
-///   - Loading → muted row, spinner trailing icon, tap DISABLED.
-///                Prevents the 1b configure-twice gap where mid-load
-///                taps deep-linked to the Fan Zone builder.
-///   - Ready   → "Configured" check + chevron, tap advances to Step 2.
-///   - Absent  → no badge, plus-icon trailing, tap deep-links to setup.
-class _GameDayTeamRow extends ConsumerWidget {
-  final String slug;
-  final TeamColors team;
-  final VoidCallback onTap;
-
-  const _GameDayTeamRow({
-    required this.slug,
-    required this.team,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final resolution =
-        ref.watch(path1GameDaySnapshotResolutionProvider(slug));
-    final isLoading = resolution is Path1SnapshotLoading;
-    final hasPath1 = resolution is Path1SnapshotReady;
-    final sportEmoji = switch (team.sport) {
-      SportType.nfl || SportType.ncaaFB => '\u{1F3C8}',
-      SportType.nba || SportType.wnba || SportType.ncaaMB => '\u{1F3C0}',
-      SportType.mlb => '\u{26BE}',
-      SportType.nhl => '\u{1F3D2}',
-      SportType.mls ||
-      SportType.nwsl ||
-      SportType.fifa ||
-      SportType.championsLeague =>
-        '\u{26BD}',
-    };
-
-    return InkWell(
-      // Tap is DISABLED while the resolution is Loading — gates the
-      // 1b configure-twice race (badge + tap derive from the same
-      // signal, so a configured team's tap can never collapse to
-      // "needs setup" mid-load).
-      onTap: isLoading ? null : onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: NexGenPalette.gunmetal,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: hasPath1
-                  ? team.primary.withValues(alpha: 0.35)
-                  : NexGenPalette.line,
-            ),
-          ),
-          child: Opacity(
-            opacity: isLoading ? 0.55 : 1.0,
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [team.primary, team.secondary],
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    sportEmoji,
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        team.teamName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          Text(
-                            team.sport.displayName,
-                            style: TextStyle(
-                              color: Colors.grey.shade500,
-                              fontSize: 11,
-                            ),
-                          ),
-                          if (hasPath1) ...[
-                            const SizedBox(width: 6),
-                            Icon(
-                              Icons.check_circle,
-                              color: team.primary,
-                              size: 12,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              'Configured',
-                              style: TextStyle(
-                                color: team.primary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: team.primary,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: team.secondary,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (isLoading)
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color: Colors.grey.shade500,
-                    ),
-                  )
-                else
-                  Icon(
-                    hasPath1 ? Icons.chevron_right : Icons.add_circle_outline,
-                    color: hasPath1 ? Colors.grey.shade400 : Colors.grey.shade600,
-                    size: 20,
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PUBLIC API
