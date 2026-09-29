@@ -544,6 +544,15 @@ class RooflineSegment {
   /// following the channel's active color/pattern.
   final Color? overrideColor;
 
+  /// True when a person deliberately marked what this segment IS — a run, a
+  /// corner, a peak — rather than [type] holding its default. `type` defaults
+  /// to [SegmentType.run] for every segment, so "run" alone cannot say
+  /// whether anyone looked. Written by the feature walkthrough and by any
+  /// editor where the customer picks the type. Stored as
+  /// `feature_confirmed`, omitted when false; documents written before it
+  /// existed read as false.
+  final bool featureConfirmed;
+
   const RooflineSegment({
     required this.id,
     required this.name,
@@ -567,6 +576,7 @@ class RooflineSegment {
     this.points = const [],
     this.channelIndex = 0,
     this.overrideColor,
+    this.featureConfirmed = false,
   });
 
   /// Global pixel index of the last LED in this segment (inclusive)
@@ -672,6 +682,7 @@ class RooflineSegment {
     int? channelIndex,
     Color? overrideColor,
     bool clearOverrideColor = false,
+    bool? featureConfirmed,
   }) {
     return RooflineSegment(
       id: id ?? this.id,
@@ -696,6 +707,7 @@ class RooflineSegment {
       points: points ?? this.points,
       channelIndex: channelIndex ?? this.channelIndex,
       overrideColor: clearOverrideColor ? null : (overrideColor ?? this.overrideColor),
+      featureConfirmed: featureConfirmed ?? this.featureConfirmed,
     );
   }
 
@@ -744,6 +756,7 @@ class RooflineSegment {
       overrideColor: json['override_color'] != null
           ? Color(json['override_color'] as int)
           : null,
+      featureConfirmed: json['feature_confirmed'] as bool? ?? false,
     );
   }
 
@@ -773,6 +786,7 @@ class RooflineSegment {
         'points': points.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
       'channel_index': channelIndex,
       if (overrideColor != null) 'override_color': overrideColor!.toARGB32(),
+      if (featureConfirmed) 'feature_confirmed': true,
     };
   }
 

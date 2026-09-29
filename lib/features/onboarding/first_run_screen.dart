@@ -3,27 +3,33 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
+import 'package:nexgen_command/features/auth/sign_out_button.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 /// First-run onboarding shown when welcomeCompleted == false.
 ///
 /// Trusts the installer's handoff selections — does not re-ask the customer
 /// for teams, holidays, or vibe (Bug 4a, 2026-05-07 tracker). Does not
 /// auto-enable autopilot or generate a schedule (Bug 4c). The customer can
-/// adjust preferences from Settings and turn on autopilot from the autopilot
-/// screen whenever they choose.
+/// adjust preferences from the System tab and turn on Autopilot from the
+/// Lumina AI card on the Schedule tab whenever they choose.
 class FirstRunScreen extends ConsumerStatefulWidget {
-  const FirstRunScreen({super.key});
+  const FirstRunScreen({super.key, @visibleForTesting this.initialPage = 0});
+
+  /// The page to open on. Tests use it to lay out each page.
+  final int initialPage;
 
   @override
   ConsumerState<FirstRunScreen> createState() => _FirstRunScreenState();
 }
 
 class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
-  final _pageController = PageController();
-  int _currentPage = 0;
+  late final PageController _pageController =
+      PageController(initialPage: widget.initialPage);
+  late int _currentPage = widget.initialPage;
+  bool _finishing = false;
 
   @override
   void dispose() {
@@ -31,44 +37,52 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
     super.dispose();
   }
 
+  /// "Skip" and "Go to my lights".
+  ///
+  /// Row 15 (+110): the completion write used to be unbounded and unhandled —
+  /// offline or refused, the button looked dead, the page could not be left,
+  /// and every launch came back here. Now the flag is honoured for this
+  /// session at once, the write is bounded, a write that does not land
+  /// retries in the background, and the customer always reaches their lights.
+  /// The uid comes from the session, so a profile that has not loaded yet no
+  /// longer blocks the button either.
   Future<void> _completeOnboarding() async {
-    final profileAsync = ref.read(currentUserProfileProvider);
-    final profile = profileAsync.maybeWhen(data: (p) => p, orElse: () => null);
-    if (profile == null) {
-      // P1 (residential path audit §9.1 item 11 / S20). This was a bare
-      // `return`: on an account whose profile has not loaded (or was a stub,
-      // pre-repair) the "Get started" button did LITERALLY NOTHING, on the
-      // first screen a brand-new customer sees, with no way forward at all.
-      // UserService.streamUser now repairs a stub and re-emits, so the right
-      // answer is "try again in a second" rather than a dead end.
-      debugPrint('FirstRun: no parsed profile — cannot complete onboarding');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "We're still setting up your account. Give it a moment and tap "
-              'Get started again.',
-            ),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
+    if (_finishing) return;
+    final uid = ref.read(accountSessionProvider).uid;
+    if (uid == null || uid.isEmpty) {
+      if (mounted) context.go(AppRoutes.login);
       return;
     }
 
+    setState(() => _finishing = true);
     // Mark welcome complete. Do NOT touch teams/holidays/vibe — those were
     // set by the installer during handoff and are authoritative. Do NOT
     // enable autopilot — that's an explicit user choice on the autopilot
     // screen.
     final userService = ref.read(userServiceProvider);
-    await userService.updateUserProfile(profile.id, {
-      'welcome_completed': true,
-    });
+    await writeAccountFlag(
+      uid: uid,
+      flag: AccountFlag.welcomeCompleted,
+      write: () =>
+          userService.updateUserProfile(uid, {'welcome_completed': true}),
+    );
 
     if (mounted) {
       context.go(AppRoutes.dashboard);
     }
+  }
+
+  /// Lets a page scroll when large text makes it taller than the screen,
+  /// while still centring it when it fits.
+  Widget _scrollablePage(Widget child) {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: IntrinsicHeight(child: child),
+        ),
+      ),
+    );
   }
 
   void _nextPage() {
@@ -113,30 +127,38 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
                 }),
               ),
             ),
-            // Skip button only on the welcome page
-            if (_currentPage < 1)
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 24),
-                  child: TextButton(
-                    onPressed: _completeOnboarding,
-                    child: const Text(
-                      'Skip',
-                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 14),
+            // Sign out on every page (the router holds a customer here until
+            // first run is finished); Skip only on the welcome page.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  AccountSignOutButton(enabled: !_finishing),
+                  if (_currentPage < 1)
+                    TextButton(
+                      key: const ValueKey('first-run-skip'),
+                      onPressed: _finishing ? null : _completeOnboarding,
+                      child: const Text(
+                        'Skip',
+                        style: TextStyle(
+                            color: NexGenPalette.textMedium, fontSize: 14),
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
+            ),
             Expanded(
               child: PageView(
                 controller: _pageController,
                 physics: const NeverScrollableScrollPhysics(),
                 onPageChanged: (page) => setState(() => _currentPage = page),
                 children: [
-                  _buildWelcomePage(firstName),
-                  _buildLocationPermissionPage(),
-                  _buildCompletionPage(),
+                  _scrollablePage(_buildWelcomePage(firstName)),
+                  _scrollablePage(_buildLocationPermissionPage()),
+                  _scrollablePage(_buildCompletionPage()),
                 ],
               ),
             ),
@@ -174,11 +196,15 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
+          // +110 (walk finding 3): this named an "Auto-Pilot tab" that the
+          // tab bar does not have. The switch is on the Lumina AI card at the
+          // top of the Schedule tab.
           const Text(
-            'Your lights are ready to go. Auto-Pilot can take over your '
+            'Your lights are ready to go. Autopilot can take over your '
             'schedule with seasonal themes, game day colors, and holiday '
-            'displays — turn it on from the Auto-Pilot tab whenever you\'re '
-            'ready.',
+            'displays — turn it on with the Autopilot switch on the Lumina AI '
+            'card in the Schedule tab whenever you\'re ready.',
+            key: ValueKey('first-run-welcome-copy'),
             style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.5),
             textAlign: TextAlign.center,
           ),
@@ -212,11 +238,12 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
   }
 
   Future<void> _handleForgotPassword() async {
-    final email = FirebaseAuth.instance.currentUser?.email;
+    final session = ref.read(accountSessionProvider);
+    final email = session.email;
     if (email != null && email.isNotEmpty) {
       // User is signed in — send reset to their email directly
       try {
-        await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+        await session.sendPasswordResetEmail(email);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -268,9 +295,7 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
       );
       if (confirmed == true && emailCtrl.text.trim().isNotEmpty) {
         try {
-          await FirebaseAuth.instance.sendPasswordResetEmail(
-            email: emailCtrl.text.trim(),
-          );
+          await session.sendPasswordResetEmail(emailCtrl.text.trim());
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -467,8 +492,9 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
           const SizedBox(height: 12),
           const Text(
             'Your installer has set up your preferences. You can adjust them '
-            'from Settings, and turn on Auto-Pilot from the Auto-Pilot tab '
-            'whenever you\'re ready.',
+            'from the System tab, and turn on Autopilot with the switch on '
+            'the Lumina AI card in the Schedule tab whenever you\'re ready.',
+            key: ValueKey('first-run-done-copy'),
             style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.4),
             textAlign: TextAlign.center,
           ),
@@ -476,16 +502,25 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _completeOnboarding,
+              key: const ValueKey('first-run-finish'),
+              onPressed: _finishing ? null : _completeOnboarding,
               style: ElevatedButton.styleFrom(
                 backgroundColor: NexGenPalette.cyan,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              child: const Text(
-                'Go to my lights',
-                style: TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.w600),
-              ),
+              child: _finishing
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.black),
+                    )
+                  : const Text(
+                      'Go to my lights',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
             ),
           ),
           const SizedBox(height: 24),

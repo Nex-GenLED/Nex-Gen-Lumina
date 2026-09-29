@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
@@ -89,6 +90,57 @@ bool hasProvisionedProfile(DocumentSnapshot<Map<String, dynamic>> doc) {
   if (!doc.exists) return false;
   final ownerId = doc.data()?['owner_id'];
   return ownerId is String && ownerId.isNotEmpty;
+}
+
+/// Whether [appRedirect] holds [uid] on the forced password reset.
+///
+/// Row 14 (+110): a reset finished in this session counts even while its
+/// flag write is still in flight or retrying ([SessionAccountFlags]).
+bool mustResetPasswordFor(String uid, Map<String, dynamic>? userData) =>
+    (userData?['must_reset_password'] as bool? ?? false) &&
+    !SessionAccountFlags.isCleared(uid, AccountFlag.passwordResetDone);
+
+/// Whether [uid] has finished first run, for [appRedirect].
+///
+/// Row 15 (+110): finishing first run in this session counts even while its
+/// flag write is still in flight or retrying.
+bool welcomeCompletedFor(String uid, Map<String, dynamic> userData) =>
+    (userData['welcome_completed'] as bool? ?? true) ||
+    SessionAccountFlags.isCleared(uid, AccountFlag.welcomeCompleted);
+
+/// The routes a self-signup (`unlinked`) account uses to add its own first
+/// controller: network discovery, Bluetooth setup, manual setup.
+bool _isOwnControllerSetupRoute(String location) =>
+    location == AppRoutes.discovery ||
+    location == AppRoutes.deviceSetup ||
+    location == AppRoutes.wifiConnect;
+
+/// Whether a signed-in `unlinked` account may open [location].
+///
+/// +110 (walk finding 1): the controller-setup routes are always open to
+/// it, and every other customer route is open once the account owns a
+/// controller of its own. Without a controller it is sent to /link-account,
+/// as before.
+bool unlinkedAccountMayOpen(String location, {required bool ownsAController}) =>
+    _isOwnControllerSetupRoute(location) || ownsAController;
+
+/// Whether `users/{uid}/controllers` holds at least one controller. Bounded
+/// by [kRedirectFirestoreTimeout]; a failed or slow read answers false (the
+/// account stays on /link-account, as before).
+Future<bool> _ownsAController(String uid) async {
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('controllers')
+        .limit(1)
+        .get()
+        .timeout(kRedirectFirestoreTimeout);
+    return snap.docs.isNotEmpty;
+  } catch (e) {
+    debugPrint('Redirect: could not check for an own controller: $e');
+    return false;
+  }
 }
 
 /// Global redirect function for GoRouter.
@@ -200,8 +252,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
   try {
     final userDoc = await _readUserDocForRedirect(user.uid);
     if (userDoc.exists) {
-      final mustReset =
-          userDoc.data()?['must_reset_password'] as bool? ?? false;
+      final mustReset = mustResetPasswordFor(user.uid, userDoc.data());
       if (mustReset && !isForcedResetRoute) {
         return AppRoutes.forcedPasswordReset;
       }
@@ -266,7 +317,7 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
     final userDoc = await _readUserDocForRedirect(user.uid);
     if (userDoc.exists) {
       final data = userDoc.data()!;
-      final welcomeCompleted = data['welcome_completed'] as bool? ?? true;
+      final welcomeCompleted = welcomeCompletedFor(user.uid, data);
       final role = data['installation_role'] as String?;
       // Only redirect primary/subUser roles (not installers/admins)
       if (!welcomeCompleted &&
@@ -323,6 +374,18 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
         // linked to a system. It cannot affect a linked customer — they are
         // resolved by the branches above and never reach this one.
         if (isDemoRoute) {
+          return null;
+        }
+        // +110 (walk finding 1): a self-signup account may set up its own
+        // first controller, and once it has one, use its lights. Before,
+        // every setup route — including /discovery, where signup itself
+        // sends a new account — bounced here to /link-account.
+        if (unlinkedAccountMayOpen(
+          state.matchedLocation,
+          ownsAController: _isOwnControllerSetupRoute(state.matchedLocation)
+              ? false
+              : await _ownsAController(user.uid),
+        )) {
           return null;
         }
         // Safety net: if the reviewer somehow lands on a protected

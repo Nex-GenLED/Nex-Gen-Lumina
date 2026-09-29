@@ -1,12 +1,13 @@
 import 'dart:ui';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:nexgen_command/app_router.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
+import 'package:nexgen_command/features/auth/sign_out_button.dart';
 import 'package:nexgen_command/theme.dart';
 
 /// One-time forced password reset shown the first time a customer logs in
@@ -15,7 +16,13 @@ import 'package:nexgen_command/theme.dart';
 /// Firebase Auth password update.
 ///
 /// Navigation in/out is gated by `appRedirect` in route_guards.dart — this
-/// screen does not render its own back button and ignores system back.
+/// screen does not render its own back button and ignores system back. Its
+/// one way out without a new password is Sign out.
+///
+/// Row 14 (+110): once the password has changed, the customer is never held
+/// here by the flag write. The flag is honoured for this session at once and
+/// written with a bounded wait; if it does not land it retries in the
+/// background ([writeAccountFlag]).
 class ForcedPasswordResetScreen extends ConsumerStatefulWidget {
   const ForcedPasswordResetScreen({super.key});
 
@@ -61,7 +68,8 @@ class _ForcedPasswordResetScreenState
   }
 
   Future<void> _sendResetEmail() async {
-    final email = FirebaseAuth.instance.currentUser?.email ?? '';
+    final session = ref.read(accountSessionProvider);
+    final email = session.email ?? '';
     if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -72,7 +80,7 @@ class _ForcedPasswordResetScreenState
       return;
     }
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      await session.sendPasswordResetEmail(email);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -95,28 +103,18 @@ class _ForcedPasswordResetScreenState
     setState(() => _formError = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.email == null) {
+    final session = ref.read(accountSessionProvider);
+    final uid = session.uid;
+    final email = session.email;
+    if (uid == null || email == null) {
       setState(() => _formError = 'Not signed in. Please log in again.');
       return;
     }
 
     setState(() => _submitting = true);
     try {
-      final cred = EmailAuthProvider.credential(
-        email: user.email!,
-        password: _currentCtrl.text,
-      );
-      await user.reauthenticateWithCredential(cred);
-      await user.updatePassword(_newCtrl.text);
-
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .update({'must_reset_password': false});
-
-      if (!mounted) return;
-      context.go(AppRoutes.dashboard);
+      await session.reauthenticate(email, _currentCtrl.text);
+      await session.updatePassword(_newCtrl.text);
     } on FirebaseAuthException catch (e) {
       String msg;
       switch (e.code) {
@@ -136,12 +134,42 @@ class _ForcedPasswordResetScreenState
         default:
           msg = e.message ?? 'Could not update password (${e.code}).';
       }
-      if (mounted) setState(() => _formError = msg);
+      if (mounted) {
+        setState(() {
+          _formError = msg;
+          _submitting = false;
+        });
+      }
+      return;
     } catch (e) {
-      if (mounted) setState(() => _formError = 'Unexpected error: $e');
-    } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() {
+          _formError = 'Unexpected error: $e';
+          _submitting = false;
+        });
+      }
+      return;
     }
+
+    // The password has changed. From here the customer is never held on this
+    // screen: the flag is honoured for this session before the write starts,
+    // the write is bounded, and one that does not land keeps retrying in the
+    // background. It used to be an unbounded update — offline or refused, the
+    // spinner never resolved and the screen came back on every launch, asking
+    // for a "temporary" password that no longer worked.
+    final userDoc =
+        ref.read(accountFirestoreProvider).collection('users').doc(uid);
+    await writeAccountFlag(
+      uid: uid,
+      flag: AccountFlag.passwordResetDone,
+      write: () => userDoc.update({'must_reset_password': false}),
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Password updated.')),
+    );
+    context.go(AppRoutes.dashboard);
   }
 
   @override
@@ -179,14 +207,17 @@ class _ForcedPasswordResetScreenState
                     const Icon(Icons.hub,
                         size: 60, color: NexGenPalette.cyan),
                     const SizedBox(height: 12),
-                    Text(
-                      'LUMINA',
-                      style: TextStyle(
-                        fontFamily: GoogleFonts.exo2().fontFamily,
-                        fontSize: 40,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                        letterSpacing: 1.2,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'LUMINA',
+                        style: TextStyle(
+                          fontFamily: GoogleFonts.exo2().fontFamily,
+                          fontSize: 40,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 32),
@@ -227,7 +258,10 @@ class _ForcedPasswordResetScreenState
                             const SizedBox(height: 20),
                             _buildPasswordField(
                               controller: _currentCtrl,
-                              hint: 'Current Password (temp password)',
+                              label: 'Current password',
+                              helper: 'The temporary password from your '
+                                  "installer. If you've already set a new "
+                                  'password, enter that one.',
                               obscure: _obscureCurrent,
                               onToggle: () => setState(
                                   () => _obscureCurrent = !_obscureCurrent),
@@ -252,7 +286,8 @@ class _ForcedPasswordResetScreenState
                             const SizedBox(height: 12),
                             _buildPasswordField(
                               controller: _newCtrl,
-                              hint: 'New Password (min 8 characters)',
+                              label: 'New password',
+                              helper: 'At least 8 characters.',
                               obscure: _obscureNew,
                               onToggle: () =>
                                   setState(() => _obscureNew = !_obscureNew),
@@ -261,7 +296,7 @@ class _ForcedPasswordResetScreenState
                             const SizedBox(height: 12),
                             _buildPasswordField(
                               controller: _confirmCtrl,
-                              hint: 'Confirm New Password',
+                              label: 'Confirm new password',
                               obscure: _obscureConfirm,
                               onToggle: () => setState(
                                   () => _obscureConfirm = !_obscureConfirm),
@@ -301,7 +336,8 @@ class _ForcedPasswordResetScreenState
                             ],
                             const SizedBox(height: 20),
                             Container(
-                              height: 52,
+                              constraints:
+                                  const BoxConstraints(minHeight: 52),
                               decoration: BoxDecoration(
                                 gradient: const LinearGradient(colors: [
                                   NexGenPalette.cyan,
@@ -314,28 +350,38 @@ class _ForcedPasswordResetScreenState
                                 splashColor: Colors.transparent,
                                 highlightColor: Colors.transparent,
                                 onTap: _submitting ? null : _submit,
-                                child: Center(
-                                  child: _submitting
-                                      ? const SizedBox(
-                                          height: 22,
-                                          width: 22,
-                                          child: CircularProgressIndicator(
-                                            color: Colors.black,
-                                            strokeWidth: 2,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 14),
+                                  child: Center(
+                                    child: _submitting
+                                        ? const SizedBox(
+                                            height: 22,
+                                            width: 22,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.black,
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : Text(
+                                            'SET NEW PASSWORD',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontFamily:
+                                                  GoogleFonts.exo2().fontFamily,
+                                              fontWeight: FontWeight.w800,
+                                              color: Colors.black,
+                                              letterSpacing: 1.2,
+                                            ),
                                           ),
-                                        )
-                                      : Text(
-                                          'SET NEW PASSWORD',
-                                          style: TextStyle(
-                                            fontFamily:
-                                                GoogleFonts.exo2().fontFamily,
-                                            fontWeight: FontWeight.w800,
-                                            color: Colors.black,
-                                            letterSpacing: 1.2,
-                                          ),
-                                        ),
+                                  ),
                                 ),
                               ),
+                            ),
+                            const SizedBox(height: 8),
+                            Center(
+                              child:
+                                  AccountSignOutButton(enabled: !_submitting),
                             ),
                           ],
                         ),
@@ -353,10 +399,44 @@ class _ForcedPasswordResetScreenState
 
   Widget _buildPasswordField({
     required TextEditingController controller,
-    required String hint,
+    required String label,
+    String? helper,
     required bool obscure,
     required VoidCallback onToggle,
     required String? Function(String?) validator,
+  }) {
+    final quietStyle = TextStyle(
+      color: Colors.white.withValues(alpha: 0.6),
+      fontFamily: GoogleFonts.dmSans().fontFamily,
+    );
+    // The label sits above the field so it can wrap at large text sizes (a
+    // floating label is one line and gets cut off) and stays visible after
+    // typing (a hint disappears).
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(label,
+            style: quietStyle.copyWith(color: Colors.white, fontSize: 13)),
+        const SizedBox(height: 6),
+        _passwordInput(
+          controller: controller,
+          helper: helper,
+          obscure: obscure,
+          onToggle: onToggle,
+          validator: validator,
+          quietStyle: quietStyle,
+        ),
+      ],
+    );
+  }
+
+  Widget _passwordInput({
+    required TextEditingController controller,
+    String? helper,
+    required bool obscure,
+    required VoidCallback onToggle,
+    required String? Function(String?) validator,
+    required TextStyle quietStyle,
   }) {
     return TextFormField(
       controller: controller,
@@ -365,11 +445,10 @@ class _ForcedPasswordResetScreenState
       style: TextStyle(
           color: Colors.white, fontFamily: GoogleFonts.dmSans().fontFamily),
       decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(
-          color: Colors.white.withValues(alpha: 0.6),
-          fontFamily: GoogleFonts.dmSans().fontFamily,
-        ),
+        helperText: helper,
+        helperMaxLines: 10,
+        helperStyle: quietStyle.copyWith(fontSize: 12),
+        errorMaxLines: 3,
         filled: true,
         fillColor: Colors.white.withValues(alpha: 0.06),
         prefixIcon:

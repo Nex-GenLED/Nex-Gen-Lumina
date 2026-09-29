@@ -1,13 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/models/sub_user_permissions.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
+
+/// Upper bound on each server round trip while joining.
+const Duration _kJoinTimeout = Duration(seconds: 15);
 
 /// Screen for entering a 6-character invitation code to join an installation.
 ///
@@ -46,7 +51,7 @@ class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
         title: const Text('Join with Code', style: TextStyle(color: Colors.white)),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Form(
             key: _formKey,
@@ -202,14 +207,42 @@ class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
     );
   }
 
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _errorMessage = message;
+    });
+  }
+
+  /// Joins the home the code belongs to.
+  ///
+  /// Row 17 (+110): the invitation used to be marked accepted FIRST, then the
+  /// profile updated, then the roster written — three separate writes. When
+  /// the second one failed the customer saw "Failed to join" while the code
+  /// was already spent, and every retry said "Invalid or expired". The
+  /// profile link and the acceptance are now ONE batch, profile first and
+  /// invitation last: they land together or not at all, so a failed join
+  /// never consumes the code.
   Future<void> _submitCode() async {
+    // The field auto-submits at six characters and the button can be tapped
+    // too; only one join runs at a time.
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
 
     final code = _codeController.text.trim().toUpperCase();
-    final user = FirebaseAuth.instance.currentUser;
+    final session = ref.read(accountSessionProvider);
+    final uid = session.uid;
 
-    if (user == null) {
+    if (!session.isSignedIn || uid == null) {
       setState(() => _errorMessage = 'You must be signed in to join.');
+      return;
+    }
+    final email = session.email?.trim().toLowerCase() ?? '';
+    if (email.isEmpty) {
+      setState(() => _errorMessage =
+          'Sign in with the email address your invitation was sent to, '
+          'then enter the code again.');
       return;
     }
 
@@ -218,90 +251,121 @@ class _JoinWithCodeScreenState extends ConsumerState<JoinWithCodeScreen> {
       _errorMessage = null;
     });
 
+    final db = ref.read(accountFirestoreProvider);
+    final QueryDocumentSnapshot<Map<String, dynamic>> inviteDoc;
     try {
-      // Find invitation by token
-      final query = await FirebaseFirestore.instance
+      // The security rules let an invitee read an invitation only when it is
+      // addressed to their own email. A query by code alone cannot show that,
+      // so Firestore refused it outright; saying which email makes it a query
+      // the rules can allow. (Invitations store the email lower-cased.)
+      final query = await db
           .collection('invitations')
           .where('token', isEqualTo: code)
+          .where('invitee_email', isEqualTo: email)
           .where('status', isEqualTo: 'pending')
           .limit(1)
-          .get();
-
+          .get()
+          .timeout(_kJoinTimeout);
       if (query.docs.isEmpty) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Invalid or expired invitation code.';
-        });
+        _fail("That code isn't valid for $email. Check the code, and make "
+            "sure you're signed in with the email address the invitation "
+            'was sent to.');
         return;
       }
+      inviteDoc = query.docs.first;
+    } on TimeoutException {
+      _fail("Couldn't reach the server. Check your connection and try "
+          'again.');
+      return;
+    } catch (e) {
+      _fail("Couldn't look up that code: $e");
+      return;
+    }
 
-      final inviteDoc = query.docs.first;
-      final inviteData = inviteDoc.data();
-
-      // Check expiration
-      final expiresAt = (inviteData['expires_at'] as Timestamp).toDate();
-      if (DateTime.now().isAfter(expiresAt)) {
-        await inviteDoc.reference.update({'status': 'expired'});
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'This invitation has expired.';
-        });
-        return;
+    final inviteData = inviteDoc.data();
+    final expiresAt = inviteData['expires_at'];
+    if (expiresAt is Timestamp && DateTime.now().isAfter(expiresAt.toDate())) {
+      try {
+        await inviteDoc.reference
+            .update({'status': 'expired'}).timeout(_kJoinTimeout);
+      } catch (e) {
+        debugPrint('JoinWithCode: could not mark invitation expired: $e');
       }
+      _fail('This invitation has expired. Ask the system owner for a new '
+          'code.');
+      return;
+    }
 
-      final installationId = inviteData['installation_id'] as String;
-      final primaryUserId = inviteData['primary_user_id'] as String;
-      final permissions = SubUserPermissions.fromJson(
-        inviteData['permissions'] as Map<String, dynamic>?,
-      );
+    final installationId = inviteData['installation_id'] as String?;
+    final primaryUserId = inviteData['primary_user_id'] as String?;
+    if (installationId == null || primaryUserId == null) {
+      _fail('This invitation is incomplete. Ask the system owner for a new '
+          'code.');
+      return;
+    }
+    final permissions = SubUserPermissions.fromJson(
+      inviteData['permissions'] as Map<String, dynamic>?,
+    );
 
-      // Update invitation status
-      await inviteDoc.reference.update({
-        'status': 'accepted',
-        'accepted_at': FieldValue.serverTimestamp(),
-        'accepted_by_user_id': user.uid,
-      });
+    try {
+      final batch = db.batch()
+        ..update(db.collection('users').doc(uid), {
+          'installation_role': InstallationRole.subUser.name,
+          'installation_id': installationId,
+          'primary_user_id': primaryUserId,
+          'invitation_token': code,
+          'linked_at': FieldValue.serverTimestamp(),
+          'sub_user_permissions': permissions.toJson(),
+        })
+        ..update(inviteDoc.reference, {
+          'status': 'accepted',
+          'accepted_at': FieldValue.serverTimestamp(),
+          'accepted_by_user_id': uid,
+        });
+      await batch.commit().timeout(_kJoinTimeout);
+    } on TimeoutException {
+      // The batch may still land when the connection returns — and if it
+      // does, both halves land together.
+      _fail("We couldn't confirm your join. Check your connection and tap "
+          'Join again.');
+      return;
+    } catch (e) {
+      _fail('Failed to join: $e\nYour code has not been used — you can try '
+          'again.');
+      return;
+    }
 
-      // Update user profile
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-        'installation_role': InstallationRole.subUser.name,
-        'installation_id': installationId,
-        'primary_user_id': primaryUserId,
-        'invitation_token': code,
-        'linked_at': FieldValue.serverTimestamp(),
-        'sub_user_permissions': permissions.toJson(),
-      });
-
-      // Add to installation's subUsers collection
-      await FirebaseFirestore.instance
+    // The owner's "Manage Users" roster. Best effort, after the join has
+    // committed: the rules allow only the owner to write this collection
+    // today, so a refusal here must not undo or misreport a join that
+    // succeeded.
+    try {
+      await db
           .collection('installations')
           .doc(installationId)
           .collection('subUsers')
-          .doc(user.uid)
+          .doc(uid)
           .set({
         'linked_at': FieldValue.serverTimestamp(),
         'permissions': permissions.toJson(),
         'invited_by': primaryUserId,
         'invitation_token': code,
-        'user_email': user.email,
-        'user_name': user.displayName ?? user.email?.split('@').first ?? 'User',
-      });
-
-      // Success! Navigate to dashboard
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Successfully joined! Welcome to the system.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        context.go(AppRoutes.dashboard);
-      }
+        'user_email': email,
+        'user_name': session.displayName ?? email.split('@').first,
+      }).timeout(_kJoinTimeout);
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Failed to join: $e';
-      });
+      debugPrint('JoinWithCode: roster entry not written ($e); the join '
+          'itself succeeded.');
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Successfully joined! Welcome to the system.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      context.go(AppRoutes.dashboard);
     }
   }
 }

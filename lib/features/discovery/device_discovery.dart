@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
+import 'package:nexgen_command/shared/explicit_selection.dart';
 
 /// Represents a discovered device endpoint
 class DeviceEndpoint {
@@ -183,26 +184,58 @@ class DeviceDiscoveryService {
 /// Riverpod provider for discovery service
 final deviceDiscoveryServiceProvider = Provider<DeviceDiscoveryService>((ref) => DeviceDiscoveryService());
 
+/// The repository controller records are saved through. Overridden in tests.
+final deviceRepositoryProvider =
+    Provider<DeviceRepository>((ref) => DeviceRepository());
+
 /// Selected device IP provider (null until chosen)
 final selectedDeviceIpProvider = StateProvider<String?>((ref) => null);
 
-/// Async discovery provider that runs once on watch
+/// Async discovery provider that runs once on watch.
+///
+/// Row 68 (+110): this used to select the FIRST device found — and the
+/// discovery page then jumped to the dashboard before the customer tapped
+/// anything, on a network with two controllers quite possibly the wrong one
+/// (a neighbour's, or the other half of the house). It now selects only when
+/// exactly ONE controller answered and nothing is selected yet: one candidate
+/// is not a guess. With two or more, the customer taps theirs.
 final discoveredDevicesProvider = FutureProvider<List<DeviceEndpoint>>((ref) async {
   final service = ref.watch(deviceDiscoveryServiceProvider);
   final devices = await service.discover();
-  // Prefer names containing nexgen-master or wled
-  final preferred = devices.where((d) => d.name.toLowerCase().contains('nexgen-master') || d.name.toLowerCase().contains('wled')).toList();
-  if (preferred.isNotEmpty) {
-    ref.read(selectedDeviceIpProvider.notifier).state = preferred.first.address.address;
-  } else if (devices.isNotEmpty) {
-    ref.read(selectedDeviceIpProvider.notifier).state = devices.first.address.address;
+  final decision = requireExplicitSelection<DeviceEndpoint>(
+    candidates: devices,
+    tapped: null,
+    noun: 'controller',
+    allowSoleCandidate: true,
+  );
+  if (decision.hasSelection && ref.read(selectedDeviceIpProvider) == null) {
+    ref.read(selectedDeviceIpProvider.notifier).state =
+        decision.value!.address.address;
   }
   return devices;
 });
 
 /// Repository for storing user's devices/controllers in Firestore
 class DeviceRepository {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  DeviceRepository({FirebaseFirestore? firestore}) : _firestore = firestore;
+
+  final FirebaseFirestore? _firestore;
+  FirebaseFirestore get _db => _firestore ?? FirebaseFirestore.instance;
+
+  /// Whether `users/{uid}/controllers` already holds a controller at [ip].
+  Future<bool> hasControllerAt({
+    required String userId,
+    required String ip,
+  }) async {
+    final snap = await _db
+        .collection('users')
+        .doc(userId)
+        .collection('controllers')
+        .where('ip', isEqualTo: ip)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
+  }
 
   /// Save or update a device under users/{uid}/controllers/{docId}
   /// Stores: serial, ip, name, ssid (optional), wifiConfigured,

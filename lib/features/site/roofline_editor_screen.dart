@@ -4,7 +4,13 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/roofline_feature_walkthrough.dart';
+import 'package:nexgen_command/features/design/roofline_segmentation.dart';
+import 'package:nexgen_command/features/design/roofline_target_bar.dart';
+import 'package:nexgen_command/features/design/roofline_trace_merge.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/services/roofline_auto_detect_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -14,6 +20,12 @@ import 'package:nexgen_command/widgets/roofline_editor.dart';
 ///
 /// Supports multi-segment tracing with per-segment channel assignment,
 /// story level, and label. Each segment is rendered in its channel color.
+///
+/// +110: loads and saves the controller named in [RooflineTargetBar]
+/// (row 70), merges the trace into the stored map instead of replacing it
+/// (row 71), writes the photo outline only after the map has saved (row
+/// 164), and offers the feature walkthrough when the roofline's corners and
+/// peaks have not been marked.
 class RooflineEditorScreen extends ConsumerStatefulWidget {
   const RooflineEditorScreen({super.key});
 
@@ -22,23 +34,49 @@ class RooflineEditorScreen extends ConsumerStatefulWidget {
 }
 
 class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
-  final GlobalKey<RooflineEditorState> _editorKey = GlobalKey();
+  GlobalKey<RooflineEditorState> _editorKey = GlobalKey();
   bool _isSaving = false;
   bool _isDetecting = false;
   bool _segmentPanelExpanded = false;
   List<RooflineSegment> _currentSegments = [];
   int _totalChannelCount = 1;
 
+  /// The stored map this trace started from, and which of its segments the
+  /// editor was shown (the ones with photo points).
+  bool _loaded = false;
+  RooflineConfiguration? _stored;
+  List<RooflineSegment> _initialSegments = const [];
+  Set<String> _shownIds = const {};
+
   @override
   void initState() {
     super.initState();
-    // Load existing config channel count after first frame
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final config = ref.read(currentRooflineConfigProvider).valueOrNull;
-      if (config != null) {
-        setState(() => _totalChannelCount = config.effectiveTotalChannelCount);
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final notifier = ref.read(rooflineConfigEditorProvider.notifier);
+    await notifier.initialize();
+    if (!mounted) return;
+    final stored = ref.read(rooflineConfigEditorProvider);
+    final initial =
+        stored?.segments.where((s) => s.points.isNotEmpty).toList() ?? const [];
+    setState(() {
+      _stored = stored;
+      _initialSegments = initial;
+      _shownIds = {for (final s in initial) s.id};
+      _currentSegments = List.of(initial);
+      _totalChannelCount = (stored?.effectiveTotalChannelCount ?? 1)
+          .clamp(1, 8)
+          .toInt();
+      _editorKey = GlobalKey();
+      _loaded = true;
     });
+  }
+
+  Future<void> _onTargetChanged(ControllerInfo picked) async {
+    setState(() => _loaded = false);
+    await _load();
   }
 
   @override
@@ -46,7 +84,6 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
     final imageUrl = ref.watch(houseImageUrlProvider);
     final useStock = ref.watch(useStockImageProvider);
     final existingMask = ref.watch(rooflineMaskProvider);
-    final existingConfig = ref.watch(currentRooflineConfigProvider).valueOrNull;
 
     // Determine image
     ImageProvider imageProvider;
@@ -56,15 +93,11 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
       imageProvider = const AssetImage('assets/images/Demohomephoto.jpg');
     }
 
-    // Load initial segments from config if available
-    final initialSegments = existingConfig?.segments
-        .where((s) => s.points.isNotEmpty)
-        .toList();
-
     final activeIdx = _editorKey.currentState?.activeSegmentIndex;
     final activeSeg = activeIdx != null && activeIdx < _currentSegments.length
         ? _currentSegments[activeIdx]
         : null;
+    final segmentation = assessRooflineSegmentation(_stored);
 
     return Scaffold(
       backgroundColor: NexGenPalette.matteBlack,
@@ -73,31 +106,47 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close),
+          tooltip: 'Close',
           onPressed: () => context.pop(),
         ),
         title: const Text('Trace Roofline'),
         actions: [
           // Design Studio Slice 5 — jump to customer boundary refine.
           if (_currentSegments.isNotEmpty)
-            TextButton.icon(
+            IconButton(
+              tooltip: 'Refine',
               onPressed: () => context.push(AppRoutes.rooflineRefine),
-              icon: const Icon(Icons.tune, size: 18),
-              label: const Text('Refine'),
+              icon: const Icon(Icons.tune),
             ),
           if (_currentSegments.isNotEmpty)
-            TextButton.icon(
+            IconButton(
+              tooltip: 'Clear all',
               onPressed: () => _editorKey.currentState?.clear(),
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Clear All'),
+              icon: const Icon(Icons.refresh),
             ),
         ],
       ),
+      // The canvas takes the middle; the controls above and below it each
+      // scroll within at most 30% of the height, so large text never
+      // squeezes the canvas to nothing or pushes Finish off-screen. (The
+      // whole page does not scroll: dragging points on the canvas would
+      // scroll it instead.)
       body: SafeArea(
-        child: Column(
+        child: LayoutBuilder(builder: (context, constraints) {
+          final chromeMax = constraints.maxHeight * 0.3;
+          return Column(
           children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: chromeMax),
+              child: SingleChildScrollView(
+                child: Column(children: [
+            RooflineTargetBar(
+              enabled: !_isSaving,
+              onChanged: _onTargetChanged,
+            ),
             // Instructions
             Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: NexGenPalette.gunmetal90,
@@ -106,7 +155,7 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: NexGenPalette.cyan, size: 18),
+                  const Icon(Icons.info_outline, color: NexGenPalette.cyan, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -120,25 +169,38 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                 ],
               ),
             ),
+            if (_loaded && segmentation.hasMap)
+              _FeatureStatusBanner(
+                segmentation: segmentation,
+                onMark: _openWalkthrough,
+              ),
+                ]),
+              ),
+            ),
 
             // Editor canvas
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: RooflineEditor(
-                  key: _editorKey,
-                  imageProvider: imageProvider,
-                  initialMask: initialSegments == null || initialSegments.isEmpty
-                      ? existingMask
-                      : null,
-                  initialSegments: initialSegments,
-                  onSegmentsChanged: (segments) {
-                    setState(() => _currentSegments = segments);
-                  },
-                ),
+                child: !_loaded
+                    ? const Center(child: CircularProgressIndicator())
+                    : RooflineEditor(
+                        key: _editorKey,
+                        imageProvider: imageProvider,
+                        initialMask:
+                            _initialSegments.isEmpty ? existingMask : null,
+                        initialSegments: _initialSegments,
+                        onSegmentsChanged: (segments) {
+                          setState(() => _currentSegments = segments);
+                        },
+                      ),
               ),
             ),
 
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: chromeMax),
+              child: SingleChildScrollView(
+                child: Column(children: [
             // Active segment info bar
             if (activeSeg != null)
               Container(
@@ -151,7 +213,10 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                     color: activeSeg.channelDisplayColor.withValues(alpha: 0.4),
                   ),
                 ),
-                child: Row(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
                   children: [
                     Container(
                       width: 12,
@@ -161,25 +226,16 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 8),
                     Text(
                       activeSeg.name,
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13),
                     ),
-                    const SizedBox(width: 8),
                     _ChannelBadge(channelIndex: activeSeg.channelIndex),
-                    const Spacer(),
                     Text(
-                      '${activeSeg.points.length} pts',
-                      style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+                      '${activeSeg.points.length} pts'
+                      '${activeSeg.level > 1 ? ' · L${activeSeg.level}' : ''}',
+                      style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
                     ),
-                    if (activeSeg.level > 1) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        'L${activeSeg.level}',
-                        style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -191,31 +247,38 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
             _buildToolbar(),
 
             const SizedBox(height: 8),
+                ]),
+              ),
+            ),
           ],
-        ),
+          );
+        }),
       ),
     );
   }
 
   Widget _buildToolbar() {
+    final target = ref.watch(rooflineEditTargetProvider);
+    final canFinish = _loaded &&
+        target.hasSelection &&
+        _currentSegments.any((s) => s.points.length >= 2) &&
+        !_isSaving;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Primary actions
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              // New Segment
-              Expanded(
-                child: _ToolbarButton(
-                  icon: Icons.add,
-                  label: '+ New Segment',
-                  onTap: _showNewSegmentDialog,
-                  color: NexGenPalette.cyan,
-                ),
+              _ToolbarButton(
+                icon: Icons.add,
+                label: 'New Segment',
+                onTap: _loaded ? _showNewSegmentDialog : null,
+                color: NexGenPalette.cyan,
               ),
-              const SizedBox(width: 8),
-              // Undo
               _ToolbarButton(
                 icon: Icons.undo,
                 label: 'Undo',
@@ -223,8 +286,6 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                     ? () => _editorKey.currentState?.undo()
                     : null,
               ),
-              const SizedBox(width: 8),
-              // Delete Segment
               _ToolbarButton(
                 icon: Icons.delete_outline,
                 label: 'Delete',
@@ -233,56 +294,52 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                     : null,
                 color: Colors.redAccent,
               ),
-              const SizedBox(width: 8),
-              // Segment list toggle
               _ToolbarButton(
                 icon: _segmentPanelExpanded ? Icons.expand_less : Icons.list,
-                label: '${_currentSegments.length}',
+                label: '${_currentSegments.length} segments',
                 onTap: () => setState(() => _segmentPanelExpanded = !_segmentPanelExpanded),
               ),
             ],
           ),
           const SizedBox(height: 8),
           // Save / secondary actions
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
             children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _isSaving || _isDetecting ? null : _autoDetectRoofline,
-                  icon: _isDetecting
-                      ? const SizedBox(
-                          width: 16, height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan),
-                        )
-                      : const Icon(Icons.auto_fix_high, size: 18),
-                  label: Text(_isDetecting ? 'Detecting...' : 'Auto-Detect'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: NexGenPalette.cyan,
-                    side: const BorderSide(color: NexGenPalette.cyan),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
+              OutlinedButton.icon(
+                onPressed: _isSaving || _isDetecting || !_loaded
+                    ? null
+                    : _autoDetectRoofline,
+                icon: _isDetecting
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: NexGenPalette.cyan),
+                      )
+                    : const Icon(Icons.auto_fix_high, size: 18),
+                label: Text(_isDetecting ? 'Detecting...' : 'Auto-Detect'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: NexGenPalette.cyan,
+                  side: const BorderSide(color: NexGenPalette.cyan),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: FilledButton.icon(
-                  onPressed: _currentSegments.any((s) => s.points.length >= 2) && !_isSaving
-                      ? _saveRoofline
-                      : null,
-                  icon: _isSaving
-                      ? const SizedBox(
-                          width: 18, height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                        )
-                      : const Icon(Icons.check),
-                  label: Text(_isSaving ? 'Saving...' : 'Finish'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: NexGenPalette.cyan,
-                    foregroundColor: Colors.black,
-                    disabledBackgroundColor: NexGenPalette.gunmetal50,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
+              FilledButton.icon(
+                key: const ValueKey('trace-finish'),
+                onPressed: canFinish ? _saveRoofline : null,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(_isSaving ? 'Saving...' : 'Finish'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: NexGenPalette.cyan,
+                  foregroundColor: Colors.black,
+                  disabledBackgroundColor: NexGenPalette.gunmetal50,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
               ),
             ],
@@ -302,7 +359,7 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
         border: Border.all(color: NexGenPalette.line),
       ),
       child: _currentSegments.isEmpty
-          ? const Padding(
+          ? const SingleChildScrollView(
               padding: EdgeInsets.all(16),
               child: Text('No segments yet. Tap on the photo to start tracing.',
                   style: TextStyle(color: NexGenPalette.textMedium)),
@@ -324,35 +381,21 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                   selectedTileColor: seg.channelDisplayColor.withValues(alpha: 0.08),
                   leading: ReorderableDragStartListener(
                     index: index,
-                    child: Icon(Icons.drag_handle, color: NexGenPalette.textMedium, size: 20),
+                    child: const Icon(Icons.drag_handle, color: NexGenPalette.textMedium, size: 20),
                   ),
-                  title: Row(
-                    children: [
-                      Container(
-                        width: 10, height: 10,
-                        decoration: BoxDecoration(
-                          color: seg.channelDisplayColor,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          seg.name,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ],
+                  title: Text(
+                    seg.name,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                      fontSize: 13,
+                    ),
                   ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  subtitle: Wrap(
+                    spacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       _ChannelBadge(channelIndex: seg.channelIndex),
-                      const SizedBox(width: 4),
                       Text('${seg.points.length} pts',
                           style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 11)),
                     ],
@@ -365,6 +408,14 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
   }
 
   // ── Actions ───────────────────────────────────────────────────────────
+
+  Future<void> _openWalkthrough() async {
+    await openRooflineFeatureWalkthrough(context);
+    if (!mounted) return;
+    // The walkthrough saves; reload so this screen shows the marked map.
+    setState(() => _loaded = false);
+    await _load();
+  }
 
   void _showNewSegmentDialog() {
     String label = '';
@@ -390,113 +441,108 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
           bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
         ),
         child: StatefulBuilder(
-          builder: (ctx, setSheetState) => Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('New Segment',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      color: Colors.white, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 16),
+          builder: (ctx, setSheetState) => SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('New Segment',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 16),
 
-              // Label
-              TextField(
-                decoration: InputDecoration(
-                  labelText: 'Segment Label',
-                  hintText: 'e.g. Front Eave, Garage',
-                  filled: true,
-                  fillColor: NexGenPalette.matteBlack,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                // Label
+                TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Segment Label',
+                    hintText: 'e.g. Front Eave, Garage',
+                    filled: true,
+                    fillColor: NexGenPalette.matteBlack,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  controller: TextEditingController(text: label),
+                  onChanged: (v) => label = v,
+                  style: const TextStyle(color: Colors.white),
                 ),
-                controller: TextEditingController(text: label),
-                onChanged: (v) => label = v,
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
-              // Channel dropdown
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<int>(
-                      initialValue: channelIndex,
-                      decoration: InputDecoration(
-                        labelText: 'Channel',
-                        filled: true,
-                        fillColor: NexGenPalette.matteBlack,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      dropdownColor: NexGenPalette.gunmetal90,
-                      style: const TextStyle(color: Colors.white),
-                      items: [
-                        for (int i = 0; i < _totalChannelCount; i++)
-                          DropdownMenuItem(
-                            value: i,
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 12, height: 12,
-                                  decoration: BoxDecoration(
-                                    color: kChannelColors[i % kChannelColors.length],
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text('Channel ${i + 1}'),
-                              ],
+                // Channel
+                DropdownButtonFormField<int>(
+                  initialValue: channelIndex,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Channel',
+                    filled: true,
+                    fillColor: NexGenPalette.matteBlack,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  dropdownColor: NexGenPalette.gunmetal90,
+                  style: const TextStyle(color: Colors.white),
+                  items: [
+                    for (int i = 0; i < _totalChannelCount; i++)
+                      DropdownMenuItem(
+                        value: i,
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 12, height: 12,
+                              decoration: BoxDecoration(
+                                color: kChannelColors[i % kChannelColors.length],
+                                shape: BoxShape.circle,
+                              ),
                             ),
-                          ),
-                        DropdownMenuItem(
-                          value: _totalChannelCount,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.add, size: 14, color: NexGenPalette.cyan),
-                              const SizedBox(width: 8),
-                              const Text('+ Add Channel', style: TextStyle(color: NexGenPalette.cyan)),
-                            ],
-                          ),
+                            const SizedBox(width: 8),
+                            Flexible(child: Text('Channel ${i + 1}')),
+                          ],
                         ),
-                      ],
-                      onChanged: (v) {
-                        if (v == _totalChannelCount) {
-                          setState(() => _totalChannelCount++);
-                          setSheetState(() {});
-                          channelIndex = _totalChannelCount - 1;
-                        } else {
-                          channelIndex = v ?? 0;
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // Story level
-                  Expanded(
-                    child: DropdownButtonFormField<int>(
-                      initialValue: storyLevel,
-                      decoration: InputDecoration(
-                        labelText: 'Story',
-                        filled: true,
-                        fillColor: NexGenPalette.matteBlack,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       ),
-                      dropdownColor: NexGenPalette.gunmetal90,
-                      style: const TextStyle(color: Colors.white),
-                      items: const [
-                        DropdownMenuItem(value: 1, child: Text('Ground Floor')),
-                        DropdownMenuItem(value: 2, child: Text('2nd Story')),
-                        DropdownMenuItem(value: 3, child: Text('3rd Story')),
-                      ],
-                      onChanged: (v) => storyLevel = v ?? 1,
+                    DropdownMenuItem(
+                      value: _totalChannelCount,
+                      child: const Row(
+                        children: [
+                          Icon(Icons.add, size: 14, color: NexGenPalette.cyan),
+                          SizedBox(width: 8),
+                          Flexible(
+                            child: Text('Add Channel', style: TextStyle(color: NexGenPalette.cyan)),
+                          ),
+                        ],
+                      ),
                     ),
+                  ],
+                  onChanged: (v) {
+                    if (v == _totalChannelCount) {
+                      setState(() => _totalChannelCount++);
+                      setSheetState(() {});
+                      channelIndex = _totalChannelCount - 1;
+                    } else {
+                      channelIndex = v ?? 0;
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                // Story level
+                DropdownButtonFormField<int>(
+                  initialValue: storyLevel,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Story',
+                    filled: true,
+                    fillColor: NexGenPalette.matteBlack,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                ],
-              ),
-              const SizedBox(height: 16),
+                  dropdownColor: NexGenPalette.gunmetal90,
+                  style: const TextStyle(color: Colors.white),
+                  items: const [
+                    DropdownMenuItem(value: 1, child: Text('Ground Floor')),
+                    DropdownMenuItem(value: 2, child: Text('2nd Story')),
+                    DropdownMenuItem(value: 3, child: Text('3rd Story')),
+                  ],
+                  onChanged: (v) => storyLevel = v ?? 1,
+                ),
+                const SizedBox(height: 16),
 
-              // Create button
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
+                // Create button
+                FilledButton(
                   onPressed: () {
                     Navigator.pop(ctx);
                     _editorKey.currentState?.startNewSegment(
@@ -512,8 +558,8 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                   ),
                   child: const Text('Start Tracing'),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -586,72 +632,39 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final profile = ref.read(currentUserProfileProvider).maybeWhen(
-        data: (p) => p,
-        orElse: () => null,
-      );
-      if (profile == null) throw Exception('No user profile found');
-
-      // 1. Save the legacy RooflineMask for backward compatibility
-      final mask = editorState.getMask();
-      final userService = ref.read(userServiceProvider);
-      final updatedProfile = profile.copyWith(
-        rooflineMask: mask.toJson(),
-        updatedAt: DateTime.now(),
-      );
-      await userService.updateUser(updatedProfile);
-
-      // 2. Save the multi-segment RooflineConfiguration
       final configEditor = ref.read(rooflineConfigEditorProvider.notifier);
-      await configEditor.initialize();
+      final stored = _stored ?? RooflineConfiguration.empty();
+      final mask = editorState.getMask();
 
-      // Build config from traced segments
-      final imageUrl = ref.read(houseImageUrlProvider);
-      final config = ref.read(rooflineConfigEditorProvider);
-      if (config != null) {
-        // Clear existing segments and replace with traced ones
-        for (final existing in config.segments.toList()) {
-          configEditor.removeSegment(existing.id);
-        }
-      }
+      // Row 71: merge the trace into the stored map — keep counts, anchors
+      // and feature marks; delete only what the customer deleted here.
+      final merged = mergeTraceIntoRoofline(
+        stored: stored,
+        traced: segments,
+        shownInEditor: _shownIds,
+      ).copyWith(
+        photoPath: ref.read(houseImageUrlProvider),
+        totalChannelCount: _totalChannelCount,
+        // Persist the traced photo's aspect so the preview/overlay project
+        // the segments correctly under BoxFit.cover.
+        sourceAspectRatio: mask.sourceAspectRatio,
+      );
+      configEditor.loadConfiguration(merged);
 
-      // Add each traced segment
-      for (final seg in segments) {
-        configEditor.addSegment(
-          name: seg.name,
-          pixelCount: seg.pixelCount > 0 ? seg.pixelCount : 30,
-          channelIndex: seg.channelIndex,
-          level: seg.level,
-          points: seg.points,
-          isConnectedToPrevious: seg.isConnectedToPrevious,
-        );
-      }
-
-      configEditor.setPhotoPath(imageUrl);
-      configEditor.setTotalChannelCount(_totalChannelCount);
-      // Persist the traced photo's aspect so the preview/overlay project the
-      // segments correctly under BoxFit.cover (mask carries it from the editor's
-      // intrinsic image size).
-      configEditor.setSourceAspectRatio(mask.sourceAspectRatio);
-      // P1 (residential path audit §9.1 item 10 / S15): the result used to be
-      // discarded, so a pixelMap write that never landed still reported
-      // "Saved N roofline segments" and popped the editor. The legacy mask had
-      // already been written by then, which is what makes the lie convincing —
-      // the photo overlay still updates while the per-channel map the lights
-      // actually use is missing. Do not pop on a failure: the trace is only in
-      // memory and leaving loses it.
+      // P1 (residential path audit §9.1 item 10 / S15): a pixelMap write that
+      // never landed used to report "Saved N roofline segments" and pop. Do
+      // not pop on a failure: the trace is only in memory and leaving loses
+      // it.
       final saved = await configEditor.save();
       if (!saved) {
-        final cause = configEditor.lastSaveError;
-        debugPrint('Roofline editor: pixelMap save failed — $cause');
+        debugPrint('Roofline editor: pixelMap save failed — '
+            '${configEditor.lastSaveError}');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Your outline was saved to your profile, but the per-channel '
-                'map did not save (${cause ?? 'unknown error'}). Your lights '
-                'will not follow it yet — check your connection and tap Save '
-                'again.',
+                '${configEditor.lastSaveMessage ?? "Your roofline didn't save."} '
+                'Nothing was changed — your trace is still here.',
               ),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 8),
@@ -661,11 +674,19 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
         return;
       }
 
+      // Row 164: the photo outline is written only AFTER the map the lights
+      // use has saved, so "Roofline traced" can no longer describe a map
+      // that failed to save.
+      final maskNote = await _saveMaskToProfile(mask.toJson());
+
       if (mounted) {
+        final n = merged.segments.length;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Saved ${segments.length} roofline segment${segments.length == 1 ? '' : 's'}'),
-            backgroundColor: Colors.green,
+            content: Text(
+                'Saved your roofline ($n segment${n == 1 ? '' : 's'}).'
+                '${maskNote == null ? '' : ' $maskNote'}'),
+            backgroundColor: maskNote == null ? Colors.green : Colors.orange,
           ),
         );
         context.pop();
@@ -681,9 +702,81 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
       if (mounted) setState(() => _isSaving = false);
     }
   }
+
+  /// Writes the photo outline to the profile. Returns null on success, or a
+  /// sentence saying the outline did not update (the lights' map already
+  /// saved, so this is not a failure of the save).
+  Future<String?> _saveMaskToProfile(Map<String, dynamic> maskJson) async {
+    final profile = ref.read(currentUserProfileProvider).maybeWhen(
+          data: (p) => p,
+          orElse: () => null,
+        );
+    if (profile == null) {
+      return "The photo outline didn't update (your profile hasn't loaded).";
+    }
+    try {
+      await ref.read(userServiceProvider).updateUser(
+            profile.copyWith(rooflineMask: maskJson, updatedAt: DateTime.now()),
+          );
+      return null;
+    } catch (e) {
+      debugPrint('Roofline editor: mask write failed after map save: $e');
+      return "The photo outline didn't update ($e).";
+    }
+  }
 }
 
 // ── Shared widgets ──────────────────────────────────────────────────────────
+
+/// Whether the roofline's corners and peaks are marked, with the way to mark
+/// them. Customers whose installer did not mark them finish it here.
+class _FeatureStatusBanner extends StatelessWidget {
+  const _FeatureStatusBanner({required this.segmentation, required this.onMark});
+
+  final RooflineSegmentation segmentation;
+  final VoidCallback onMark;
+
+  @override
+  Widget build(BuildContext context) {
+    final done = segmentation.isSegmented;
+    return Container(
+      key: const ValueKey('roofline-feature-status'),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: done
+            ? NexGenPalette.cyan.withValues(alpha: 0.08)
+            : Colors.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: done
+              ? NexGenPalette.cyan.withValues(alpha: 0.4)
+              : Colors.amber.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          Icon(done ? Icons.check_circle : Icons.roofing,
+              size: 18, color: done ? NexGenPalette.cyan : Colors.amber),
+          Text(
+            done
+                ? 'Corners and peaks marked'
+                : "Your roofline's corners and peaks aren't marked yet.",
+            style: const TextStyle(color: Colors.white),
+          ),
+          TextButton(
+            key: const ValueKey('roofline-mark-features'),
+            onPressed: onMark,
+            child: Text(done ? 'Review' : 'Mark them'),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _ChannelBadge extends StatelessWidget {
   final int channelIndex;

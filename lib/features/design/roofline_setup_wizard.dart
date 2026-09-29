@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/design/find_led.dart';
 import 'package:nexgen_command/features/design/roofline_channel_assignment.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/roofline_target_bar.dart';
+import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -27,21 +29,35 @@ import 'package:uuid/uuid.dart';
 /// 4. Anchor Point Identification
 /// 5. Review & Save
 class RooflineSetupWizard extends ConsumerStatefulWidget {
-  const RooflineSetupWizard({super.key});
+  const RooflineSetupWizard({super.key, @visibleForTesting this.initialStep = 0});
+
+  /// Tests only: the step to open on (0-4).
+  final int initialStep;
 
   @override
   ConsumerState<RooflineSetupWizard> createState() => _RooflineSetupWizardState();
 }
 
 class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
-  final _pageController = PageController();
-  int _currentStep = 0;
+  late final _pageController = PageController(initialPage: widget.initialStep);
+  late int _currentStep = widget.initialStep;
   final _uuid = const Uuid();
 
   // Step 2: LED Installation Info
   Set<int> _selectedChannels = {1}; // Channels 1-8, at least one selected
-  int _totalLedCount = 200; // Total LEDs combined (1-2600)
   Map<int, int> _channelLedCounts = {}; // LED count per channel
+
+  /// Row 163 (+110): the total is the SUM of the per-channel counts and
+  /// nothing else. It used to be its own −/+ number that the save never read:
+  /// with the channel fields blank the review said "Total LEDs: 200" and
+  /// "Configuration valid!" while the saved map carried no per-channel truth.
+  int get _totalLedCount => [
+        for (final n in _selectedChannels) _channelLedCounts[n] ?? 0,
+      ].fold(0, (sum, c) => sum + c);
+
+  /// Every selected channel has an LED count.
+  bool get _allChannelsCounted => _selectedChannels
+      .every((n) => (_channelLedCounts[n] ?? 0) > 0);
   String _controllerLocation = '';
   String _startLocation = ''; // Where LED 1 is located
   String _ledDirection = 'leftToRight'; // Overall LED direction
@@ -141,6 +157,8 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           isConnectedToPrevious: draft.isConnectedToPrevious,
           level: draft.level,
           channelIndex: channelIndex,
+          // The installer chose each segment's type in this wizard.
+          featureConfirmed: true,
         ));
         nextStartByChannel[channelIndex] = currentStart + draft.ledCount;
       }
@@ -161,31 +179,49 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
       // the live bus length when the controller is reachable, else what the
       // installer typed in step 2. (Was never passed → source_pixel_count fell
       // back to the mapped total, so a mis-typed roof always looked "fresh".)
-      final liveChannels = ref.read(deviceChannelsProvider);
+      // Row 70 (+110): save to the controller named on this step, never to
+      // "the selected one, else the newest", and never to the legacy per-user
+      // doc that belongs to no controller.
+      final target = ref.read(rooflineEditTargetProvider);
+      if (!target.hasSelection) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(target.reason ??
+                'Choose which controller this roofline belongs to.'),
+            backgroundColor: Colors.red.shade800,
+          ));
+        }
+        return; // nothing written; `finally` clears the busy flag
+      }
+      final controllerId = target.value!.id;
+
+      // Live bus lengths describe the controller the app is connected to;
+      // use them only when that is the one being saved.
+      final liveChannels =
+          target.value!.ip == ref.read(selectedDeviceIpProvider)
+              ? ref.read(deviceChannelsProvider)
+              : const <DeviceChannel>[];
       final sourceCounts = <int, int>{
         for (int i = 0; i < typedCounts.length; i++)
           if (typedCounts[i] > 0) i: typedCounts[i],
         for (final c in liveChannels) c.id: c.stop - c.start,
       };
 
-      // Save to the active controller's per-channel pixelMap (Slice 1). Use
+      // Save to the chosen controller's per-channel pixelMap (Slice 1). Use
       // effectiveUserUid so an installer-impersonation session writes into the
-      // customer's subtree (same uid as the controller doc). Falls back to the
-      // legacy per-user doc when no controller is selected yet — the lazy
-      // migration folds it into the pixelMap on the first per-controller read.
+      // customer's subtree (same uid as the controller doc).
       final userId = ref.read(effectiveUserUidProvider);
       if (userId == null) {
         throw Exception('User not logged in');
       }
 
-      final controllerId = ref.read(activePixelMapControllerIdProvider);
       final service = ref.read(rooflineConfigServiceProvider);
-      if (controllerId != null) {
-        await service.savePixelMap(userId, controllerId, config,
-            sourceCounts: sourceCounts, createdBy: userId);
-      } else {
-        await service.saveConfiguration(userId, config);
-      }
+      await service.savePixelMap(
+          userId,
+          controllerId,
+          config.copyWith(id: controllerId, controllerId: controllerId),
+          sourceCounts: sourceCounts,
+          createdBy: userId);
 
       // Log AI-relevant segments for debugging
       final aiSegments = _segments.where((s) => s.isAiRelevantSegment).toList();
@@ -234,9 +270,10 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           ),
         ),
         body: Center(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(32),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
@@ -347,12 +384,16 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                   child: Center(
                     child: isActive && !isCurrent
                         ? const Icon(Icons.check, size: 16, color: Colors.black)
-                        : Text(
-                            '${index + 1}',
-                            style: TextStyle(
-                              color: isActive ? Colors.black : NexGenPalette.textMedium,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
+                        // One digit in a fixed circle: scale, don't clip.
+                        : FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '${index + 1}',
+                              style: TextStyle(
+                                color: isActive ? Colors.black : NexGenPalette.textMedium,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
                   ),
@@ -470,9 +511,6 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
   }
 
   Widget _buildLedInfoStep() {
-    // Calculate total from channel counts
-    final channelTotal = _channelLedCounts.values.fold(0, (sum, count) => sum + count);
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -523,8 +561,6 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                         _selectedChannels.remove(channelNum);
                         _channelLedCounts.remove(channelNum);
                       }
-                      // Recalculate total
-                      _totalLedCount = _channelLedCounts.values.fold(0, (sum, count) => sum + count);
                     });
                   },
                 );
@@ -533,48 +569,33 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           ),
           const SizedBox(height: 24),
 
-          // Total LED Count Display
+          // Total LED count: read-only, the sum of the channel counts below.
           _buildGlassField(
-            label: 'Total LEDs Combined (1-2600)',
-            child: Row(
+            label: 'Total LEDs Combined',
+            child: Column(
               children: [
-                IconButton(
-                  icon: const Icon(Icons.remove),
-                  onPressed: _totalLedCount > 10 ? () {
-                    setState(() {
-                      _totalLedCount = (_totalLedCount - 10).clamp(1, 2600);
-                    });
-                  } : null,
-                ),
-                Expanded(
-                  child: Column(
-                    children: [
-                      Text(
-                        '$_totalLedCount',
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                              color: NexGenPalette.cyan,
-                              fontWeight: FontWeight.bold,
-                            ),
-                        textAlign: TextAlign.center,
+                Text(
+                  '$_totalLedCount',
+                  key: const ValueKey('wizard-total-leds'),
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        color: NexGenPalette.cyan,
+                        fontWeight: FontWeight.bold,
                       ),
-                      if (channelTotal > 0 && channelTotal != _totalLedCount)
-                        Text(
-                          'Channel sum: $channelTotal',
-                          style: TextStyle(
-                            color: Colors.orange,
-                            fontSize: 12,
-                          ),
-                        ),
-                    ],
-                  ),
+                  textAlign: TextAlign.center,
                 ),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: _totalLedCount < 2600 ? () {
-                    setState(() {
-                      _totalLedCount = (_totalLedCount + 10).clamp(1, 2600);
-                    });
-                  } : null,
+                Text(
+                  _allChannelsCounted
+                      ? 'The sum of your channel counts.'
+                      : 'Enter the LED count for every selected channel '
+                          'below. The total is their sum.',
+                  key: const ValueKey('wizard-total-hint'),
+                  style: TextStyle(
+                    color: _allChannelsCounted
+                        ? NexGenPalette.textMedium
+                        : Colors.orange,
+                    fontSize: 12,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
@@ -589,7 +610,12 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 children: (_selectedChannels.toList()..sort()).map((channelNum) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
+                      // Wraps: at large text the count field moves under the
+                      // channel label instead of overflowing.
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 12,
+                        runSpacing: 8,
                         children: [
                           Container(
                             width: 36,
@@ -599,21 +625,23 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Center(
-                              child: Text(
-                                '$channelNum',
-                                style: TextStyle(
-                                  color: NexGenPalette.cyan,
-                                  fontWeight: FontWeight.bold,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '$channelNum',
+                                  style: TextStyle(
+                                    color: NexGenPalette.cyan,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
                           Text(
                             'Channel $channelNum:',
                             style: TextStyle(color: NexGenPalette.textHigh),
                           ),
-                          const Spacer(),
+                          Row(mainAxisSize: MainAxisSize.min, children: [
                           SizedBox(
                             width: 100,
                             child: TextFormField(
@@ -644,7 +672,6 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                                 setState(() {
                                   final count = int.tryParse(value) ?? 0;
                                   _channelLedCounts[channelNum] = count.clamp(0, 2600);
-                                  _totalLedCount = _channelLedCounts.values.fold(0, (sum, c) => sum + c);
                                 });
                               },
                             ),
@@ -654,6 +681,7 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                             'LEDs',
                             style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
                           ),
+                          ]),
                         ],
                       ),
                     );
@@ -815,10 +843,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     final remainingLeds = _totalLedCount - _segments.fold(0, (sum, s) => sum + s.ledCount);
     final aiSegmentCount = _segments.where((s) => s.isAiRelevantSegment).length;
 
-    return Column(
-      children: [
-        // Header
-        Padding(
+    // The header and the Add button scroll WITH the list: as fixed blocks
+    // around an Expanded list, large text left the list no height at all.
+    final header = Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -859,8 +886,10 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 ),
                 child: Column(
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
                       children: [
                         Icon(
                           remainingLeds == 0
@@ -875,7 +904,6 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                                   : NexGenPalette.cyan,
                           size: 20,
                         ),
-                        const SizedBox(width: 8),
                         Text(
                           remainingLeds == 0
                               ? 'All $_totalLedCount LEDs assigned!'
@@ -895,11 +923,12 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                     ),
                     if (aiSegmentCount > 0) ...[
                       const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 4,
                         children: [
                           Icon(Icons.auto_awesome, color: Colors.purple, size: 16),
-                          const SizedBox(width: 4),
                           Text(
                             '$aiSegmentCount corners/peaks for Lumina AI',
                             style: TextStyle(color: Colors.purple, fontSize: 12),
@@ -912,63 +941,69 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
               ),
             ],
           ),
-        ),
+        );
 
-        // Segments list
-        Expanded(
-          child: _segments.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.add_circle_outline,
-                        size: 64,
-                        color: NexGenPalette.textMedium,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No segments yet',
-                        style: TextStyle(color: NexGenPalette.textMedium),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Tap the button below to add your first segment',
-                        style: TextStyle(
-                          color: NexGenPalette.textMedium,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : ReorderableListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  itemCount: _segments.length,
-                  onReorder: (oldIndex, newIndex) {
-                    setState(() {
-                      if (newIndex > oldIndex) newIndex--;
-                      final item = _segments.removeAt(oldIndex);
-                      _segments.insert(newIndex, item);
-                    });
-                  },
-                  itemBuilder: (context, index) {
-                    final segment = _segments[index];
-                    return _buildSegmentCard(segment, index);
-                  },
+    final addButton = Padding(
+      padding: const EdgeInsets.all(24),
+      child: _buildActionButton(
+        icon: Icons.add,
+        label: 'Add Segment',
+        onTap: _showAddSegmentDialog,
+      ),
+    );
+
+    if (_segments.isEmpty) {
+      return SingleChildScrollView(
+        child: Column(
+          children: [
+            header,
+            Icon(
+              Icons.add_circle_outline,
+              size: 64,
+              color: NexGenPalette.textMedium,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No segments yet',
+              style: TextStyle(color: NexGenPalette.textMedium),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                'Tap the button below to add your first segment',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: NexGenPalette.textMedium,
+                  fontSize: 12,
                 ),
+              ),
+            ),
+            addButton,
+          ],
         ),
+      );
+    }
 
-        // Add segment button
-        Padding(
-          padding: const EdgeInsets.all(24),
-          child: _buildActionButton(
-            icon: Icons.add,
-            label: 'Add Segment',
-            onTap: _showAddSegmentDialog,
-          ),
-        ),
-      ],
+    return ReorderableListView.builder(
+      header: header,
+      footer: addButton,
+      itemCount: _segments.length,
+      onReorder: (oldIndex, newIndex) {
+        setState(() {
+          if (newIndex > oldIndex) newIndex--;
+          final item = _segments.removeAt(oldIndex);
+          _segments.insert(newIndex, item);
+        });
+      },
+      itemBuilder: (context, index) {
+        final segment = _segments[index];
+        return Padding(
+          key: ValueKey('wizard-segment-${segment.id}'),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: _buildSegmentCard(segment, index),
+        );
+      },
     );
   }
 
@@ -1335,7 +1370,9 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
 
   Widget _buildReviewStep() {
     final totalAssigned = _segments.fold(0, (sum, s) => sum + s.ledCount);
-    final isValid = totalAssigned == _totalLedCount && _segments.isNotEmpty;
+    final isValid = _allChannelsCounted &&
+        totalAssigned == _totalLedCount &&
+        _segments.isNotEmpty;
 
     // Count AI-relevant segments (corners and peaks)
     final aiSegments = _segments.where((s) => s.isAiRelevantSegment).toList();
@@ -1353,7 +1390,10 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                   fontWeight: FontWeight.bold,
                 ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 12),
+          // Row 70 (+110): the controller this roofline is saved to.
+          RooflineTargetBar(enabled: !_isValidating),
+          const SizedBox(height: 12),
 
           // Summary card
           _buildGlassCard(
@@ -1556,9 +1596,11 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      _segments.isEmpty
-                          ? 'Please add at least one segment'
-                          : 'LED count mismatch: $totalAssigned LEDs in segments vs $_totalLedCount total. Segment totals must match the total LED count.',
+                      !_allChannelsCounted
+                          ? 'Enter the LED count for every selected channel (step 2).'
+                          : _segments.isEmpty
+                              ? 'Please add at least one segment'
+                              : 'LED count mismatch: $totalAssigned LEDs in segments vs $_totalLedCount total. Segment totals must match the total LED count.',
                       style: const TextStyle(color: Colors.red),
                     ),
                   ),
@@ -1593,8 +1635,17 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
 
   Widget _buildNavigationButtons() {
     final totalAssigned = _segments.fold(0, (sum, s) => sum + s.ledCount);
-    final canProceed = _currentStep < 4 ||
-        (totalAssigned == _totalLedCount && _segments.isNotEmpty);
+    // Row 163: past the LED step only with a count on every selected channel;
+    // saving only when the segments add up to that sum AND a controller is
+    // named (row 70).
+    final canProceed = switch (_currentStep) {
+      1 => _allChannelsCounted,
+      < 4 => true,
+      _ => _allChannelsCounted &&
+          totalAssigned == _totalLedCount &&
+          _segments.isNotEmpty &&
+          ref.watch(rooflineEditTargetProvider).hasSelection,
+    };
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1666,11 +1717,13 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
                 children: [
                   Icon(icon, color: NexGenPalette.cyan, size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: NexGenPalette.textHigh,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: NexGenPalette.textHigh,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1760,6 +1813,7 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           style: TextStyle(color: NexGenPalette.textHigh),
           decoration: InputDecoration(
             hintText: hint,
+            hintMaxLines: 3,
             hintStyle: TextStyle(color: NexGenPalette.textMedium.withValues(alpha: 0.5)),
             filled: true,
             fillColor: NexGenPalette.gunmetal90,
@@ -1801,25 +1855,27 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
           children: [
             Icon(icon, color: NexGenPalette.cyan),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: NexGenPalette.cyan,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (subtitle != null)
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    subtitle,
+                    label,
                     style: TextStyle(
-                      color: NexGenPalette.textMedium,
-                      fontSize: 12,
+                      color: NexGenPalette.cyan,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-              ],
+                  if (subtitle != null)
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: NexGenPalette.textMedium,
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ),
@@ -1848,8 +1904,11 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
   Widget _buildSummaryRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      // Label and value both wrap; the value moves under the label when the
+      // pair no longer fits on one line.
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        spacing: 12,
         children: [
           Text(label, style: TextStyle(color: NexGenPalette.textMedium)),
           Text(

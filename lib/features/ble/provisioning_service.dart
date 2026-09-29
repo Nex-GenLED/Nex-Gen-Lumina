@@ -3,16 +3,46 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 
-/// Result of a provisioning attempt
+/// Result of a provisioning attempt.
+///
+/// Row 67 (+110): the controller taking the Wi-Fi details, the account
+/// recording it, and the controller showing up on the network are three
+/// different facts. They used to be collapsed into "Device Connected!".
 class ProvisionResult {
   final String ip;
   final String serial;
-  const ProvisionResult({required this.ip, required this.serial});
+
+  /// Whether the controller record reached the account. On failure its
+  /// message says why, in the customer's words.
+  final WriteResult accountSave;
+
+  /// Whether the controller answered on the home network after taking the
+  /// Wi-Fi details. False means "credentials sent, not yet found": it may
+  /// still be joining the network.
+  final bool reachable;
+
+  const ProvisionResult({
+    required this.ip,
+    required this.serial,
+    required this.accountSave,
+    required this.reachable,
+  });
+
+  bool get savedToAccount => accountSave.ok;
 }
+
+/// How the device-setup screen gets a [ProvisioningService] for an account.
+/// Overridden in tests.
+final provisioningServiceFactoryProvider =
+    Provider<ProvisioningService Function(String targetUserId)>(
+  (ref) => (targetUserId) => ProvisioningService(targetUserId: targetUserId),
+);
 
 /// Exception thrown during provisioning with additional context
 class ProvisioningException implements Exception {
@@ -44,7 +74,10 @@ class ProvisioningService {
   /// (`device_setup_page.dart`) and it has a `ref`.
   final String targetUserId;
 
-  ProvisioningService({required this.targetUserId});
+  ProvisioningService({required this.targetUserId, DeviceRepository? repository})
+      : _repository = repository;
+
+  final DeviceRepository? _repository;
 
   static final Guid _improvUuid = Guid('00000000-0090-0016-0128-633215502390');
 
@@ -64,8 +97,9 @@ class ProvisioningService {
     if (kIsWeb || kSimulationMode) {
       final ip = '192.168.1.123';
       final serial = device.remoteId.str; // best available identifier
-      await _saveToRepository(ip: ip, serial: serial, ssid: ssid);
-      return ProvisionResult(ip: ip, serial: serial);
+      final saved = await saveController(ip: ip, serial: serial, ssid: ssid);
+      return ProvisionResult(
+          ip: ip, serial: serial, accountSave: saved, reachable: true);
     }
 
     BluetoothCharacteristic? writeChar;
@@ -143,8 +177,10 @@ class ProvisioningService {
 
       final serial = device.remoteId.str;
 
-      // Persist to repository
-      await _saveToRepository(ip: ip, serial: serial, ssid: ssid);
+      // Persist to the account. The result is REPORTED, not swallowed: a
+      // controller that took the Wi-Fi details but never reached the account
+      // is not "set up".
+      final saved = await saveController(ip: ip, serial: serial, ssid: ssid);
 
       // Disconnect BLE
       try {
@@ -153,13 +189,16 @@ class ProvisioningService {
         debugPrint('ProvisioningService: disconnect failed: $e');
       }
 
-      // Verify Wi‑Fi reachability
-      final ok = await _verifyReachable(ip);
-      if (!ok) {
-        debugPrint('ProvisioningService: IP not reachable yet, will still return result.');
-      }
+      // Verify Wi‑Fi reachability. Not reachable yet means "credentials
+      // sent, not yet found" — the caller says so instead of "Connected".
+      final reachable = await verifyReachable(ip);
 
-      return ProvisionResult(ip: ip, serial: serial);
+      return ProvisionResult(
+        ip: ip,
+        serial: serial,
+        accountSave: saved,
+        reachable: reachable,
+      );
     } catch (e) {
       debugPrint('ProvisioningService: provision failed: $e');
       rethrow;
@@ -213,21 +252,46 @@ class ProvisioningService {
     return RegExp(r'(\d{1,3}(?:\.\d{1,3}){3})').firstMatch(text)?.group(1);
   }
 
-  Future<void> _saveToRepository({required String ip, required String serial, String? ssid}) async {
+  /// Records the controller on [targetUserId]'s account.
+  ///
+  /// Row 67 (+110): this used to swallow every failure (and skip silently
+  /// when there was no account id), so the setup screen said "Device
+  /// Connected!" and left with no controller registered. It now says what
+  /// happened. Also the retry the setup screen offers.
+  Future<WriteResult> saveController({
+    required String ip,
+    required String serial,
+    String? ssid,
+  }) async {
+    if (targetUserId.isEmpty) {
+      return const WriteResult.blocked(
+          "You're not signed in, so the controller couldn't be added to "
+          'your account.');
+    }
     try {
-      if (targetUserId.isEmpty) {
-        debugPrint('ProvisioningService: no target uid — controller not saved');
-        return;
-      }
-      final repo = DeviceRepository();
-      await repo.saveDevice(userId: targetUserId, serial: serial, ip: ip, ssid: ssid);
+      await (_repository ?? DeviceRepository())
+          .saveDevice(userId: targetUserId, serial: serial, ip: ip, ssid: ssid)
+          .timeout(const Duration(seconds: 15));
+      return const WriteResult.success();
+    } on TimeoutException catch (e) {
+      return WriteResult.failed(
+        WriteFailureKind.unreachable,
+        message: "Couldn't reach your account to save the controller. Check "
+            'your connection and try again.',
+        error: e,
+      );
     } catch (e) {
       debugPrint('ProvisioningService: save repository failed: $e');
+      return WriteResult.failed(
+        WriteFailureKind.error,
+        message: "The controller couldn't be added to your account ($e).",
+        error: e,
+      );
     }
   }
 
   /// Verify device reachable over Wi‑Fi by trying a quick HTTP request.
-  Future<bool> _verifyReachable(String ip) async {
+  Future<bool> verifyReachable(String ip) async {
     try {
       final uri = Uri.parse('http://$ip/json');
       final res = await http.get(uri).timeout(const Duration(seconds: 3));
@@ -270,8 +334,9 @@ class ProvisioningService {
       await Future.delayed(const Duration(seconds: 2));
       final ip = '192.168.1.123';
       final serial = device.remoteId.str;
-      await _saveToRepository(ip: ip, serial: serial, ssid: ssid);
-      return ProvisionResult(ip: ip, serial: serial);
+      final saved = await saveController(ip: ip, serial: serial, ssid: ssid);
+      return ProvisionResult(
+          ip: ip, serial: serial, accountSave: saved, reachable: true);
     }
 
     final serial = device.remoteId.str;
@@ -316,7 +381,7 @@ class ProvisioningService {
           // If we found one, verify it's reachable
           if (discoveredIp != null) {
             onStatusUpdate?.call('Verifying controller at $discoveredIp...');
-            final reachable = await _verifyReachable(discoveredIp);
+            final reachable = await verifyReachable(discoveredIp);
             if (reachable) {
               break;
             } else {
@@ -335,8 +400,13 @@ class ProvisioningService {
       // Step 5: If found, save and return
       if (discoveredIp != null) {
         onStatusUpdate?.call('Controller found at $discoveredIp!');
-        await _saveToRepository(ip: discoveredIp, serial: serial, ssid: ssid);
-        return ProvisionResult(ip: discoveredIp, serial: serial);
+        final saved = await saveController(
+            ip: discoveredIp, serial: serial, ssid: ssid);
+        return ProvisionResult(
+            ip: discoveredIp,
+            serial: serial,
+            accountSave: saved,
+            reachable: true);
       }
 
       // Step 6: Not found - throw exception for manual IP fallback
@@ -418,7 +488,7 @@ class ProvisioningService {
     String? ssid,
   }) async {
     // Verify the IP is reachable first
-    final reachable = await _verifyReachable(ip);
+    final reachable = await verifyReachable(ip);
     if (!reachable) {
       throw const ProvisioningException(
         'Controller at this IP is not responding. Please check the IP address.',
@@ -426,7 +496,8 @@ class ProvisioningService {
     }
 
     // Save to repository
-    await _saveToRepository(ip: ip, serial: serial, ssid: ssid);
-    return ProvisionResult(ip: ip, serial: serial);
+    final saved = await saveController(ip: ip, serial: serial, ssid: ssid);
+    return ProvisionResult(
+        ip: ip, serial: serial, accountSave: saved, reachable: true);
   }
 }

@@ -120,6 +120,7 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Email',
+                            hintMaxLines: 3,
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -152,7 +153,7 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Wrap(alignment: WrapAlignment.center, crossAxisAlignment: WrapCrossAlignment.center, children: [
                           Text('Remember your password?', style: TextStyle(color: Colors.white.withValues(alpha: 0.85))),
                           TextButton(onPressed: () => context.pop(), child: const Text('Log In')),
                         ]),

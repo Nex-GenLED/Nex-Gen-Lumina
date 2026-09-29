@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
+import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/roofline_segmentation.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/image_upload_service.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -459,8 +461,32 @@ class _RooflineStatusSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Row 164 (+110): the status comes from the pixel map the LIGHTS use,
+    // not the profile's photo mask. The installer wizard writes only the map
+    // (so this said "Not Set" on a mapped home), and the trace editor used to
+    // write the mask before the map (so a failed map save still said
+    // "Traced"). The photo outline is reported separately.
+    final segmentation = ref.watch(rooflineSegmentationProvider);
+    final mapped = segmentation.valueOrNull?.hasMap ?? false;
+    final featuresMarked = segmentation.valueOrNull?.isSegmented ?? false;
+    final sections = ref.watch(currentRooflineConfigProvider).maybeWhen(
+          data: (c) => c?.segments.length ?? 0,
+          orElse: () => 0,
+        );
     final rooflineMask = ref.watch(rooflineMaskProvider);
-    final hasRoofline = rooflineMask != null && rooflineMask.hasCustomPoints;
+    final hasOutline = rooflineMask != null && rooflineMask.hasCustomPoints;
+    final hasRoofline = mapped;
+
+    final String detail;
+    if (!mapped) {
+      detail = hasOutline
+          ? "Your photo outline isn't linked to your lights yet — open it "
+              'and tap Finish'
+          : 'Trace your roofline for accurate light preview';
+    } else {
+      detail = '$sections section${sections == 1 ? '' : 's'} mapped'
+          '${featuresMarked ? ' · corners & peaks marked' : ' · corners & peaks not marked yet'}';
+    }
 
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -495,7 +521,8 @@ class _RooflineStatusSection extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    hasRoofline ? 'Roofline Traced' : 'Roofline Not Set',
+                    hasRoofline ? 'Roofline Mapped' : 'Roofline Not Set',
+                    key: const ValueKey('roofline-status-title'),
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
@@ -503,9 +530,8 @@ class _RooflineStatusSection extends ConsumerWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    hasRoofline
-                        ? '${rooflineMask.points.length} points traced'
-                        : 'Trace your roofline for accurate light preview',
+                    detail,
+                    key: const ValueKey('roofline-status-detail'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: NexGenPalette.textMedium,
                     ),

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/roofline_target_bar.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -29,7 +30,10 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
   @override
   void initState() {
     super.initState();
-    _initialize();
+    // After the first frame: initialize() can set provider state before its
+    // first await (no controller chosen yet), which Riverpod does not allow
+    // while the tree is building.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialize());
   }
 
   Future<void> _initialize() async {
@@ -98,6 +102,14 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
             ? const Center(child: CircularProgressIndicator())
             : Column(
                 children: [
+                  // Row 70 (+110): which controller this roofline belongs to.
+                  RooflineTargetBar(
+                    enabled: !_dirty && !_isSaving,
+                    onChanged: (_) {
+                      setState(() => _isLoading = true);
+                      _initialize();
+                    },
+                  ),
                   // Stats header
                   _buildStatsHeader(totalPixels, segmentCount),
 
@@ -125,8 +137,10 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
           bottom: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
         ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+      child: Wrap(
+        alignment: WrapAlignment.spaceAround,
+        spacing: 24,
+        runSpacing: 12,
         children: [
           _StatItem(
             label: 'Segments',
@@ -149,9 +163,9 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
             Icons.roofing,
@@ -235,6 +249,8 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
             type: result.type,
             anchorPixels: result.anchorPixels,
             anchorLedCount: result.anchorLedCount,
+            // The customer chose this segment's type in the form.
+            featureConfirmed: true,
           );
       setState(() => _dirty = true);
     }
@@ -254,12 +270,22 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
             type: result.type,
             anchorPixels: result.anchorPixels,
             anchorLedCount: result.anchorLedCount,
+            featureConfirmed: true,
           );
       setState(() => _dirty = true);
     }
   }
 
   Future<void> _showAnchorEditor(RooflineSegment segment) async {
+    final before = ref.read(rooflineConfigEditorProvider);
+    await _openAnchorSheet(segment);
+    // The anchor sheet edits the map directly; count that as unsaved.
+    if (mounted && !identical(before, ref.read(rooflineConfigEditorProvider))) {
+      setState(() => _dirty = true);
+    }
+  }
+
+  Future<void> _openAnchorSheet(RooflineSegment segment) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -298,25 +324,21 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
     );
 
     if (confirm == true) {
+      // Row 72 (+110): this used to call save() on the WHOLE editor, so one
+      // delete silently committed every other unsaved add, edit and reorder
+      // on the screen and bypassed the unsaved-changes prompt. A delete is
+      // now an edit like any other: it marks the screen dirty and is saved by
+      // Save (or discarded by leaving).
       ref.read(rooflineConfigEditorProvider.notifier).removeSegment(segment.id);
-      // Auto-save deletion to Firestore so it persists across reinstalls.
-      final ok = await ref.read(rooflineConfigEditorProvider.notifier).save();
-      if (mounted && !ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to save — changes may not persist'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      setState(() => _dirty = true);
     }
   }
 
   Future<void> _save() async {
     setState(() => _isSaving = true);
 
-    final success =
-        await ref.read(rooflineConfigEditorProvider.notifier).save();
+    final notifier = ref.read(rooflineConfigEditorProvider.notifier);
+    final success = await notifier.save();
 
     if (mounted) {
       setState(() {
@@ -329,7 +351,7 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
           content: Text(
             success
                 ? 'Configuration saved!'
-                : 'Failed to save configuration',
+                : notifier.lastSaveMessage ?? 'Failed to save configuration',
           ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -407,63 +429,82 @@ class _SegmentCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: ReorderableDragStartListener(
-          index: index,
-          child: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: _getTypeColor(segment.type).withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              _getTypeIcon(segment.type),
-              color: _getTypeColor(segment.type),
-              size: 24,
-            ),
-          ),
-        ),
-        title: Text(
-          segment.name,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Row(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _InfoChip(
-              icon: Icons.lightbulb_outline,
-              value: '${segment.pixelCount} px',
+            Row(
+              children: [
+                ReorderableDragStartListener(
+                  index: index,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _getTypeColor(segment.type).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      _getTypeIcon(segment.type),
+                      color: _getTypeColor(segment.type),
+                      size: 24,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    segment.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            _InfoChip(
-              icon: Icons.anchor,
-              value: '${segment.anchorPixels.length} anchors',
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _InfoChip(
+                  icon: _getTypeIcon(segment.type),
+                  value: segment.type.displayName,
+                ),
+                _InfoChip(
+                  icon: Icons.lightbulb_outline,
+                  value: '${segment.pixelCount} px',
+                ),
+                _InfoChip(
+                  icon: Icons.anchor,
+                  value: '${segment.anchorPixels.length} anchors',
+                ),
+              ],
             ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.anchor, size: 20),
-              color: Colors.white54,
-              onPressed: onEditAnchors,
-              tooltip: 'Edit Anchors',
-            ),
-            IconButton(
-              icon: const Icon(Icons.edit, size: 20),
-              color: Colors.white54,
-              onPressed: onEdit,
-              tooltip: 'Edit Segment',
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete, size: 20),
-              color: Colors.red.withValues(alpha: 0.7),
-              onPressed: onDelete,
-              tooltip: 'Delete Segment',
+            Wrap(
+              alignment: WrapAlignment.end,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.anchor, size: 20),
+                  color: Colors.white54,
+                  onPressed: onEditAnchors,
+                  tooltip: 'Edit Anchors',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit, size: 20),
+                  color: Colors.white54,
+                  onPressed: onEdit,
+                  tooltip: 'Edit Segment',
+                ),
+                IconButton(
+                  key: ValueKey('delete-${segment.id}'),
+                  icon: const Icon(Icons.delete, size: 20),
+                  color: Colors.red.withValues(alpha: 0.7),
+                  onPressed: onDelete,
+                  tooltip: 'Delete Segment',
+                ),
+              ],
             ),
           ],
         ),
@@ -522,11 +563,13 @@ class _InfoChip extends StatelessWidget {
         children: [
           Icon(icon, size: 12, color: Colors.white54),
           const SizedBox(width: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
+          Flexible(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+              ),
             ),
           ),
         ],
