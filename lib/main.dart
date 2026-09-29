@@ -27,6 +27,7 @@ import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
 import 'package:nexgen_command/shared/accessibility/text_scale_clamp.dart';
+import 'package:nexgen_command/shared/fonts/bundled_font_weights.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
 /// Main entry point for the application
@@ -132,6 +133,11 @@ Future<void> main() async {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
   _startupBreadcrumb('main:enter');
+
+  // Register the shipped font weights. Deliberately NOT awaited: it must never
+  // stand between main() and runApp(), and until it completes text falls back
+  // to the same files declared under `fonts:` in pubspec.yaml.
+  unawaited(registerBundledFontWeights());
 
   // The whole startup body is wrapped so that runApp() is UNCONDITIONAL —
   // see the finally at the bottom of main(). Nothing below may be the reason
