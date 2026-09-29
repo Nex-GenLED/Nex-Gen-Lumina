@@ -1,16 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
-import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
@@ -70,17 +68,16 @@ class RecentPatternsSection extends ConsumerWidget {
   }
 
   Future<void> _applyPattern(BuildContext context, WidgetRef ref, GradientPattern pattern) async {
+    // Captured before any await, so the reason below can still be shown.
+    final container = ProviderScope.containerOf(context, listen: false);
     // Check for active neighborhood sync before changing lights
     final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
     if (!shouldProceed) return;
 
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No device connected')),
-        );
-      }
+      // Row 1: the shared reason, not "No device connected" for every case.
+      await reportApplyBlocked(container);
       return;
     }
 
@@ -104,10 +101,11 @@ class RecentPatternsSection extends ConsumerWidget {
       );
 
       if (!isCustomEffect) {
-        // Standard WLED effect - send payload directly
-        var payload = <String, dynamic>{
+        // Standard WLED effect. No `bri`: replaying a recent look must not
+        // jump the house to the level it happened to be at then (the rule
+        // Explore's Apply follows since +110, P10).
+        final payload = <String, dynamic>{
           'on': true,
-          'bri': pattern.brightness,
           'seg': [
             {
               'fx': pattern.effectId,
@@ -118,24 +116,19 @@ class RecentPatternsSection extends ConsumerWidget {
           ],
         };
 
-        final channels = ref.read(effectiveChannelIdsProvider);
-        if (channels.isEmpty) {
-          debugPrint('PatternLibrary pattern apply: skip (U1 gate)');
-          return;
-        }
-        payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-        // applyJson returns false (does NOT throw) on a device-write failure
-        // — gate the label/toast so we don't claim "Applied:" on a failed
-        // write (Audit-2 S8).
-        final success = await repo.applyJson(payload);
-        if (!success) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Failed to apply pattern'), backgroundColor: Colors.orange),
-            );
-          }
-          return;
-        }
+        // Row 1: the notifier's gated apply waits for a channel source that
+        // is still answering and, when the gate is closed, reports WHY
+        // instead of returning in silence. It also mirrors the look into the
+        // Home preview and Now Playing, which this path never did.
+        final notifier = ref.read(wledStateProvider.notifier);
+        final result = await notifier.runAndReport(
+          notifier.applyToDeviceResult(payload, labelHint: pattern.name),
+          onFailure: "Couldn't apply ${pattern.name} — check your connection",
+        );
+        if (!result.ok || !context.mounted) return;
+        // Row 19: a Recent apply is a use — it moves to the front.
+        await ref.trackWledPayload(
+            payload: payload, patternName: pattern.name, source: 'recent');
       }
 
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(pattern.name, ref.read(wledStateProvider));
@@ -252,293 +245,15 @@ class _RecentPatternCard extends StatelessWidget {
   }
 }
 
-/// Section for displaying user's pinned categories
-class PinnedCategoriesSection extends ConsumerWidget {
-  const PinnedCategoriesSection();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final pinnedAsync = ref.watch(pinnedCategoriesProvider);
-
-    return pinnedAsync.when(
-      data: (pinnedCategories) {
-        if (pinnedCategories.isEmpty) return const SizedBox.shrink();
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final pinned in pinnedCategories) ...[
-              _PinnedCategoryRow(pinnedData: pinned),
-              const SizedBox(height: 24),
-            ],
-          ],
-        );
-      },
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
-    );
-  }
-}
-
-/// Row showing a pinned category with its patterns
-class _PinnedCategoryRow extends ConsumerWidget {
-  final PinnedCategoryData pinnedData;
-
-  const _PinnedCategoryRow({required this.pinnedData});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header with unpin button
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.push_pin, color: NexGenPalette.cyan, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  pinnedData.category.name,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: () {
-                    // Navigate to category detail
-                    context.push(
-                      AppRoutes.patternCategory.replaceFirst(':categoryId', pinnedData.category.id),
-                      extra: pinnedData.category,
-                    );
-                  },
-                  child: const Text('See All'),
-                  style: TextButton.styleFrom(foregroundColor: NexGenPalette.textSecondary),
-                ),
-                IconButton(
-                  onPressed: () => _confirmUnpin(context, ref),
-                  icon: const Icon(Icons.close, size: 18),
-                  color: NexGenPalette.textSecondary,
-                  tooltip: 'Unpin folder',
-                ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        // Sub-categories as horizontal scrolling chips
-        if (pinnedData.subCategories.isNotEmpty)
-          SizedBox(
-            height: 80,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: pinnedData.subCategories.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final subCat = pinnedData.subCategories[index];
-                return _SubCategoryChip(
-                  subCategory: subCat,
-                  categoryId: pinnedData.category.id,
-                );
-              },
-            ),
-          ),
-      ],
-    );
-  }
-
-  Future<void> _confirmUnpin(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Unpin Folder?'),
-        content: Text('Remove "${pinnedData.category.name}" from your Explore page?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Unpin'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && context.mounted) {
-      final success = await ref.read(pinnedCategoriesNotifierProvider.notifier).unpinCategory(pinnedData.category.id);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(success ? 'Folder unpinned' : 'Failed to unpin folder'),
-          ),
-        );
-      }
-    }
-  }
-}
-
-/// Chip showing a sub-category within a pinned category
-class _SubCategoryChip extends StatelessWidget {
-  final SubCategory subCategory;
-  final String categoryId;
-
-  const _SubCategoryChip({
-    required this.subCategory,
-    required this.categoryId,
-  });
-
-  IconData _heroIconForSubCategory(String subId) {
-    if (subId.contains('warm') || subId.contains('white')) return Icons.lightbulb;
-    if (subId.contains('cool') || subId.contains('ice')) return Icons.ac_unit;
-    if (subId.contains('fire') || subId.contains('flame')) return Icons.local_fire_department;
-    if (subId.contains('ocean') || subId.contains('water')) return Icons.water;
-    if (subId.contains('forest') || subId.contains('nature')) return Icons.forest;
-    if (subId.contains('rain') || subId.contains('storm')) return Icons.thunderstorm;
-    if (subId.contains('sun') || subId.contains('gold')) return Icons.wb_sunny;
-    if (subId.contains('night') || subId.contains('star')) return Icons.nightlight_round;
-    if (subId.contains('party') || subId.contains('dance')) return Icons.music_note;
-    if (subId.contains('holiday') || subId.contains('festiv')) return Icons.celebration;
-    if (subId.contains('sport') || subId.contains('team')) return Icons.emoji_events;
-    if (subId.contains('flag') || subId.contains('patriot')) return Icons.flag;
-    return Icons.auto_awesome;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = subCategory.themeColors;
-    final gradientColors = colors.isEmpty
-        ? [NexGenPalette.violet, NexGenPalette.cyan]
-        : (colors.length == 1 ? [colors[0], colors[0]] : colors);
-    final accentColor = gradientColors.first;
-    final heroIcon = _heroIconForSubCategory(subCategory.id);
-
-    return GestureDetector(
-      onTap: () {
-        // Navigate to theme selection for this sub-category
-        context.push(
-          AppRoutes.patternSubCategory
-              .replaceFirst(':categoryId', categoryId)
-              .replaceFirst(':subId', subCategory.id),
-          extra: subCategory.name,
-        );
-      },
-      child: Container(
-        width: 110,
-        decoration: BoxDecoration(
-          // Premium gradient background matching main category cards
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              gradientColors[0].withValues(alpha: 0.3),
-              gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.2) : gradientColors[0].withValues(alpha: 0.2),
-              NexGenPalette.matteBlack.withValues(alpha: 0.95),
-            ],
-            stops: const [0.0, 0.4, 1.0],
-          ),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: accentColor.withValues(alpha: 0.4),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: accentColor.withValues(alpha: 0.25),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            // Radial glow behind icon
-            Positioned(
-              top: 6,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        gradientColors[0].withValues(alpha: 0.35),
-                        gradientColors.length > 1 ? gradientColors[1].withValues(alpha: 0.15) : Colors.transparent,
-                        Colors.transparent,
-                      ],
-                      stops: const [0.0, 0.5, 1.0],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            // Content
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Hero icon
-                  Icon(
-                    heroIcon,
-                    size: 28,
-                    color: Colors.white,
-                    shadows: [
-                      Shadow(
-                        color: accentColor.withValues(alpha: 0.8),
-                        blurRadius: 16,
-                      ),
-                      Shadow(
-                        color: gradientColors[0].withValues(alpha: 0.5),
-                        blurRadius: 10,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  // Name with arrow
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          subCategory.name,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 10,
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(
-                        Icons.arrow_forward_ios,
-                        color: accentColor.withValues(alpha: 0.8),
-                        size: 8,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// Row 89 — the legacy PINNED tree is retired (+110 E1, 2026-09-29).
+//
+// `PinnedCategoriesSection` (a row per pinned folder, with 'See All' and
+// sub-category chips into `CategoryDetailScreen` / `ThemeSelectionScreen`)
+// lived here. The only Pin button was on `CategoryDetailScreen`, which is
+// reachable only FROM a pinned row, so no account could ever start pinning,
+// and the tree it led to is a second, older copy of the catalogue (the
+// legacy sub-category list, not the library) carrying rows 20, 21, 90 and
+// 91. Explore's library folders are the one way in.
 
 /// GPU-friendly animated gradient strip that simulates a flowing/chase effect
 /// using a LinearGradient and a lightweight GradientTransform.

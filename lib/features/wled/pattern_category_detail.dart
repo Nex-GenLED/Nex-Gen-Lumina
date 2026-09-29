@@ -22,6 +22,9 @@ import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog
 import 'package:nexgen_command/features/wled/pattern_library_pages.dart' show LiveGradientStrip;
 import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
+import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart' show showLuminaSheet;
+import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart' show LuminaSheetMode;
+import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
 
 /// Netflix-style horizontal row of gradient cards
 class PatternCategoryRow extends ConsumerWidget {
@@ -701,22 +704,12 @@ class CategoryDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncSubs = ref.watch(patternSubCategoriesByCategoryProvider(categoryId));
-    final pinnedIds = ref.watch(pinnedCategoryIdsProvider);
-    final isPinned = pinnedIds.contains(categoryId);
     final title = categoryName ?? 'Explore';
+    // Row 89: no Pin button. The pinned tree is retired (see
+    // pattern_library_browser.dart) — a pin would put nothing anywhere.
     return Scaffold(
       appBar: GlassAppBar(
         title: Text(title),
-        actions: [
-          IconButton(
-            icon: Icon(
-              isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-              color: isPinned ? NexGenPalette.cyan : Colors.white,
-            ),
-            tooltip: isPinned ? 'Unpin from Explore' : 'Pin to Explore',
-            onPressed: () => _togglePin(context, ref, isPinned),
-          ),
-        ],
       ),
       body: asyncSubs.when(
         data: (subs) {
@@ -766,12 +759,7 @@ class CategoryDetailScreen extends ConsumerWidget {
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(12, 0, 12, navBarTotalHeight(context)),
                 sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                    childAspectRatio: 1.3,
-                  ),
+                  gridDelegate: _subCategoryGridDelegate(context),
                   delegate: SliverChildBuilderDelegate(
                     (_, i) => _SubCategoryCard(categoryId: categoryId, sub: remaining[i]),
                     childCount: remaining.length,
@@ -835,58 +823,42 @@ class CategoryDetailScreen extends ConsumerWidget {
     if (month >= 8 && month <= 9) return 'sub_halloween';
     return 'sub_xmas';
   }
-
-  Future<void> _togglePin(BuildContext context, WidgetRef ref, bool isPinned) async {
-    final success = isPinned
-        ? await ref.read(pinnedCategoriesNotifierProvider.notifier).unpinCategory(categoryId)
-        : await ref.read(pinnedCategoriesNotifierProvider.notifier).pinCategory(categoryId);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            success
-                ? (isPinned ? 'Folder unpinned from Explore' : 'Folder pinned to Explore')
-                : 'Failed to update pin status',
-          ),
-        ),
-      );
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
 // Lumina AI contextual search bar
 // ---------------------------------------------------------------------------
-class _LuminaCategorySearchBar extends StatelessWidget {
+class _LuminaCategorySearchBar extends ConsumerWidget {
   final String categoryName;
   const _LuminaCategorySearchBar({required this.categoryName});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ask Lumina about $categoryName...')),
-          );
-        },
+        // Row 90: this used to show a snackbar repeating its own label. It
+        // opens Lumina now. The sheet has no way to start with a question
+        // typed in (lib/features/ai, package E2), so the label no longer
+        // promises one.
+        key: const ValueKey('category-ask-lumina'),
+        onTap: () => showLuminaSheet(context, ref, mode: LuminaSheetMode.compact),
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          height: 44,
+          constraints: const BoxConstraints(minHeight: 44),
           decoration: BoxDecoration(
             color: NexGenPalette.matteBlack.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.25), width: 0.5),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(
             children: [
               Icon(Icons.auto_awesome, size: 18, color: NexGenPalette.cyan.withValues(alpha: 0.7)),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Ask Lumina about $categoryName...',
+                  'Ask Lumina for a $categoryName look',
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 13, fontWeight: FontWeight.w400),
                 ),
               ),
@@ -920,7 +892,9 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
         onTap: () => context.push('/explore/$categoryId/sub/${sub.id}', extra: {'name': sub.name}),
         borderRadius: BorderRadius.circular(20),
         child: Container(
-          height: 180,
+          // At least 180 tall, taller when Larger Text needs it — a fixed 180
+          // cut the strip off at 2x.
+          constraints: const BoxConstraints(minHeight: 180),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -959,7 +933,10 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: Column(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 180 - 32 - 2),
+                  child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
@@ -974,7 +951,9 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
                               Text(sub.name,
                                   style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
                               const SizedBox(height: 2),
-                              Text('50+ designs available',
+                              // Row 91: the real count — the theme grid
+                              // generates one design per catalogue effect.
+                              Text('${PatternRepository.kColorwayEffectIds.length} designs',
                                   style: TextStyle(color: accentColor.withValues(alpha: 0.8), fontSize: 11, fontWeight: FontWeight.w500)),
                             ],
                           ),
@@ -997,20 +976,27 @@ class _FeaturedSubCategoryCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const Spacer(),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: PixelStripPreview(colors: previewColors, pixelCount: 24, height: 42, animate: true, borderRadius: 10),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text('Tap to explore', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11)),
-                        const SizedBox(width: 4),
-                        Icon(Icons.arrow_forward_ios, size: 10, color: Colors.white.withValues(alpha: 0.35)),
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: PixelStripPreview(colors: previewColors, pixelCount: 24, height: 42, animate: true, borderRadius: 10),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Text('Tap to explore', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 11)),
+                            const SizedBox(width: 4),
+                            Icon(Icons.arrow_forward_ios, size: 10, color: Colors.white.withValues(alpha: 0.35)),
+                          ],
+                        ),
                       ],
                     ),
                   ],
+                ),
                 ),
               ),
             ],
@@ -1385,6 +1371,19 @@ List<Color> _previewColorsForSub(SubCategory sub) {
 // ---------------------------------------------------------------------------
 // Enhanced sub-category grid card
 // ---------------------------------------------------------------------------
+/// The theme grid sizes its cells from the text scale: a fixed aspect ratio
+/// cut the names and the "Explore" line off at Larger Text (+110 E1
+/// accessibility). Past 1.5x it drops to two columns so a name still fits.
+SliverGridDelegate _subCategoryGridDelegate(BuildContext context) {
+  final scale = MediaQuery.textScalerOf(context).scale(10) / 10;
+  return SliverGridDelegateWithFixedCrossAxisCount(
+    crossAxisCount: scale >= 1.5 ? 2 : 3,
+    crossAxisSpacing: 10,
+    mainAxisSpacing: 10,
+    mainAxisExtent: 64 + 40 * scale,
+  );
+}
+
 class _SubCategoryCard extends StatelessWidget {
   final String categoryId;
   final SubCategory sub;
@@ -1474,7 +1473,7 @@ class _SubCategoryCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         fontSize: 11,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 1),

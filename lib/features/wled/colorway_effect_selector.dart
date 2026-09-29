@@ -10,7 +10,10 @@ import 'package:nexgen_command/features/wled/selector_payload.dart';
 import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:nexgen_command/features/wled/rainbow_scope.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
-import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
+import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
+import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -109,6 +112,12 @@ class LibraryDesignSelection {
   /// [paletteName] when known, else [name].
   String get baseName => paletteName ?? name;
 }
+
+/// What the customer is told when leaving the tuner could not put the house
+/// back the way it was (row 93).
+const String kRestoreFailedMessage =
+    "Couldn't restore the previous look — your lights are still showing the "
+    'preview.';
 
 /// Which of its four jobs the tuner is doing. See [resolveSelectorMode].
 enum SelectorMode {
@@ -362,6 +371,24 @@ class _ColorwayEffectSelectorPageState
   bool _restoreDemoMode = false;
   Map<String, dynamic>? _restorePayload;
 
+  /// Captured with the restore cache, so a failed restore from [dispose] can
+  /// still be reported (row 93) without touching `ref`.
+  WledNotifier? _reportNotifier;
+
+  /// True once a live preview actually reached the lights. Catalog mode
+  /// restores only then: with nothing written there is nothing to undo, and
+  /// replaying the captured look would be a write of its own.
+  bool _previewWritten = false;
+
+  /// Every mode but celebration snapshots the look on entry, so leaving
+  /// without committing puts it back. CATALOG mode joined in +110 E1 (row 22):
+  /// every tile, slider and chip there writes live, and Back used to leave the
+  /// last preview on the house with Now Playing unchanged.
+  bool get _capturesLook =>
+      widget.handsBack ||
+      widget.isDesignEdit ||
+      widget.mode == SelectorMode.catalog;
+
   List<Color> get _paletteColors =>
       widget.paletteNode.themeColors ?? [Colors.white];
 
@@ -373,7 +400,7 @@ class _ColorwayEffectSelectorPageState
     // from the polled wledStateProvider so it reflects the device state the
     // user is leaving — held in a local field, NOT re-read later (the poll
     // would pick up our own preview writes and pollute it).
-    if (widget.handsBack || widget.isDesignEdit) {
+    if (_capturesLook) {
       _capturedLook = ref.read(wledStateProvider);
       _refreshRestoreCache();
     }
@@ -418,10 +445,12 @@ class _ColorwayEffectSelectorPageState
           ? _celebrationSeedEffectId()
           : (widget.initialEffectId ?? 0);
       ref.read(selectorEffectIdProvider.notifier).state = seedFx;
+      // Item D: the curated roofline speed table (pattern_effect_speeds.dart)
+      // unless the caller seeds a stored choice.
       ref.read(selectorSpeedProvider.notifier).state =
-          widget.initialSpeed ?? getSpeedProfile(seedFx).rawDefault;
+          widget.initialSpeed ?? effectDefaultSpeedOr(seedFx, 128);
       ref.read(selectorIntensityProvider.notifier).state =
-          widget.initialIntensity ?? 128;
+          widget.initialIntensity ?? effectDefaultIntensity(seedFx) ?? 128;
       ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
       ref.read(selectorSpacingProvider.notifier).state = initSpacing;
       ref.read(selectorGradientPresetProvider.notifier).state = initPreset;
@@ -618,7 +647,17 @@ class _ColorwayEffectSelectorPageState
     // [_restoreCapturedLook] uses only the cached repo/payload (dispose cannot
     // touch `ref`). A failed write is benign — the next apply self-corrects.
     if (_capturedLook != null) {
-      _restoreCapturedLook();
+      // Row 93: a restore that fails (away from home the relay can refuse it;
+      // the controller can drop it) used to be swallowed, leaving the preview
+      // on the house with nothing said. Report it, through the notifier
+      // captured while `ref` was live.
+      final notifier = _reportNotifier;
+      _restoreCapturedLook().then((ok) {
+        if (!ok) {
+          notifier?.runAndReport(_restoreFailed(),
+              onFailure: kRestoreFailedMessage);
+        }
+      });
     }
     // DESIGN-EDIT cancel: put the shared selector providers back. Safe from
     // dispose because it only writes to Riverpod-owned notifiers, which
@@ -638,6 +677,7 @@ class _ColorwayEffectSelectorPageState
     if (look == null) return;
     _restoreDemoMode = ref.read(demoModeProvider);
     _restoreRepo = ref.read(wledRepositoryProvider);
+    _reportNotifier = ref.read(wledStateProvider.notifier);
     final channels = ref.read(effectiveChannelIdsProvider);
     if (channels.isEmpty) {
       _restorePayload = null; // U1 gate not satisfied yet — nothing to send
@@ -646,7 +686,7 @@ class _ColorwayEffectSelectorPageState
     _restorePayload = applyChannelFilter(
       _buildLookPayload(look),
       channels,
-      ref.read(deviceChannelsProvider),
+      ref.read(applyFilterChannelsProvider),
     );
   }
 
@@ -695,6 +735,10 @@ class _ColorwayEffectSelectorPageState
   /// decision — leftover preview is a benign, self-correcting state).
   Future<bool> _restoreCapturedLook() async {
     if (_capturedLook == null) return true; // nothing to restore / consumed
+    if (widget.mode == SelectorMode.catalog && !_previewWritten) {
+      _capturedLook = null; // browsed without touching the lights
+      return true;
+    }
     if (_isSaveMode && !_livePreviewOn) {
       // No preview ever reached the lights: nothing to undo, and a restore
       // write would itself be a controller command a Save must not issue.
@@ -853,11 +897,17 @@ class _ColorwayEffectSelectorPageState
         debugPrint('ColorwayEffectSelector preview apply: skip (U1 gate)');
         return;
       }
-      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
+      payload = applyChannelFilter(payload, channels, ref.read(applyFilterChannelsProvider));
 
-      await repo.applyJson(payload);
+      final ok = await repo.applyJson(payload);
+      if (ok) _previewWritten = true;
     });
   }
+
+  /// What a failed restore reports (row 93).
+  static Future<WriteResult> _restoreFailed() => Future.value(
+      const WriteResult.failed(WriteFailureKind.unreachable,
+          message: kRestoreFailedMessage));
 
   /// Everything a commit needs, from the SAME builder the live preview uses
   /// ([_sendToWled]), so what was previewed is what gets applied, saved or
@@ -966,7 +1016,13 @@ class _ColorwayEffectSelectorPageState
       // callback tears down the picker stack. A failed restore is benign and
       // self-correcting — it must NOT lose the user's selection, so we hand
       // back the design regardless.
-      await _restoreCapturedLook();
+      // Row 93: say so when the house could not be put back.
+      final notifier = ref.read(wledStateProvider.notifier);
+      final restored = await _restoreCapturedLook();
+      if (!restored) {
+        await notifier.runAndReport(_restoreFailed(),
+            onFailure: kRestoreFailedMessage);
+      }
       if (!mounted) return;
       final handBack = widget.onDesignSelected;
       if (handBack != null) {
@@ -978,52 +1034,37 @@ class _ColorwayEffectSelectorPageState
       return;
     }
 
-    // APPLY mode: write to the lights.
-    bool appliedToDevice = false;
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo != null) {
-      // Apply channel filter so all targeted segments receive the pattern
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isEmpty) {
-        // P1 (residential path audit §9.1 item 9 / S19). This returned in
-        // silence: the user tapped Apply and NOTHING happened — no lights, no
-        // preview, no message. The gate closes whenever /json/cfg could not be
-        // read with at least one LED bus, which is guaranteed off-LAN
-        // (CloudRelayRepository.getConfig returns null) and also happens when
-        // the controller has no buses configured yet.
-        debugPrint('ColorwayEffectSelector apply: skip (U1 gate)');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text(
-                "Couldn't read this controller's channels, so there is nothing "
-                'to apply to. Connect to your home Wi-Fi and try again, or set '
-                'up the controller in System → Hardware.',
-              ),
-              backgroundColor: Colors.orange.shade800,
-              duration: const Duration(seconds: 5),
-            ),
-          );
-        }
-        return;
-      }
-      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-
-      try {
-        // P1 (audit §9.1 item 9 / S18): the applyJson RESULT is the truth about
-        // whether the lights changed. This used to discard it and report the
-        // PREVIOUS poll's `connected` flag instead, so a POST that timed out or
-        // came back non-2xx still said "Applied: <effect>".
-        appliedToDevice = await repo.applyJson(payload);
-        if (!appliedToDevice) {
-          debugPrint('Pattern apply: applyJson returned false');
-        }
-      } catch (e) {
-        debugPrint('Pattern apply failed (device offline?): $e');
-      }
+    // APPLY mode (catalog, and design-edit's Apply): write to the lights.
+    // Row 1: a closed gate is explained with the shared reason — this used to
+    // say "Connect to your home Wi-Fi" even to a customer standing on it.
+    final container = ProviderScope.containerOf(context, listen: false);
+    final channels = await resolveChannelsForTap(container);
+    if (channels == null || !mounted) return;
+    final repo = container.read(wledRepositoryProvider);
+    if (repo == null) {
+      await reportApplyBlocked(container);
+      return;
     }
+    // Design-edit applies at the design's own level, like its live preview.
+    payload = designEditPreviewPayload(payload, widget.editingDesign);
+    payload = applyChannelFilter(
+        payload, channels, container.read(applyFilterChannelsProvider));
 
-    // Always update local preview AND Explore hero from the as-sent payload.
+    // The write's RESULT decides everything after it (foundation walk B3): a
+    // failed Apply used to rewrite the Home preview and Now Playing anyway,
+    // under a "(device offline)" toast, so Home showed a look that was not
+    // playing. A failure is now reported and nothing else changes.
+    final result = await container.read(wledStateProvider.notifier).runAndReport(
+          repo.applyJson(payload).then(WriteResult.fromBool),
+          onFailure: "Couldn't apply $effectName — check your connection",
+        );
+    if (!result.ok || !mounted) return;
+
+    // Applied: leaving must not undo it (row 22 restores only an UNCOMMITTED
+    // preview).
+    _capturedLook = null;
+
+    // Update the local preview AND Explore hero from the as-sent payload.
     // Single chokepoint also arms poll-overwrite suppression so the home
     // dashboard preview doesn't snap back to the device's (lossy) echo.
     ref.read(wledStateProvider.notifier).applyPreviewSync(
@@ -1051,28 +1092,24 @@ class _ColorwayEffectSelectorPageState
     if (parentId != null) {
       parentNode = await ref.read(patternRepositoryProvider).getNodeById(parentId);
     }
+    if (!mounted) return;
     final composedLabel = composeColorwayLabel(widget.paletteNode, parentNode);
     ref
         .read(activePresetLabelProvider.notifier)
         .setLabelWithFingerprint(composedLabel, ref.read(wledStateProvider));
 
-    // Show feedback with offline awareness
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            appliedToDevice
-                ? 'Applied: $effectName'
-                : 'Preview: $effectName (device offline)',
-          ),
-          duration: const Duration(seconds: 2),
-          backgroundColor: appliedToDevice
-              ? NexGenPalette.gunmetal
-              : Colors.orange.shade800,
-        ),
-      );
-    }
-    if (appliedToDevice) maybeShowManualApplyOffWarning(ref);
+    // Row 19: an Explore apply is a use — it feeds Recent Patterns.
+    unawaited(ref.trackWledPayload(
+        payload: payload, patternName: composedLabel, source: 'explore'));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Applied: $effectName'),
+        duration: const Duration(seconds: 2),
+        backgroundColor: NexGenPalette.gunmetal,
+      ),
+    );
+    maybeShowManualApplyOffWarning(ref);
   }
 
   // ── Commit controls ────────────────────────────────────────────────────
@@ -1100,12 +1137,22 @@ class _ColorwayEffectSelectorPageState
       textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
     );
     if (widget.isDesignEdit) {
+      // Item C: a design opened from My Designs is ALSO something to put on
+      // the house — this used to offer only "Save to design".
       return [
-        ElevatedButton.icon(
+        OutlinedButton.icon(
           key: const ValueKey('save-to-design'),
           onPressed: _saveToDesign,
           icon: const Icon(Icons.save_outlined, size: 18),
           label: const Text('Save to design'),
+          style: secondaryStyle,
+        ),
+        const SizedBox(width: 8),
+        ElevatedButton.icon(
+          key: const ValueKey('apply-design'),
+          onPressed: _applyPattern,
+          icon: const Icon(Icons.check, size: 18),
+          label: const Text('Apply'),
           style: primaryStyle,
         ),
       ];
@@ -1369,11 +1416,17 @@ class _ColorwayEffectSelectorPageState
           ),
         ),
 
-        // Apply button row
+        // Swatches + editor on one line, the commit buttons on the next.
+        // They shared one Row, which overflowed a 390-point phone by up to 187
+        // points at default text size in selection mode (+110 E1
+        // accessibility); the buttons now wrap.
         SliverToBoxAdapter(
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+              Row(
               children: [
                 // Color palette preview
                 Expanded(
@@ -1405,13 +1458,27 @@ class _ColorwayEffectSelectorPageState
                         final effectId = ref.read(selectorEffectIdProvider);
                         final speed = ref.read(selectorSpeedProvider);
                         final intensity = ref.read(selectorIntensityProvider);
+                        final live = ref.read(wledStateProvider);
                         final pattern = EditablePattern.fromGradientColors(
-                          id: widget.paletteNode.id,
+                          // Row 43: a FRESH id. The palette's id made the
+                          // editor's heart toggle the palette's favourite.
+                          id: 'edit_${DateTime.now().microsecondsSinceEpoch}',
                           name: widget.paletteNode.name,
                           colors: _paletteColors,
                           effectId: effectId,
                           speed: speed,
                           intensity: intensity,
+                          // The house's own level, not 255: the editor sends
+                          // its brightness with every change, so a default
+                          // of 255 jumped the house to 100 % on the first
+                          // colour tap.
+                          brightness: live.brightness.clamp(1, 255),
+                        ).copyWith(
+                          colorGroupSize: ref.read(selectorColorGroupProvider),
+                          // What the channel is actually doing (row 94).
+                          direction: live.reverse
+                              ? PatternDirection.left
+                              : PatternDirection.right,
                         );
                         context.push(AppRoutes.editPattern, extra: pattern);
                       },
@@ -1431,7 +1498,18 @@ class _ColorwayEffectSelectorPageState
                 //     schedule) and restores the pre-preview look rather than
                 //     applying now, so it reads "Set design".
                 //   • CATALOG → applies to the lights.
-                ..._commitButtons(),
+              ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final w in _commitButtons())
+                    if (w is! SizedBox) w,
+                ],
+              ),
               ],
             ),
           ),
@@ -2006,12 +2084,13 @@ class _ColorwayEffectSelectorPageState
   // Filter Chip Rows
   // ---------------------------------------------------------------------------
 
+  // The two chip rows scroll sideways and take their chips' height. They were
+  // 36-point ListViews, which cut every chip label off at Larger Text.
   Widget _buildMotionFilterRow(MotionType? selected) {
-    return SizedBox(
-      height: 36,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
         children: [
           _buildFilterChip(
             label: 'All',
@@ -2036,11 +2115,10 @@ class _ColorwayEffectSelectorPageState
 
   Widget _buildColorFilterRow(ColorBehavior? selected) {
     // Simplified color behavior options - merge usesSelected + blends into "My Colors"
-    return SizedBox(
-      height: 36,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
         children: [
           _buildFilterChip(
             label: 'Any Color',
@@ -2133,9 +2211,14 @@ class _ColorwayEffectSelectorPageState
     return InkWell(
       onTap: () {
         ref.read(selectorEffectIdProvider.notifier).state = effect.id;
-        // Reset speed to this effect's profile default for best experience
-        ref.read(selectorSpeedProvider.notifier).state =
-            getSpeedProfile(effect.id).rawDefault;
+        // Item D: start at this effect's curated roofline speed (and, for the
+        // one effect whose rate is intensity, that too). The sliders stay free
+        // above and below it. An effect whose speed is not a pace keeps the
+        // current speed.
+        ref.read(selectorSpeedProvider.notifier).state = effectDefaultSpeedOr(
+            effect.id, ref.read(selectorSpeedProvider));
+        final ix = effectDefaultIntensity(effect.id);
+        if (ix != null) ref.read(selectorIntensityProvider.notifier).state = ix;
         _sendToWled();
       },
       borderRadius: BorderRadius.circular(10),
@@ -2291,7 +2374,8 @@ class _ColorwayEffectSelectorPageState
                 },
                 child: Container(
                   width: 48,
-                  height: 40,
+                  // At least 40 tall; the number grows it at Larger Text.
+                  constraints: const BoxConstraints(minHeight: 40),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? NexGenPalette.cyan.withValues(alpha: 0.2)
@@ -2358,7 +2442,7 @@ class _ColorwayEffectSelectorPageState
               },
               child: Container(
                 width: 40,
-                height: 40,
+                constraints: const BoxConstraints(minHeight: 40),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? NexGenPalette.cyan.withValues(alpha: 0.2)

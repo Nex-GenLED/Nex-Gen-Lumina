@@ -116,7 +116,10 @@ void main() {
     expect(find.textContaining('stored LED by LED'), findsNothing);
     expect(find.textContaining('tap SAVE'), findsNothing);
     expect(favorites.added, hasLength(1));
-    expect(favorites.added.single.id, 'team_nfl_chiefs');
+    // Row 43: keyed by a FRESH id minted in the editor — never the source
+    // palette's, whose favourite a tap used to delete.
+    expect(favorites.added.single.id, isNot('team_nfl_chiefs'));
+    expect(favorites.added.single.id, startsWith('pe_'));
     expect(favorites.added.single.name, 'Kansas City Chiefs');
   });
 

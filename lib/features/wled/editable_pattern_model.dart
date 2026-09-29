@@ -30,17 +30,26 @@ enum PatternDirection {
     }
   }
 
-  /// Cycle to next direction on tap.
+  /// Cycle to next direction on tap: Left ↔ Right.
+  ///
+  /// Row 94: [centerOut] is no longer offered. Direction reaches the lights
+  /// only through the direction door (`channel_direction.dart`), which states
+  /// `rev` and nothing else; "Center" is WLED's mirror (`mi`), which that door
+  /// cannot state, so the card used to cycle to a label that did nothing. The
+  /// value survives for patterns stored with it and reads as Right.
   PatternDirection get next {
     switch (this) {
       case PatternDirection.left:
         return PatternDirection.right;
       case PatternDirection.right:
-        return PatternDirection.centerOut;
       case PatternDirection.centerOut:
         return PatternDirection.left;
     }
   }
+
+  /// WLED `rev` for this direction: Left runs against the channel's
+  /// installed direction.
+  bool get reverse => this == PatternDirection.left;
 }
 
 /// A user-editable pattern with up to 15 action colors, background color,
@@ -168,6 +177,22 @@ class EditablePattern {
   bool get hasLayersBeyondEffectSlots =>
       effectId != 0 && actionColors.length > maxEffectColors;
 
+  /// Whether BG COLOR can reach the lights for this pattern (row 95).
+  ///
+  /// WLED's colour slot 2 (`col[1]`) is the effect's background — its own UI
+  /// labels it "Bg" for every effect that does not rename it (FX.cpp slot
+  /// defaults; source-verified for the sparkle family in
+  /// sparkle_background.dart). So a background applies when the pattern is
+  /// animated and has ONE action colour, leaving that slot free. Static lights
+  /// every LED with an action colour and has no unlit LED to fill; with two or
+  /// more colours, slot 2 is the second colour.
+  ///
+  /// It used to go in `col[2]` whenever there were fewer than three colours,
+  /// with `col[1]` padded by DUPLICATING colour 1 — so the effect's real
+  /// background was colour 1 again, and the preview, the lights and the saved
+  /// design all showed different things.
+  bool get backgroundApplies => effectId != 0 && actionColors.length == 1;
+
   /// The `col` slots an animated effect is sent — what the lights are actually
   /// showing. Public so the design that Save stores leads with exactly these.
   List<List<int>> effectColorSlots() {
@@ -179,21 +204,18 @@ class EditablePattern {
     if (cols.isEmpty) {
       cols.add(rgbToRgbw(255, 255, 255, forceZeroWhite: true));
     }
-
-    // If we have fewer than 3 colors and a non-black background, use the
-    // background color as the third color slot (WLED uses col[2] as background
-    // for many effects like Twinkle, Stars, etc.)
-    if (cols.length < 3 && backgroundColor != const Color(0xFF000000)) {
-      // Fill up to slot 2 with existing colors if needed
-      while (cols.length < 2) {
-        cols.add(cols.last);
-      }
-      cols.add(rgbToRgbw(
-        backgroundColor.red,
-        backgroundColor.green,
-        backgroundColor.blue,
-        forceZeroWhite: true,
-      ));
+    if (backgroundApplies) {
+      // Slot 2 IS the background. Always stated — black included — so an
+      // effect never inherits the previous look's second colour as its field.
+      return [
+        cols.first,
+        rgbToRgbw(
+          backgroundColor.red,
+          backgroundColor.green,
+          backgroundColor.blue,
+          forceZeroWhite: true,
+        ),
+      ];
     }
     return cols;
   }

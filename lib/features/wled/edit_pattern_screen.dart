@@ -26,6 +26,13 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart';
+import 'package:nexgen_command/features/favorites/favorite_brightness.dart';
+import 'package:nexgen_command/features/wled/channel_direction.dart';
+import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/pattern_editor_design.dart';
+import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 
 /// Full-screen Edit Pattern screen modeled after the native controller app.
 ///
@@ -62,6 +69,29 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   // Live-apply serialisation (see _sendToWled).
   bool _sending = false;
   bool _resend = false;
+
+  /// Row 43 — the heart's document id, per NAME, minted fresh in this editor.
+  ///
+  /// The heart used to be keyed by the SOURCE palette's id (`_pattern.id` is
+  /// the Explore node the editor was opened from). It showed filled whenever
+  /// that palette had ever been favourited, and a tap then DELETED that
+  /// favourite; a second heart after a rename refreshed the old document,
+  /// whose name the rules keep immutable. Now each distinct name gets its own
+  /// fresh id, so hearting "Chiefs Alt" after "Chiefs" is a second favourite
+  /// under the new name, and the heart only ever toggles this editor's own.
+  final Map<String, String> _favoriteIds = {};
+  final String _sessionKey =
+      DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+
+  String _favoriteIdFor(String name) {
+    final key = name.trim().toLowerCase();
+    return _favoriteIds.putIfAbsent(
+        key, () => 'pe_${_sessionKey}_${_favoriteIds.length}');
+  }
+
+  /// Item B — true once the customer moved the BRIGHTNESS slider, so a
+  /// favourite saved from here states its level on purpose.
+  bool _brightnessTouched = false;
 
   @override
   void initState() {
@@ -128,14 +158,17 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   /// through the chunked spine instead of as one message `applyJson` refuses
   /// past 4 KB. (The heart used to decline in Static and point at SAVE.)
   Future<Map<String, dynamic>> _favoritePayload() async {
-    if (_pattern.effectId != 0) return _currentWledPayload();
+    // Item B: the level rides along as the customer's only when they set it.
+    Map<String, dynamic> stated(Map<String, dynamic> p) =>
+        _brightnessTouched ? markFavoriteBrightnessStated(p) : p;
+    if (_pattern.effectId != 0) return stated(await _currentWledPayload());
     try {
-      return buildPerPixelFavoritePayload(customDesignFromEditablePattern(
+      return stated(buildPerPixelFavoritePayload(customDesignFromEditablePattern(
         pattern: _pattern,
         name: _pattern.name,
         ownerId: '',
         channels: _targetChannels(),
-      ));
+      )));
     } on StateError {
       throw const FavoriteNotSavable(
           'Connect to your lights to favorite this pattern — it is stored LED '
@@ -220,21 +253,25 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   }
 
   Future<void> _sendOnce(WledRepository repo) async {
-    final channels = ref.read(effectiveChannelIdsProvider);
-    if (channels.isEmpty) {
-      debugPrint('EditPattern apply: skip (U1 gate)');
-      return;
-    }
-    // Read before any await: the screen can be disposed mid-send, and a dead
-    // `ref` throws.
-    final deviceChannels = ref.read(deviceChannelsProvider);
+    // The container, not `ref`: the screen can be disposed mid-send, and a
+    // dead `ref` throws.
+    final container = ProviderScope.containerOf(context, listen: false);
+    // Row 1: a closed gate is explained, not skipped in silence.
+    final channels = await resolveChannelsForTap(container);
+    if (channels == null || !mounted) return;
+    final filterChannels = container.read(applyFilterChannelsProvider);
     if (_pattern.effectId == 0 && await _sendStatic()) return;
     if (!mounted) return;
 
     var payload = await _currentWledPayload();
-    payload = applyChannelFilter(payload, channels, deviceChannels);
-    final ok = await repo.applyJson(payload);
-    if (!ok || !mounted) return;
+    payload = applyChannelFilter(payload, channels, filterChannels);
+    // A refused write is reported, like every other live control (row 80).
+    final result = await container.read(wledStateProvider.notifier).runAndReport(
+          repo.applyJson(payload).then(WriteResult.fromBool),
+          onFailure: "Your lights didn't take that change — check your "
+              'connection and try again.',
+        );
+    if (!result.ok || !mounted) return;
     _syncPreview();
   }
 
@@ -299,7 +336,10 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
 
     final CustomDesign built;
     try {
-      built = customDesignFromEditablePattern(
+      // Item C: a palette/effect design — the model the tuner edits and My
+      // Designs renders as a pattern card — for everything but a Static
+      // pattern with more than three colours (see pattern_editor_design.dart).
+      built = designFromPatternEditor(
         pattern: _pattern.copyWith(name: name),
         name: name,
         ownerId: uid,
@@ -368,6 +408,11 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
             message: 'Save to My Designs',
             child: TextButton(
               onPressed: _saving ? null : _saveToMyDesigns,
+              // No vertical padding: at Larger Text the default padding left
+              // SAVE taller than the button inside the app bar.
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
               child: _saving
                   ? const SizedBox(
                       width: 18,
@@ -525,7 +570,10 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
                     previewSpeed: _pattern.speed,
                     brightness: _pattern.brightness,
                     forceOn: true,
-                    backgroundColor: _pattern.backgroundColor,
+                    // Row 95: only where the lights show one.
+                    backgroundColor: _pattern.backgroundApplies
+                        ? _pattern.backgroundColor
+                        : const Color(0xFF000000),
                     colorGroupSize: _pattern.colorGroupSize,
                     targetAspectRatio: constraints.maxWidth / constraints.maxHeight,
                     useBoxFitCover: true,
@@ -559,21 +607,31 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          // DIRECTION
+          // DIRECTION — row 94. It cycled a label (Left / Right / Center) and
+          // nothing else: the payload never carried it and Save dropped it.
+          // It is now Left ↔ Right, sent through the direction door the Home
+          // Tune panel uses (home Wi-Fi only), and Save stores it.
           Expanded(
             child: _ControlCard(
+              key: const ValueKey('edit-pattern-direction'),
               label: 'DIRECTION',
-              icon: _pattern.direction.icon,
-              value: _pattern.direction.displayName,
-              onTap: () {
-                _updatePattern(_pattern.copyWith(direction: _pattern.direction.next));
-              },
+              icon: _pattern.direction == PatternDirection.centerOut
+                  ? PatternDirection.right.icon
+                  : _pattern.direction.icon,
+              value: _pattern.direction == PatternDirection.centerOut
+                  ? PatternDirection.right.displayName
+                  : _pattern.direction.displayName,
+              onTap: _toggleDirection,
             ),
           ),
+          // BG COLOR — row 95. Shown only where a background reaches the
+          // lights (EditablePattern.backgroundApplies); elsewhere the preview
+          // painted a background the lights never showed and Save dropped.
+          if (_pattern.backgroundApplies) ...[
           const SizedBox(width: 10),
-          // BG COLOR
           Expanded(
             child: _ControlCard(
+              key: const ValueKey('edit-pattern-bg-color'),
               label: 'BG COLOR',
               customIcon: Container(
                 width: 28,
@@ -597,9 +655,46 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
               },
             ),
           ),
+          ],
         ],
       ),
     );
+  }
+
+  /// Row 94 — Left ↔ Right, live through the direction door. A refusal (away
+  /// from home, demo, a controller that did not take it) flips the card back
+  /// and says why, like the Home Tune panel's toggle (row 81).
+  Future<void> _toggleDirection() async {
+    final from = _pattern.direction;
+    final to = from.next;
+    setState(() => _pattern = _pattern.copyWith(direction: to));
+    final container = ProviderScope.containerOf(context, listen: false);
+    final notifier = container.read(wledStateProvider.notifier);
+    if (container.read(demoModeProvider)) return; // no device to turn
+    final channels = await resolveEffectiveChannelIds(container.read);
+    final WriteResult result;
+    if (channels.isEmpty) {
+      result = WriteResult.blocked(
+          applyBlockedReason(container.read) ?? kApplyBlockedFallback);
+    } else if (!container.read(isLanConnectedProvider)) {
+      result = const WriteResult.failed(WriteFailureKind.unsupported,
+          message: kLanOnlyMessage);
+    } else {
+      final ok = await applyChannelDirection(
+        repo: container.read(wledRepositoryProvider),
+        channelIds: channels,
+        reverse: to.reverse,
+      );
+      result = ok
+          ? const WriteResult.success()
+          : const WriteResult.failed(WriteFailureKind.unsupported,
+              message: "Direction couldn't be changed — your lights didn't "
+                  'take it.');
+    }
+    final reported = await notifier.runAndReport(Future.value(result),
+        onFailure: "Direction couldn't be changed.");
+    if (!mounted || reported.ok) return;
+    setState(() => _pattern = _pattern.copyWith(direction: from));
   }
 
   void _showModeSelector() {
@@ -683,7 +778,19 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
                                 ),
                               ),
                               onTap: () {
-                                _updatePattern(_pattern.copyWith(effectId: effect.id));
+                                // Item D: a newly chosen MODE starts at its
+                                // curated roofline speed; the slider stays
+                                // free above and below it.
+                                _updatePattern(_pattern.copyWith(
+                                  effectId: effect.id,
+                                  speed: effectDefaultSpeedOr(
+                                      effect.id, _pattern.speed),
+                                  intensity: effectDefaultIntensity(effect.id),
+                                ));
+                                // BG COLOR may stop applying (row 95).
+                                if (!_pattern.backgroundApplies) {
+                                  setState(() => _editingBgColor = false);
+                                }
                                 Navigator.of(context).pop();
                               },
                             );
@@ -861,30 +968,36 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       ),
       child: Column(
         children: [
-          // Tab bar + heart
+          // Tab bar + heart. The tabs wrap: in one Row they ran 137 points off
+          // the card at Larger Text (+110 E1 accessibility).
           Row(
             children: [
-              _ColorPickerTabButton(
-                label: 'Common Color',
-                isActive: _colorPickerTab == 0,
-                onTap: () => setState(() => _colorPickerTab = 0),
+              Expanded(
+                child: Wrap(
+                  spacing: 12,
+                  runSpacing: 6,
+                  children: [
+                    _ColorPickerTabButton(
+                      label: 'Common Color',
+                      isActive: _colorPickerTab == 0,
+                      onTap: () => setState(() => _colorPickerTab = 0),
+                    ),
+                    _ColorPickerTabButton(
+                      label: 'Color Picker',
+                      isActive: _colorPickerTab == 1,
+                      onTap: () => setState(() => _colorPickerTab = 1),
+                    ),
+                    _ColorPickerTabButton(
+                      label: 'Slider',
+                      isActive: _colorPickerTab == 2,
+                      onTap: () => setState(() => _colorPickerTab = 2),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(width: 8),
-              _ColorPickerTabButton(
-                label: 'Color Picker',
-                isActive: _colorPickerTab == 1,
-                onTap: () => setState(() => _colorPickerTab = 1),
-              ),
-              const SizedBox(width: 8),
-              _ColorPickerTabButton(
-                label: 'Slider',
-                isActive: _colorPickerTab == 2,
-                onTap: () => setState(() => _colorPickerTab = 2),
-              ),
-              const Spacer(),
               // Heart button
               FavoriteHeartButton(
-                patternId: _pattern.id,
+                patternId: _favoriteIdFor(_pattern.name),
                 patternName: _pattern.name,
                 patternDataBuilder: _favoritePayload,
                 size: 28,
@@ -1023,7 +1136,10 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       value: _pattern.brightness.toDouble(),
       max: 255,
       displayValue: '${(_pattern.brightness / 255 * 100).round()}%',
-      onChanged: (v) => _updatePattern(_pattern.copyWith(brightness: v.round())),
+      onChanged: (v) {
+        _brightnessTouched = true;
+        _updatePattern(_pattern.copyWith(brightness: v.round()));
+      },
     );
   }
 
@@ -1105,6 +1221,7 @@ class _ControlCard extends StatelessWidget {
   final VoidCallback onTap;
 
   const _ControlCard({
+    super.key,
     required this.label,
     this.icon,
     this.customIcon,

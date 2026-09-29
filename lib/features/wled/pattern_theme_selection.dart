@@ -18,7 +18,6 @@ import 'package:nexgen_command/features/explore_patterns/ui/explore_design_syste
 import 'package:go_router/go_router.dart';
 // Additional imports required by the full _CompactPatternItemCard implementation
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -29,6 +28,9 @@ import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
+import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
+import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 
 // ---------------------------------------------------------------------------
 // Private helper widgets
@@ -477,6 +479,15 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         final designId =
                             node.metadata?['sourceDesignId'] as String?;
                         if (widget.onDesignSelected != null) {
+                          // Row 92: a per-pixel design cannot be handed to a
+                          // schedule or Game Day. The picker used to show a
+                          // spinner that never resolved while a snackbar said
+                          // so; it now says so in place, with a way back.
+                          final pending = _resolveDesign(designId ?? '');
+                          if (pending != null && pending.isPositional) {
+                            return _PerPixelNotSelectable(
+                                designName: pending.name);
+                          }
                           if (!_savedDesignApplyKicked) {
                             _savedDesignApplyKicked = true;
                             WidgetsBinding.instance
@@ -491,6 +502,20 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                           return const Center(
                             child: Text('Design not found',
                                 style: TextStyle(color: Colors.white70)),
+                          );
+                        }
+                        // Item C: a pattern saved from the Pattern Editor opens
+                        // the SAME tuner as the Explore card it came from,
+                        // with its effect, speed, intensity and layout —
+                        // live, with Apply and "Save to design".
+                        final editorDesign = _resolveDesign(designId);
+                        if (editorDesign != null &&
+                            editorDesign.tags
+                                .contains(kPatternEditorDesignTag) &&
+                            !editorDesign.isPositional) {
+                          return ColorwayEffectSelectorPage.forDesign(
+                            key: ValueKey('design-tuner-$designId'),
+                            design: editorDesign,
                           );
                         }
                         // embedded: this Scaffold already provides the app
@@ -542,11 +567,13 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                         // The surface is always rendered (no longer gated on
                         // designs.isNotEmpty) so the user sees the category
                         // and the next-step guidance, not a missing folder.
+                        // Names controls that exist (foundation walk B6: there
+                        // is no "Save Custom" anywhere).
                         emptyMessage: widget.nodeId == kMyDesignsCategoryId
-                            ? 'No saved designs yet.\n\nFrom the dashboard, '
-                                'tap Now Playing → "Save Custom" or use '
-                                '"Save As Custom Pattern" on the adjustment '
-                                'panel to save a design.'
+                            ? 'No saved designs yet.\n\nOpen any pattern in '
+                                'Explore, tap the tune icon to edit it, then '
+                                'tap SAVE. Or on Home, open Adjust Pattern '
+                                'and tap "Save As Custom Pattern".'
                             : null,
                       );
                     },
@@ -559,6 +586,52 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                   child: Text('Unable to load content', style: TextStyle(color: ExploreDesignTokens.textSecondary)),
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Row 92 — shown in place of the never-ending spinner when a schedule or Game
+/// Day picker lands on a per-pixel design.
+class _PerPixelNotSelectable extends StatelessWidget {
+  final String designName;
+  const _PerPixelNotSelectable({required this.designName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.grid_on_rounded,
+                color: NexGenPalette.textMedium, size: 40),
+            const SizedBox(height: 12),
+            Text(
+              '"$designName" is a per-pixel design',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Your controller's timers can replay colours and effects, not a "
+              'painted picture, so this one can\'t be chosen here. You can '
+              'still apply it any time from My Designs.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              key: const ValueKey('per-pixel-choose-another'),
+              onPressed: () => Navigator.of(context).maybePop(),
+              child: const Text('Choose another design'),
             ),
           ],
         ),
@@ -819,81 +892,98 @@ class _CompactPatternItemCard extends ConsumerWidget {
   }
 
   Future<void> _handleTap(BuildContext context, WidgetRef ref, int effectId) async {
+    final container = ProviderScope.containerOf(context, listen: false);
     final shouldProceed = await SyncWarningDialog.checkAndProceed(context, ref);
-    if (!shouldProceed) return;
-
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No device connected')));
-      }
-      return;
-    }
+    if (!shouldProceed || !context.mounted) return;
 
     // Solid effect with multiple theme colors — let user pick which one
     if (effectId == 0 && themeColors.length > 1) {
-      if (context.mounted) {
-        final selectedColor = await _showSolidColorPicker(context, themeColors);
-        if (selectedColor != null && context.mounted) {
-          await _applyWithColor(context, ref, repo, selectedColor);
-        }
+      final selectedColor = await _showSolidColorPicker(context, themeColors);
+      if (selectedColor == null || !context.mounted) return;
+      final payload = Map<String, dynamic>.from(item.wledPayload);
+      final seg = payload['seg'];
+      if (seg is List && seg.isNotEmpty) {
+        final s0 = Map<String, dynamic>.from(seg.first as Map);
+        s0['col'] = [rgbToRgbw(selectedColor.red, selectedColor.green, selectedColor.blue, forceZeroWhite: true)];
+        payload['seg'] = [s0];
       }
+      await _apply(context, ref, container, payload);
       return;
     }
-
-    try {
-      var payload = Map<String, dynamic>.from(item.wledPayload);
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isEmpty) {
-        debugPrint('PatternThemeSelection apply: skip (U1 gate)');
-        return;
-      }
-      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      // applyJson returns false (does NOT throw) on a device-write failure.
-      // Gate EVERYTHING downstream on it — label, local state, AND the Game
-      // Day persist — so we never persist/label a design the lights aren't
-      // actually showing (Audit-2 S9, the worst case: persist-on-failure).
-      final success = await repo.applyJson(payload);
-      if (!success) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to apply pattern')),
-          );
-        }
-        return;
-      }
-      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
-      _updateLocalState(ref);
-
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
-      }
-      maybeShowManualApplyOffWarning(ref);
-    } catch (e) {
-      debugPrint('Apply pattern failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-      }
-    }
+    await _apply(context, ref, container, Map<String, dynamic>.from(item.wledPayload));
   }
 
-  void _updateLocalState(WidgetRef ref) {
-    final bri = item.wledPayload['bri'];
-    if (bri is int) ref.read(wledStateProvider.notifier).setBrightness(bri);
-    final seg = item.wledPayload['seg'];
-    if (seg is List && seg.isNotEmpty && seg.first is Map) {
-      final s0 = seg.first as Map;
-      final sx = s0['sx'];
-      if (sx is int) ref.read(wledStateProvider.notifier).setSpeed(sx);
-      final col = s0['col'];
-      if (col is List && col.isNotEmpty && col.first is List) {
-        final c = col.first as List;
-        if (c.length >= 3) {
-          ref.read(wledStateProvider.notifier).setColor(Color.fromARGB(255, (c[0] as num).toInt(), (c[1] as num).toInt(), (c[2] as num).toInt()));
-        }
-      }
+  /// The theme card's ONE apply. Rows 1, 20, 21:
+  ///  * a closed channel gate is explained, never a silent return;
+  ///  * after the write, the preview follows the as-sent payload ONLY. The old
+  ///    "sync local state" helper called setBrightness / setSpeed / setColor —
+  ///    three more DEVICE writes — and setColor re-sent colour 1 alone, which
+  ///    the wire pads to three slots with black: a 2- or 3-colour theme was
+  ///    replaced by its first colour right after "Applied";
+  ///  * the payload states `on: true` and a brightness — the house's own
+  ///    current level — because a theme payload carried neither, so tapping a
+  ///    card while the house was off lit nothing under an "Applied" toast.
+  ///    Stating the current level (not a catalogue one) is what lets the house
+  ///    come on without the jump to a fixed brightness that Explore's Apply
+  ///    and Favorites no longer make.
+  Future<void> _apply(
+    BuildContext context,
+    WidgetRef ref,
+    ProviderContainer container,
+    Map<String, dynamic> raw,
+  ) async {
+    final repo = container.read(wledRepositoryProvider);
+    final channels = await resolveChannelsForTap(container);
+    if (channels == null || repo == null) {
+      if (repo == null && channels != null) await reportApplyBlocked(container);
+      return;
     }
+    final live = container.read(wledStateProvider);
+    final stated = <String, dynamic>{
+      ...raw,
+      'on': true,
+      'bri': live.brightness.clamp(1, 255),
+    };
+    final payload = applyChannelFilter(
+        stated, channels, container.read(applyFilterChannelsProvider));
+    final notifier = container.read(wledStateProvider.notifier);
+    final result = await notifier.runAndReport(
+      repo.applyJson(payload).then(WriteResult.fromBool),
+      onFailure: "Couldn't apply ${item.name} — check your connection",
+    );
+    if (!result.ok) return;
+    container
+        .read(activePresetLabelProvider.notifier)
+        .setLabelWithFingerprint(item.name, container.read(wledStateProvider));
+    _syncPreview(container, payload);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
+    ref.trackWledPayload(payload: payload, patternName: item.name, source: 'explore');
+    maybeShowManualApplyOffWarning(ref);
+  }
+
+  /// Preview only — no device write. The same sync every other card uses.
+  void _syncPreview(ProviderContainer container, Map<String, dynamic> sent) {
+    final seg = firstRealDesignSegment(sent);
+    if (seg == null) return;
+    final cols = <Color>[
+      for (final c in (seg['col'] as List? ?? const []))
+        if (c is List && c.length >= 3)
+          Color.fromARGB(255, (c[0] as num).toInt().clamp(0, 255),
+              (c[1] as num).toInt().clamp(0, 255), (c[2] as num).toInt().clamp(0, 255)),
+    ];
+    container.read(wledStateProvider.notifier).applyPreviewSync(
+          colors: cols.isEmpty ? const [Colors.white] : cols,
+          effectId: (seg['fx'] as num?)?.toInt() ?? 0,
+          effectName: item.name,
+          speed: (seg['sx'] as num?)?.toInt() ?? 128,
+          intensity: (seg['ix'] as num?)?.toInt() ?? 128,
+          brightness: (sent['bri'] as num?)?.toInt() ?? 255,
+          colorGroupSize: (seg['grp'] as num?)?.toInt() ?? 1,
+          spacing: (seg['spc'] as num?)?.toInt() ?? 0,
+          paletteId: (seg['pal'] as num?)?.toInt(),
+        );
   }
 
   Future<Color?> _showSolidColorPicker(BuildContext context, List<Color> colors) async {
@@ -904,46 +994,6 @@ class _CompactPatternItemCard extends ConsumerWidget {
     );
   }
 
-  Future<void> _applyWithColor(BuildContext context, WidgetRef ref, WledRepository repo, Color color) async {
-    try {
-      var payload = Map<String, dynamic>.from(item.wledPayload);
-      final seg = payload['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final s0 = Map<String, dynamic>.from(seg.first as Map);
-        s0['col'] = [rgbToRgbw(color.red, color.green, color.blue, forceZeroWhite: true)];
-        payload['seg'] = [s0];
-      }
-      final channels = ref.read(effectiveChannelIdsProvider);
-      if (channels.isEmpty) {
-        debugPrint('PatternThemeSelection color apply: skip (U1 gate)');
-        return;
-      }
-      payload = applyChannelFilter(payload, channels, ref.read(deviceChannelsProvider));
-      // Gate label AND Game Day persist on the write result — don't persist a
-      // design the device rejected (Audit-2 S9, solid-color variant).
-      final success = await repo.applyJson(payload);
-      if (!success) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to apply pattern')),
-          );
-        }
-        return;
-      }
-      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(item.name, ref.read(wledStateProvider));
-
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Applied: ${item.name}')));
-      }
-      maybeShowManualApplyOffWarning(ref);
-    } catch (e) {
-      debugPrint('Apply with color failed: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to apply pattern')));
-      }
-    }
-  }
 }
 
 class _SolidColorPickerSheet extends StatelessWidget {
