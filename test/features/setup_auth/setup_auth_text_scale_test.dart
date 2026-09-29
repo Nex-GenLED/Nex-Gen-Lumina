@@ -138,12 +138,24 @@ List<Override> _session([FakeAccountSession? s]) => [
       currentUserProfileProvider.overrideWith((ref) => Stream.value(null)),
     ];
 
-List<Override> _deviceSetup() => [
-      effectiveUserUidProvider.overrideWith((ref) => kTestUid),
-      wledStateProvider.overrideWith(_StillWled.new),
-      provisioningServiceFactoryProvider
-          .overrideWithValue((uid) => ProvisioningService(targetUserId: uid)),
-    ];
+List<Override> _deviceSetup() {
+  // A self-signup account (what a new customer has), which the pairing check
+  // now lets through.
+  final fs = FakeFirebaseFirestore();
+  fs.collection('users').doc(kTestUid).set({
+    'id': kTestUid,
+    'owner_id': kTestUid,
+    'installation_role': 'unlinked',
+  });
+  return [
+    accountSessionProvider.overrideWithValue(FakeAccountSession()),
+    accountFirestoreProvider.overrideWithValue(fs),
+    effectiveUserUidProvider.overrideWith((ref) => kTestUid),
+    wledStateProvider.overrideWith(_StillWled.new),
+    provisioningServiceFactoryProvider
+        .overrideWithValue((uid) => ProvisioningService(targetUserId: uid)),
+  ];
+}
 
 const _outcomeNotSaved = ProvisionResult(
   ip: '192.0.2.40',
@@ -273,6 +285,18 @@ void main() {
     }
     testWidgets('controller setup wizard', (tester) async {
       await _screen(tester, const ControllerSetupWizard());
+    });
+    testWidgets('discovery, nothing found', (tester) async {
+      await _routed(
+        tester,
+        const DiscoveryPage(),
+        path: AppRoutes.discovery,
+        overrides: [
+          deviceDiscoveryServiceProvider
+              .overrideWithValue(FakeDiscoveryService(const [])),
+          wledStateProvider.overrideWith(_StillWled.new),
+        ],
+      );
     });
     testWidgets('discovery, two controllers found', (tester) async {
       await _routed(

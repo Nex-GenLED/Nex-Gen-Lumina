@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
+import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/features/ble/provisioning_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -15,13 +16,63 @@ import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/models/user_role.dart';
 
 /// Device Setup screen with a specialized BLE scanner for Improv Standard.
+/// Whether an account may add a controller from Bluetooth setup.
+enum PairingDecision { allowed, notSignedIn, noProfile, familyMember }
+
+/// Who may add a controller (+110, walk finding 1).
+///
+///  * An installer session — always.
+///  * Account owners: `primary`, `installer`, `admin`.
+///  * A self-signup account (`unlinked`, or a role this build does not know)
+///    adding a controller to its OWN account: that is the account owner
+///    setting up their first controller.
+///  * A family member (`subUser`) — refused: their account belongs to someone
+///    else's system, and hardware goes on the owner's account.
+@visibleForTesting
+PairingDecision controllerPairingDecision({
+  required bool signedIn,
+  required bool installerSession,
+  required bool profileExists,
+  required String? role,
+  required bool addingToOwnAccount,
+}) {
+  if (installerSession) return PairingDecision.allowed;
+  if (!signedIn) return PairingDecision.notSignedIn;
+  if (!profileExists) return PairingDecision.noProfile;
+  switch (InstallationRoleExtension.fromJson(role)) {
+    case InstallationRole.primary:
+    case InstallationRole.installer:
+    case InstallationRole.admin:
+      return PairingDecision.allowed;
+    case InstallationRole.subUser:
+      return PairingDecision.familyMember;
+    case InstallationRole.unlinked:
+      return addingToOwnAccount
+          ? PairingDecision.allowed
+          : PairingDecision.familyMember;
+  }
+}
+
+/// What the customer is told when Bluetooth setup turns them away.
+String pairingRefusalMessage(PairingDecision decision) {
+  switch (decision) {
+    case PairingDecision.notSignedIn:
+      return 'You must be signed in to add controllers.';
+    case PairingDecision.noProfile:
+      return 'User profile not found.';
+    case PairingDecision.familyMember:
+      return "Your account is part of someone else's lighting system. Ask "
+          'its owner to add new controllers.';
+    case PairingDecision.allowed:
+      return '';
+  }
+}
+
 class DeviceSetupPage extends ConsumerStatefulWidget {
   const DeviceSetupPage({
     super.key,
@@ -100,12 +151,12 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
       _provisionResult = widget.testOutcome;
       return;
     }
-    if (widget.testSkipScan) return;
-
     // Check user permissions before allowing controller pairing
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _checkPairingPermission();
     });
+
+    if (widget.testSkipScan) return;
 
     // Avoid plugin calls on web/simulation; provide a mock experience.
     if (kIsWeb || kSimulationMode) {
@@ -115,19 +166,27 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     }
   }
 
-  /// Verify the current user has permission to add new controllers.
-  /// Only primary users and installers can pair new devices.
-  /// Anonymous users are always allowed through — they entered via the
-  /// installer PIN flow and have already been authenticated.
+  /// Verify the current user may add a controller here.
+  ///
+  /// +110 (walk finding 1): this allowed only `primary` and `installer`, so an
+  /// account the customer created themselves — which starts as `unlinked`
+  /// (signup writes the model's default role) — was refused with "Only
+  /// system owners can add new controllers." The rule is now
+  /// [controllerPairingDecision]: account owners (including a self-signup
+  /// adding the first controller to its OWN account) are let through; a
+  /// family member (`subUser`), whose account belongs to someone else's
+  /// system, is still refused.
   Future<void> _checkPairingPermission() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You must be signed in to add controllers.')),
-        );
-        context.pop();
-      }
+    final session = ref.read(accountSessionProvider);
+    final uid = session.uid;
+    if (!session.isSignedIn || uid == null) {
+      _refusePairing(controllerPairingDecision(
+        signedIn: false,
+        installerSession: false,
+        profileExists: false,
+        role: null,
+        addingToOwnAccount: false,
+      ));
       return;
     }
 
@@ -138,43 +197,37 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     // role (e.g. 'unlinked').
     if (ref.read(installerModeActiveProvider)) return;
 
+    final effectiveUid = ref.read(effectiveUserUidProvider);
     try {
-      final userDoc = await FirebaseFirestore.instance
+      final userDoc = await ref
+          .read(accountFirestoreProvider)
           .collection('users')
-          .doc(user.uid)
-          .get();
-
-      if (!userDoc.exists) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('User profile not found.')),
-          );
-          context.pop();
-        }
-        return;
-      }
-
-      final data = userDoc.data()!;
-      final roleStr = data['installation_role'] as String?;
-      final role = InstallationRoleExtension.fromJson(roleStr);
-
-      // Only primary users and installers can add new controllers
-      if (role != InstallationRole.primary && role != InstallationRole.installer) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Only system owners can add new controllers.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          context.pop();
-        }
-        return;
-      }
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 15));
+      final decision = controllerPairingDecision(
+        signedIn: true,
+        installerSession: false,
+        profileExists: userDoc.exists,
+        role: userDoc.data()?['installation_role'] as String?,
+        addingToOwnAccount: effectiveUid == null || effectiveUid == uid,
+      );
+      if (decision != PairingDecision.allowed) _refusePairing(decision);
     } catch (e) {
       debugPrint('Error checking pairing permission: $e');
       // Allow through in case of network issues to avoid blocking installers
     }
+  }
+
+  void _refusePairing(PairingDecision decision) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(pairingRefusalMessage(decision)),
+        backgroundColor: Colors.orange,
+      ),
+    );
+    context.pop();
   }
 
   /// Request the platform-specific runtime Bluetooth permissions

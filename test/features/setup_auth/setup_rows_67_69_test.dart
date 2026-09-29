@@ -16,6 +16,7 @@ import 'package:nexgen_command/features/ble/wled_manual_setup.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/discovery/discovery_page.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/shared/write_result.dart';
@@ -241,6 +242,7 @@ void main() {
         'with two controllers the page waits for a tap and the header says '
         'so; a tap chooses', (tester) async {
       SharedPreferences.setMockInitialValues({'welcome_completed_v1': true});
+      final discoveryStore = FakeFirebaseFirestore();
       await tester.pumpWidget(_routerApp(
         const DiscoveryPage(),
         [
@@ -250,6 +252,11 @@ void main() {
             _endpoint('wled-back', '192.0.2.22'),
           ])),
           wledStateProvider.overrideWith(() => _StillWled()),
+          // A tap now saves the controller to the account (walk finding 2).
+          effectiveUserUidProvider.overrideWith((ref) => kTestUid),
+          controllersFirestoreProvider.overrideWithValue(discoveryStore),
+          deviceRepositoryProvider
+              .overrideWithValue(DeviceRepository(firestore: discoveryStore)),
         ],
         path: AppRoutes.discovery,
       ));

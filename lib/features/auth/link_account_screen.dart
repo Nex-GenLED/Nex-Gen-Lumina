@@ -110,6 +110,36 @@ class LinkAccountScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 16),
+              // Option 1b: set up their own controller (+110, walk finding
+              // 1). A self-signup account owns its own account and may add
+              // its first controller: Discovery finds one already on Wi-Fi
+              // and offers Bluetooth setup for a new one. appRedirect opens
+              // the setup routes to this account.
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  key: const ValueKey('link-setup-own-controller'),
+                  onPressed: () => context.push(AppRoutes.discovery),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    side: const BorderSide(color: NexGenPalette.cyan),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add_circle_outline,
+                      color: NexGenPalette.cyan),
+                  label: const Text(
+                    'Set up my own controller',
+                    style: TextStyle(
+                      color: NexGenPalette.cyan,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               // Option 2: Find a dealer
               SizedBox(
                 width: double.infinity,

@@ -222,6 +222,21 @@ class DeviceRepository {
   final FirebaseFirestore? _firestore;
   FirebaseFirestore get _db => _firestore ?? FirebaseFirestore.instance;
 
+  /// Whether `users/{uid}/controllers` already holds a controller at [ip].
+  Future<bool> hasControllerAt({
+    required String userId,
+    required String ip,
+  }) async {
+    final snap = await _db
+        .collection('users')
+        .doc(userId)
+        .collection('controllers')
+        .where('ip', isEqualTo: ip)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
+  }
+
   /// Save or update a device under users/{uid}/controllers/{docId}
   /// Stores: serial, ip, name, ssid (optional), wifiConfigured,
   /// connectionMethod, createdAt/updatedAt.

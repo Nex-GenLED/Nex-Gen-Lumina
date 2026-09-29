@@ -6,6 +6,11 @@ import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 
+/// The Firestore [controllersStreamProvider] reads. Overridden in tests so
+/// the real reader can be driven against a fake store.
+final controllersFirestoreProvider =
+    Provider<FirebaseFirestore>((ref) => FirebaseFirestore.instance);
+
 /// Streams the current user's controllers collection. Reads from
 /// [effectiveUserUidProvider] so installer impersonation (Existing
 /// Customer flow) transparently scopes the stream to the customer's UID.
@@ -19,7 +24,8 @@ final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
   debugPrint('controllersStreamProvider: Listening to controllers for user $uid');
 
   // Don't use orderBy to avoid composite index requirement - we'll sort in memory
-  final col = FirebaseFirestore.instance
+  final col = ref
+      .watch(controllersFirestoreProvider)
       .collection('users')
       .doc(uid)
       .collection('controllers');

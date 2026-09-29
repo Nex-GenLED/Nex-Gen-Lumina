@@ -13,8 +13,8 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 /// Trusts the installer's handoff selections — does not re-ask the customer
 /// for teams, holidays, or vibe (Bug 4a, 2026-05-07 tracker). Does not
 /// auto-enable autopilot or generate a schedule (Bug 4c). The customer can
-/// adjust preferences from Settings and turn on autopilot from the autopilot
-/// screen whenever they choose.
+/// adjust preferences from the System tab and turn on Autopilot from the
+/// Lumina AI card on the Schedule tab whenever they choose.
 class FirstRunScreen extends ConsumerStatefulWidget {
   const FirstRunScreen({super.key, @visibleForTesting this.initialPage = 0});
 
@@ -196,11 +196,15 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
+          // +110 (walk finding 3): this named an "Auto-Pilot tab" that the
+          // tab bar does not have. The switch is on the Lumina AI card at the
+          // top of the Schedule tab.
           const Text(
-            'Your lights are ready to go. Auto-Pilot can take over your '
+            'Your lights are ready to go. Autopilot can take over your '
             'schedule with seasonal themes, game day colors, and holiday '
-            'displays — turn it on from the Auto-Pilot tab whenever you\'re '
-            'ready.',
+            'displays — turn it on with the Autopilot switch on the Lumina AI '
+            'card in the Schedule tab whenever you\'re ready.',
+            key: ValueKey('first-run-welcome-copy'),
             style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.5),
             textAlign: TextAlign.center,
           ),
@@ -488,8 +492,9 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
           const SizedBox(height: 12),
           const Text(
             'Your installer has set up your preferences. You can adjust them '
-            'from Settings, and turn on Auto-Pilot from the Auto-Pilot tab '
-            'whenever you\'re ready.',
+            'from the System tab, and turn on Autopilot with the switch on '
+            'the Lumina AI card in the Schedule tab whenever you\'re ready.',
+            key: ValueKey('first-run-done-copy'),
             style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.4),
             textAlign: TextAlign.center,
           ),
