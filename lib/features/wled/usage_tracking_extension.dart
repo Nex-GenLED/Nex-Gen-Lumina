@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 
 /// Extension methods for tracking pattern usage (for Ref)
 extension UsageTracking on Ref {
@@ -41,7 +42,8 @@ extension UsageTracking on Ref {
   }) async {
     try {
       // Extract info from payload
-      final seg = (payload['seg'] as List?)?.firstOrNull as Map<String, dynamic>?;
+      // The DESIGN segment, not seg[0] — see firstRealDesignSegment.
+      final seg = firstRealDesignSegment(payload);
       final effectId = seg?['fx'] as int?;
       final speed = seg?['sx'] as int?;
       final intensity = seg?['ix'] as int?;
@@ -134,7 +136,8 @@ extension UsageTrackingWidget on WidgetRef {
   }) async {
     try {
       // Extract info from payload
-      final seg = (payload['seg'] as List?)?.firstOrNull as Map<String, dynamic>?;
+      // The DESIGN segment, not seg[0] — see firstRealDesignSegment.
+      final seg = firstRealDesignSegment(payload);
       final effectId = seg?['fx'] as int?;
       final speed = seg?['sx'] as int?;
       final intensity = seg?['ix'] as int?;

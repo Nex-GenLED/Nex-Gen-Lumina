@@ -12,6 +12,8 @@ export 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 // so the bench/ CLI can reach them under `dart run`; re-exported here.
 export 'package:nexgen_command/features/wled/wled_cfg_gamma.dart'
     show kNglLightGammaConfig, normalizeWledCfgPayload;
+import 'package:nexgen_command/shared/wled_segment_defaults.dart';
+export 'package:nexgen_command/shared/wled_segment_defaults.dart';
 import 'package:nexgen_command/utils/color_naming.dart';
 import 'package:nexgen_command/utils/rgbw_validation.dart';
 
@@ -51,8 +53,12 @@ List<int> safeRGBW(List<int> color) {
 /// carries `{id, on:false}` and nothing else.
 ///
 /// If [channelIds] is empty, or the payload has no `seg` key, the payload is
-/// returned unchanged (safe fallback). Otherwise the first segment object is
-/// used as a template for the targeted channels.
+/// returned unchanged (safe fallback). Otherwise the first REAL design segment
+/// ([firstRealDesignSegment]) is used as a template for the targeted channels.
+/// Not `seg.first`: a payload that has already been through this function —
+/// every stored favourite captured while channel 1 was deselected — leads with
+/// the exclusion marker `{id: 0, on: false}`, and templating from that sent
+/// every channel "on" with no colour and no effect.
 ///
 /// THE CONTRACT (#67's answer, brought to the interactive path — #89):
 ///
@@ -97,8 +103,10 @@ Map<String, dynamic> applyChannelFilter(
   final seg = payload['seg'];
   if (seg is! List || seg.isEmpty) return payload;
 
-  // Use the first segment entry as a template.
-  final template = Map<String, dynamic>.from(seg.first as Map);
+  // Template from the first entry that carries a look; the first entry at all
+  // only when none does (a payload of nothing but exclusion markers).
+  final template = firstRealDesignSegment(payload) ??
+      Map<String, dynamic>.from(seg.first as Map);
   template.remove('id'); // strip hardcoded ID so each copy gets its own
   template.remove('start'); // bounds are provisioning's — rule 2
   template.remove('stop');
@@ -143,6 +151,65 @@ Map<String, dynamic>? firstDesignSeg(dynamic seg) {
   }
   final first = seg.first;
   return first is Map ? Map<String, dynamic>.from(first) : null;
+}
+
+/// True for the marker [applyChannelFilter] writes for a channel a design
+/// leaves out: `{id, on: false}` and nothing that describes a look.
+///
+/// `frz` is tolerated because the wire normalizer adds `frz:false` to every
+/// entry, so a marker read back from an as-sent payload carries it.
+bool isChannelExclusionMarker(Object? entry) {
+  if (entry is! Map) return false;
+  if (entry['on'] != false) return false;
+  for (final key in entry.keys) {
+    if (key != 'id' && key != 'on' && key != 'frz') return false;
+  }
+  return true;
+}
+
+/// THE answer to "which segment of this payload is the design?" — for every
+/// reader that used to take `seg[0]`.
+///
+/// `seg[0]` stopped being the design when [applyChannelFilter] began emitting
+/// the full partition: on anything scoped away from channel 1 it is the
+/// exclusion marker `{id: 0, on: false}`. A reader that takes it sees no
+/// effect and no colours, so the hero paints white, a favourite card falls
+/// back to a default gradient, usage is logged with nothing in it, and a
+/// re-filtered favourite sends no look at all.
+///
+/// Returns, in order of preference:
+///   1. the first entry that states a look — an `fx`, a `col`, or a per-pixel
+///      `i` — and is not an exclusion marker;
+///   2. else the first entry that is not an exclusion marker (a one-field
+///      tweak such as `{sx: 200}`);
+///   3. else null. A payload of nothing but markers has no design, and the
+///      caller must treat it as "nothing to show", never as "white".
+///
+/// Accepts the whole payload or its `seg` value, and a `seg` that is a list or
+/// a single map (WLED returns either). Always a copy; never the caller's map.
+///
+/// Differs from [firstDesignSeg] only in case 3, where that function hands
+/// back the marker. New code should call this one.
+Map<String, dynamic>? firstRealDesignSegment(Object? payloadOrSeg) {
+  // A map is always the PAYLOAD (its `seg` may be a list or a single map); a
+  // list is always the `seg` value. A payload with no `seg` has no design.
+  Object? seg = payloadOrSeg is Map ? payloadOrSeg['seg'] : payloadOrSeg;
+  if (seg is Map) seg = [seg];
+  if (seg is! List) return null;
+
+  Map? firstNonMarker;
+  for (final entry in seg) {
+    if (entry is! Map || isChannelExclusionMarker(entry)) continue;
+    if (entry.containsKey('fx') ||
+        entry.containsKey('col') ||
+        entry.containsKey('i')) {
+      return Map<String, dynamic>.from(entry);
+    }
+    firstNonMarker ??= entry;
+  }
+  return firstNonMarker == null
+      ? null
+      : Map<String, dynamic>.from(firstNonMarker);
 }
 
 // buildChannelPowerPayload (P1-43) lives in channel_power_payload.dart (pure
@@ -551,6 +618,18 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
     // BUG-GD-PICKER-1: an emitter census must be a grep of the FIELD NAMES,
     // and it must include the code the builders flow THROUGH, not only the
     // code they are.
+
+    // #110 — COMPLETE SEGMENT STATE. Same rule as the grp/spc assertion above,
+    // for the fields that were still inherited: the effect's own sliders and
+    // checkboxes, the segment's own brightness, and — on a complete design —
+    // speed, intensity and palette. See wled_segment_defaults.dart for what
+    // each is, why the firmware leaves it behind, and what is deliberately
+    // left to provisioning. Runs BEFORE the palette guard so a palette filled
+    // in here is held to the same pal:5 rule as one the caller stated.
+    completeEffectSegment(
+      s,
+      paletteFor: WledEffectsCatalog.setColorsPaletteFor,
+    );
 
     // Palette guard (single chokepoint for the pal:5 strobing/blending bug).
     //

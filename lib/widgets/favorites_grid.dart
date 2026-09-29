@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
 import 'package:nexgen_command/features/favorites/favorites_picker.dart';
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -241,26 +242,21 @@ class _FavoritePatternCard extends ConsumerWidget {
   /// Always returns at least one color (never empty list)
   List<Color> _extractPatternColors() {
     try {
-      final seg = favorite.patternData['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        final firstSeg = seg[0];
-        if (firstSeg is Map) {
-          final col = firstSeg['col'];
-          if (col is List && col.isNotEmpty) {
-            final colors = <Color>[];
-            for (final c in col) {
-              if (c is List && c.length >= 3) {
-                colors.add(Color.fromARGB(
-                  255,
-                  (c[0] as num).toInt().clamp(0, 255),
-                  (c[1] as num).toInt().clamp(0, 255),
-                  (c[2] as num).toInt().clamp(0, 255),
-                ));
-              }
-            }
-            if (colors.isNotEmpty) return colors;
+      // The DESIGN segment, not seg[0] — see firstRealDesignSegment.
+      final col = firstRealDesignSegment(favorite.patternData)?['col'];
+      if (col is List && col.isNotEmpty) {
+        final colors = <Color>[];
+        for (final c in col) {
+          if (c is List && c.length >= 3) {
+            colors.add(Color.fromARGB(
+              255,
+              (c[0] as num).toInt().clamp(0, 255),
+              (c[1] as num).toInt().clamp(0, 255),
+              (c[2] as num).toInt().clamp(0, 255),
+            ));
           }
         }
+        if (colors.isNotEmpty) return colors;
       }
     } catch (e) {
       debugPrint('Error in favorites grid extracting colors from payload: $e');
