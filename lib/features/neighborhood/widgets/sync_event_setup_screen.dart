@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme.dart';
 import '../../../utils/time_format.dart';
+import '../../game_day/team_picker_sheet.dart';
 import '../../sports_alerts/data/team_colors.dart';
 import '../../sports_alerts/models/sport_type.dart';
 import '../models/sync_event.dart';
@@ -39,6 +40,7 @@ class SyncEventSetupScreen extends ConsumerStatefulWidget {
 
 class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
   int _step = 0;
+  final _teamScroll = ScrollController();
   final _nameController = TextEditingController();
 
   // Step 1 — Group
@@ -51,7 +53,6 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
   String? _selectedEspnTeamId;
   Color? _teamPrimaryColor;
   Color? _teamSecondaryColor;
-  String _teamSearchQuery = '';
 
   // Step 3 — Trigger
   SyncEventTriggerType _triggerType = SyncEventTriggerType.gameStart;
@@ -137,6 +138,7 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
 
   @override
   void dispose() {
+    _teamScroll.dispose();
     _nameController.dispose();
     super.dispose();
   }
@@ -315,150 +317,29 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
 
   // ── Step 1: Team Selection ─────────────────────────────────────────
 
+  /// The shared Game Day picker (league folders, cross-league search) in
+  /// PICK mode — this step used to carry its own flat per-sport chip list.
   Widget _buildTeamStep() {
-    final filteredTeams = kTeamColors.entries.where((entry) {
-      if (_selectedSport != null) {
-        if (!entry.key.startsWith(_selectedSport!.name)) return false;
-      }
-      if (_teamSearchQuery.isNotEmpty) {
-        final q = _teamSearchQuery.toLowerCase();
-        return entry.value.teamName.toLowerCase().contains(q) ||
-            entry.key.toLowerCase().contains(q);
-      }
-      return true;
-    }).toList();
-
-    return Column(
-      children: [
-        // Sport filter chips
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: SportType.values.map((sport) {
-                final isSelected = _selectedSport == sport;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: Text(sport.displayName),
-                    selected: isSelected,
-                    selectedColor: NexGenPalette.cyan.withValues(alpha: 0.3),
-                    checkmarkColor: NexGenPalette.cyan,
-                    labelStyle: TextStyle(
-                      color: isSelected ? NexGenPalette.cyan : Colors.white70,
-                    ),
-                    backgroundColor: Colors.white10,
-                    onSelected: (_) => setState(() {
-                      _selectedSport = isSelected ? null : sport;
-                    }),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-        // Search bar
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: TextField(
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'Search teams...',
-              hintStyle: const TextStyle(color: Colors.white30),
-              prefixIcon: const Icon(Icons.search, color: Colors.white38),
-              enabledBorder: OutlineInputBorder(
-                borderSide: const BorderSide(color: Colors.white24),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderSide: const BorderSide(color: NexGenPalette.cyan),
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onChanged: (v) => setState(() => _teamSearchQuery = v),
-          ),
-        ),
-        const SizedBox(height: 8),
-        // Team list
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: filteredTeams.length,
-            itemBuilder: (context, index) {
-              final entry = filteredTeams[index];
-              final slug = entry.key;
-              final tc = entry.value;
-              final isSelected = _selectedTeamSlug == slug;
-              return Card(
-                color: isSelected
-                    ? NexGenPalette.cyan.withValues(alpha: 0.15)
-                    : Colors.white10,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: isSelected
-                      ? const BorderSide(color: NexGenPalette.cyan)
-                      : BorderSide.none,
-                ),
-                child: ListTile(
-                  leading: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: tc.primary,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: tc.secondary,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ],
-                  ),
-                  title: Text(
-                    tc.teamName,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  subtitle: Text(
-                    tc.sport.displayName,
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
-                  ),
-                  trailing: isSelected
-                      ? const Icon(Icons.check_circle,
-                          color: NexGenPalette.cyan)
-                      : null,
-                  onTap: () {
-                    setState(() {
-                      _selectedTeamSlug = slug;
-                      _selectedTeamName = tc.teamName;
-                      _selectedEspnTeamId = tc.espnTeamId;
-                      _teamPrimaryColor = tc.primary;
-                      _teamSecondaryColor = tc.secondary;
-                      _selectedSport = tc.sport;
-                      // Auto-set event name if empty
-                      if (_nameController.text.isEmpty) {
-                        _nameController.text = '${tc.teamName} Game Day';
-                      }
-                    });
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-      ],
+    return GameDayTeamPickerSheet(
+      embedded: true,
+      scrollController: _teamScroll,
+      existingTeamSlugs: const {},
+      selectedTeamSlug: _selectedTeamSlug,
+      onTeamPicked: (slug, tc) {
+        setState(() {
+          _selectedTeamSlug = slug;
+          _selectedTeamName = tc.teamName;
+          _selectedEspnTeamId = tc.espnTeamId;
+          _teamPrimaryColor = tc.primary;
+          _teamSecondaryColor = tc.secondary;
+          _selectedSport = tc.sport;
+          if (_nameController.text.isEmpty) {
+            _nameController.text = '${tc.teamName} Game Day';
+          }
+        });
+      },
     );
   }
-
-  // ── Step 2: Trigger Type ───────────────────────────────────────────
 
   Widget _buildTriggerStep() {
     return ListView(

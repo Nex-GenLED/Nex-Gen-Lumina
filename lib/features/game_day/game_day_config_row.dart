@@ -41,13 +41,20 @@ class GameDayConfigRow extends StatelessWidget {
                 color: NexGenPalette.textMedium,
               ),
             ),
-            const Spacer(),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: NexGenPalette.textHigh,
+            const SizedBox(width: 12),
+            // Flexible + ellipsis: a long design name ("Green Bay Packers
+            // Running") must not overflow the card on a 390 px phone.
+            Expanded(
+              child: Text(
+                value,
+                textAlign: TextAlign.end,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: NexGenPalette.textHigh,
+                ),
               ),
             ),
             if (onTap != null) ...[
