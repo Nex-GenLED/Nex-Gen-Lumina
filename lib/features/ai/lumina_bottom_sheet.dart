@@ -92,13 +92,18 @@ class _LuminaAvatar extends StatelessWidget {
           ),
         ],
       ),
+      // The glyph is the avatar's icon, and the circle is a fixed size, so the
+      // glyph scales DOWN to fit rather than spilling out of it at large text.
       child: Center(
-        child: Text(
-          '✦',
-          style: TextStyle(
-            fontSize: size * 0.46,
-            color: NexGenPalette.cyan,
-            height: 1.1,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '✦',
+            style: TextStyle(
+              fontSize: size * 0.46,
+              color: NexGenPalette.cyan,
+              height: 1.1,
+            ),
           ),
         ),
       ),
@@ -405,6 +410,9 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
   }
 
   void _animateToMode(LuminaSheetMode mode) {
+    // animateTo is async: the try/catch below cannot catch its not-attached
+    // assertion, which escaped as an unhandled error. Ask first.
+    if (!_dragController.isAttached) return;
     try {
       _dragController.animateTo(
         _sizeForMode(mode),
@@ -654,7 +662,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       LuminaSheetState sheetState, ScrollController scrollController) {
     switch (sheetState.mode) {
       case LuminaSheetMode.compact:
-        return _buildCompactContent(sheetState);
+        return _buildCompactContent(sheetState, scrollController);
       case LuminaSheetMode.listening:
         return _buildListeningContent(sheetState);
       case LuminaSheetMode.expanded:
@@ -666,8 +674,13 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
   // COMPACT STATE
   // -------------------------------------------------------------------------
 
-  Widget _buildCompactContent(LuminaSheetState sheetState) {
-    return Padding(
+  Widget _buildCompactContent(
+      LuminaSheetState sheetState, ScrollController scrollController) {
+    // Scrolls with the SHEET's controller: at large text the compact sheet
+    // (a third of the screen) cannot hold its content, and dragging the
+    // content now drags the sheet taller, as dragging the handle does.
+    return SingleChildScrollView(
+      controller: scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -728,32 +741,41 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       'Game day',
     ];
 
-    return SizedBox(
-      height: 36,
-      child: ListView.separated(
+    // Sized by the chips, not a fixed 36: at large text a fixed-height strip
+    // cut the labels off. 36 stays the minimum, so default size looks as before.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 36),
+      child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        itemCount: suggestions.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          return ActionChip(
-            label: Text(
-              suggestions[i],
-              style: const TextStyle(
-                color: _kFrost,
-                fontSize: 13,
+        child: Row(
+          children: [
+            for (var i = 0; i < suggestions.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              ActionChip(
+                label: Text(
+                  suggestions[i],
+                  style: const TextStyle(
+                    color: _kFrost,
+                    fontSize: 13,
+                  ),
+                ),
+                // 2. CARBON surface
+                backgroundColor: _kCarbon,
+                side: BorderSide(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.3),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                onPressed: () => _sendMessage(suggestions[i]),
+                // The strip no longer forces a height, so keep the chip at its
+                // drawn size instead of a 48-point touch box: same look as
+                // before at default size.
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-            ),
-            // 2. CARBON surface
-            backgroundColor: _kCarbon,
-            side: BorderSide(
-              color: NexGenPalette.cyan.withValues(alpha: 0.3),
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            onPressed: () => _sendMessage(suggestions[i]),
-          );
-        },
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -878,18 +900,37 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
               // 8. Avatar with ✦ symbol
               const _LuminaAvatar(size: 24),
               const SizedBox(width: 8),
-              Text(
-                'Lumina',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: _kFrost,
+              // Title and pills share the row's free space and wrap onto a
+              // second line at large text instead of pushing the clear button
+              // off the edge.
+              Expanded(
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Text(
+                        'Lumina',
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: _kFrost,
+                                ),
+                      ),
                     ),
+                    // 9. Layer pills in expanded header — glow while thinking
+                    _LayerPill(
+                        label: 'FAST',
+                        color: _kFast,
+                        active: sheetState.isThinking),
+                    _LayerPill(
+                        label: 'SMART',
+                        color: _kPulse,
+                        active: sheetState.isThinking),
+                  ],
+                ),
               ),
-              const SizedBox(width: 10),
-              // 9. Layer pills in expanded header — glow while thinking
-              _LayerPill(label: 'FAST', color: _kFast, active: sheetState.isThinking),
-              const SizedBox(width: 4),
-              _LayerPill(label: 'SMART', color: _kPulse, active: sheetState.isThinking),
-              const Spacer(),
               IconButton(
                 icon: const Icon(Icons.delete_outline_rounded, size: 20),
                 color: _kFrost.withValues(alpha: 0.5),

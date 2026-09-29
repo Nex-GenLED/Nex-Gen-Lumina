@@ -409,31 +409,40 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       'Game day',
     ];
 
-    return SizedBox(
-      height: 36,
-      child: ListView.separated(
+    // Sized by the chips, not a fixed 36: at large text a fixed-height strip
+    // cut the labels off. 36 stays the minimum, so default size looks as before.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 36),
+      child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        itemCount: suggestions.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          return ActionChip(
-            label: Text(
-              suggestions[i],
-              style: const TextStyle(
-                color: _kFrost,
-                fontSize: 13,
+        child: Row(
+          children: [
+            for (var i = 0; i < suggestions.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              ActionChip(
+                label: Text(
+                  suggestions[i],
+                  style: const TextStyle(
+                    color: _kFrost,
+                    fontSize: 13,
+                  ),
+                ),
+                backgroundColor: _kCarbon,
+                side: BorderSide(
+                  color: NexGenPalette.cyan.withValues(alpha: 0.3),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                onPressed: () => _sendMessage(suggestions[i]),
+                // The strip no longer forces a height, so keep the chip at its
+                // drawn size instead of a 48-point touch box: same look as
+                // before at default size.
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-            ),
-            backgroundColor: _kCarbon,
-            side: BorderSide(
-              color: NexGenPalette.cyan.withValues(alpha: 0.3),
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            onPressed: () => _sendMessage(suggestions[i]),
-          );
-        },
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -596,13 +605,18 @@ class _LuminaAvatar extends StatelessWidget {
           ),
         ],
       ),
+      // The glyph is the avatar's icon, and the circle is a fixed size, so the
+      // glyph scales DOWN to fit rather than spilling out of it at large text.
       child: Center(
-        child: Text(
-          '\u2726',
-          style: TextStyle(
-            fontSize: size * 0.46,
-            color: NexGenPalette.cyan,
-            height: 1.1,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '\u2726',
+            style: TextStyle(
+              fontSize: size * 0.46,
+              color: NexGenPalette.cyan,
+              height: 1.1,
+            ),
           ),
         ),
       ),

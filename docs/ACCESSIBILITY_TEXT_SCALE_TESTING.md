@@ -131,6 +131,38 @@ The harness pumps one frame and then 500 ms. It does not call
 a widget that does settle, pass `pumpAndSettle: true`; to wait longer, pass
 `settle:`.
 
+### Sheets and dialogs
+
+A bottom sheet or dialog is a ROUTE, pushed onto the app's navigator above
+`home:`. Two things follow:
+
+* Put the `ProviderScope` **above** the `MaterialApp`, so use
+  `TextScaleHost.none` and install the cap yourself (see above). A scope
+  inside `home:` is not an ancestor of the sheet.
+* Open it from a post-frame callback in a small host widget, and pass
+  `frames:` so the entrance animation runs. The harness builds a fresh tree
+  for every profile and measures one frame later by default, which would
+  measure the sheet still closed.
+
+```dart
+await expectNoTextScaleDefectsAcrossMatrix(
+  tester,
+  ProviderScope(
+    overrides: [/* fakes */],
+    child: MaterialApp(
+      theme: nexGenPremiumDarkTheme,
+      builder: TextScaleClamp.appBuilder,
+      home: const OpensMySheet(), // calls showModalBottomSheet post-frame
+    ),
+  ),
+  host: TextScaleHost.none,
+  settle: const Duration(milliseconds: 900),
+  frames: 6,
+);
+```
+
+`test/features/ai/lumina_text_scale_test.dart` does this for the Lumina sheet.
+
 ## What it checks
 
 | Kind | Meaning |

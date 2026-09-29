@@ -234,6 +234,10 @@ Future<void> loadAppFontsForTest(WidgetTester tester) async {
 /// * [allow] — return `true` to excuse a specific defect of any kind.
 /// * [settle] — how long to pump after the first frame. Set
 ///   [pumpAndSettle] instead for a widget with no endless animation.
+/// * [frames] — how many frames [settle] is spread over. Leave at 1 for a
+///   widget that is on screen from the first frame; raise it (e.g. 6, with
+///   `settle: Duration(milliseconds: 900)`) for a sheet or dialog opened from
+///   a post-frame callback, which only starts to animate in on the next frame.
 /// * [tolerance] — slack, in logical pixels, before a measurement counts.
 /// * [useAppFonts] — load the shipped fonts so text is measured at its real
 ///   width. Turn off only to test the harness itself.
@@ -249,6 +253,7 @@ Future<TextScaleReport> pumpAtTextScale(
   TextScaleAllowance? allow,
   Duration settle = const Duration(milliseconds: 500),
   bool pumpAndSettle = false,
+  int frames = 1,
   double tolerance = 0.5,
   bool useAppFonts = true,
 }) async {
@@ -275,8 +280,17 @@ Future<TextScaleReport> pumpAtTextScale(
     );
     if (pumpAndSettle) {
       await tester.pumpAndSettle();
-    } else {
+    } else if (frames <= 1) {
       await tester.pump(settle);
+    } else {
+      // A route opened from a post-frame callback (a sheet, a dialog) starts
+      // its entrance animation on the NEXT frame; a single pump measures it
+      // still closed. Spread [settle] over [frames] frames so it opens.
+      await tester.pump();
+      final Duration step = settle ~/ frames;
+      for (int i = 0; i < frames; i++) {
+        await tester.pump(step);
+      }
     }
   } finally {
     FlutterError.onError = previousHandler;
@@ -318,6 +332,7 @@ Future<void> expectNoTextScaleDefects(
   TextScaleAllowance? allow,
   Duration settle = const Duration(milliseconds: 500),
   bool pumpAndSettle = false,
+  int frames = 1,
   double tolerance = 0.5,
   bool useAppFonts = true,
 }) async {
@@ -331,6 +346,7 @@ Future<void> expectNoTextScaleDefects(
     allow: allow,
     settle: settle,
     pumpAndSettle: pumpAndSettle,
+    frames: frames,
     tolerance: tolerance,
     useAppFonts: useAppFonts,
   );
@@ -351,6 +367,7 @@ Future<List<TextScaleReport>> pumpAcrossTextScaleMatrix(
   TextScaleAllowance? allow,
   Duration settle = const Duration(milliseconds: 500),
   bool pumpAndSettle = false,
+  int frames = 1,
   double tolerance = 0.5,
   bool useAppFonts = true,
 }) async {
@@ -367,6 +384,7 @@ Future<List<TextScaleReport>> pumpAcrossTextScaleMatrix(
         allow: allow,
         settle: settle,
         pumpAndSettle: pumpAndSettle,
+        frames: frames,
         tolerance: tolerance,
         useAppFonts: useAppFonts,
       ),
@@ -411,6 +429,7 @@ Future<void> expectNoTextScaleDefectsAcrossMatrix(
   TextScaleAllowance? allow,
   Duration settle = const Duration(milliseconds: 500),
   bool pumpAndSettle = false,
+  int frames = 1,
   double tolerance = 0.5,
   bool useAppFonts = true,
 }) async {
@@ -424,6 +443,7 @@ Future<void> expectNoTextScaleDefectsAcrossMatrix(
     allow: allow,
     settle: settle,
     pumpAndSettle: pumpAndSettle,
+    frames: frames,
     tolerance: tolerance,
     useAppFonts: useAppFonts,
   );

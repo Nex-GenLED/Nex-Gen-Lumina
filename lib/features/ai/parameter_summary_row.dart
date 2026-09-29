@@ -55,7 +55,8 @@ class ParameterSummaryRow extends StatelessWidget {
                               changed ? FontWeight.w600 : FontWeight.w400,
                           fontSize: 12,
                         ),
-                    overflow: TextOverflow.ellipsis,
+                    // Wraps. A colour list ("Pumpkin Orange, Harvest Gold,
+                    // Deep Amber") was cut short even at default text size.
                   ),
                 ),
                 if (changed) ...[
