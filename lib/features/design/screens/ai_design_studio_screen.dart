@@ -121,6 +121,17 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
                 )
               : Column(
                   children: [
+                    // D1 — soft gate: the studio is open, the sections are
+                    // not marked; a dismissible strip offers the walkthrough.
+                    if (gate.showsBanner &&
+                        !ref.watch(designStudioBannerDismissedProvider))
+                      _StudioSoftGateBanner(
+                        gate: gate,
+                        onWalkthrough: _openWalkthrough,
+                        onDismiss: () => ref
+                            .read(designStudioBannerDismissedProvider.notifier)
+                            .state = true,
+                      ),
                     // Roofline SETUP entry — architectural structure
                     // (corners/peaks/columns), distinct from the AI/Manual
                     // DESIGN mode pill. Visible in BOTH modes.
@@ -212,6 +223,13 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
 
   String _sectionsSummary(DesignStudioGate gate) {
     final s = gate.segmentation;
+    // D1 — the studio can be open on an unmarked map; say so rather than
+    // claiming sections that are not there.
+    if (!s.isSegmented) {
+      return s.isPartlySegmented
+          ? 'Some sections not marked yet'
+          : 'Sections not marked yet';
+    }
     final parts = <String>[
       if (s.corners > 0) '${s.corners} corner${s.corners == 1 ? '' : 's'}',
       if (s.peaks > 0) '${s.peaks} peak${s.peaks == 1 ? '' : 's'}',
@@ -790,6 +808,99 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     } finally {
       if (mounted) setState(() => _isApplying = false);
     }
+  }
+}
+
+/// D1 — the soft gate. The studio is open; this strip says the sections are
+/// not marked and offers the walkthrough. Dismissible for the session.
+class _StudioSoftGateBanner extends StatelessWidget {
+  const _StudioSoftGateBanner({
+    required this.gate,
+    required this.onWalkthrough,
+    required this.onDismiss,
+  });
+
+  final DesignStudioGate gate;
+  final Future<void> Function() onWalkthrough;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('studio-soft-gate'),
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
+      decoration: BoxDecoration(
+        color: NexGenPalette.cyan.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Icon(Icons.roofing, size: 20, color: NexGenPalette.cyan),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        gate.title,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        gate.message,
+                        style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 12,
+                            height: 1.35),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const ValueKey('studio-soft-gate-dismiss'),
+                tooltip: 'Dismiss',
+                icon: const Icon(Icons.close, size: 18, color: Colors.white54),
+                onPressed: onDismiss,
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                key: const ValueKey('studio-soft-gate-walkthrough'),
+                onPressed: onWalkthrough,
+                icon: const Icon(Icons.touch_app_outlined, size: 18),
+                label: Text(gate.actionLabel ?? 'Mark corners and peaks'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: NexGenPalette.cyan.withValues(alpha: 0.18),
+                  foregroundColor: NexGenPalette.cyan,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
