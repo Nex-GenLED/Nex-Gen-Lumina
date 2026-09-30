@@ -21,6 +21,14 @@
  * which is why the cloud half of controller health is safe to schedule and the
  * app half (cfg digests) is not.
  *
+ * RELAY ELIGIBILITY (2026-09-30). A probe is a relay command; with no
+ * bridge_registry row paired to the account nothing can answer it. Those
+ * accounts are skipped here (reason `no_paired_bridge`) and the collector
+ * still records them — as `never`/`silent` from the registry and
+ * bridge_status, with a `missing` probe that advances no failure count. A
+ * `monitoring_exclude: true` user doc (reviewer/demo, bench) is skipped
+ * outright (`monitoring_excluded`); the flag is read only, never written.
+ *
  * Deployment:
  *   cd functions
  *   npm run build
@@ -40,6 +48,11 @@ import {
   resolveProbeTarget,
   shouldProbeToday,
 } from "./controllerHealth";
+import {
+  PairedBridgeCache,
+  isMonitoringExcluded,
+  probeSkipReason,
+} from "./relayEligibility";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
@@ -73,9 +86,23 @@ export async function probeOneController(args: {
   totalControllersForUser: number;
   pendingCommands: Array<{ controllerId?: unknown; status?: unknown }>;
   nowMs: number;
+  /**
+   * Relay eligibility inputs, decided once per user by the caller. Default
+   * "paired, not excluded" keeps the bench harness (which probes one known
+   * paired account) and older callers unchanged.
+   */
+  bridgePaired?: boolean;
+  monitoringExcluded?: boolean;
 }): Promise<{ written: boolean; reason: string }> {
   const { db, uid, controllerId, controllerIp, totalControllersForUser, pendingCommands, nowMs } =
     args;
+
+  // ── Relay eligibility: nothing can answer a probe for these accounts ─────
+  const skip = probeSkipReason({
+    bridgePaired: args.bridgePaired ?? true,
+    monitoringExcluded: args.monitoringExcluded ?? false,
+  });
+  if (skip !== null) return { written: false, reason: skip };
 
   // ── Q3 backoff: a persistently dark controller drops to weekly ───────────
   // One extra read per controller per day (15/day at today's fleet). Cheap, and
@@ -169,6 +196,7 @@ export const probeControllerHealth = onSchedule(
     const nowMs = Date.now();
 
     const users = await db.collection("users").get();
+    const pairing = new PairedBridgeCache(db);
 
     let controllersSeen = 0;
     let written = 0;
@@ -184,6 +212,22 @@ export const probeControllerHealth = onSchedule(
         .collection("controllers")
         .get();
       if (controllers.empty) continue;
+
+      // ── Relay eligibility, once per user ──────────────────────────────────
+      // A lookup error reads as "paired" (fail open): a transient Firestore
+      // error must not silently drop a paired customer from the day's probe.
+      const monitoringExcluded = isMonitoringExcluded(userDoc);
+      let bridgePaired = true;
+      if (!monitoringExcluded) {
+        try {
+          bridgePaired = await pairing.lookup(uid);
+        } catch (err) {
+          logger.warn(
+            `probeControllerHealth: registry lookup failed for ${uid}; probing anyway`,
+            err
+          );
+        }
+      }
 
       // One read per user, reused for every controller. `in` on a single field
       // uses the single-field auto-index — no composite index required.
@@ -226,6 +270,8 @@ export const probeControllerHealth = onSchedule(
             totalControllersForUser: controllers.size,
             pendingCommands,
             nowMs,
+            bridgePaired,
+            monitoringExcluded,
           });
           if (res.written) written++;
           else skipped[res.reason] = (skipped[res.reason] ?? 0) + 1;

@@ -88,6 +88,11 @@ exports.backfillSchedulesSubcollection = backfillSchedulesSubcollection;
 const { sweepExpiredCommands } = require("./lib/sweepExpiredCommands");
 exports.sweepExpiredCommands = sweepExpiredCommands;
 
+// Relay eligibility (2026-09-30): a bridge-mode command for an account with no
+// paired bridge is failed the moment it is created, instead of sitting until
+// the sweeper expires it. See functions/src/relayEligibility.ts.
+const { failFastIfNoPairedBridge } = require("./lib/relayEligibility");
+
 // Maintains users/{uid}.controller_ips — the allowlist firestore.rules uses to
 // reject a command naming a controllerIp that is not the customer's own.
 // DEPLOY + BACKFILL BEFORE the tightened commands rule (COMMAND_SAFETY.md §5).
@@ -261,8 +266,19 @@ exports.executeWledCommand = onDocumentCreated(
 
     // Check execution mode
     if (!commandData.webhookUrl || commandData.webhookUrl === "") {
-      // ESP32 Bridge Mode: Don't execute here, let the ESP32 bridge handle it
-      console.log("🔌 ESP32 Bridge Mode: Skipping Cloud Function execution");
+      // ESP32 Bridge Mode: Don't execute here, let the ESP32 bridge handle it.
+      //
+      // Unless nothing CAN handle it: with no bridge_registry row paired to
+      // this uid the command would sit pending until the sweeper expired it
+      // (120 s) while the app's watchdog waited 45 s. Mark it failed now so
+      // the app resolves at once. Paired accounts, the pairing wizard's own
+      // ping, and any lookup error all fall through to the legacy behaviour.
+      const outcome = await failFastIfNoPairedBridge(db, userId, commandRef, commandData);
+      if (outcome === "failed_no_bridge") {
+        console.log("🔌 ESP32 Bridge Mode: no bridge paired to this account — marked failed (no_bridge_paired)");
+        return;
+      }
+      console.log(`🔌 ESP32 Bridge Mode: Skipping Cloud Function execution (${outcome})`);
       console.log("   The ESP32 bridge will pick up and execute this command");
       return;
     }
