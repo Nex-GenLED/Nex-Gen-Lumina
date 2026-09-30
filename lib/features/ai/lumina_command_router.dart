@@ -96,6 +96,10 @@ class LuminaCommandRouter {
       stopwatch.stop();
       debugPrint(
           '✅ Tier 2 result: ${cloudResult.command?.type ?? "text-only"} [${stopwatch.elapsedMilliseconds}ms total]');
+      // Deliberately not awaited: an error raised while enriching must reach
+      // the caller, not the Tier 2 fallback below. Flutter 3.47's analyzer
+      // warns on this shape; the behaviour is the one build-109 shipped.
+      // ignore: unawaited_return_in_try_block
       return _enrich(ref, cloudResult.command, cloudResult, text);
     } catch (e) {
       stopwatch.stop();

@@ -191,6 +191,10 @@ class ClarificationOption {
       isRecommended: json['is_recommended'] as bool? ?? false,
       previewPayload: json['preview_payload'] as Map<String, dynamic>?,
       icon: json['icon'] != null
+          // The icon comes from the orchestrator's JSON, so it cannot be a
+          // compile-time constant. Flutter 3.47's analyzer flags every non-const
+          // IconData (tree-shaken icon fonts); the behaviour is unchanged.
+          // ignore: non_const_argument_for_const_parameter
           ? IconData(json['icon'] as int, fontFamily: 'MaterialIcons')
           : null,
       colorSwatches: (json['color_swatches'] as List?)
