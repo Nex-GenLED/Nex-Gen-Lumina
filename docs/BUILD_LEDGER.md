@@ -124,6 +124,22 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### FUNCTIONS DEPLOY — relay eligibility (no relay command without a paired bridge) — 2026-09-30
+
+| item | value |
+|---|---|
+| Deployed | 2026-09-30 14:17–14:21 UTC, from `fix/relay-without-bridge` at `0269282` (working tree clean; functions commit `8b3bcdf`, app commit `d838f75`) |
+| Functions | `executeWledCommand`, `sweepExpiredCommands`, `probeControllerHealth`, `collectControllerHealth` — `--only` those four, nothing else touched |
+| Base | `9e5376a` (release/store-submission-consolidated after package E2). `9a08062..9e5376a` changed nothing under `functions/` |
+| Previous live version | the 2026-08-19 nodejs22 full deploy, `a836a3e`; the four functions' load sets were byte-identical to `9e5376a` apart from this change |
+| Read back | `updateTime` 14:20:58–14:21:00Z on all four; the live `executeWledCommand` source zip's `index.js` is byte-identical to the branch's, and `lib/relayEligibility.js` (`no_bridge_paired`), `lib/sweepExpiredCommands.js`, `lib/probeControllerHealth.js`, `lib/collectControllerHealth.js` each carry the change (grep-verified, per the "delivery is not content" rule) |
+| App half | NOT shipped. `d838f75` is on the branch only — no version bump, no tag, no merge to release (bench run pending). Build-109 clients benefit anyway: a bridge-less account's relay command now resolves `failed` in ~1 s instead of `timeout` after 45 s |
+| Pre-deploy checks | fleet scan: 0 accounts with a fresh heartbeat or a completed bridge-mode command in 7 d without a paired registry row, 0 mid-pairing rows; predicate resolved every paired bridge (13/13) as paired against production; pairing wizard's untargeted ping proven exempt (emulator) |
+| Tests | functions unit 618/618; emulator suite 13/13; app full suite 4,521 pass / 38 skip / 0 fail; analyzer 0 errors, 12 warnings (baseline) |
+| Behaviour change | bridge-mode command for a uid with no `bridge_registry` row paired to it → `status: failed`, `error: no_bridge_paired` at create time; sweeper text distinguishes "no bridge paired" from "bridge offline"; daily probe skips unpaired and `monitoring_exclude: true` accounts; collector honours the flag. Paired accounts, webhook mode and the wizard ping are unchanged |
+| Post-deploy | 15-minute log watch of `executeWledCommand` and a Firestore read of every `no_bridge_paired` verdict (see the session report); `monitoring_exclude: true` set on the reviewer demo account and the bench test account, audit JSON in the private memory tree |
+| Hazard | the separate voice-integration repo also exports `executeWledCommand` (nodejs20) to this project; a functions deploy from there would silently revert the fail-fast |
+
 ### FUNCTIONS RUNTIME nodejs20 -> nodejs22 — DEPLOYED AND READ BACK 2026-08-19
 
 **Deployed SHA `a836a3e`, which IS `origin/main`.** Node.js 20 was deprecated
