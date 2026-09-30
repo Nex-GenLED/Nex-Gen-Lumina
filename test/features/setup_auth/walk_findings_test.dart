@@ -190,14 +190,20 @@ void main() {
         (tester) async {
       await tester.pumpWidget(_app(
         const LinkAccountScreen(),
-        [accountSessionProvider.overrideWithValue(FakeAccountSession())],
+        [
+          accountSessionProvider.overrideWithValue(FakeAccountSession()),
+          accountFirestoreProvider.overrideWithValue(FakeFirebaseFirestore()),
+          currentUserProfileProvider.overrideWith(
+              (ref) => Stream.value(_profile(InstallationRole.unlinked))),
+        ],
         pushed: false,
       ));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('link-setup-own-controller')),
           findsNothing);
       expect(find.textContaining('Set up my own controller'), findsNothing);
-      expect(find.text('I have an invitation code'), findsOneWidget);
+      expect(find.textContaining('controller'), findsNothing);
+      expect(find.byKey(const ValueKey('link-invitation-code')), findsOneWidget);
     });
 
     Future<void> openEmptyDiscovery(

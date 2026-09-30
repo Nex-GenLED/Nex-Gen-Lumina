@@ -12,8 +12,8 @@ import 'package:nexgen_command/services/image_upload_service.dart';
 /// whenever the session is older than ~5 minutes — the common case, since
 /// nobody signs in immediately before visiting Security settings. By the time
 /// that error surfaced, `users/{uid}` was already gone, and nothing recreates
-/// it: `FirebaseAuthManager` only calls `createUser()` inside
-/// `createUserWithEmailAndPassword`, never on sign-in. The user was left
+/// it: nothing in the app writes a profile on sign-in (the self-signup path
+/// that once did was removed in +110). The user was left
 /// signed in against a profile that does not exist, permanently, with no
 /// recovery UI.
 ///

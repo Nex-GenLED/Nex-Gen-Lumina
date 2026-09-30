@@ -125,7 +125,6 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
 
   // Define route categories
   final isAuthRoute = state.matchedLocation == AppRoutes.login ||
-      state.matchedLocation == AppRoutes.signUp ||
       state.matchedLocation == AppRoutes.forgotPassword;
 
   final isLinkRoute = state.matchedLocation == AppRoutes.linkAccount ||

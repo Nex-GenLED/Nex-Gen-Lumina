@@ -95,12 +95,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // reviewer can use it without re-tapping. No time window — the
   // reviewer flow doesn't need rate limiting.
 
-  /// "Create One" and the demo link.
+  /// The demo link.
   ///
   /// Row 16 (+110): an anonymous session left behind by the staff PIN screen
   /// (the screen now signs it out on close, but older builds did not) makes
-  /// the router send both of these straight back here. A customer tapping
-  /// either one is not in a staff flow, so the leftover session goes first.
+  /// the router send this straight back here. A customer tapping it is not
+  /// in a staff flow, so the leftover session goes first.
   Future<void> _openCustomerRoute(String route) async {
     await discardAnonymousSession(ref.read(accountSessionProvider));
     if (mounted) context.push(route);
@@ -480,26 +480,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ),
                         ),
+                        // There is deliberately no "create an account" link.
+                        // Lumina is professionally installed: an installer
+                        // provisions the customer's account, and a family
+                        // member is added by the system owner. Nobody signs
+                        // themselves up from the store listing.
                         const SizedBox(height: 20),
-                        // Create Account link row
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              "Don't have an account? ",
-                              style: GoogleFonts.montserrat(color: Colors.white70, fontWeight: FontWeight.w500),
-                            ),
-                            TextButton(
-                              onPressed: _loading ? null : () => _openCustomerRoute(AppRoutes.signUp),
-                              child: Text(
-                                'Create One',
-                                style: GoogleFonts.montserrat(color: Colors.cyanAccent, fontWeight: FontWeight.w700),
-                              ),
-                            )
-                          ],
-                        ),
-                        const SizedBox(height: 16),
                         // Demo Experience link
                         Center(
                           child: TextButton.icon(

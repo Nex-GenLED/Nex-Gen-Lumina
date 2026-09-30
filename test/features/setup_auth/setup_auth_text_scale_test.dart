@@ -20,12 +20,15 @@ import 'package:nexgen_command/features/auth/forgot_password_page.dart';
 import 'package:nexgen_command/features/auth/join_with_code_screen.dart';
 import 'package:nexgen_command/features/auth/link_account_screen.dart';
 import 'package:nexgen_command/features/auth/login_page.dart';
-import 'package:nexgen_command/features/auth/signup_page.dart';
 import 'package:nexgen_command/features/auth/staff_pin_screen.dart';
 import 'package:nexgen_command/features/ble/controller_setup_wizard.dart';
 import 'package:nexgen_command/features/ble/device_setup_page.dart';
 import 'package:nexgen_command/features/ble/provisioning_service.dart';
 import 'package:nexgen_command/features/ble/wled_manual_setup.dart';
+import 'package:nexgen_command/features/dashboard/main_scaffold.dart'
+    show showDemoExitSheet;
+import 'package:nexgen_command/features/demo/demo_completion_screen.dart';
+import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/design/refine/refine_roofline_screen.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/roofline_feature_walkthrough.dart';
@@ -76,6 +79,7 @@ Future<void> _screen(
   List<Override> overrides = const [],
   Duration settle = const Duration(milliseconds: 500),
   int frames = 1,
+  bool pumpAndSettle = false,
 }) {
   return expectNoTextScaleDefectsAcrossMatrix(
     tester,
@@ -83,6 +87,7 @@ Future<void> _screen(
     host: TextScaleHost.screen,
     settle: settle,
     frames: frames,
+    pumpAndSettle: pumpAndSettle,
   );
 }
 
@@ -134,6 +139,37 @@ List<Override> _rooflineOverrides({
   ];
 }
 
+/// Opens the demo exit sheet as soon as it is on screen.
+class _DemoExitSheetOpener extends ConsumerStatefulWidget {
+  const _DemoExitSheetOpener();
+  @override
+  ConsumerState<_DemoExitSheetOpener> createState() => _DemoExitSheetState();
+}
+
+class _DemoExitSheetState extends ConsumerState<_DemoExitSheetOpener> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showDemoExitSheet(context, ref);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(body: SizedBox());
+}
+
+UserModel _unlinkedProfile({String? dealerCode}) => UserModel(
+      id: kTestUid,
+      email: kTestEmail,
+      displayName: 'Pat',
+      ownerId: kTestUid,
+      createdAt: DateTime.utc(2026, 9, 29),
+      updatedAt: DateTime.utc(2026, 9, 29),
+      installationRole: InstallationRole.unlinked,
+      dealerCode: dealerCode,
+    );
+
 List<Override> _session([FakeAccountSession? s]) => [
       accountSessionProvider.overrideWithValue(s ?? FakeAccountSession()),
       accountFirestoreProvider.overrideWithValue(FakeFirebaseFirestore()),
@@ -181,9 +217,6 @@ void main() {
     testWidgets('login', (tester) async {
       await _screen(tester, const LoginScreen(), overrides: _session());
     });
-    testWidgets('sign up', (tester) async {
-      await _screen(tester, const SignUpPage());
-    });
     testWidgets('forgot password', (tester) async {
       await _screen(tester, const ForgotPasswordPage());
     });
@@ -194,8 +227,38 @@ void main() {
     testWidgets('join with code', (tester) async {
       await _screen(tester, const JoinWithCodeScreen(), overrides: _session());
     });
-    testWidgets('link account', (tester) async {
-      await _screen(tester, const LinkAccountScreen(), overrides: _session());
+    // Follow-up 3: the "Create an account" buttons came out of both.
+    testWidgets('demo exit sheet', (tester) async {
+      // Settles so the sheet is measured after it has slid up.
+      await _screen(tester, const _DemoExitSheetOpener(),
+          pumpAndSettle: true);
+    });
+    testWidgets('demo completion', (tester) async {
+      await _screen(tester, const DemoCompletionScreen(), overrides: [
+        demoExperienceActiveProvider.overrideWith((ref) => true),
+        wledStateProvider.overrideWith(_StillWled.new),
+      ]);
+    });
+    testWidgets('link account, contact is Nex-Gen LED', (tester) async {
+      await _screen(tester, const LinkAccountScreen(), overrides: [
+        ..._session(),
+        currentUserProfileProvider
+            .overrideWith((ref) => Stream.value(_unlinkedProfile())),
+      ]);
+    });
+    testWidgets('link account, contact is the dealer', (tester) async {
+      final fs = FakeFirebaseFirestore();
+      await fs.collection('dealers').doc('DLR-1').set({
+        'companyName': 'Bright Homes LED of the Greater Metropolitan Area',
+        'phone': '(555) 010-0100',
+        'email': 'hello@example.com',
+      });
+      await _screen(tester, const LinkAccountScreen(), overrides: [
+        accountSessionProvider.overrideWithValue(FakeAccountSession()),
+        accountFirestoreProvider.overrideWithValue(fs),
+        currentUserProfileProvider.overrideWith(
+            (ref) => Stream.value(_unlinkedProfile(dealerCode: 'DLR-1'))),
+      ]);
     });
     testWidgets('staff PIN', (tester) async {
       await _screen(tester, const StaffPinScreen(), overrides: _session());

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 // Feature imports
 import 'package:nexgen_command/features/auth/login_page.dart';
-import 'package:nexgen_command/features/auth/signup_page.dart';
 import 'package:nexgen_command/features/auth/forgot_password_page.dart';
 import 'package:nexgen_command/features/auth/forced_password_reset_screen.dart';
 import 'package:nexgen_command/features/auth/link_account_screen.dart';
@@ -162,12 +161,6 @@ class AppRouter {
         name: 'login',
         parentNavigatorKey: _rootNavigatorKey,
         pageBuilder: (context, state) => const NoTransitionPage(child: LoginPage()),
-      ),
-      GoRoute(
-        path: AppRoutes.signUp,
-        name: 'signup',
-        parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) => const NoTransitionPage(child: SignUpPage()),
       ),
       GoRoute(
         path: AppRoutes.forgotPassword,
@@ -1109,7 +1102,6 @@ class AppRouter {
 /// Use these instead of hard-coding route strings
 class AppRoutes {
   static const String login = '/';
-  static const String signUp = '/signup';
   static const String forgotPassword = '/forgot-password';
   static const String forcedPasswordReset = '/forced-password-reset';
   static const String discovery = '/discovery';

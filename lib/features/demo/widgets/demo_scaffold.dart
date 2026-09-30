@@ -196,9 +196,11 @@ class DemoPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
+    // A minimum height, not a fixed one, so a long label at a large text
+    // size wraps onto a second line instead of clipping.
+    return ConstrainedBox(
+      constraints:
+          const BoxConstraints(minWidth: double.infinity, minHeight: 56),
       child: FilledButton(
         onPressed: isLoading ? null : onPressed,
         child: isLoading
@@ -217,11 +219,14 @@ class DemoPrimaryButton extends StatelessWidget {
                     Icon(icon, size: 20),
                     const SizedBox(width: 8),
                   ],
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                  Flexible(
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
