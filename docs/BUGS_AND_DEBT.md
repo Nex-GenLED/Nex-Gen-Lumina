@@ -1596,6 +1596,53 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     (`match /neighborhoods/{groupId}`), `functions/src/` (new callable). Related:
     **F-3**, **#70**, **#69**.
 
+- [ ] **#117 — ONE LEASE PER DATE, LAST WRITE WINS: a user-authored dated entry written onto a
+  Game Day date displaces the Game Day timer on the controller, whatever the composer's tier
+  says**
+  - Status: **OPEN — REPORT ONLY, not fixed** (filed 2026-09-30, +110 E2 review item D4) ·
+    Severity: **P1** · Evidence: **verified-by-source** on `fix/110-e2-followups` (line refs
+    below are that branch; the shape is unchanged since `9e5376a`)
+  - **THE SHAPE.** Precedence exists only on the app side. The night composer ranks entries by
+    tier (`tierForEntry`, `lib/features/schedule/schedule_priority_resolver.dart:277`; the tiers
+    at `:207` — user 1, holiday 2, Game Day 3 … personal autopilot 6) and the timeline shows the
+    Game Day hold. The CONTROLLER never sees a tier. The lease manager holds ONE lease per
+    `dateKey` (`lib/features/schedule/calendar_entry_lease_manager.dart:496` registry; the
+    `.primaries` note at `:123` says why), and a second entry landing on a date that already has
+    a lease takes the UPDATE path (`_handleEntryCreatedImpl`, `:630`; `final existing =
+    _activeLeases[entry.dateKey]` at `:669`): the existing slot and preset are kept, and the
+    payload, pattern name and on-time are overwritten with the newcomer's and re-saved
+    (`_writeLeaseToWled`, `:1219` — `psave` into presets 26–41 plus a `/json/cfg` timer write).
+    Whoever wrote LAST owns the night's timer.
+  - **WHY IT BITES.** Under Policy B a Game Day entry is meant to HOLD its night. It does in the
+    composer and on the Schedule tab; on the controller the timer for that date fires whichever
+    entry was written last. Three writers can be "last": a customer's own dated entry saved from
+    the calendar editor onto a game date (`calendar_entry_editor.dart:491` → `applyEntries`,
+    `:516`, which takes the update path above), the weekly Game Day populate taking the night
+    back, and — before D2 — a Lumina multi-night plan crossing a game date. Write ORDER decides,
+    not precedence; the customer sees a Game Day hold on the tab and gets their own look on the
+    house, or the reverse after the next populate.
+  - **WHAT THE +110 E2 FOLLOW-UPS DID, AND DID NOT.** D2 makes Lumina SKIP any date that already
+    carries a Game Day entry, an armed lease or a user entry (`planLuminaNightWrites`,
+    `lib/features/ai/lumina_schedule_persistence.dart:337`) — so Lumina is no longer one of the
+    writers. D3 records the lease holder (`CalendarEntryLease.entryId`) and re-derives the lease
+    from the best survivor on delete (`removeEntryById`, `calendar_providers.dart:675`;
+    `leaseHolderAmong`, `:77`) — so a delete no longer leaves a stale timer. NEITHER changes the
+    write path: a manual dated entry from the editor on a game date still displaces the Game Day
+    timer.
+  - **FIX SHAPE (not implemented).** Cheapest: make the update path consult the same rule the
+    delete path now uses — `leaseHolderAmong([holder, incoming])` — and REFUSE to overwrite
+    when the incoming entry loses, returning a new `LeaseOutcome` (e.g. `heldByHigherPriority`)
+    so the editor can say the night is held rather than "saved". That rule ranks the customer's
+    own entry ABOVE Game Day (tier 1 over 3), which matches the composer but not Policy B's
+    "Game Day holds"; if Policy B is meant to win on the controller too, the rule needs a
+    Game-Day-first variant for the lease layer only. Leasing per `(dateKey, entryId)` would need
+    N timer slots per night, which the 8-slot pool cannot afford.
+  - Files: `lib/features/schedule/calendar_entry_lease_manager.dart` (`_handleEntryCreatedImpl`
+    update path), `lib/features/schedule/calendar_providers.dart` (`applyEntriesDetailed`,
+    `:326`; `leaseHolderAmong`, `:77`), `lib/features/schedule/schedule_priority_resolver.dart`
+    (`tierForEntry`), `lib/features/schedule/calendar_entry_editor.dart` (`_saveThisGameOnly`).
+    Related: **#61** (lease manager), Policy B.
+
 ## P2 — hardening & platform
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
