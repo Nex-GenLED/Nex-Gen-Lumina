@@ -242,14 +242,26 @@ final rooflineConfigServiceProvider = Provider<RooflineConfigService>((ref) {
   return RooflineConfigService();
 });
 
-/// Resolves the controller whose pixel map is "active": the currently selected
-/// controller, else the user's first saved controller (residential single-
-/// controller default). Null when the user has no controllers.
+/// Resolves the controller whose pixel map is "active" — the controller every
+/// roofline READER (Design Studio, the Lumina brain, the hero overlay, zone
+/// labels, the installer's Map step) shows the map of.
+///
+///  * the controller selected in the Home menu, else
+///  * the account's ONLY controller, else
+///  * null.
+///
+/// +110 package E2 (row 70, read paths). This used to fall back to
+/// `list.first` — the NEWEST controller record — whenever nothing was
+/// selected, so a second record (a duplicate, a removed device, a second
+/// building) silently swapped every reader onto the wrong roofline. Package G
+/// moved the four roofline SAVES to an explicit target and left the readers
+/// here; the readers now follow the same rule: one controller is not a guess,
+/// two is a choice the customer has not made. Never `.first` of many.
 final activePixelMapControllerIdProvider = Provider<String?>((ref) {
   final selected = ref.watch(selectedControllerIdProvider);
   if (selected != null && selected.isNotEmpty) return selected;
   return ref.watch(controllersStreamProvider).maybeWhen(
-        data: (list) => list.isNotEmpty ? list.first.id : null,
+        data: (list) => list.length == 1 ? list.single.id : null,
         orElse: () => null,
       );
 });

@@ -15,10 +15,16 @@ class ClarificationDialogWidget extends ConsumerWidget {
   final VoidCallback onComplete;
   final void Function(String aspect)? onManualRequested;
 
+  /// +110 E2 row 115: the way OUT of a question. Without it the prompt box
+  /// was hidden while a question was pending and the customer could only
+  /// answer or leave — and the question was still there when they came back.
+  final VoidCallback? onStartOver;
+
   const ClarificationDialogWidget({
     super.key,
     required this.onComplete,
     this.onManualRequested,
+    this.onStartOver,
   });
 
   @override
@@ -98,35 +104,36 @@ class ClarificationDialogWidget extends ConsumerWidget {
           ],
           const SizedBox(height: 16),
 
-          // Options
-          Expanded(
-            child: ListView.separated(
-              itemCount: currentQuestion.options.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final option = currentQuestion.options[index];
-                final isSelected = selectedOption?.id == option.id;
+          // Options — sized to their content so the panel can live inside a
+          // scrolling column (it used to be an Expanded ListView that needed
+          // a bounded height).
+          for (var index = 0; index < currentQuestion.options.length; index++)
+            Padding(
+              padding: EdgeInsets.only(top: index == 0 ? 0 : 8),
+              child: _OptionCard(
+                option: currentQuestion.options[index],
+                isSelected:
+                    selectedOption?.id == currentQuestion.options[index].id,
+                questionType: currentQuestion.type,
+                onTap: () {
+                  final option = currentQuestion.options[index];
+                  selectClarificationOption(ref, option);
 
-                return _OptionCard(
-                  option: option,
-                  isSelected: isSelected,
-                  questionType: currentQuestion.type,
-                  onTap: () {
-                    selectClarificationOption(ref, option);
-
-                    // If manual was selected, trigger callback
-                    if (option.id == 'manual' && onManualRequested != null) {
-                      onManualRequested!(currentQuestion.type.displayName);
-                    }
-                  },
-                );
-              },
+                  // If manual was selected, trigger callback
+                  if (option.id == 'manual' && onManualRequested != null) {
+                    onManualRequested!(currentQuestion.type.displayName);
+                  }
+                },
+              ),
             ),
-          ),
           const SizedBox(height: 12),
 
           // Navigation buttons
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
             children: [
               // Back button
               if (currentIndex > 0)
@@ -138,7 +145,16 @@ class ClarificationDialogWidget extends ConsumerWidget {
                     foregroundColor: Colors.white54,
                   ),
                 ),
-              const Spacer(),
+              if (onStartOver != null)
+                TextButton.icon(
+                  key: const ValueKey('clarification-start-over'),
+                  onPressed: onStartOver,
+                  icon: const Icon(Icons.restart_alt, size: 18),
+                  label: const Text('Start over'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white54,
+                  ),
+                ),
 
               // Continue/Done button
               ElevatedButton(

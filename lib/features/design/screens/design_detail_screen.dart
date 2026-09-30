@@ -5,9 +5,12 @@ import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart'
+    show motionEffectOf;
 import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_preview.dart';
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
+import 'package:nexgen_command/features/design/widgets/design_dialogs.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -193,6 +196,21 @@ class _DesignDetailBody extends ConsumerWidget {
     final colorCount =
         included.fold<int>(0, (n, c) => n + c.colorGroups.length);
     final effectId = included.isEmpty ? null : included.first.effectId;
+    // +110 E2 row 118: a positional design applies as a still picture
+    // whatever effect id its channels store — unless it is an AI design that
+    // asked for motion, which now runs its effect (row 41). Say which.
+    final motion = motionEffectOf(design);
+    final String effectValue;
+    if (effectId == null) {
+      effectValue = '—';
+    } else if (motion != null) {
+      effectValue =
+          '${WledEffectsCatalog.getName(motion.effectId)}  (animated)';
+    } else if (design.isPositional) {
+      effectValue = 'Static (per-pixel)';
+    } else {
+      effectValue = '${WledEffectsCatalog.getName(effectId)}  (fx $effectId)';
+    }
 
     // Device channel lengths when connected; the frame producer falls back to
     // each ChannelDesign's stored ledCount when this is empty.
@@ -237,9 +255,7 @@ class _DesignDetailBody extends ConsumerWidget {
         _MetaRow(
           icon: Icons.auto_fix_high_outlined,
           label: 'Effect',
-          value: effectId == null
-              ? '—'
-              : '${WledEffectsCatalog.getName(effectId)}  (fx $effectId)',
+          value: effectValue,
         ),
         _MetaRow(
           icon: Icons.palette_outlined,
@@ -292,13 +308,11 @@ class _DesignDetailBody extends ConsumerWidget {
         Row(children: [
           Expanded(
             child: OutlinedButton.icon(
-              // Per-pixel → the paint editor. Effect → the colourway tuner in
-              // design-edit mode (Phase C). AI-composed stays disabled: its
-              // editor has no open-existing path and `composedPattern` has no
-              // reader (audit/DESIGN_CARD_P4.md §4).
-              onPressed: kind == DesignKind.aiComposed
-                  ? null
-                  : () => _openEditor(context, ref, kind),
+              // Per-pixel AND AI-composed → the paint editor, loaded with the
+              // design's own pixels (+110 E2 row 117: the AI design used to
+              // be un-editable here). Effect → the colourway tuner in
+              // design-edit mode (Phase C).
+              onPressed: () => _openEditor(context, ref, kind),
               icon: const Icon(Icons.brush_outlined, size: 18),
               label: const Text('Edit'),
             ),
@@ -312,12 +326,13 @@ class _DesignDetailBody extends ConsumerWidget {
             ),
           ),
         ]),
-        if (kind == DesignKind.aiComposed)
+        if (motion != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              'Editing an AI-composed design reopens it in the Design '
-              'Studio — not wired yet.',
+              'Editing paints this design pixel by pixel; the '
+              '${WledEffectsCatalog.getName(motion.effectId)} motion stays '
+              'with it when you apply.',
               style: TextStyle(
                   color: NexGenPalette.textMedium, fontSize: 12),
             ),
@@ -357,36 +372,16 @@ class _DesignDetailBody extends ConsumerWidget {
       builder: (_) => Scaffold(
         backgroundColor: NexGenPalette.matteBlack,
         appBar: GlassAppBar(title: Text('Edit ${design.name}')),
-        body: kind == DesignKind.perPixel
-            ? ManualDesignEditor(initialDesign: design)
-            : ColorwayEffectSelectorPage.forDesign(design: design),
+        body: kind == DesignKind.effect
+            ? ColorwayEffectSelectorPage.forDesign(design: design)
+            : ManualDesignEditor(initialDesign: design),
       ),
     ));
     ref.invalidate(designByIdProvider(design.id));
   }
 
   Future<void> _rename(BuildContext context, WidgetRef ref) async {
-    final controller = TextEditingController(text: design.name);
-    final next = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rename Design'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Name'),
-          onSubmitted: (v) => Navigator.of(ctx).pop(v),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(controller.text),
-              child: const Text('Save')),
-        ],
-      ),
-    );
+    final next = await showRenameDesignDialog(context, currentName: design.name);
     if (next == null || !context.mounted) return;
     final ok = await ref.read(renameDesignProvider)(design, next);
     if (!context.mounted) return;

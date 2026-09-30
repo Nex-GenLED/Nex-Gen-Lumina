@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/ai/mic_availability.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -10,7 +11,9 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 /// - Microphone button with visual feedback
 /// - Pulsing animation while listening
 /// - Transcript display during speech
-/// - Error handling for permissions
+/// - Error handling for permissions: a denied permission SAYS so and links to
+///   Settings, and is re-checked on every tap (row 123 — it used to be
+///   reported as "not available on this device" and checked once, at mount).
 class VoiceInputButton extends ConsumerStatefulWidget {
   final void Function(String transcript) onTranscript;
 
@@ -29,6 +32,7 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
   bool _isAvailable = false;
   bool _isListening = false;
   String _currentTranscript = '';
+  String? _lastError;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
@@ -45,7 +49,7 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
     );
   }
 
-  Future<void> _initSpeech() async {
+  Future<bool> _initSpeech() async {
     try {
       _isAvailable = await _speech.initialize(
         onStatus: (status) {
@@ -55,14 +59,17 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
         },
         onError: (error) {
           debugPrint('Speech error: $error');
+          _lastError = error.errorMsg;
           _stopListening();
         },
       );
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint('Speech init error: $e');
+      _lastError = '$e';
       _isAvailable = false;
     }
+    return _isAvailable;
   }
 
   @override
@@ -73,8 +80,20 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
   }
 
   Future<void> _startListening() async {
-    if (!_isAvailable) {
-      _showUnavailableSnackbar();
+    // Re-check on every tap: the customer may have just turned the
+    // permission on in Settings and come back.
+    if (!_isAvailable && !await _initSpeech()) {
+      bool permitted = false;
+      try {
+        permitted = await _speech.hasPermission;
+      } catch (_) {
+        permitted = false;
+      }
+      if (!mounted) return;
+      _showUnavailable(classifyMicFailure(
+        hasPermission: permitted,
+        lastError: _lastError ?? _speech.lastError?.errorMsg,
+      ));
       return;
     }
 
@@ -113,25 +132,16 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
     _speech.stop();
     _pulseController.stop();
     _pulseController.reset();
-    setState(() {
-      _isListening = false;
-    });
-    ref.read(voiceInputActiveProvider.notifier).state = false;
+    if (mounted) {
+      setState(() {
+        _isListening = false;
+      });
+      ref.read(voiceInputActiveProvider.notifier).state = false;
+    }
   }
 
-  void _showUnavailableSnackbar() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Voice input is not available on this device'),
-        backgroundColor: Colors.orange.shade800,
-        action: SnackBarAction(
-          label: 'OK',
-          textColor: Colors.white,
-          onPressed: () {},
-        ),
-      ),
-    );
-  }
+  void _showUnavailable(MicUnavailableReason reason) =>
+      showMicUnavailableSnackBar(context, reason);
 
   @override
   Widget build(BuildContext context) {
@@ -160,8 +170,6 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
                       color: Colors.white,
                       fontSize: 14,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -177,36 +185,40 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
               child: child,
             );
           },
-          child: GestureDetector(
-            onTap: _isListening ? _stopListening : _startListening,
-            child: Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: _isListening
-                    ? NexGenPalette.cyan
-                    : Colors.white.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-                border: Border.all(
+          child: Semantics(
+            button: true,
+            label: _isListening ? 'Stop listening' : 'Speak your design',
+            child: GestureDetector(
+              onTap: _isListening ? _stopListening : _startListening,
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
                   color: _isListening
                       ? NexGenPalette.cyan
-                      : Colors.white.withValues(alpha: 0.3),
-                  width: 2,
+                      : Colors.white.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: _isListening
+                        ? NexGenPalette.cyan
+                        : Colors.white.withValues(alpha: 0.3),
+                    width: 2,
+                  ),
+                  boxShadow: _isListening
+                      ? [
+                          BoxShadow(
+                            color: NexGenPalette.cyan.withValues(alpha: 0.4),
+                            blurRadius: 16,
+                            spreadRadius: 2,
+                          ),
+                        ]
+                      : null,
                 ),
-                boxShadow: _isListening
-                    ? [
-                        BoxShadow(
-                          color: NexGenPalette.cyan.withValues(alpha: 0.4),
-                          blurRadius: 16,
-                          spreadRadius: 2,
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Icon(
-                _isListening ? Icons.mic : Icons.mic_none,
-                color: _isListening ? Colors.black : Colors.white70,
-                size: 28,
+                child: Icon(
+                  _isListening ? Icons.mic : Icons.mic_none,
+                  color: _isListening ? Colors.black : Colors.white70,
+                  size: 28,
+                ),
               ),
             ),
           ),
