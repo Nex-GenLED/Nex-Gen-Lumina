@@ -22,24 +22,30 @@ import 'package:nexgen_command/models/user_role.dart';
 
 /// Device Setup screen with a specialized BLE scanner for Improv Standard.
 /// Whether an account may add a controller from Bluetooth setup.
-enum PairingDecision { allowed, notSignedIn, noProfile, familyMember }
+enum PairingDecision {
+  allowed,
+  notSignedIn,
+  noProfile,
+  familyMember,
+  notOwner,
+}
 
-/// Who may add a controller (+110, walk finding 1).
+/// Who may add a controller from Bluetooth setup.
 ///
-///  * An installer session — always.
-///  * Account owners: `primary`, `installer`, `admin`.
-///  * A self-signup account (`unlinked`, or a role this build does not know)
-///    adding a controller to its OWN account: that is the account owner
-///    setting up their first controller.
-///  * A family member (`subUser`) — refused: their account belongs to someone
-///    else's system, and hardware goes on the owner's account.
-@visibleForTesting
+/// Lumina is professionally installed: controllers are added by the
+/// installer, or by the system's owner. So only an installer session, a
+/// `primary` account or an `installer` account passes. Everyone else is
+/// refused, including a self-signup (`unlinked`) account — that path is
+/// deliberately closed.
+///
+/// A family member (`subUser`) gets its own message (+110): their account
+/// belongs to someone else's system, and hardware goes on the owner's
+/// account.
 PairingDecision controllerPairingDecision({
   required bool signedIn,
   required bool installerSession,
   required bool profileExists,
   required String? role,
-  required bool addingToOwnAccount,
 }) {
   if (installerSession) return PairingDecision.allowed;
   if (!signedIn) return PairingDecision.notSignedIn;
@@ -47,14 +53,12 @@ PairingDecision controllerPairingDecision({
   switch (InstallationRoleExtension.fromJson(role)) {
     case InstallationRole.primary:
     case InstallationRole.installer:
-    case InstallationRole.admin:
       return PairingDecision.allowed;
     case InstallationRole.subUser:
       return PairingDecision.familyMember;
+    case InstallationRole.admin:
     case InstallationRole.unlinked:
-      return addingToOwnAccount
-          ? PairingDecision.allowed
-          : PairingDecision.familyMember;
+      return PairingDecision.notOwner;
   }
 }
 
@@ -68,6 +72,8 @@ String pairingRefusalMessage(PairingDecision decision) {
     case PairingDecision.familyMember:
       return "Your account is part of someone else's lighting system. Ask "
           'its owner to add new controllers.';
+    case PairingDecision.notOwner:
+      return 'Only system owners can add new controllers.';
     case PairingDecision.allowed:
       return '';
   }
@@ -166,16 +172,9 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     }
   }
 
-  /// Verify the current user may add a controller here.
-  ///
-  /// +110 (walk finding 1): this allowed only `primary` and `installer`, so an
-  /// account the customer created themselves — which starts as `unlinked`
-  /// (signup writes the model's default role) — was refused with "Only
-  /// system owners can add new controllers." The rule is now
-  /// [controllerPairingDecision]: account owners (including a self-signup
-  /// adding the first controller to its OWN account) are let through; a
-  /// family member (`subUser`), whose account belongs to someone else's
-  /// system, is still refused.
+  /// Verify the current user may add a controller here: an installer
+  /// session, or a `primary` / `installer` account ([controllerPairingDecision]).
+  /// Everyone else is refused with [pairingRefusalMessage] and the page closes.
   Future<void> _checkPairingPermission() async {
     final session = ref.read(accountSessionProvider);
     final uid = session.uid;
@@ -185,7 +184,6 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         installerSession: false,
         profileExists: false,
         role: null,
-        addingToOwnAccount: false,
       ));
       return;
     }
@@ -197,7 +195,6 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     // role (e.g. 'unlinked').
     if (ref.read(installerModeActiveProvider)) return;
 
-    final effectiveUid = ref.read(effectiveUserUidProvider);
     try {
       final userDoc = await ref
           .read(accountFirestoreProvider)
@@ -210,7 +207,6 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
         installerSession: false,
         profileExists: userDoc.exists,
         role: userDoc.data()?['installation_role'] as String?,
-        addingToOwnAccount: effectiveUid == null || effectiveUid == uid,
       );
       if (decision != PairingDecision.allowed) _refusePairing(decision);
     } catch (e) {

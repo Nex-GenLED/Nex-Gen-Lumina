@@ -5,9 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
+import 'package:nexgen_command/features/ble/device_setup_page.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/shared/write_result.dart';
@@ -297,13 +300,25 @@ class _NeonDot extends StatelessWidget {
 }
 
 /// Empty state shown when no devices are found
-class _EmptyState extends StatelessWidget {
+class _EmptyState extends ConsumerWidget {
   final VoidCallback onRetry;
   final VoidCallback onBluetooth;
   const _EmptyState({required this.onRetry, required this.onBluetooth});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // The Bluetooth offer is shown only to accounts Bluetooth setup accepts
+    // (an installer session, a `primary` or an `installer` account). A
+    // family member or an admin can reach this screen too, and would only
+    // be turned away on the next one.
+    final profile = ref.watch(currentUserProfileProvider).valueOrNull;
+    final canPair = controllerPairingDecision(
+          signedIn: true,
+          installerSession: ref.watch(installerModeActiveProvider),
+          profileExists: profile != null,
+          role: profile?.installationRole.name,
+        ) ==
+        PairingDecision.allowed;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -315,15 +330,17 @@ class _EmptyState extends StatelessWidget {
         Text('Make sure your device is powered on and connected to the same Wi-Fi network', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(height: 16),
         FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Retry')),
-        const SizedBox(height: 8),
         // A new controller is not on Wi-Fi yet, so discovery cannot find it;
         // Bluetooth setup gives it the Wi-Fi details.
-        TextButton.icon(
-          key: const ValueKey('discovery-bluetooth-setup'),
-          onPressed: onBluetooth,
-          icon: const Icon(Icons.bluetooth_searching),
-          label: const Text('Set up a new controller with Bluetooth'),
-        ),
+        if (canPair) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            key: const ValueKey('discovery-bluetooth-setup'),
+            onPressed: onBluetooth,
+            icon: const Icon(Icons.bluetooth_searching),
+            label: const Text('Set up a new controller with Bluetooth'),
+          ),
+        ],
       ]),
       ),
     );
