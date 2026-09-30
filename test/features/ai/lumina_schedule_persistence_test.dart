@@ -81,16 +81,154 @@ void main() {
   });
 
   group('calendarEntryForNight', () {
-    test('a dated, Lumina-tagged autopilot entry with clock times', () {
+    test('a dated, Lumina-tagged USER entry (AI-generated) with clock times',
+        () {
       final night = plannedNightsOf(_flags()).first;
       final e = calendarEntryForNight(night, batchId: 'b1')!;
       expect(e.dateKey, '2026-12-20');
       expect(e.entryId, 'lumina_b1_0');
       expect(e.onTime, '20:00');
       expect(e.offTime, '06:00');
-      expect(e.type, CalendarEntryType.autopilot);
+      // D2 — the customer asked for it: theirs, marked AI-generated.
+      expect(e.type, CalendarEntryType.user);
+      expect(e.autopilot, isTrue);
       expect(e.sourceTag, kLuminaAiSourceTag);
       expect(e.patternName, 'Christmas night 1');
+    });
+  });
+
+  group('D2 — planLuminaNightWrites never overwrites', () {
+    final nights = plannedNightsOf(_flags()); // Sun 12-20, Mon 12-21, Tue 12-22
+
+    CalendarEntry gameDay(String dateKey) => CalendarEntry(
+          entryId: CalendarEntryId.gameDay('team-a'),
+          dateKey: dateKey,
+          patternName: 'Team A Colors',
+          onTime: '19:00',
+          offTime: '22:30',
+          type: CalendarEntryType.autopilot,
+          autopilot: true,
+          sourceTag: CalendarEntrySourceTag.gameDay,
+          note: 'Team A vs Team B — Game Day autopilot',
+        );
+
+    CalendarEntry mine(String dateKey) => CalendarEntry(
+          entryId: 'user_1',
+          dateKey: dateKey,
+          patternName: 'Birthday Blue',
+          onTime: '18:00',
+          offTime: '23:00',
+          type: CalendarEntryType.user,
+          autopilot: false,
+        );
+
+    CalendarEntry holiday(String dateKey) => CalendarEntry(
+          entryId: CalendarEntryId.holiday,
+          dateKey: dateKey,
+          patternName: 'Holiday',
+          onTime: '17:30',
+          offTime: '23:30',
+          type: CalendarEntryType.holiday,
+          autopilot: false,
+        );
+
+    test('an empty calendar → every night is written', () {
+      final plan = planLuminaNightWrites(
+          nights: nights, batchId: 'b', existingOn: (_) => const []);
+      expect(plan.entries.length, 3);
+      expect(plan.skipped, isEmpty);
+      expect(plan.noClock, 0);
+      expect(plan.entries.map((e) => e.entryId),
+          ['lumina_b_0', 'lumina_b_1', 'lumina_b_2']);
+    });
+
+    test('a Game Day entry on a night → skipped, and the reply names the '
+        'team', () {
+      final plan = planLuminaNightWrites(
+        nights: nights,
+        batchId: 'b',
+        existingOn: (k) => k == '2026-12-21' ? [gameDay(k)] : const [],
+      );
+      expect(plan.entries.map((e) => e.dateKey), ['2026-12-20', '2026-12-22']);
+      expect(plan.skipped.single.reason, LuminaNightSkipReason.gameDay);
+      expect(plan.skipped.single.reply,
+          'Skipped Mon — the Team A game already has that night.');
+    });
+
+    test('an armed lease on a night → skipped', () {
+      final plan = planLuminaNightWrites(
+        nights: nights,
+        batchId: 'b',
+        existingOn: (_) => const [],
+        leasedDateKeys: {'2026-12-22'},
+      );
+      expect(plan.entries.length, 2);
+      expect(plan.skipped.single.reason, LuminaNightSkipReason.armed);
+      expect(plan.skipped.single.reply, startsWith('Skipped Tue — '));
+    });
+
+    test('a user-authored entry on a night → skipped, named, never replaced '
+        '(the A3 overwrite guard, without a prompt)', () {
+      final plan = planLuminaNightWrites(
+        nights: nights,
+        batchId: 'b',
+        existingOn: (k) => k == '2026-12-20' ? [mine(k)] : const [],
+      );
+      expect(plan.entries.length, 2);
+      expect(plan.skipped.single.reason, LuminaNightSkipReason.userEntry);
+      expect(plan.skipped.single.reply, contains('"Birthday Blue"'));
+      expect(plan.skipped.single.reply, contains('Delete it in Schedule'));
+    });
+
+    test('a previous Lumina night is a user entry too, so it is not '
+        'overwritten either', () {
+      final earlier = calendarEntryForNight(nights[1], batchId: 'old')!;
+      final plan = planLuminaNightWrites(
+        nights: nights,
+        batchId: 'new',
+        existingOn: (k) => k == earlier.dateKey ? [earlier] : const [],
+      );
+      expect(plan.skipped.single.reason, LuminaNightSkipReason.userEntry);
+    });
+
+    test('a holiday default does not block a night', () {
+      final plan = planLuminaNightWrites(
+        nights: nights,
+        batchId: 'b',
+        existingOn: (k) => [holiday(k)],
+      );
+      expect(plan.entries.length, 3);
+      expect(plan.skipped, isEmpty);
+    });
+
+    test('Game Day wins the sentence when several things share the night', () {
+      final plan = planLuminaNightWrites(
+        nights: nights,
+        batchId: 'b',
+        existingOn: (k) => k == '2026-12-21' ? [mine(k), gameDay(k)] : const [],
+        leasedDateKeys: {'2026-12-21'},
+      );
+      expect(plan.skipped.single.reason, LuminaNightSkipReason.gameDay);
+    });
+
+    test('a night with no clock time is counted, not skipped', () {
+      final plan = planLuminaNightWrites(
+        nights: plannedNightsOf(_flags(start: 'specificTime', end: 'specificTime')),
+        batchId: 'b',
+        existingOn: (_) => const [],
+      );
+      expect(plan.entries, isEmpty);
+      expect(plan.skipped, isEmpty);
+      expect(plan.noClock, 3);
+    });
+
+    test('gameDayTeamNameOf reads the note the Game Day service writes', () {
+      expect(gameDayTeamNameOf(gameDay('2026-12-21')), 'Team A');
+      expect(
+          gameDayTeamNameOf(gameDay('2026-12-21')
+              .copyWith(note: 'Team C @ Team D — Game Day autopilot')),
+          'Team C');
+      expect(gameDayTeamNameOf(mine('2026-12-21')), isNull);
     });
   });
 
@@ -143,6 +281,58 @@ void main() {
         outcome: ScheduleNightsOutcome.nothingToPersist,
       );
       expect(text, "Tonight's Christmas look is on your lights now.");
+    });
+
+    // D2 — skips and a full timer pool are said, never claimed.
+    test('a skipped night is named after the nights that were saved', () {
+      final text = composeScheduleReply(
+        themeName: 'Christmas',
+        appliedOk: true,
+        nights: nights,
+        outcome: const ScheduleNightsOutcome(
+          requested: 3,
+          persisted: 2,
+          saved: [0, 2],
+          skipped: ['Skipped Mon — the Team A game already has that night.'],
+        ),
+      );
+      expect(text, contains('I saved 1 of the other 2 nights to your Schedule: '
+          'Tue — Running.'));
+      expect(text, contains('Skipped Mon — the Team A game already has that night.'));
+      expect(text, isNot(contains('Mon — Breathe')));
+    });
+
+    test('nights that did not fit are counted, in the decided words', () {
+      final text = composeScheduleReply(
+        themeName: 'Christmas',
+        appliedOk: true,
+        nights: nights,
+        outcome: const ScheduleNightsOutcome(
+          requested: 3,
+          persisted: 1,
+          saved: [0],
+          unfitted: 2,
+        ),
+      );
+      expect(text, contains("I couldn't fit 2 nights — your schedule is full."));
+      expect(text, contains('none of the other 2 nights could be saved'));
+      expect(text, isNot(contains("won't run on their own")));
+    });
+
+    test('every other night skipped → tonight only, with each reason', () {
+      final text = composeScheduleReply(
+        themeName: 'Christmas',
+        appliedOk: true,
+        nights: nights,
+        outcome: const ScheduleNightsOutcome(
+          requested: 3,
+          persisted: 1,
+          saved: [0],
+          skipped: ['Skipped Mon — a.', 'Skipped Tue — b.'],
+        ),
+      );
+      expect(text, contains('Only tonight was applied'));
+      expect(text, contains('Skipped Mon — a. Skipped Tue — b.'));
     });
   });
 }
