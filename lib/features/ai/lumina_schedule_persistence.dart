@@ -11,11 +11,20 @@ import 'package:nexgen_command/utils/sun_utils.dart';
 // in-memory autopilot scheduler only — lost when the app closed, never in
 // the Schedule tab, never armed on the controller.
 //
-// Each night is now a DATED calendar entry (`CalendarEntry`), the same shape
-// the Game Day planner writes, keyed by date, with a clock on/off time. The
-// calendar's lease manager arms the ones inside its window on the controller
-// and the Schedule tab lists them. What could not be persisted is said
-// plainly, never claimed.
+// Each night is now a DATED calendar entry (`CalendarEntry`), keyed by date,
+// with a clock on/off time. The calendar's lease manager arms the ones inside
+// its window on the controller and the Schedule tab lists them. What could
+// not be persisted is said plainly, never claimed.
+//
+// +110 E2 follow-up D2 — the entries are the CUSTOMER'S (type `user`,
+// `autopilot: true`, source `lumina_ai`): they asked for these nights, so the
+// Schedule tab shows "You" / "AI-Generated", Edit opens the ordinary editor,
+// and the night composer treats them as user-authored. And Lumina never
+// overwrites: a night whose date already holds a Game Day entry, an armed
+// lease, or a user-authored entry is skipped and named in the reply
+// ([planLuminaNightWrites]); a night the controller's timer pool cannot fit
+// is dropped and counted ([ScheduleNightsOutcome.unfitted]). The customer is
+// never asked mid-conversation.
 
 /// Provenance tag on entries this module writes.
 const String kLuminaAiSourceTag = 'lumina_ai';
@@ -26,6 +35,9 @@ class ScheduleNightsOutcome {
     required this.requested,
     required this.persisted,
     this.message,
+    this.saved = const [],
+    this.skipped = const [],
+    this.unfitted = 0,
   });
 
   /// Nights the plan asked for.
@@ -36,6 +48,18 @@ class ScheduleNightsOutcome {
 
   /// Why some (or all) nights were not persisted. Customer-readable.
   final String? message;
+
+  /// Indexes (into the plan's nights) that were written. Empty when the
+  /// caller did not track them; [composeScheduleReply] then treats the first
+  /// [persisted] nights as the saved ones.
+  final List<int> saved;
+
+  /// One customer-readable sentence per night skipped because its date was
+  /// already taken (D2). Never claimed as saved.
+  final List<String> skipped;
+
+  /// Nights dropped because the controller's timer pool was full (D2).
+  final int unfitted;
 
   bool get all => requested > 0 && persisted == requested;
   bool get none => persisted == 0;
@@ -76,11 +100,13 @@ class PlannedNight {
 
   bool get hasClockTimes => onTime != null && offTime != null;
 
+  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  /// "Tue", for the reply.
+  String get dayLabel => _days[(date.weekday - 1).clamp(0, 6)];
+
   /// "Tue — Running", for the reply.
-  String get summary {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return '${days[(date.weekday - 1).clamp(0, 6)]} — $effectName';
-  }
+  String get summary => '$dayLabel — $effectName';
 }
 
 String _hhmm(DateTime t) =>
@@ -202,6 +228,10 @@ List<PlannedNight> plannedNightsOf(
 }
 
 /// The calendar entry for [night]. Null when it has no clock times.
+///
+/// D2: the customer asked for this night, so it is THEIRS — `type: user`
+/// (Schedule tab "You", ordinary editor, user tier in the composer) with
+/// `autopilot: true` ("AI-Generated") and the `lumina_ai` source tag.
 CalendarEntry? calendarEntryForNight(PlannedNight night, {required String batchId}) {
   if (!night.hasClockTimes) return null;
   return CalendarEntry(
@@ -212,11 +242,157 @@ CalendarEntry? calendarEntryForNight(PlannedNight night, {required String batchI
     onTime: night.onTime,
     offTime: night.offTime,
     brightness: night.brightnessPercent,
-    type: CalendarEntryType.autopilot,
+    type: CalendarEntryType.user,
     autopilot: true,
     sourceTag: kLuminaAiSourceTag,
     note: 'Lumina: ${night.effectName}',
   );
+}
+
+// ── D2 — never overwrite ────────────────────────────────────────────────────
+
+/// Why a planned night was not written.
+enum LuminaNightSkipReason {
+  /// The date already holds a Game Day entry: the game has that night.
+  gameDay,
+
+  /// The date already holds a lease (a timer armed on the controller).
+  armed,
+
+  /// The date already holds a user-authored entry (the A3 overwrite guard).
+  userEntry,
+}
+
+/// A night that was skipped, with the sentence the reply says about it.
+class SkippedNight {
+  const SkippedNight({
+    required this.night,
+    required this.reason,
+    required this.reply,
+  });
+
+  final PlannedNight night;
+  final LuminaNightSkipReason reason;
+
+  /// Customer-readable, e.g. "Skipped Sun — the Chiefs game already has that
+  /// night."
+  final String reply;
+}
+
+/// A night and the entry that will be written for it.
+class LuminaNightWrite {
+  const LuminaNightWrite(this.night, this.entry);
+  final PlannedNight night;
+  final CalendarEntry entry;
+}
+
+/// What [planLuminaNightWrites] decided.
+class LuminaNightWritePlan {
+  const LuminaNightWritePlan({
+    required this.writes,
+    required this.skipped,
+    required this.noClock,
+  });
+
+  final List<LuminaNightWrite> writes;
+  final List<SkippedNight> skipped;
+
+  /// Nights with no usable clock time (not written, not "skipped").
+  final int noClock;
+
+  List<CalendarEntry> get entries => [for (final w in writes) w.entry];
+  List<String> get skipReplies => [for (final s in skipped) s.reply];
+}
+
+/// True for an entry projected from Game Day autopilot.
+bool isGameDayEntry(CalendarEntry e) =>
+    e.sourceTag == CalendarEntrySourceTag.gameDay ||
+    e.sourceTag == CalendarEntrySourceTag.gameDayGroup;
+
+/// The team a Game Day entry is for, read from the note the Game Day
+/// service writes ("TEAM vs OPPONENT — Game Day autopilot"). Null when the
+/// note has no such shape.
+String? gameDayTeamNameOf(CalendarEntry e) {
+  final note = e.note;
+  if (note == null) return null;
+  for (final sep in const [' vs ', ' @ ']) {
+    final i = note.indexOf(sep);
+    if (i > 0) return note.substring(0, i).trim();
+  }
+  return null;
+}
+
+/// Pure (D2): decides, night by night, what to write and what to skip.
+///
+///  * a date with a Game Day entry → skipped ("the TEAM game already has
+///    that night");
+///  * a date in [leasedDateKeys] (a timer already armed on the controller)
+///    → skipped;
+///  * a date with a user-authored entry → skipped, honouring the A3 overwrite
+///    guard without asking mid-conversation;
+///  * a night with no clock time → counted in [LuminaNightWritePlan.noClock].
+///
+/// Holidays and other generated entries do not block a night: the calendar
+/// holds several entries per date and replacing nothing loses nothing.
+LuminaNightWritePlan planLuminaNightWrites({
+  required List<PlannedNight> nights,
+  required String batchId,
+  required List<CalendarEntry> Function(String dateKey) existingOn,
+  Set<String> leasedDateKeys = const {},
+}) {
+  final writes = <LuminaNightWrite>[];
+  final skipped = <SkippedNight>[];
+  var noClock = 0;
+
+  for (final night in nights) {
+    final entry = calendarEntryForNight(night, batchId: batchId);
+    if (entry == null) {
+      noClock++;
+      continue;
+    }
+    final existing = existingOn(night.dateKey);
+
+    CalendarEntry? gameDay;
+    CalendarEntry? mine;
+    for (final e in existing) {
+      if (gameDay == null && isGameDayEntry(e)) gameDay = e;
+      if (mine == null && e.type == CalendarEntryType.user) mine = e;
+    }
+
+    if (gameDay != null) {
+      final team = gameDayTeamNameOf(gameDay);
+      skipped.add(SkippedNight(
+        night: night,
+        reason: LuminaNightSkipReason.gameDay,
+        reply: 'Skipped ${night.dayLabel} — '
+            '${team == null ? 'a Game Day' : 'the $team game'} already has '
+            'that night.',
+      ));
+      continue;
+    }
+    if (leasedDateKeys.contains(night.dateKey)) {
+      skipped.add(SkippedNight(
+        night: night,
+        reason: LuminaNightSkipReason.armed,
+        reply: 'Skipped ${night.dayLabel} — that night is already set on '
+            'your controller.',
+      ));
+      continue;
+    }
+    if (mine != null) {
+      skipped.add(SkippedNight(
+        night: night,
+        reason: LuminaNightSkipReason.userEntry,
+        reply: 'Skipped ${night.dayLabel} — you already have '
+            '"${mine.patternName}" that night. Delete it in Schedule first '
+            'if you want this instead.',
+      ));
+      continue;
+    }
+    writes.add(LuminaNightWrite(night, entry));
+  }
+
+  return LuminaNightWritePlan(writes: writes, skipped: skipped, noClock: noClock);
 }
 
 /// The reply for a plan, from what actually happened. Pure.
@@ -225,7 +401,7 @@ CalendarEntry? calendarEntryForNight(PlannedNight night, {required String batchI
 ///    plan had no payload for tonight);
 ///  * [applyMessage] — why not, in the customer's words;
 ///  * [nights] — the plan's nights, for the per-night summary;
-///  * [outcome] — what was persisted.
+///  * [outcome] — what was persisted, skipped and dropped.
 String composeScheduleReply({
   required String themeName,
   required bool? appliedOk,
@@ -246,20 +422,46 @@ String composeScheduleReply({
   }
 
   final others = requested - 1;
-  final otherNights = nights.skip(1).map((n) => n.summary).join(', ');
-  final String rest;
-  if (outcome.persisted >= requested) {
-    rest = 'The other $others ${others == 1 ? 'night is' : 'nights are'} '
-        'in your Schedule: $otherNights.';
-  } else if (outcome.persisted <= 0) {
-    rest = 'Only tonight was applied — I couldn\'t save the other $others '
-        '${others == 1 ? 'night' : 'nights'}'
-        '${outcome.message == null ? '.' : ': ${outcome.message}'} '
-        "They won't run on their own.";
+
+  // Which of the OTHER nights (after tonight) were saved.
+  final Set<int> savedIdx = outcome.saved.isNotEmpty
+      ? outcome.saved.toSet()
+      : {
+          for (var i = 0; i < outcome.persisted && i < nights.length; i++)
+            nights[i].index,
+        };
+  final savedOthers = [
+    for (final n in nights.skip(1))
+      if (savedIdx.contains(n.index)) n,
+  ];
+  final list = savedOthers.map((n) => n.summary).join(', ');
+
+  final parts = <String>[];
+  if (savedOthers.length >= others) {
+    parts.add('The other $others ${others == 1 ? 'night is' : 'nights are'} '
+        'in your Schedule: $list.');
+  } else if (savedOthers.isEmpty) {
+    if (outcome.skipped.isEmpty && outcome.unfitted == 0) {
+      parts.add('Only tonight was applied — I couldn\'t save the other '
+          '$others ${others == 1 ? 'night' : 'nights'}'
+          '${outcome.message == null ? '.' : ': ${outcome.message}'} '
+          "They won't run on their own.");
+    } else {
+      parts.add('Only tonight was applied — none of the other $others '
+          '${others == 1 ? 'night' : 'nights'} could be saved'
+          '${outcome.message == null ? '.' : ': ${outcome.message}'}');
+    }
   } else {
-    final saved = (outcome.persisted - 1).clamp(0, others);
-    rest = 'I saved $saved of the other $others nights to your Schedule'
-        '${outcome.message == null ? '.' : ' — ${outcome.message}'}';
+    parts.add('I saved ${savedOthers.length} of the other $others nights to '
+        'your Schedule: $list'
+        '${outcome.message == null ? '.' : ' — ${outcome.message}'}');
   }
+  parts.addAll(outcome.skipped);
+  if (outcome.unfitted > 0) {
+    parts.add("I couldn't fit ${outcome.unfitted} "
+        '${outcome.unfitted == 1 ? 'night' : 'nights'} — your schedule is '
+        'full.');
+  }
+  final rest = parts.join(' ');
   return tonight == null ? rest : '$tonight $rest';
 }

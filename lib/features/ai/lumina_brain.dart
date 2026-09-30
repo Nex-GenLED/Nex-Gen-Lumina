@@ -752,8 +752,34 @@ class LuminaBrain {
     caseSensitive: false,
   );
 
-  /// True when the customer asked for the lights to MOVE.
-  static bool wantsMotion(String prompt) => _motionPattern.hasMatch(prompt);
+  /// D5 — words that ask for NO motion: "no motion", "without motion", "not
+  /// moving", "no movement", "don't move", "static", "still". They win over a
+  /// motion word in the same sentence, because "no motion" contains one.
+  static final RegExp _noMotionPattern = RegExp(
+    r"\b(?:no|without|not|never|don'?t|do\s+not|zero)\s+(?:any\s+)?"
+    r'(?:motion|movement|moving|move|animation|animated|chas(?:e|ing)|'
+    r'running|flow(?:ing)?)\b'
+    r'|\bnot\s+(?:be\s+)?moving\b'
+    r'|\b(?:static|still|stationary|motionless)\b',
+    caseSensitive: false,
+  );
+
+  /// D5 — "colors"/"colours". A bare `<team> colors` wants the colours, not a
+  /// show.
+  static final RegExp _colorsPattern =
+      RegExp(r'\bcolou?rs?\b', caseSensitive: false);
+
+  /// True when the customer asked for the lights to MOVE — and did not, in
+  /// the same breath, ask them not to (D5: "no motion" is not a motion ask).
+  static bool wantsMotion(String prompt) =>
+      _motionPattern.hasMatch(prompt) && !asksStatic(prompt);
+
+  /// True when the customer asked for NO motion (D5).
+  static bool asksStatic(String prompt) => _noMotionPattern.hasMatch(prompt);
+
+  /// True for a bare `<team> colors` with no motion word (D5): Solid.
+  static bool asksColorsOnly(String prompt) =>
+      _colorsPattern.hasMatch(prompt) && !_motionPattern.hasMatch(prompt);
 
   /// Immediacy words. They change nothing about the design — a Tier 0 result
   /// is applied as soon as it is composed — but they must never be mistaken
@@ -808,11 +834,17 @@ class LuminaBrain {
     // Only return team response for high-confidence matches (>= 0.8).
     // Low-confidence fuzzy matches fall through to Tier 1/3 for better handling.
     if (teamResult == null || !teamResult.isHighConfidence) return null;
-    final context = EventThemeLibrary.detectContext(prompt.toLowerCase());
+    // D5 — "no motion" / "not moving" / "static" / "still" read as Solid, and
+    // so does a bare "<team> colors". "<team> design" / "<team> look" with no
+    // motion word keeps the team's own default (Theater Chase for most).
+    final wantsStatic = asksStatic(prompt) || asksColorsOnly(prompt);
+    final context = wantsStatic
+        ? EventContext.staticSimple
+        : EventThemeLibrary.detectContext(prompt.toLowerCase());
     return _buildCanonicalTeamResponse(
       teamResult.team,
       context,
-      motion: wantsMotion(prompt),
+      motion: !wantsStatic && wantsMotion(prompt),
     );
   }
 

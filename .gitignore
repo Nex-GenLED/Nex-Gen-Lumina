@@ -239,3 +239,10 @@ functions/lib/
 # backfill_dryrun.js). Ignored because these dump per-user/PII output and are
 # shaped for one session's question, not for reuse.
 functions/scripts/_*.js
+
+# Session reports and audits written to the repo root (+110 package reports,
+# release/build reports, dated audits). They name accounts, controllers and
+# internal state and must stay local — the repo is public. Durable docs live
+# under docs/ and are committed on purpose.
+/*-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+/[0-9][0-9][0-9]-*.md

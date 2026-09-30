@@ -18,7 +18,8 @@ import 'package:nexgen_command/features/ai/recurring_sports_autopilot_intent.dar
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
-import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
+    show calendarEntryLeaseManagerProvider;
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
@@ -303,44 +304,65 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
       longitude: profile?.longitude,
     );
     final batchId = DateTime.now().millisecondsSinceEpoch.toString();
-    final entries = <CalendarEntry>[];
-    var noClock = 0;
-    for (final n in nights) {
-      final e = calendarEntryForNight(n, batchId: batchId);
-      if (e == null) {
-        noClock++;
-      } else {
-        entries.add(e);
-      }
-    }
-    if (entries.isEmpty) {
+
+    // D2 — never overwrite. A night that already holds a Game Day entry, an
+    // armed lease, or a user-authored entry is SKIPPED and named in the reply;
+    // the customer is never asked mid-conversation.
+    final calendar = ref.read(calendarScheduleProvider);
+    final leased = ref
+        .read(calendarEntryLeaseManagerProvider)
+        .activeLeases
+        .map((l) => l.dateKey)
+        .toSet();
+    final plan = planLuminaNightWrites(
+      nights: nights,
+      batchId: batchId,
+      existingOn: calendar.forDate,
+      leasedDateKeys: leased,
+    );
+    final noClockMessage = plan.noClock > 0
+        ? "I couldn't tell what time each night should start. Tell me a "
+            'time like "7pm" or "sunset".'
+        : null;
+    if (plan.entries.isEmpty) {
       return ScheduleNightsOutcome(
         requested: requested,
         persisted: 0,
-        message: noClock > 0
-            ? "I couldn't tell what time each night should start. Tell me a "
-                'time like "7pm" or "sunset".'
-            : 'the plan had no dates I could use.',
+        skipped: plan.skipReplies,
+        message: noClockMessage ??
+            (plan.skipped.isEmpty ? 'the plan had no dates I could use.' : null),
       );
     }
     try {
-      final ok = await ref
+      // D2 — a full timer pool drops the nights that do not fit; the reply
+      // says so. The eviction picker is never raised from here.
+      final outcome = await ref
           .read(calendarScheduleProvider.notifier)
-          .applyEntries(entries);
-      if (!ok) {
+          .applyEntriesDetailed(plan.entries,
+              noFreeSlots: NoFreeSlotsPolicy.drop);
+      if (!outcome.ok) {
         return ScheduleNightsOutcome(
           requested: requested,
           persisted: 0,
+          skipped: plan.skipReplies,
           message: "the Schedule didn't accept them. Check your connection "
               'and try again.',
         );
       }
+      final droppedIds = outcome.dropped.map((e) => e.entryId).toSet();
+      final saved = [
+        for (final w in plan.writes)
+          if (!droppedIds.contains(w.entry.entryId)) w.night.index,
+      ];
       return ScheduleNightsOutcome(
         requested: requested,
-        persisted: entries.length,
-        message: noClock > 0
-            ? '$noClock ${noClock == 1 ? 'night' : 'nights'} had no usable '
-                'time.'
+        persisted: saved.length,
+        saved: saved,
+        skipped: plan.skipReplies,
+        unfitted: droppedIds.length,
+        message: plan.noClock > 0
+            ? '${plan.noClock} ${plan.noClock == 1 ? 'night' : 'nights'} had '
+                'no usable time.'
             : null,
       );
     } catch (e) {
@@ -348,6 +370,7 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
       return ScheduleNightsOutcome(
         requested: requested,
         persisted: 0,
+        skipped: plan.skipReplies,
         message: "the Schedule didn't accept them. Try again in a moment.",
       );
     }

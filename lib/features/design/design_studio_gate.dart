@@ -1,19 +1,37 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/design_studio_feature_flag.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/roofline_segmentation.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/models/roofline_configuration.dart';
 
 // +110 package E2, item 1a — "may Design Studio open?"
 //
 // Design Studio's selection unit is the named roofline feature (corner, peak,
 // run). Until a roofline is SEGMENTED — it has a map, and every mapped channel
-// has its features marked — there is nothing to select, and the old studio
-// either composed onto a whole-house strip or did nothing at all (audit
-// row 2). The gate names what is missing and opens the walkthrough that fixes
-// it. It never lets the studio no-op.
+// has its features marked — there is nothing to select by section, and the
+// old studio either composed onto a whole-house strip or did nothing at all
+// (audit row 2). The gate names what is missing and opens the walkthrough
+// that fixes it. It never lets the studio no-op.
+//
+// +110 E2 follow-up D1 — the segmentation requirement is SOFT by default.
+// No production install had its sections marked when the gate shipped, so a
+// hard gate would have closed the studio on every customer at once. Now:
+//
+//   * no controller, two controllers with none selected, and no map at all
+//     still BLOCK — there is nothing to paint on;
+//   * an unmarked (or partly marked) map OPENS the studio with a dismissible
+//     banner that offers the walkthrough (DesignStudioGateState.openUnmarked),
+//     unless the gate is HARD for this install;
+//   * the gate is hard when the fleet flag
+//     config/design_studio.requireSegmentation is true, or when the map
+//     carries installer-written features (an `architectural_role` on any
+//     segment: only the installer's Map Roofline step and the installer
+//     Roofline Setup Wizard write it) — an installer who marked sections at
+//     install meant the studio to work by section.
 //
 // The roofline it asks about is the EXPLICIT controller
 // (activePixelMapControllerIdProvider: the selected one, else the account's
@@ -34,17 +52,21 @@ enum DesignStudioGateState {
   /// The controller has no roofline map at all.
   noMap,
 
-  /// There is a map, but no channel has its features marked.
+  /// There is a map, but no channel has its features marked (hard gate).
   unsegmented,
 
-  /// Some channels are marked and some are not.
+  /// Some channels are marked and some are not (hard gate).
   partlySegmented,
+
+  /// The map is not (fully) marked, but the gate is soft: the studio opens
+  /// with a banner that offers the walkthrough.
+  openUnmarked,
 
   /// Every mapped channel is marked: the studio may open.
   ready,
 }
 
-/// The gate's answer plus the sentences the blocked view shows.
+/// The gate's answer plus the sentences the blocked view (or banner) shows.
 class DesignStudioGate {
   const DesignStudioGate({
     required this.state,
@@ -69,13 +91,21 @@ class DesignStudioGate {
   /// when it is not known yet).
   final RooflineSegmentation segmentation;
 
-  bool get isReady => state == DesignStudioGateState.ready;
+  /// True when the studio may open (fully marked, or soft-gated).
+  bool get isReady =>
+      state == DesignStudioGateState.ready ||
+      state == DesignStudioGateState.openUnmarked;
+
+  /// True when the studio is open but should show the "mark your sections"
+  /// banner (D1 soft gate).
+  bool get showsBanner => state == DesignStudioGateState.openUnmarked;
 
   /// True when the primary action is the feature walkthrough (a map exists,
   /// its sections are not all marked).
   bool get opensWalkthrough =>
       state == DesignStudioGateState.unsegmented ||
-      state == DesignStudioGateState.partlySegmented;
+      state == DesignStudioGateState.partlySegmented ||
+      state == DesignStudioGateState.openUnmarked;
 
   /// True when the primary action is tracing the roofline: there is no map
   /// yet, and the walkthrough marks sections ON a traced map.
@@ -117,6 +147,24 @@ class DesignStudioGate {
   );
 }
 
+/// D1 — the soft-gate banner, once dismissed, stays dismissed for the rest
+/// of the app session (not per visit: a customer who has no intention of
+/// marking sections should not be asked on every open).
+final designStudioBannerDismissedProvider =
+    StateProvider<bool>((ref) => false);
+
+/// Pure: true when [config] carries a feature the installer wrote. Only the
+/// installer's Map Roofline step and the installer Roofline Setup Wizard set
+/// `architectural_role`; the customer walkthrough sets `type` and
+/// `feature_confirmed` and leaves the role alone.
+bool mapCarriesInstallerFeatures(RooflineConfiguration? config) {
+  if (config == null) return false;
+  for (final s in config.segments) {
+    if (s.architecturalRole != null) return true;
+  }
+  return false;
+}
+
 /// The gate for the roofline the app is reading right now.
 final designStudioGateProvider = Provider<DesignStudioGate>((ref) {
   final controllersAsync = ref.watch(controllersStreamProvider);
@@ -136,6 +184,16 @@ final designStudioGateProvider = Provider<DesignStudioGate>((ref) {
     return DesignStudioGate._chooseController;
   }
 
+  // D1 — hard when the fleet says so, or when the installer marked sections
+  // on this install. The flag's loading window reads as OFF: a customer never
+  // meets the hard gate because the flag had not arrived yet.
+  final fleetRequires = ref
+      .watch(designStudioRequireSegmentationProvider)
+      .maybeWhen(data: (v) => v, orElse: () => false);
+  final installerMarked = mapCarriesInstallerFeatures(
+      ref.watch(currentRooflineConfigProvider).valueOrNull);
+  final requireSegmentation = fleetRequires || installerMarked;
+
   final segAsync = ref.watch(rooflineSegmentationProvider);
   return segAsync.when(
     loading: () => DesignStudioGate._loading,
@@ -143,18 +201,40 @@ final designStudioGateProvider = Provider<DesignStudioGate>((ref) {
     // one either way, and a spinner that never ends is the silence row 2
     // was about.
     error: (_, __) => DesignStudioGate._noMap,
-    data: (seg) => gateForSegmentation(seg),
+    data: (seg) =>
+        gateForSegmentation(seg, requireSegmentation: requireSegmentation),
   );
 });
 
-/// Pure: the gate for a known [seg].
-DesignStudioGate gateForSegmentation(RooflineSegmentation seg) {
+/// Pure: the gate for a known [seg]. With [requireSegmentation] false (the
+/// default, as in production) an unmarked or partly marked map opens the
+/// studio behind a banner instead of blocking it; no map at all still blocks.
+DesignStudioGate gateForSegmentation(
+  RooflineSegmentation seg, {
+  bool requireSegmentation = false,
+}) {
   if (!seg.hasMap) return DesignStudioGate._noMap;
   if (seg.isSegmented) {
     return DesignStudioGate(
       state: DesignStudioGateState.ready,
       title: 'Ready',
       message: '',
+      segmentation: seg,
+    );
+  }
+  if (!requireSegmentation) {
+    final partly = seg.isPartlySegmented;
+    return DesignStudioGate(
+      state: DesignStudioGateState.openUnmarked,
+      title: partly
+          ? "Some sections aren't marked yet"
+          : "Your sections aren't marked yet",
+      message: partly
+          ? 'Mark the rest of your corners and peaks and every section becomes '
+              'something you can select and paint.'
+          : 'Mark your corners and peaks once and each section of your '
+              'roofline becomes something you can select and paint.',
+      actionLabel: partly ? 'Mark the rest' : 'Mark corners and peaks',
       segmentation: seg,
     );
   }

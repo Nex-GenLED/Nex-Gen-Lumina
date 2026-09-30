@@ -20,12 +20,14 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/design_studio_feature_flag.dart';
 import 'package:nexgen_command/features/design/design_studio_gate.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
 import 'package:nexgen_command/features/design/models/clarification_models.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
-import 'package:nexgen_command/features/design/models/design_intent.dart';
+import 'package:nexgen_command/features/design/models/design_intent.dart'
+    hide ArchitecturalRole;
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/roofline_feature_walkthrough.dart';
 import 'package:nexgen_command/features/design/roofline_segmentation.dart';
@@ -150,8 +152,15 @@ List<Override> _overrides({
   String? selectedId = 'ctl-a',
   String? selectedIp = _ip,
   _Repo? repo,
+  // D1 — config/design_studio.requireSegmentation. Off by default, as in
+  // production; the hard-gate tests turn it on. [flagStream] models the
+  // flag never arriving.
+  bool requireSegmentation = false,
+  Stream<bool>? flagStream,
 }) =>
     [
+      designStudioRequireSegmentationProvider.overrideWith(
+          (ref) => flagStream ?? Stream.value(requireSegmentation)),
       controllersStreamProvider.overrideWith(
           (ref) => controllerStream ?? Stream.value(controllers)),
       selectedControllerIdProvider.overrideWithValue(selectedId),
@@ -190,10 +199,15 @@ Future<ProviderContainer> _pump(WidgetTester tester, List<Override> overrides,
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  group('item 1a — the gate', () {
+  group('item 1a — the gate (hard: config/design_studio.requireSegmentation '
+      'on)', () {
     testWidgets('an unsegmented roofline shows the gate, names what is '
         'missing, and reaches the walkthrough', (tester) async {
-      await _pump(tester, _overrides(roofline: Stream.value(_unsegmented())));
+      await _pump(
+          tester,
+          _overrides(
+              roofline: Stream.value(_unsegmented()),
+              requireSegmentation: true));
 
       expect(find.byKey(const ValueKey('studio-gate')), findsOneWidget);
       expect(find.textContaining("corners and peaks aren't marked yet"),
@@ -225,7 +239,10 @@ void main() {
         const RooflineSegment(
             id: 'x', name: 'Segment 2', pixelCount: 30, channelIndex: 1),
       ]);
-      await _pump(tester, _overrides(roofline: Stream.value(partly)));
+      await _pump(
+          tester,
+          _overrides(
+              roofline: Stream.value(partly), requireSegmentation: true));
 
       expect(find.textContaining("Channel 2's corners and peaks aren't marked"),
           findsOneWidget);
@@ -267,10 +284,154 @@ void main() {
     test('gateForSegmentation is pure and covers every state', () {
       expect(gateForSegmentation(RooflineSegmentation.none).state,
           DesignStudioGateState.noMap);
-      expect(gateForSegmentation(assessRooflineSegmentation(_unsegmented())).state,
+      expect(
+          gateForSegmentation(assessRooflineSegmentation(_unsegmented()),
+                  requireSegmentation: true)
+              .state,
           DesignStudioGateState.unsegmented);
       expect(gateForSegmentation(assessRooflineSegmentation(_segmented())).state,
           DesignStudioGateState.ready);
+      // D1 — the default is soft.
+      final soft = gateForSegmentation(assessRooflineSegmentation(_unsegmented()));
+      expect(soft.state, DesignStudioGateState.openUnmarked);
+      expect(soft.isReady, isTrue);
+      expect(soft.showsBanner, isTrue);
+      expect(soft.opensWalkthrough, isTrue);
+      expect(gateForSegmentation(RooflineSegmentation.none,
+              requireSegmentation: false)
+          .state,
+          DesignStudioGateState.noMap);
+    });
+  });
+
+  group('D1 — the soft gate (flag off is the default)', () {
+    /// A map the INSTALLER marked on one channel (architectural_role is only
+    /// ever written by the installer surfaces) and left unmarked on the
+    /// other.
+    RooflineConfiguration installerPartly() => _config(const [
+          RooflineSegment(id: 'c1', name: '', pixelCount: 4, startPixel: 0,
+              type: SegmentType.corner, architecturalRole: ArchitecturalRole.corner,
+              channelIndex: 0),
+          RooflineSegment(id: 'r1', name: '', pixelCount: 36, startPixel: 4,
+              type: SegmentType.run, channelIndex: 0),
+          RooflineSegment(id: 'x', name: 'Segment 2', pixelCount: 30,
+              channelIndex: 1),
+        ]);
+
+    testWidgets('flag off: an unmarked roofline OPENS the studio, with a '
+        'banner that offers the walkthrough', (tester) async {
+      await _pump(tester, _overrides(roofline: Stream.value(_unsegmented())));
+
+      expect(find.byKey(const ValueKey('studio-gate')), findsNothing);
+      expect(find.text('Create Design'), findsOneWidget);
+      expect(find.text('Manual'), findsOneWidget);
+      expect(find.byKey(const ValueKey('studio-soft-gate')), findsOneWidget);
+      expect(find.text("Your sections aren't marked yet"), findsOneWidget);
+      expect(find.text('Sections not marked yet'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('studio-soft-gate-walkthrough')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(RooflineFeatureWalkthroughScreen), findsOneWidget);
+    });
+
+    testWidgets('the banner dismisses, and stays dismissed for the session',
+        (tester) async {
+      final c = await _pump(
+          tester, _overrides(roofline: Stream.value(_unsegmented())));
+
+      await tester.tap(find.byKey(const ValueKey('studio-soft-gate-dismiss')));
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('studio-soft-gate')), findsNothing);
+      expect(find.text('Create Design'), findsOneWidget);
+      expect(c.read(designStudioBannerDismissedProvider), isTrue);
+    });
+
+    testWidgets('the flag never arrives (loading) → still soft: the studio '
+        'opens', (tester) async {
+      final never = StreamController<bool>();
+      addTearDown(never.close);
+      await _pump(
+          tester,
+          _overrides(
+              roofline: Stream.value(_unsegmented()), flagStream: never.stream));
+
+      expect(find.byKey(const ValueKey('studio-gate')), findsNothing);
+      expect(find.byKey(const ValueKey('studio-soft-gate')), findsOneWidget);
+    });
+
+    testWidgets('partly marked by the CUSTOMER (no installer roles) → soft, '
+        '"Mark the rest"', (tester) async {
+      final partly = _config([
+        ..._segmented().segments.where((s) => s.channelIndex == 0),
+        const RooflineSegment(
+            id: 'x', name: 'Segment 2', pixelCount: 30, channelIndex: 1),
+      ]);
+      await _pump(tester, _overrides(roofline: Stream.value(partly)));
+
+      expect(find.byKey(const ValueKey('studio-gate')), findsNothing);
+      expect(find.byKey(const ValueKey('studio-soft-gate')), findsOneWidget);
+      expect(find.text('Mark the rest'), findsOneWidget);
+      expect(find.text('Some sections not marked yet'), findsOneWidget);
+    });
+
+    testWidgets('installer-written features on the map → the gate is HARD '
+        'even with the flag off (auto-on per install)', (tester) async {
+      await _pump(
+          tester, _overrides(roofline: Stream.value(installerPartly())));
+
+      expect(find.byKey(const ValueKey('studio-gate')), findsOneWidget);
+      expect(find.textContaining("Channel 2's corners and peaks aren't marked"),
+          findsOneWidget);
+      expect(find.text('Create Design'), findsNothing);
+    });
+
+    testWidgets('flag on → the hard gate, as before', (tester) async {
+      await _pump(
+          tester,
+          _overrides(
+              roofline: Stream.value(_unsegmented()),
+              requireSegmentation: true));
+
+      expect(find.byKey(const ValueKey('studio-gate')), findsOneWidget);
+      expect(find.byKey(const ValueKey('studio-soft-gate')), findsNothing);
+      expect(find.text('Create Design'), findsNothing);
+    });
+
+    testWidgets('no map at all still BLOCKS under the soft gate',
+        (tester) async {
+      await _pump(tester, _overrides(roofline: Stream.value(null)));
+
+      expect(find.byKey(const ValueKey('studio-gate-trace')), findsOneWidget);
+      expect(find.text('Create Design'), findsNothing);
+    });
+
+    testWidgets('a fully marked roofline shows no banner', (tester) async {
+      await _pump(tester, _overrides(roofline: Stream.value(_segmented())));
+
+      expect(find.byKey(const ValueKey('studio-soft-gate')), findsNothing);
+      expect(find.textContaining('2 corners · 1 peak · 3 runs'), findsOneWidget);
+    });
+
+    test('the flag reads false for every degraded document', () {
+      expect(designStudioRequireSegmentationFrom(null), isFalse);
+      expect(designStudioRequireSegmentationFrom(const {}), isFalse);
+      expect(designStudioRequireSegmentationFrom(
+          const {'requireSegmentation': 'true'}), isFalse);
+      expect(designStudioRequireSegmentationFrom(
+          const {'requireSegmentation': 1}), isFalse);
+      expect(designStudioRequireSegmentationFrom(
+          const {'requireSegmentation': true}), isTrue);
+    });
+
+    test('installer-written features are the auto-on signal; customer marks '
+        'are not', () {
+      expect(mapCarriesInstallerFeatures(null), isFalse);
+      expect(mapCarriesInstallerFeatures(_unsegmented()), isFalse);
+      // The walkthrough sets type + feature_confirmed, never a role.
+      expect(mapCarriesInstallerFeatures(_segmented()), isFalse);
+      expect(mapCarriesInstallerFeatures(installerPartly()), isTrue);
     });
   });
 

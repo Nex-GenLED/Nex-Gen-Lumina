@@ -10,6 +10,7 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/design_studio_feature_flag.dart';
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/screens/ai_design_studio_screen.dart';
@@ -58,6 +59,8 @@ Future<void> _pump(WidgetTester tester) async {
   addTearDown(tester.view.reset);
   await tester.pumpWidget(ProviderScope(
     overrides: [
+      designStudioRequireSegmentationProvider
+          .overrideWith((ref) => Stream.value(false)),
       controllersStreamProvider.overrideWith((ref) => Stream.value(const [
             ControllerInfo(id: 'ctl-a', ip: '192.0.2.10', name: 'House'),
           ])),

@@ -18,6 +18,7 @@ import 'package:nexgen_command/app_theme.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/design_studio_feature_flag.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
 import 'package:nexgen_command/features/design/models/clarification_models.dart';
@@ -149,8 +150,11 @@ List<Override> _overrides({
   String? selectedId = 'ctl-a',
   String? selectedIp = '192.0.2.10',
   CustomDesign? detail,
+  bool requireSegmentation = false,
 }) =>
     [
+      designStudioRequireSegmentationProvider
+          .overrideWith((ref) => Stream.value(requireSegmentation)),
       controllersStreamProvider.overrideWith((ref) => Stream.value(controllers)),
       selectedControllerIdProvider.overrideWithValue(selectedId),
       selectedDeviceIpProvider.overrideWith((ref) => selectedIp),
@@ -272,9 +276,29 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('Design Studio — gate', () {
-    testWidgets('unsegmented roofline', (tester) async {
-      await _check(tester, 'studio / gate / unsegmented',
+    testWidgets('unsegmented roofline (hard gate, flag on)', (tester) async {
+      await _check(
+          tester,
+          'studio / gate / unsegmented',
+          _studio(_overrides(
+              roofline: Stream.value(_unsegmented()),
+              requireSegmentation: true)));
+    });
+
+    // D1 — the soft gate's banner, in both of its wordings.
+    testWidgets('soft gate banner, unmarked', (tester) async {
+      await _check(tester, 'studio / soft gate / unmarked',
           _studio(_overrides(roofline: Stream.value(_unsegmented()))));
+    });
+
+    testWidgets('soft gate banner, partly marked', (tester) async {
+      final partly = _config([
+        ..._segmented().segments.where((s) => s.channelIndex == 0),
+        const RooflineSegment(
+            id: 'x', name: 'Segment 2', pixelCount: 30, channelIndex: 1),
+      ]);
+      await _check(tester, 'studio / soft gate / partly marked',
+          _studio(_overrides(roofline: Stream.value(partly))));
     });
 
     testWidgets('no map', (tester) async {
