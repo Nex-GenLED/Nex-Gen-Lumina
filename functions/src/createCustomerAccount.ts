@@ -32,6 +32,7 @@ import { logger } from "firebase-functions";
 import * as admin from "firebase-admin";
 
 import { sendEmail } from "./messaging-helpers";
+import { dealerContactFields, lookupDealerContact } from "./dealerContact";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
@@ -317,6 +318,9 @@ export const createCustomerAccount = onCall(
       const userRef = db.collection("users").doc(uid);
       const existingDoc = await userRef.get();
       const now = admin.firestore.FieldValue.serverTimestamp();
+      // The dealer's contact, denormalised so the customer's link-account
+      // screen can show it without reading /dealers (customers cannot).
+      const dealerContact = await lookupDealerContact(db, dealerCode);
 
       await userRef.set(
         {
@@ -332,6 +336,7 @@ export const createCustomerAccount = onCall(
           // Per-dealer scoping — the field firestore.rules and the installer
           // wizard actually read.
           dealer_code: dealerCode,
+          ...dealerContactFields(dealerContact),
           installation_role: "primary",
           // Provenance breadcrumb; nothing reads it today.
           job_id: jobId,

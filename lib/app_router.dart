@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/auth/forgot_password_page.dart';
 import 'package:nexgen_command/features/auth/forced_password_reset_screen.dart';
 import 'package:nexgen_command/features/auth/link_account_screen.dart';
 import 'package:nexgen_command/features/auth/join_with_code_screen.dart';
+import 'package:nexgen_command/features/users/manage_family_members_flag.dart';
 import 'package:nexgen_command/features/users/sub_users_screen.dart';
 import 'package:nexgen_command/features/whites/preferred_white_selection_page.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
@@ -1062,6 +1063,10 @@ class AppRouter {
                     path: 'users',
                     name: 'sub-users',
                     parentNavigatorKey: _systemNavigatorKey,
+                    // Hidden behind kManageFamilyMembersEnabled; see
+                    // manage_family_members_flag.dart.
+                    redirect: (context, state) => manageFamilyMembersRedirect(
+                        enabled: kManageFamilyMembersEnabled),
                     pageBuilder: (context, state) => const NoTransitionPage(child: SubUsersScreen()),
                   ),
                   GoRoute(

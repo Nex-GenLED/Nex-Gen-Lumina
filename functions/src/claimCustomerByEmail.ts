@@ -45,6 +45,13 @@ import { onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https
 import { logger } from "firebase-functions";
 import * as admin from "firebase-admin";
 
+import {
+  DealerContact,
+  DealerLookupDb,
+  dealerContactFields,
+  lookupDealerContact,
+} from "./dealerContact";
+
 // admin.initializeApp() is called in index.js — do not call again here.
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -89,6 +96,13 @@ export interface ClaimDeps {
   };
   /** Injected so the fake can assert on it without a Firestore sentinel. */
   serverTimestamp: () => unknown;
+  /**
+   * The dealer's contact for a code (see dealerContact.ts). Copied onto the
+   * profile whenever the caller's dealer code is stamped, so the customer's
+   * link-account screen can show the dealer without reading /dealers.
+   * Optional: absent means no contact is written.
+   */
+  lookupDealerContact?: (dealerCode: string) => Promise<DealerContact | undefined>;
 }
 
 // ── Policy ──────────────────────────────────────────────────────────────────
@@ -243,6 +257,13 @@ export async function runClaimCustomerByEmail(params: {
 
   if (plan.stampDealerCode) {
     patch.dealer_code = callerDealerCode;
+    // Denormalised dealer contact, non-empty values only (dealerContact.ts).
+    if (deps.lookupDealerContact) {
+      Object.assign(
+        patch,
+        dealerContactFields(await deps.lookupDealerContact(callerDealerCode)),
+      );
+    }
   }
 
   await userRef.set(patch, { merge: true });
@@ -282,6 +303,11 @@ export const claimCustomerByEmail = onCall(
         db: admin.firestore() as unknown as ClaimDeps["db"],
         auth: admin.auth() as unknown as ClaimDeps["auth"],
         serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+        lookupDealerContact: (code) =>
+          lookupDealerContact(
+            admin.firestore() as unknown as DealerLookupDb,
+            code,
+          ),
       },
       callerUid: req.auth?.uid,
       token: req.auth?.token as unknown as Record<string, unknown> | undefined,
