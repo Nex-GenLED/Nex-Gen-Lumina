@@ -478,6 +478,62 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     E2 surfaces), functions unit 618/618, emulator suite 13/13. Related: **#109**, **#112**,
     **#114**; `docs/BUILD_LEDGER.md` "FUNCTIONS DEPLOY — relay eligibility — 2026-09-30".
 
+- [ ] **#119 — RULES: STAFF OF ANY DEALER CAN READ AND WRITE A CUSTOMER'S `commercial_locations`
+  AND `brand_profile` WHEN THE USER DOC HAS NO `owner_id` — the 2026-09-18 stub-doc correction
+  widened "unprovisioned" from "doc absent" to "no owner_id", and dealer scoping went with it**
+  - Status: **OPEN — filed 2026-09-30 from the build-110 gate; rules NOT changed, NOT deployed** ·
+    Severity: **P1 (no exposure today — see below; promote to P0 the day a commercial customer is
+    provisioned without `owner_id`)** · Evidence: **verified-by-test**
+    (`commercialRules.emulator.test.ts` "staff from ANOTHER dealer: DENIED" ×2 fail on `9e5376a`
+    and on `2c895ed`) + **verified-by-source** + **verified-by-data** (read-only production read
+    2026-09-30 ~17:25Z)
+  - **THE RULE.** `commercial_locations` (`firestore.rules:813-820`) and `brand_profile` (`:756+`)
+    grant read and write to `staffMayReach(userId)` (`:259-263`):
+    `isProvisionedUser(userId) ? hasStaffClaim(dealerCodeOf(userId)) : isStaffSession()`.
+    `isProvisionedUser` (`:253-257`) is `owner_id != ''`. A user doc WITH a `dealer_code` but
+    WITHOUT `owner_id` is therefore "unprovisioned", and `isStaffSession()` (`:218-223`) admits
+    ANY session whose custom token carries a non-empty `dealerCode` and an installer or
+    salesperson role — every dealer's staff, not the customer's dealer. The same helper gates 13
+    rule sites, `pixelMap` and `designs` among them.
+  - **HOW IT GOT HERE.** The test was written against the P0-5 form (`:178+`), where
+    "unprovisioned" meant the document does not exist and any existing doc was scoped by its
+    `dealer_code`. The STUB-DOC CORRECTION of 2026-09-18 (`:225+`) re-keyed it on `owner_id`
+    because the FCM token write creates the doc before the installer stamps it; the seeded test
+    doc (`dealer_code`, no `owner_id`) now reads as a stub, and the suite was not re-run.
+  - **EXPOSURE TODAY (read-only, 2026-09-30).** 55 user docs: 24 carry a `dealer_code` (22 with
+    dealer A, 2 with dealer B), 30 carry `owner_id`, **0 carry a `dealer_code` without
+    `owner_id`** — no provisioned customer is reachable cross-dealer today. 25 docs carry
+    neither (stub-shaped; reachable by any staff session, which is the install window's design).
+    `commercial_locations` 0 docs, `brand_profile` 0 docs, `commercial_hours` 0 docs,
+    `profile_type == commercial` 0 users. Staff: `installers` holds 5 records — dealer A: 1
+    active installer; dealer B: 2 active installers; a third code: 2 inactive (1 admin, 1
+    installer). `dealers`: A and B active. Master and owner PINs are cross-dealer by design and
+    unaffected. So the only cross-dealer pair that exists is A and B, and there is nothing under
+    any A or B customer for the other to reach.
+  - **FIX SHAPE (not implemented, not deployed).** Scope by `dealer_code` whenever one is set;
+    fall back to `isStaffSession()` only for a true stub (doc exists, no `owner_id`, no
+    `dealer_code`) or an absent doc:
+    ```
+    function hasDealerCode(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.get('dealer_code', '') != '';
+    }
+    function staffMayReach(userId) {
+      return (isProvisionedUser(userId) || hasDealerCode(userId))
+        ? hasStaffClaim(dealerCodeOf(userId))
+        : isStaffSession();
+    }
+    ```
+    The installer stamps `dealer_code` as the customer's own dealer, so the wizard keeps its
+    access (same code) and every other dealer loses it the moment the code lands. Tests: the two
+    failing assertions pass as written; add (a) a stub doc with neither field → any staff session
+    may reach (install window), (b) `owner_id` + `dealer_code` → only that dealer, (c) an absent
+    doc → unchanged (P0-5). Run `commercialRules.emulator.test.ts` and the pixelMap rules tests,
+    then the rules-diff gate (`scripts/_test_rules_diff.js`), before any deploy — never from `main`.
+  - Files: `firestore.rules` (`staffMayReach`, `isProvisionedUser`, `isStaffSession`),
+    `functions/test/emulator/commercialRules.emulator.test.ts`. Related: **P0-5**, the 2026-09-18
+    stub-doc correction, **#118**.
+
 - [ ] **#79 — SCORE CELEBRATIONS HAVE NEVER FIRED ON HARDWARE FOR ANYONE, and the
   `start_time_passed` skip that hid the Dodgers cycle is invisible**
   - Status: **IN-PROGRESS** on `feat/gameday-unified-monitoring` · Severity: **P1** ·
