@@ -17,11 +17,17 @@ import 'package:nexgen_command/features/ai/lumina_adjustment_panel.dart';
 ///  4. Action buttons: Apply, Adjust, Save as Favorite
 ///  5. Expandable [LuminaAdjustmentPanel] for inline parameter fine-tuning
 ///
-/// When an adjustment session is active, the preview strip and parameter
-/// summary read from [adjustmentStateProvider] for real-time updates.
+/// When an adjustment session is active FOR THIS CARD ([sessionKey]), the
+/// preview strip and parameter summary read from [adjustmentStateProvider]
+/// for real-time updates. Other cards in the thread keep their own values
+/// (+110 E2 row 108: every card used to mirror the adjusting one).
 class LuminaResponseCard extends ConsumerStatefulWidget {
   /// The lighting suggestion to display.
   final LuminaLightingSuggestion suggestion;
+
+  /// Identifies this card's message in the thread, so an adjustment session
+  /// belongs to one card. The surfaces pass the message index.
+  final Object? sessionKey;
 
   /// Called when the user taps "Apply".
   final VoidCallback? onApply;
@@ -35,6 +41,7 @@ class LuminaResponseCard extends ConsumerStatefulWidget {
   const LuminaResponseCard({
     super.key,
     required this.suggestion,
+    this.sessionKey,
     this.onApply,
     this.onAdjust,
     this.onSaveFavorite,
@@ -46,24 +53,30 @@ class LuminaResponseCard extends ConsumerStatefulWidget {
 }
 
 class _LuminaResponseCardState extends ConsumerState<LuminaResponseCard> {
-  /// The active suggestion — reads from adjustment state when active,
-  /// otherwise falls back to the widget's original suggestion.
-  LuminaLightingSuggestion get _s {
+  /// This card's session, or null when the active session is another
+  /// card's (or there is none).
+  AdjustmentState? get _mySession {
     final adj = ref.watch(adjustmentStateProvider);
+    if (adj != null && adj.isFor(widget.sessionKey)) return adj;
+    return null;
+  }
+
+  /// The active suggestion — reads from adjustment state when this card's
+  /// session is open, otherwise falls back to the widget's original
+  /// suggestion.
+  LuminaLightingSuggestion get _s {
+    final adj = _mySession;
     if (adj != null && adj.isExpanded) {
       return adj.currentSuggestion;
     }
     return widget.suggestion;
   }
 
-  bool get _isAdjusting {
-    final adj = ref.watch(adjustmentStateProvider);
-    return adj?.isExpanded ?? false;
-  }
+  bool get _isAdjusting => _mySession?.isExpanded ?? false;
 
   /// The set of user-changed params (for highlight indicators).
   Set<String> get _changedParams {
-    final adj = ref.watch(adjustmentStateProvider);
+    final adj = _mySession;
     if (adj != null && adj.isExpanded) {
       return adj.userChangedParams;
     }
@@ -97,8 +110,8 @@ class _LuminaResponseCardState extends ConsumerState<LuminaResponseCard> {
           // ---- 4. Action buttons ----
           _buildActions(context),
 
-          // ---- 5. Adjustment panel (expands/collapses) ----
-          const LuminaAdjustmentPanel(),
+          // ---- 5. Adjustment panel (expands/collapses) — this card's only.
+          LuminaAdjustmentPanel(sessionKey: widget.sessionKey),
         ],
       ),
     );
@@ -213,8 +226,10 @@ class _LuminaResponseCardState extends ConsumerState<LuminaResponseCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Primary action row
-          Row(
+          // Primary action row — wraps at large text instead of overflowing.
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
             children: [
               if (widget.onApply != null)
                 _CardActionButton(
@@ -223,7 +238,6 @@ class _LuminaResponseCardState extends ConsumerState<LuminaResponseCard> {
                   primary: true,
                   onTap: widget.onApply!,
                 ),
-              const SizedBox(width: 8),
               _CardActionButton(
                 label: _isAdjusting ? 'Done' : 'Adjust',
                 icon: Icons.tune_rounded,
@@ -232,7 +246,8 @@ class _LuminaResponseCardState extends ConsumerState<LuminaResponseCard> {
             ],
           ),
 
-          // Save as favorite link
+          // Save as favorite link (row 106: wired by the surfaces; hidden
+          // when there is nothing to save).
           if (widget.onSaveFavorite != null) ...[
             const SizedBox(height: 6),
             GestureDetector(
@@ -268,12 +283,13 @@ class _LuminaResponseCardState extends ConsumerState<LuminaResponseCard> {
   }
 
   void _toggleAdjust() {
-    final adj = ref.read(adjustmentStateProvider);
+    final adj = _mySession;
     if (adj != null && adj.isExpanded) {
       ref.read(adjustmentStateProvider.notifier).collapse();
     } else {
       ref.read(adjustmentStateProvider.notifier).beginAdjustment(
             widget.suggestion,
+            sessionKey: widget.sessionKey,
           );
     }
     widget.onAdjust?.call();

@@ -38,14 +38,23 @@ class ZoneAdjustmentCard extends ConsumerWidget {
           )),
     ];
 
-    return SizedBox(
-      height: 36,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: chips.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final chip = chips[i];
+    // Content-sized, not a fixed 36-point strip (+110 E2 accessibility).
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < chips.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            _chipWidget(ref, chips[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _chipWidget(WidgetRef ref, _ZoneChipData chip) {
+    {
+      {
           return GestureDetector(
             onTap: () => ref
                 .read(adjustmentStateProvider.notifier)
@@ -77,9 +86,8 @@ class ZoneAdjustmentCard extends ConsumerWidget {
               ),
             ),
           );
-        },
-      ),
-    );
+      }
+    }
   }
 }
 

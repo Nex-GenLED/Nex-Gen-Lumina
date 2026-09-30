@@ -24,37 +24,34 @@ class PaletteAdjustmentCard extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Color swatches
-        Row(
+        // Color swatches, then the colour names — which WRAP rather than
+        // being cut short (+110 E2 accessibility: they were ellipsised at
+        // every text size).
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            ...colors.take(5).map((c) => Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: c,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: NexGenPalette.line.withValues(alpha: 0.6),
-                        width: 0.5,
-                      ),
+            ...colors.take(5).map((c) => Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: NexGenPalette.line.withValues(alpha: 0.6),
+                      width: 0.5,
                     ),
                   ),
                 )),
-            if (palette.colorNames.isNotEmpty) ...[
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  palette.colorNames.join(', '),
-                  style: TextStyle(
-                    color: NexGenPalette.textMedium.withValues(alpha: 0.7),
-                    fontSize: 11,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+            if (palette.colorNames.isNotEmpty)
+              Text(
+                palette.colorNames.join(', '),
+                style: TextStyle(
+                  color: NexGenPalette.textMedium.withValues(alpha: 0.7),
+                  fontSize: 11,
                 ),
               ),
-            ],
           ],
         ),
         const SizedBox(height: 10),

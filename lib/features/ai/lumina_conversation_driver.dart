@@ -10,17 +10,22 @@ import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/lumina_schedule_flags.dart';
+import 'package:nexgen_command/features/ai/lumina_schedule_persistence.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/pattern_label_resolver.dart';
 import 'package:nexgen_command/features/ai/recurring_sports_autopilot_handler.dart';
 import 'package:nexgen_command/features/ai/recurring_sports_autopilot_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
+import 'package:nexgen_command/features/favorites/favorites_providers.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/services/autopilot_scheduler.dart';
-import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 
 // ---------------------------------------------------------------------------
 // Host — what the driver needs from the surface it is running on
@@ -108,8 +113,10 @@ abstract class LuminaConversationServices {
   /// Whether a controller is currently selected.
   bool get hasDevice;
 
-  /// Sends [payload] to the lights. True when the apply went through.
-  Future<bool> applyToDevice(Map<String, dynamic> payload);
+  /// Sends [payload] to the lights and says what happened: success, or the
+  /// reason nothing was sent (no controller, away from home, channels not
+  /// read yet), or a write the controller did not take (+110 E2 row 74).
+  Future<WriteResult> applyToDevice(Map<String, dynamic> payload);
 
   /// Mirrors the applied design's colours and effect into the hero.
   void setPatternMetadata(LuminaPatternPreview preview);
@@ -146,8 +153,16 @@ abstract class LuminaConversationServices {
     VoidCallback? onMessagePosted,
   });
 
-  /// Hands a multi-night plan to the autopilot scheduler.
-  Future<void> importSmartSchedule(Map<String, dynamic> payload);
+  /// Writes the nights of a multi-night plan to the account's calendar and
+  /// says how many landed (+110 E2 item 4).
+  Future<ScheduleNightsOutcome> persistScheduleNights(
+      LuminaScheduleFlags flags);
+
+  /// Saves a reply's design as a favourite (+110 E2 row 106).
+  Future<WriteResult> saveFavorite({
+    required String patternName,
+    required Map<String, dynamic> wledPayload,
+  });
 
   /// Switches the bottom-nav tab.
   void selectTab(int tabIndex);
@@ -189,8 +204,15 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
   bool get hasDevice => ref.read(wledRepositoryProvider) != null;
 
   @override
-  Future<bool> applyToDevice(Map<String, dynamic> payload) =>
-      ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
+  Future<WriteResult> applyToDevice(Map<String, dynamic> payload) {
+    if (ref.read(wledRepositoryProvider) == null) {
+      return Future.value(WriteResult.blocked(
+          applyBlockedReason(ref.read) ?? kApplyBlockedFallback));
+    }
+    return ref
+        .read(wledStateProvider.notifier)
+        .applyToDeviceResult(payload, labelHint: null);
+  }
 
   @override
   void setPatternMetadata(LuminaPatternPreview preview) {
@@ -263,8 +285,98 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
       );
 
   @override
-  Future<void> importSmartSchedule(Map<String, dynamic> payload) =>
-      ref.read(autopilotSchedulerProvider).importSmartSchedule(payload);
+  Future<ScheduleNightsOutcome> persistScheduleNights(
+      LuminaScheduleFlags flags) async {
+    final requested = flags.schedule.length;
+    if (requested <= 1) return ScheduleNightsOutcome.nothingToPersist;
+    if (currentUserId == null) {
+      return ScheduleNightsOutcome(
+        requested: requested,
+        persisted: 0,
+        message: 'sign in to save nights to your Schedule.',
+      );
+    }
+    final profile = ref.read(currentUserProfileProvider).valueOrNull;
+    final nights = plannedNightsOf(
+      flags,
+      latitude: profile?.latitude,
+      longitude: profile?.longitude,
+    );
+    final batchId = DateTime.now().millisecondsSinceEpoch.toString();
+    final entries = <CalendarEntry>[];
+    var noClock = 0;
+    for (final n in nights) {
+      final e = calendarEntryForNight(n, batchId: batchId);
+      if (e == null) {
+        noClock++;
+      } else {
+        entries.add(e);
+      }
+    }
+    if (entries.isEmpty) {
+      return ScheduleNightsOutcome(
+        requested: requested,
+        persisted: 0,
+        message: noClock > 0
+            ? "I couldn't tell what time each night should start. Tell me a "
+                'time like "7pm" or "sunset".'
+            : 'the plan had no dates I could use.',
+      );
+    }
+    try {
+      final ok = await ref
+          .read(calendarScheduleProvider.notifier)
+          .applyEntries(entries);
+      if (!ok) {
+        return ScheduleNightsOutcome(
+          requested: requested,
+          persisted: 0,
+          message: "the Schedule didn't accept them. Check your connection "
+              'and try again.',
+        );
+      }
+      return ScheduleNightsOutcome(
+        requested: requested,
+        persisted: entries.length,
+        message: noClock > 0
+            ? '$noClock ${noClock == 1 ? 'night' : 'nights'} had no usable '
+                'time.'
+            : null,
+      );
+    } catch (e) {
+      debugPrint('persistScheduleNights failed: $e');
+      return ScheduleNightsOutcome(
+        requested: requested,
+        persisted: 0,
+        message: "the Schedule didn't accept them. Try again in a moment.",
+      );
+    }
+  }
+
+  @override
+  Future<WriteResult> saveFavorite({
+    required String patternName,
+    required Map<String, dynamic> wledPayload,
+  }) async {
+    if (currentUserId == null) {
+      return const WriteResult.blocked('Sign in to save favourites.');
+    }
+    try {
+      await ref.read(favoritesNotifierProvider.notifier).addToFavorites(
+            patternId: luminaFavoriteId(wledPayload),
+            patternName: patternName,
+            wledPayload: wledPayload,
+          );
+      return WriteResult.success(message: 'Saved "$patternName" to Favorites');
+    } catch (e) {
+      debugPrint('Lumina saveFavorite failed: $e');
+      return WriteResult.failed(
+        WriteFailureKind.error,
+        message: "Couldn't save that to Favorites. Try again in a moment.",
+        error: e,
+      );
+    }
+  }
 
   @override
   void selectTab(int tabIndex) {
@@ -336,7 +448,8 @@ enum LuminaResultBranch {
 /// Owns the send routine and every branch a reply can take: navigation, the
 /// multi-night schedule, the ephemeral game session, recurring sports
 /// autopilot, recurring scheduling intents and the plain single-pattern
-/// apply — plus the bubble-tap apply. The surfaces keep only their widgets.
+/// apply — plus the bubble-tap apply and the favourite save. The surfaces
+/// keep only their widgets.
 ///
 /// Holds no state of its own. [host] carries the surface-specific callbacks;
 /// [services] carries everything Riverpod-owned.
@@ -375,7 +488,8 @@ class LuminaConversationDriver {
       if (branch != LuminaResultBranch.apply) return;
     } catch (e) {
       debugPrint('Lumina ${host.surface.name} send error: $e');
-      thread.addAssistantMessage('I hit a snag: $e');
+      thread.addAssistantMessage(
+          "I hit a snag and couldn't finish that. Try again in a moment.");
     }
 
     host.scrollToEnd();
@@ -397,14 +511,10 @@ class LuminaConversationDriver {
     }
 
     // ── Schedule detection ────────────────────────────────────────────────
-    // When the AI returns a multi-day schedule plan, we apply night 1 as a
-    // live preview and route the full plan to the scheduling system.
-    //
-    // UX audit row 7: the schedule branch — single edit point. Reads the
-    // flags from result.scheduleFlags (they no longer ride in wledPayload,
-    // where the parser dropped them). Flags with NO plan attached — the cloud
-    // `season_fill` shape — still fall through to the plain apply below, as
-    // they always have; nothing in the app fans a season out yet.
+    // A multi-night plan: night 1 goes on the lights now, every night goes
+    // to the calendar, and the reply says what actually happened (row 7 /
+    // item 4). Flags with NO plan attached — the cloud `season_fill` shape —
+    // still fall through to the plain apply below, as they always have.
     final scheduleFlags = result.scheduleFlags;
     if (scheduleFlags != null &&
         scheduleFlags.isSchedule &&
@@ -427,10 +537,6 @@ class LuminaConversationDriver {
     }
 
     // ── Recurring sports autopilot (every game / all season) ──────────────
-    // A COMPACT rule (team slug + optional untilDate) — NOT enumerated game
-    // dates. Routes to the existing Game Day Autopilot enable path, which
-    // idempotently enables/updates ONE config per team and materializes only
-    // the rolling 7-day window into ≤8 WLED timers via the lease manager.
     final recurringSports = result.recurringSportsAutopilotIntent;
     if (recurringSports != null && recurringSports.isValid) {
       await services.dispatchRecurringSportsAutopilot(
@@ -442,13 +548,6 @@ class LuminaConversationDriver {
     }
 
     // ── Scheduling intents (recurring weekly/daily, 1 or N) ───────────────
-    // The cloud parser canonicalizes both schema shapes (singular
-    // schedulingIntent, array schedulingIntents) into one typed
-    // List<SchedulingIntent> carried on result.schedulingIntents — read here
-    // INDEPENDENT of wledPayload so the intents survive a null/absent
-    // top-level wled (#58b). The shared handler iterates the list, builds N
-    // ScheduleItems with a shared sourcePromptId, and persists atomically via
-    // addAll.
     final intents = result.schedulingIntents ?? const <SchedulingIntent>[];
     if (intents.isNotEmpty) {
       await services.dispatchSchedulingIntents(
@@ -463,18 +562,29 @@ class LuminaConversationDriver {
     // ── Normal single-pattern apply ───────────────────────────────────────
     final preview = _previewFor(result);
     if (result.wledPayload != null) {
-      await _applyDesign(
+      final outcome = await _applyDesign(
         result.wledPayload!,
         preview: preview,
         fallbackName: result.command?.parameters['patternName'],
         prompt: prompt,
         logLabel: 'Apply from Lumina ${host.surface.name}',
+        touchesLabel: !_isPowerOrBrightness(result),
       );
+
+      // UX audit row 74: a completion-toned reply ("Turning your lights
+      // off.") is never posted for a command that went nowhere. The reply
+      // is the failure sentence, with the shared reason when the command
+      // was blocked before it was sent.
+      if (!outcome.ok) {
+        thread.addAssistantMessage(
+          failureReplyFor(result, outcome),
+          preview: preview,
+          wledPayload: result.wledPayload,
+        );
+        return LuminaResultBranch.apply;
+      }
     }
 
-    // UX audit row 74: reply is posted regardless of apply result — single
-    // edit point. _applyDesign above returns false when no device is
-    // selected, the apply is refused, or it throws; nothing here reads it.
     thread.addAssistantMessage(
       result.responseText,
       preview: preview,
@@ -493,6 +603,26 @@ class LuminaConversationDriver {
     return LuminaResultBranch.apply;
   }
 
+  static bool _isPowerOrBrightness(LuminaCommandResult result) {
+    final t = result.command?.type;
+    return t == LuminaCommandType.power || t == LuminaCommandType.brightness;
+  }
+
+  /// The reply for a command that did not reach the lights. Pure.
+  @visibleForTesting
+  static String failureReplyFor(LuminaCommandResult result, WriteResult outcome) {
+    final reason = outcome.message ?? kApplyBlockedFallback;
+    final what = switch (result.command?.type) {
+      LuminaCommandType.power => result.command!.parameters['on'] == true
+          ? 'turn your lights on'
+          : 'turn your lights off',
+      LuminaCommandType.brightness => 'change the brightness',
+      LuminaCommandType.solidColor => 'change the colour',
+      _ => 'apply that',
+    };
+    return "I couldn't $what — $reason";
+  }
+
   // -------------------------------------------------------------------------
   // Apply pattern from bubble
   // -------------------------------------------------------------------------
@@ -502,7 +632,7 @@ class LuminaConversationDriver {
     LuminaPatternPreview? preview, {
     String? originalPrompt,
   }) async {
-    await _applyDesign(
+    final outcome = await _applyDesign(
       wled,
       preview: preview,
       fallbackName: wled['patternName'],
@@ -510,6 +640,33 @@ class LuminaConversationDriver {
       logLabel: 'Apply from ${host.surface.name}',
       announce: true,
     );
+    if (!outcome.ok && host.isMounted()) {
+      host.showSnackBar(outcome.message ?? kApplyBlockedFallback);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Save as favourite (row 106)
+  // -------------------------------------------------------------------------
+
+  /// Saves the design behind a reply card as a favourite and says so.
+  Future<WriteResult> saveFavorite(
+    Map<String, dynamic> wled,
+    LuminaPatternPreview? preview, {
+    String? originalPrompt,
+  }) async {
+    final name = preview?.patternName ??
+        resolveLuminaDisplayName(wled['patternName'] as String?, originalPrompt) ??
+        'Lumina design';
+    final result = await services.saveFavorite(
+      patternName: name,
+      wledPayload: favoritePayloadOf(wled),
+    );
+    if (host.isMounted()) {
+      host.showSnackBar(result.message ??
+          (result.ok ? 'Saved to Favorites' : "Couldn't save to Favorites"));
+    }
+    return result;
   }
 
   // -------------------------------------------------------------------------
@@ -538,14 +695,14 @@ class LuminaConversationDriver {
     thread.addAssistantMessage(result.responseText);
   }
 
-  /// Handles a smart schedule result from the AI.
+  /// Handles a smart schedule result from the AI (+110 E2 item 4).
   ///
-  /// 1. Applies the FIRST occurrence as a live preview so the user
-  ///    immediately sees something on their lights.
-  /// 2. Routes the full schedule to [AutopilotScheduler.importSmartSchedule].
-  ///    Night 1 is already applied — the scheduler marks it approved and
-  ///    queues/suggests nights 2+ based on the user's autonomy level.
-  /// 3. Posts the conversational response card to the chat thread.
+  /// 1. Applies the FIRST occurrence now, and records whether it landed.
+  /// 2. Persists every night of the plan to the calendar
+  ///    ([LuminaConversationServices.persistScheduleNights]).
+  /// 3. Posts a reply composed from those two outcomes — never the plan's
+  ///    own "I've scheduled N nights" prose, which was posted whatever
+  ///    happened.
   Future<void> _handleScheduleResult(
     LuminaCommandResult result,
     LuminaScheduleFlags flags,
@@ -554,50 +711,76 @@ class LuminaConversationDriver {
     debugPrint(
         '📅 Smart schedule: ${flags.dayCount} days, hasVariety=${flags.hasVariety}');
 
-    // Step 1 — Apply night 1 as immediate live preview
+    // Step 1 — tonight, now.
     final firstWled = flags.firstNightWled;
-    if (firstWled != null && services.hasDevice) {
+    WriteResult? applied;
+    if (firstWled != null) {
       try {
-        await services.applyToDevice(firstWled);
-        debugPrint('📅 Night 1 preview applied to lights');
+        applied = await services.applyToDevice(firstWled);
       } catch (e) {
-        debugPrint('📅 Night 1 preview apply failed: $e');
+        debugPrint('📅 Night 1 apply threw: $e');
+        applied = WriteResult.failed(
+          WriteFailureKind.error,
+          message: "Couldn't reach your lights — check your connection",
+          error: e,
+        );
       }
+      debugPrint('📅 Night 1 apply: $applied');
     }
 
-    // Step 2 — Hand full plan off to AutopilotScheduler.
-    // Night 1 is already applied above; the scheduler marks it approved so
-    // the check loop never re-fires it. Nights 2+ are queued as suggestions
-    // (autonomy level 1) or auto-scheduled (autonomy level 2).
+    // Step 2 — every night to the calendar.
+    ScheduleNightsOutcome outcome;
     try {
-      await services.importSmartSchedule(flags.toImportPayload());
-      debugPrint(
-          '📅 Imported ${flags.dayCount}-night schedule into AutopilotScheduler');
+      outcome = await services.persistScheduleNights(flags);
     } catch (e) {
-      debugPrint('📅 Schedule import failed: $e');
+      debugPrint('📅 Schedule persistence failed: $e');
+      outcome = ScheduleNightsOutcome(
+        requested: flags.schedule.length,
+        persisted: 0,
+        message: "the Schedule didn't accept them.",
+      );
     }
 
-    // Step 3 — Build preview strip from night 1 colors for the response card
+    // Step 3 — preview strip from night 1 colors for the response card
     LuminaPatternPreview? preview;
     if (firstWled != null) preview = extractLuminaPreview(firstWled);
     preview ??= result.previewColors.isNotEmpty
         ? LuminaPatternPreview(colors: result.previewColors)
         : null;
 
-    // Set the preset label to the full schedule name
+    // The Now Playing label names the plan only when tonight actually landed.
     final scheduleLabel = flags.patternName;
-    if (scheduleLabel != null && host.isMounted()) {
+    if (applied != null && applied.ok && scheduleLabel != null && host.isMounted()) {
       services.setActiveLabel(scheduleLabel);
     }
 
-    // Step 4 — Post response card to chat thread
+    // Step 4 — the honest reply.
+    final nights = plannedNightsOf(flags);
+    final themeName = (flags.raw['themeName'] as String?) ??
+        _themeNameFromPatternName(flags.patternName) ??
+        'this';
+    final reply = composeScheduleReply(
+      themeName: themeName,
+      appliedOk: applied?.ok,
+      applyMessage: applied == null || applied.ok ? null : applied.message,
+      nights: nights,
+      outcome: outcome,
+    );
     thread.addAssistantMessage(
-      result.responseText,
+      reply,
       preview: preview,
       wledPayload: result.wledPayload,
     );
 
     host.scrollToEnd();
+  }
+
+  /// "Christmas — 7-Night Schedule" → "Christmas".
+  static String? _themeNameFromPatternName(String? patternName) {
+    if (patternName == null) return null;
+    final dash = patternName.indexOf(' — ');
+    final name = dash < 0 ? patternName : patternName.substring(0, dash);
+    return name.trim().isEmpty ? null : name.trim();
   }
 
   /// Item #51 Prompt 3 — applies the immediate WLED design then dispatches
@@ -614,9 +797,10 @@ class LuminaConversationDriver {
     //    existing single-pattern apply so the user gets the design they
     //    asked for regardless of the dispatch outcome.
     LuminaPatternPreview? preview;
+    WriteResult? applied;
     if (result.wledPayload != null) {
       preview = extractLuminaPreview(result.wledPayload!);
-      await _applyDesign(
+      applied = await _applyDesign(
         result.wledPayload!,
         preview: preview,
         fallbackName: result.command?.parameters['patternName'],
@@ -626,25 +810,32 @@ class LuminaConversationDriver {
     }
 
     // 2. Dispatch the ephemeral session intent.
-    String? augmentation;
+    String augmentation;
     final userId = services.currentUserId;
     if (userId == null) {
       debugPrint(
           '[Lumina ${host.surface.name}] ephemeral session — no authenticated user; skipping dispatch');
+      // Row 109: say it, rather than posting the AI's "armed" prose.
+      augmentation =
+          "I couldn't set the post-game revert — sign in and ask me again.";
     } else {
       final dispatchResult =
           await services.dispatchEphemeralSession(intent, userId);
-      augmentation =
-          buildEphemeralAugmentation(dispatchResult, surface: host.surface);
+      augmentation = buildEphemeralAugmentation(
+        dispatchResult,
+        surface: host.surface,
+        applied: applied?.ok,
+        applyMessage: applied == null || applied.ok ? null : applied.message,
+      );
     }
 
-    // UX audit row 109: a null augmentation means no revert session was armed
-    // (signed out, or the dispatch failed) and the AI's prose goes out
-    // unchanged — single edit point.
+    // Row 74 for this branch: when the colours never reached the lights,
+    // the reply leads with that rather than the AI's completion prose.
     var responseText = result.responseText;
-    if (augmentation != null) {
-      responseText = '$responseText\n\n$augmentation';
+    if (applied != null && !applied.ok) {
+      responseText = failureReplyFor(result, applied);
     }
+    responseText = '$responseText\n\n$augmentation';
 
     if (!host.isMounted()) return;
     thread.addAssistantMessage(
@@ -659,56 +850,67 @@ class LuminaConversationDriver {
   // -------------------------------------------------------------------------
 
   /// Sends [payload] to the lights and, when that lands, records what is now
-  /// playing. Returns true only when the design reached the lights and the
-  /// surface was still there to record it; false when no device is selected,
-  /// the apply is refused, or it throws.
+  /// playing. The result says why when it did not land: nothing sent (no
+  /// controller, away from home, channels not read yet — the shared reason),
+  /// the controller refused it, or the surface was gone before it landed.
   ///
   /// [fallbackName] is the pattern name to fall back on when [preview] has
   /// none. [announce] confirms a successful apply with a snackbar.
-  Future<bool> _applyDesign(
+  /// [touchesLabel] — false for a power or brightness command, which is not
+  /// a design and must leave Now Playing alone (row 112).
+  Future<WriteResult> _applyDesign(
     Map<String, dynamic> payload, {
     required LuminaPatternPreview? preview,
     required Object? fallbackName,
     required String? prompt,
     required String logLabel,
     bool announce = false,
+    bool touchesLabel = true,
   }) async {
-    if (!services.hasDevice) return false;
-
     try {
-      final ok = await services.applyToDevice(payload);
-      if (!ok || !host.isMounted()) return false;
-
-      if (preview != null) {
-        services.setPatternMetadata(preview);
+      final result = await services.applyToDevice(payload);
+      if (!result.ok) return result;
+      if (!host.isMounted()) {
+        return const WriteResult.failed(WriteFailureKind.error,
+            message: 'The screen closed before the lights answered.');
       }
-      // UX audit row 112 (label half): a power / brightness reply lands here
-      // with the manufactured preview and no pattern name, so the label is
-      // synthesized from the prompt words. See extractLuminaPreview.
-      final aiName = preview?.patternName ?? fallbackName as String?;
-      final label = resolveLuminaDisplayName(aiName, prompt);
-      if (label != null) {
-        services.setActiveLabel(label);
-      } else {
-        services.clearActiveLabel();
+
+      if (touchesLabel) {
+        if (preview != null) {
+          services.setPatternMetadata(preview);
+        }
+        final aiName = preview?.patternName ?? fallbackName as String?;
+        final label = resolveLuminaDisplayName(aiName, prompt);
+        if (label != null) {
+          services.setActiveLabel(label);
+        } else {
+          services.clearActiveLabel();
+        }
       }
       if (announce) {
         host.showSnackBar('${services.displayPatternName} applied!');
       }
-      return true;
+      return result;
     } catch (e) {
       debugPrint('$logLabel failed: $e');
-      return false;
+      return WriteResult.failed(
+        WriteFailureKind.error,
+        message: "Couldn't reach your lights — check your connection",
+        error: e,
+      );
     }
   }
 
   /// The preview card for [result]: extracted from the payload when there is
-  /// one, otherwise built from the bare preview colors.
+  /// one, otherwise built from the bare preview colors. Null when the reply
+  /// carries no colours at all (a power or brightness command): no card, no
+  /// manufactured swatches (row 112).
   LuminaPatternPreview? _previewFor(LuminaCommandResult result) {
     if (result.wledPayload != null) {
-      return extractLuminaPreview(result.wledPayload!);
-    } else if (result.previewColors.isNotEmpty) {
-      // Build a preview from colors even without full WLED payload
+      final p = extractLuminaPreview(result.wledPayload!);
+      if (p != null) return p;
+    }
+    if (result.previewColors.isNotEmpty) {
       return LuminaPatternPreview(colors: result.previewColors);
     }
     return null;
@@ -716,33 +918,88 @@ class LuminaConversationDriver {
 }
 
 // ---------------------------------------------------------------------------
+// Favourite payload
+// ---------------------------------------------------------------------------
+
+/// The WLED state a favourite stores: the payload's device keys only, so the
+/// Lumina display metadata (`patternName`, `colors`, `effect`…) never rides
+/// to the controller.
+Map<String, dynamic> favoritePayloadOf(Map<String, dynamic> lumina) {
+  const deviceKeys = {'on', 'bri', 'seg', 'transition', 'tt', 'ps', 'pl'};
+  final wled = lumina['wled'];
+  final source = wled is Map ? Map<String, dynamic>.from(wled) : lumina;
+  return {
+    for (final e in source.entries)
+      if (deviceKeys.contains(e.key)) e.key: e.value,
+  };
+}
+
+/// A stable favourite id for a Lumina design: the same design saved twice
+/// updates one favourite rather than adding a second.
+String luminaFavoriteId(Map<String, dynamic> wled) {
+  final seg = wled['seg'];
+  final first = seg is List && seg.isNotEmpty && seg.first is Map
+      ? seg.first as Map
+      : const {};
+  final fx = first['fx'];
+  final col = first['col'];
+  final fingerprint = '$fx|$col|${first['sx']}|${first['ix']}|${first['pal']}';
+  return 'lumina_${fingerprint.hashCode.toUnsigned(32).toRadixString(16)}';
+}
+
+// ---------------------------------------------------------------------------
 // Ephemeral session confirmation
 // ---------------------------------------------------------------------------
 
-/// Builds the chat confirmation suffix appended to the AI's response
-/// text after an ephemeral session dispatch. Returns null when there's
-/// nothing to add (hard error or empty result).
-String? buildEphemeralAugmentation(
+/// Builds the chat confirmation suffix appended to the AI's response text
+/// after an ephemeral session dispatch.
+///
+/// [applied] is whether the team colours reached the lights (null when there
+/// was nothing to apply); [applyMessage] is why not. Row 105: the "I've
+/// applied the colors anyway" sentence is composed from BOTH the schedule
+/// lookup and the apply outcome. Row 109: a failed dispatch says the revert
+/// was not set, instead of leaving the AI's "armed" prose standing.
+String buildEphemeralAugmentation(
   DispatchResult dispatchResult, {
   required LuminaSurface surface,
+  bool? applied,
+  String? applyMessage,
 }) {
-  if (dispatchResult.noGameFoundMessage != null) {
-    // UX audit row 105: this sentence says the colors were applied, but it is
-    // composed from the schedule lookup alone — the apply outcome
-    // (_applyDesign, in _handleEphemeralSession) never reaches it — single
-    // edit point.
-    return dispatchResult.noGameFoundMessage;
+  final colorsSentence = applied == null
+      ? null
+      : applied
+          ? "I've applied the colors anyway."
+          : "I couldn't apply the colors"
+              '${applyMessage == null ? '.' : ' — $applyMessage'}';
+
+  final noGame = dispatchResult.noGameFoundMessage;
+  if (noGame != null) {
+    // The dispatcher's sentence already claims the colours were applied;
+    // replace that clause with what actually happened.
+    var text = noGame
+        .replaceAll(", but I've applied the colors anyway.", '.')
+        .replaceAll(", but I've applied the colors anyway", '.');
+    if (colorsSentence != null) text = '$text $colorsSentence';
+    return text;
   }
-  if (dispatchResult.createdSessionIds.isEmpty) {
+  if (!dispatchResult.success || dispatchResult.createdSessionIds.isEmpty) {
     debugPrint(
-        '[Lumina ${surface.name}] ephemeral dispatch returned no sessions and no message: ${dispatchResult.errorMessage}');
-    return null;
+        '[Lumina ${surface.name}] ephemeral dispatch failed: ${dispatchResult.errorMessage}');
+    final team = dispatchResult.teamDisplayName;
+    final revert = "I couldn't set the post-game revert"
+        '${team == null ? '' : ' for the $team game'}'
+        ' — your lights will stay on this look after the game.';
+    return colorsSentence == null || applied == true
+        ? revert
+        : '$colorsSentence $revert';
   }
   final labels = dispatchResult.sessionLabels;
-  if (labels.length == 1) {
-    return '✓ Will revert to ${dispatchResult.revertLabel} when ${labels.first} ends.';
-  }
-  return '✓ Will revert to ${dispatchResult.revertLabel} after each game ends: ${labels.join(', ')}.';
+  final armed = labels.length == 1
+      ? '✓ Will revert to ${dispatchResult.revertLabel} when ${labels.first} ends.'
+      : '✓ Will revert to ${dispatchResult.revertLabel} after each game ends: ${labels.join(', ')}.';
+  return applied == false && colorsSentence != null
+      ? '$colorsSentence $armed'
+      : armed;
 }
 
 // ---------------------------------------------------------------------------
@@ -809,7 +1066,9 @@ bool isLuminaShellRoute(String route) =>
 
 /// Builds the response-card preview for a Lumina payload. Reads the rich
 /// `colors` / `effect` metadata first and falls back to the first WLED
-/// segment. Returns null only when the payload cannot be read at all.
+/// segment. Returns null when the payload cannot be read at all — and, from
+/// +110 (row 112), when it carries NO colours: a power or brightness command
+/// gets no manufactured swatches and no lighting card.
 LuminaPatternPreview? extractLuminaPreview(Map<String, dynamic> payload) {
   try {
     String? patternName = payload['patternName'] as String?;
@@ -886,12 +1145,10 @@ LuminaPatternPreview? extractLuminaPreview(Map<String, dynamic> payload) {
       }
     }
 
-    // UX audit row 112: the preview is manufactured (fallback swatches) when
-    // the payload has no colors — single edit point. The label half of the
-    // row keys off this same preview in _applyDesign.
-    if (colors.isEmpty) {
-      colors = const [NexGenPalette.cyan, Color(0xFF102040)];
-    }
+    // Row 112: no colours → no preview. The card and the hero read colours
+    // from here, so a "turn on" reply no longer paints cyan-and-navy
+    // swatches into either.
+    if (colors.isEmpty) return null;
 
     return LuminaPatternPreview(
       patternName: patternName,

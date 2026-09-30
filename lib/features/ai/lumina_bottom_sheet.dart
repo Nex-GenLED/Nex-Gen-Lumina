@@ -9,7 +9,9 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/ai/lumina_conversation_actions.dart';
 import 'package:nexgen_command/features/ai/lumina_conversation_driver.dart';
+import 'package:nexgen_command/features/ai/mic_availability.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_waveform_painter.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
@@ -447,7 +449,9 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       );
 
       if (!_speechAvailable) {
+        // UX audit row 113: say so. This used to be a debug line only.
         debugPrint('Speech recognition not available');
+        await _reportMicUnavailable();
         return;
       }
 
@@ -492,6 +496,26 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
       debugPrint('Lumina STT init failed: $e');
       if (mounted) _stopListening();
     }
+  }
+
+  Future<void> _reportMicUnavailable() async {
+    bool permitted = false;
+    try {
+      permitted = await _speech.hasPermission;
+    } catch (_) {}
+    if (!mounted) return;
+    // The sheet was opened in listening mode: fall back to the typing
+    // surface so the customer is not left on a dead mic screen.
+    if (ref.read(luminaSheetProvider).mode == LuminaSheetMode.listening) {
+      ref.read(luminaSheetProvider.notifier).setMode(LuminaSheetMode.compact);
+    }
+    showMicUnavailableSnackBar(
+      context,
+      classifyMicFailure(
+        hasPermission: permitted,
+        lastError: _speech.lastError?.errorMsg,
+      ),
+    );
   }
 
   void _stopListening({bool submit = false}) {
@@ -709,9 +733,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                   icon: const Icon(Icons.delete_outline_rounded, size: 20),
                   color: _kFrost.withValues(alpha: 0.5),
                   tooltip: 'Clear session',
-                  onPressed: () {
-                    ref.read(luminaSheetProvider.notifier).clearSession();
-                  },
+                  onPressed: () => clearLuminaConversation(ref),
                 ),
               ],
             ],
@@ -936,7 +958,7 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                 color: _kFrost.withValues(alpha: 0.5),
                 tooltip: 'Clear conversation',
                 onPressed: () {
-                  ref.read(luminaSheetProvider.notifier).clearSession();
+                  clearLuminaConversation(ref);
                   ref
                       .read(luminaSheetProvider.notifier)
                       .setMode(LuminaSheetMode.compact);
@@ -973,8 +995,17 @@ class _LuminaSheetBodyState extends ConsumerState<_LuminaSheetBody>
                     text: msg.text,
                     preview: msg.preview,
                     wledPayload: msg.wledPayload,
+                    sessionKey: i,
                     onApply: msg.wledPayload != null
                         ? () => _applyPattern(
+                              msg.wledPayload!,
+                              msg.preview,
+                              originalPrompt:
+                                  priorLuminaUserPrompt(sheetState.messages, i),
+                            )
+                        : null,
+                    onSaveFavorite: msg.wledPayload != null
+                        ? () => _driver.saveFavorite(
                               msg.wledPayload!,
                               msg.preview,
                               originalPrompt:
@@ -1182,13 +1213,17 @@ class _AssistantBubble extends StatelessWidget {
   final String text;
   final LuminaPatternPreview? preview;
   final Map<String, dynamic>? wledPayload;
+  final Object? sessionKey;
   final VoidCallback? onApply;
+  final VoidCallback? onSaveFavorite;
 
   const _AssistantBubble({
     required this.text,
     this.preview,
     this.wledPayload,
+    this.sessionKey,
     this.onApply,
+    this.onSaveFavorite,
   });
 
   @override
@@ -1235,15 +1270,11 @@ class _AssistantBubble extends StatelessWidget {
 
     return LuminaResponseCard(
       suggestion: suggestion,
+      sessionKey: sessionKey,
       onApply: onApply,
-      onAdjust: () {
-        // Placeholder for expanding inline adjustment panel
-      },
-      onSaveFavorite: wledPayload != null
-          ? () {
-              // Placeholder for save-as-favorite flow
-            }
-          : null,
+      onAdjust: () {},
+      // Row 106: wired to the favourites save through the shared driver.
+      onSaveFavorite: onSaveFavorite,
     );
   }
 

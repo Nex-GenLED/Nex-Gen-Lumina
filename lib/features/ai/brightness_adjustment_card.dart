@@ -5,6 +5,9 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
 
 /// Brightness slider + quick-preset chips for the adjustment panel.
+///
+/// +110 E2 accessibility: the percentage label sizes to its text (it was a
+/// fixed 38-point box that overflowed at 1.75x) and the preset chips wrap.
 class BrightnessAdjustmentCard extends ConsumerWidget {
   const BrightnessAdjustmentCard({super.key});
 
@@ -50,8 +53,8 @@ class BrightnessAdjustmentCard extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 4),
-            SizedBox(
-              width: 38,
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 38),
               child: Text(
                 '$pct%',
                 textAlign: TextAlign.right,
@@ -66,19 +69,18 @@ class BrightnessAdjustmentCard extends ConsumerWidget {
         ),
         const SizedBox(height: 6),
         // Quick preset chips
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
           children: _presets.map((preset) {
             final label = '${(preset * 100).round()}%';
             final isActive = (brightness - preset).abs() < 0.03;
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: _QuickChip(
-                label: label,
-                isActive: isActive,
-                onTap: () => ref
-                    .read(adjustmentStateProvider.notifier)
-                    .updateBrightness(preset),
-              ),
+            return _QuickChip(
+              label: label,
+              isActive: isActive,
+              onTap: () => ref
+                  .read(adjustmentStateProvider.notifier)
+                  .updateBrightness(preset),
             );
           }).toList(),
         ),

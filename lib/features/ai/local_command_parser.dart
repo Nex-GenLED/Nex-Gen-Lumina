@@ -57,6 +57,12 @@ class LocalCommandParser {
     'peach': Color(0xFFFFDAB9),
   };
 
+  /// Every colour word the parser knows, split into single words, so another
+  /// tier can say "I understood red" (+110 E2 item 3e).
+  static final Set<String> knownColorWords = {
+    for (final name in _colorMap.keys) ...name.split(' '),
+  };
+
   // ---------------------------------------------------------------------------
   // Navigation keyword → route / tab mapping
   // ---------------------------------------------------------------------------
