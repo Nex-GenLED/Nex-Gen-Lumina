@@ -30,7 +30,8 @@ import 'package:nexgen_command/shared/write_result.dart';
 // ---------------------------------------------------------------------------
 
 class _Phrase {
-  const _Phrase(this.text, {required this.team, required this.motion});
+  const _Phrase(this.text,
+      {required this.team, required this.motion, this.solid = false});
   final String text;
 
   /// The `UnifiedTeamEntry.id` the phrase must resolve to.
@@ -38,6 +39,11 @@ class _Phrase {
 
   /// Whether the phrase asks for motion.
   final bool motion;
+
+  /// D5 — whether the phrase must come back Solid (fx 0): a negated motion
+  /// word, "static"/"still", or a bare "TEAM colors". A phrase that is
+  /// neither [motion] nor [solid] keeps the team's own default effect.
+  final bool solid;
 }
 
 const _phrases = <_Phrase>[
@@ -75,6 +81,29 @@ const _phrases = <_Phrase>[
   _Phrase('sporting kc design with motion', team: 'sporting_kc', motion: true),
   _Phrase('yankees design with motion', team: 'yankees', motion: true),
   _Phrase('New York Yankees design right now', team: 'yankees', motion: false),
+  // D5 — the review's item 4 table, with the decided results.
+  _Phrase('chiefs colors', team: 'chiefs', motion: false, solid: true),
+  _Phrase('chiefs design, no motion', team: 'chiefs', motion: false, solid: true),
+  _Phrase('chiefs design without motion',
+      team: 'chiefs', motion: false, solid: true),
+  _Phrase('chiefs, not moving', team: 'chiefs', motion: false, solid: true),
+  _Phrase('chiefs static', team: 'chiefs', motion: false, solid: true),
+  // D5 — the new negations.
+  _Phrase('chiefs design, no movement',
+      team: 'chiefs', motion: false, solid: true),
+  _Phrase("chiefs design, don't move", team: 'chiefs', motion: false, solid: true),
+  _Phrase('chiefs colors, still', team: 'chiefs', motion: false, solid: true),
+  _Phrase('keep the chiefs colors still',
+      team: 'chiefs', motion: false, solid: true),
+  _Phrase('give me the chiefs, no animation',
+      team: 'chiefs', motion: false, solid: true),
+  _Phrase('chiefs colours', team: 'chiefs', motion: false, solid: true),
+  _Phrase('royals colors', team: 'royals', motion: false, solid: true),
+  _Phrase('lakers colors, no motion', team: 'lakers', motion: false, solid: true),
+  // D5 — a motion word with "colors" is still motion; "design"/"look" with no
+  // motion word keeps the default.
+  _Phrase('chiefs colors with motion', team: 'chiefs', motion: true),
+  _Phrase('chiefs look', team: 'chiefs', motion: false),
 ];
 
 /// Phrases that must NOT be taken for a team request.
@@ -250,11 +279,49 @@ void main() {
         if (p.motion) {
           expect(seg['fx'], isNot(0), reason: 'motion was asked for');
           expect((wled['effect'] as Map)['isStatic'], isFalse);
+        } else if (p.solid) {
+          // D5 — a negated motion word, "static"/"still", or a bare
+          // "<team> colors" is Solid.
+          expect(seg['fx'], 0, reason: 'no motion was asked for');
+          expect((wled['effect'] as Map)['isStatic'], isTrue);
+        } else {
+          // "<team> design" / "<team> look" keep the team's own default
+          // (Theater Chase for most teams) — the decided behaviour.
+          expect(seg['fx'], team.suggestedEffects.first,
+              reason: 'no motion word: the team default stands');
         }
         // No manufactured swatches: the colours ARE the payload's.
         expect(result.previewColors.length, team.colors.length);
       });
     }
+
+    group('D5 — motion words and their negations', () {
+      test('a negated motion word is not a motion ask', () {
+        expect(LuminaBrain.wantsMotion('chiefs design, no motion'), isFalse);
+        expect(LuminaBrain.asksStatic('chiefs design, no motion'), isTrue);
+        expect(LuminaBrain.wantsMotion('chiefs design with motion'), isTrue);
+        expect(LuminaBrain.asksStatic('chiefs design with motion'), isFalse);
+        for (final s in const [
+          'chiefs without motion',
+          'chiefs, not moving',
+          'chiefs design, no movement',
+          "chiefs, don't move",
+          'chiefs static',
+          'chiefs colors, still',
+        ]) {
+          expect(LuminaBrain.asksStatic(s), isTrue, reason: s);
+          expect(LuminaBrain.wantsMotion(s), isFalse, reason: s);
+        }
+      });
+
+      test('"colors" alone is Solid; "colors, make it move" is not', () {
+        expect(LuminaBrain.asksColorsOnly('chiefs colors'), isTrue);
+        expect(LuminaBrain.asksColorsOnly('royals colours'), isTrue);
+        expect(LuminaBrain.asksColorsOnly('chiefs colors, make it move'), isFalse);
+        expect(LuminaBrain.asksColorsOnly('chiefs colors with motion'), isFalse);
+        expect(LuminaBrain.asksColorsOnly('chiefs design'), isFalse);
+      });
+    });
 
     test('a static ask keeps the team\'s own first suggestion', () {
       final r = LuminaBrain.composeTeamResponse('chiefs design')!;
