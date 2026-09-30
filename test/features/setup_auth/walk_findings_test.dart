@@ -1,5 +1,7 @@
 // +110 package G — the three findings from the first-time-customer walk:
-//   1. a self-signup customer could not add a controller;
+//   1. Bluetooth setup's refusal. Lumina is professionally installed, so a
+//      self-signup account adding its own controller stays refused; only
+//      the family-member message was made clearer;
 //   2. choosing a controller on discovery did not save it;
 //   3. first run pointed at an "Auto-Pilot tab" that does not exist.
 
@@ -23,7 +25,8 @@ import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
-import 'package:nexgen_command/route_guards.dart';
+import 'package:nexgen_command/models/user_model.dart';
+import 'package:nexgen_command/models/user_role.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'setup_auth_fixtures.dart';
@@ -51,6 +54,16 @@ class _RefusingRepository extends DeviceRepository {
 
 DeviceEndpoint _endpoint(String name, String ip) =>
     DeviceEndpoint(name: name, address: InternetAddress(ip));
+
+UserModel _profile(InstallationRole role) => UserModel(
+      id: kTestUid,
+      email: kTestEmail,
+      displayName: 'Pat',
+      ownerId: kTestUid,
+      createdAt: DateTime.utc(2026, 9, 29),
+      updatedAt: DateTime.utc(2026, 9, 29),
+      installationRole: role,
+    );
 
 /// [screen] at `/screen`, pushed from a stub home so `pop` has somewhere to
 /// go, with stub pages for every place the screens send the customer.
@@ -89,44 +102,41 @@ void main() {
   setUp(() =>
       SharedPreferences.setMockInitialValues({'welcome_completed_v1': true}));
 
-  // ── 1. A self-signup customer can add their first controller ────────────
-  group('1 — Bluetooth setup lets the account owner through', () {
+  // ── 1. Bluetooth setup: owners and installers only ──────────────────────
+  group('1 — Bluetooth setup admits only installers and system owners', () {
     test(
-        'who may pair: owners and a self-signup on its own account; not a '
-        'family member', () {
-      PairingDecision decide(String? role, {bool own = true}) =>
-          controllerPairingDecision(
+        'who may pair: an installer session, a primary or an installer '
+        'account; nobody else', () {
+      PairingDecision decide(String? role) => controllerPairingDecision(
             signedIn: true,
             installerSession: false,
             profileExists: true,
             role: role,
-            addingToOwnAccount: own,
           );
-      expect(decide('unlinked'), PairingDecision.allowed,
-          reason: 'what signup writes: the owner of a brand-new account');
-      expect(decide(null), PairingDecision.allowed);
       expect(decide('primary'), PairingDecision.allowed);
       expect(decide('installer'), PairingDecision.allowed);
-      expect(decide('admin'), PairingDecision.allowed);
-      expect(decide('subUser'), PairingDecision.familyMember,
-          reason: "a family member's hardware goes on the owner's account");
-      expect(decide('unlinked', own: false), PairingDecision.familyMember);
+      expect(decide('unlinked'), PairingDecision.notOwner,
+          reason: 'a self-signup account never pairs its own controller');
+      expect(decide(null), PairingDecision.notOwner);
+      expect(decide('admin'), PairingDecision.notOwner,
+          reason: 'the pre-+110 rule: primary or installer only');
+      expect(decide('subUser'), PairingDecision.familyMember);
       expect(
           controllerPairingDecision(
               signedIn: false,
               installerSession: false,
               profileExists: false,
-              role: null,
-              addingToOwnAccount: false),
+              role: null),
           PairingDecision.notSignedIn);
       expect(
           controllerPairingDecision(
               signedIn: true,
               installerSession: true,
               profileExists: false,
-              role: 'subUser',
-              addingToOwnAccount: false),
+              role: 'unlinked'),
           PairingDecision.allowed);
+      expect(pairingRefusalMessage(PairingDecision.notOwner),
+          'Only system owners can add new controllers.');
     });
 
     Future<void> openSetup(WidgetTester tester, String role) async {
@@ -151,18 +161,24 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('a self-signup account stays in Bluetooth setup',
-        (tester) async {
+    testWidgets(
+        'a self-signup (unlinked) account is turned away: "Only system '
+        'owners can add new controllers."', (tester) async {
       await openSetup(tester, 'unlinked');
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('Only system owners can add new controllers.'),
+          findsOneWidget);
+      expect(find.text('open'), findsOneWidget, reason: 'popped back');
+    });
+
+    testWidgets('a system owner stays in Bluetooth setup', (tester) async {
+      await openSetup(tester, 'primary');
       expect(find.text('Device Setup'), findsOneWidget);
       expect(find.textContaining('Only system owners'), findsNothing);
-      expect(
-          find.textContaining("someone else's lighting system"), findsNothing);
       await tester.pump(const Duration(seconds: 10)); // radar settle timer
     });
 
-    testWidgets("a family member is still turned away, and told why",
-        (tester) async {
+    testWidgets("a family member is turned away, and told why", (tester) async {
       await openSetup(tester, 'subUser');
       await tester.pump(const Duration(seconds: 1));
       expect(find.textContaining("someone else's lighting system"),
@@ -170,25 +186,7 @@ void main() {
       expect(find.text('open'), findsOneWidget, reason: 'popped back');
     });
 
-    test(
-        'the router opens the setup routes to a self-signup account, and '
-        'everything once it owns a controller', () {
-      for (final route in [
-        AppRoutes.discovery,
-        AppRoutes.deviceSetup,
-        AppRoutes.wifiConnect,
-      ]) {
-        expect(unlinkedAccountMayOpen(route, ownsAController: false), isTrue,
-            reason: route);
-      }
-      expect(
-          unlinkedAccountMayOpen(AppRoutes.dashboard, ownsAController: false),
-          isFalse);
-      expect(unlinkedAccountMayOpen(AppRoutes.dashboard, ownsAController: true),
-          isTrue);
-    });
-
-    testWidgets('link account offers "Set up my own controller"',
+    testWidgets('link account offers no way to set up a controller yourself',
         (tester) async {
       await tester.pumpWidget(_app(
         const LinkAccountScreen(),
@@ -196,29 +194,47 @@ void main() {
         pushed: false,
       ));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(
-          find.byKey(const ValueKey('link-setup-own-controller')));
-      await tester.tap(find.byKey(const ValueKey('link-setup-own-controller')));
-      await tester.pumpAndSettle();
-      expect(find.text('PAGE:discovery'), findsOneWidget);
+      expect(find.byKey(const ValueKey('link-setup-own-controller')),
+          findsNothing);
+      expect(find.textContaining('Set up my own controller'), findsNothing);
+      expect(find.text('I have an invitation code'), findsOneWidget);
     });
 
-    testWidgets('discovery with nothing found offers Bluetooth setup',
-        (tester) async {
+    Future<void> openEmptyDiscovery(
+        WidgetTester tester, UserModel? profile) async {
       await tester.pumpWidget(_app(
         const DiscoveryPage(),
         [
           deviceDiscoveryServiceProvider
               .overrideWithValue(FakeDiscoveryService(const [])),
           wledStateProvider.overrideWith(_StillWled.new),
+          currentUserProfileProvider
+              .overrideWith((ref) => Stream.value(profile)),
         ],
         pushed: false,
       ));
       await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+        'discovery with nothing found offers Bluetooth setup to a system '
+        'owner', (tester) async {
+      await openEmptyDiscovery(tester, _profile(InstallationRole.primary));
       await tester.tap(find.byKey(const ValueKey('discovery-bluetooth-setup')));
       await tester.pumpAndSettle();
       expect(find.text('PAGE:device-setup'), findsOneWidget);
     });
+
+    for (final role in [InstallationRole.subUser, InstallationRole.unlinked]) {
+      testWidgets(
+          'discovery with nothing found makes no Bluetooth offer to '
+          '${role.name}', (tester) async {
+        await openEmptyDiscovery(tester, _profile(role));
+        expect(find.byKey(const ValueKey('discovery-bluetooth-setup')),
+            findsNothing);
+        expect(find.text('No controllers found'), findsOneWidget);
+      });
+    }
   });
 
   // ── 2. Choosing on discovery saves the controller ───────────────────────

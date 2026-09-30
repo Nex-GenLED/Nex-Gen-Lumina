@@ -108,41 +108,6 @@ bool welcomeCompletedFor(String uid, Map<String, dynamic> userData) =>
     (userData['welcome_completed'] as bool? ?? true) ||
     SessionAccountFlags.isCleared(uid, AccountFlag.welcomeCompleted);
 
-/// The routes a self-signup (`unlinked`) account uses to add its own first
-/// controller: network discovery, Bluetooth setup, manual setup.
-bool _isOwnControllerSetupRoute(String location) =>
-    location == AppRoutes.discovery ||
-    location == AppRoutes.deviceSetup ||
-    location == AppRoutes.wifiConnect;
-
-/// Whether a signed-in `unlinked` account may open [location].
-///
-/// +110 (walk finding 1): the controller-setup routes are always open to
-/// it, and every other customer route is open once the account owns a
-/// controller of its own. Without a controller it is sent to /link-account,
-/// as before.
-bool unlinkedAccountMayOpen(String location, {required bool ownsAController}) =>
-    _isOwnControllerSetupRoute(location) || ownsAController;
-
-/// Whether `users/{uid}/controllers` holds at least one controller. Bounded
-/// by [kRedirectFirestoreTimeout]; a failed or slow read answers false (the
-/// account stays on /link-account, as before).
-Future<bool> _ownsAController(String uid) async {
-  try {
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('controllers')
-        .limit(1)
-        .get()
-        .timeout(kRedirectFirestoreTimeout);
-    return snap.docs.isNotEmpty;
-  } catch (e) {
-    debugPrint('Redirect: could not check for an own controller: $e');
-    return false;
-  }
-}
-
 /// Global redirect function for GoRouter.
 /// Handles auth checks, role-based access, and installation validation.
 Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
@@ -374,18 +339,6 @@ Future<String?> appRedirect(BuildContext context, GoRouterState state) async {
         // linked to a system. It cannot affect a linked customer — they are
         // resolved by the branches above and never reach this one.
         if (isDemoRoute) {
-          return null;
-        }
-        // +110 (walk finding 1): a self-signup account may set up its own
-        // first controller, and once it has one, use its lights. Before,
-        // every setup route — including /discovery, where signup itself
-        // sends a new account — bounced here to /link-account.
-        if (unlinkedAccountMayOpen(
-          state.matchedLocation,
-          ownsAController: _isOwnControllerSetupRoute(state.matchedLocation)
-              ? false
-              : await _ownsAController(user.uid),
-        )) {
           return null;
         }
         // Safety net: if the reviewer somehow lands on a protected

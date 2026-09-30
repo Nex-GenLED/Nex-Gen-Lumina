@@ -44,6 +44,8 @@ import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/models/user_model.dart';
+import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/shared/accessibility/text_scale_clamp.dart';
 import 'package:nexgen_command/shared/write_result.dart';
 import 'package:nexgen_command/widgets/house_photo_uploader.dart';
@@ -139,13 +141,12 @@ List<Override> _session([FakeAccountSession? s]) => [
     ];
 
 List<Override> _deviceSetup() {
-  // A self-signup account (what a new customer has), which the pairing check
-  // now lets through.
+  // A system owner: the account Bluetooth setup accepts.
   final fs = FakeFirebaseFirestore();
   fs.collection('users').doc(kTestUid).set({
     'id': kTestUid,
     'owner_id': kTestUid,
-    'installation_role': 'unlinked',
+    'installation_role': 'primary',
   });
   return [
     accountSessionProvider.overrideWithValue(FakeAccountSession()),
@@ -295,6 +296,18 @@ void main() {
           deviceDiscoveryServiceProvider
               .overrideWithValue(FakeDiscoveryService(const [])),
           wledStateProvider.overrideWith(_StillWled.new),
+          // A system owner, so the Bluetooth offer is on screen.
+          currentUserProfileProvider.overrideWith((ref) => Stream.value(
+                UserModel(
+                  id: kTestUid,
+                  email: kTestEmail,
+                  displayName: 'Pat',
+                  ownerId: kTestUid,
+                  createdAt: DateTime.utc(2026, 9, 29),
+                  updatedAt: DateTime.utc(2026, 9, 29),
+                  installationRole: InstallationRole.primary,
+                ),
+              )),
         ],
       );
     });
