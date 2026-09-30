@@ -534,6 +534,30 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `functions/test/emulator/commercialRules.emulator.test.ts`. Related: **P0-5**, the 2026-09-18
     stub-doc correction, **#118**.
 
+- [ ] **#120 — TEST INFRA: the emulator suite cannot go green on the standing recipe — two
+  `beforeEach(wipe)` hooks exceed Jest's 5 s default on this PC, and `healUserProfile` needs an
+  Auth emulator that `firebase.json` does not declare**
+  - Status: **OPEN — filed 2026-09-30 from the build-110 gate; not fixed** · Severity: **P3
+    (debt)** · Evidence: **verified-by-run** on `2c895ed` and on `9e5376a`
+  - **(a) Wipe-hook timeouts.** `setAccountProfile.emulator.test.ts:101` and
+    `healUserProfile.emulator.test.ts:102` run `beforeEach(wipe…)`; the first wipe after the
+    emulator starts takes longer than the 5 s hook default, so the first test of each file fails
+    ("Exceeded timeout of 5000 ms for a hook") and the rest pass (30/31, 13/14). Identical on the
+    base. Fix shape: `testTimeout: 30000` in `jest.emulator.config.js` (it covers hooks), or a
+    `globalSetup` that warms the emulator with one throw-away write.
+  - **(b) Auth emulator.** `healUserProfile.emulator.test.ts:33` throws unless
+    `FIREBASE_AUTH_EMULATOR_HOST` is set; `firebase.json` declares only the Firestore emulator, so
+    `firebase emulators:exec --only firestore,auth` starts no Auth emulator and the README's
+    workaround is a scratch config. Fix shape: add `"auth": { "port": 9099 }` to `firebase.json`'s
+    `emulators` block (a `--only firestore` run is unaffected) and make `npm run test:emulator`
+    document `--only firestore,auth`.
+  - **Standing recipe until then** (what build 110 was gated with): JDK 25 on PATH; `npm ci` in
+    `functions/`; `firebase emulators:exec --only firestore --project lumina-fn-test "cd functions
+    && npm run test:emulator"` from the repo root; the healer alone via the README's scratch
+    config; then `git checkout -- functions/lib/createCustomerAccount.js{,.map}` (tsc rewrites it).
+  - Files: `functions/jest.emulator.config.js`, `firebase.json`, `functions/test/emulator/README.md`.
+    Related: **#119** (the real failure in the same suite).
+
 - [ ] **#79 — SCORE CELEBRATIONS HAVE NEVER FIRED ON HARDWARE FOR ANYONE, and the
   `start_time_passed` skip that hid the Dodgers cycle is invisible**
   - Status: **IN-PROGRESS** on `feat/gameday-unified-monitoring` · Severity: **P1** ·
