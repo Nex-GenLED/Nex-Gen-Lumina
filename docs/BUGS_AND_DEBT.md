@@ -1623,23 +1623,33 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     house, or the reverse after the next populate.
   - **WHAT THE +110 E2 FOLLOW-UPS DID, AND DID NOT.** D2 makes Lumina SKIP any date that already
     carries a Game Day entry, an armed lease or a user entry (`planLuminaNightWrites`,
-    `lib/features/ai/lumina_schedule_persistence.dart:337`) — so Lumina is no longer one of the
-    writers. D3 records the lease holder (`CalendarEntryLease.entryId`) and re-derives the lease
-    from the best survivor on delete (`removeEntryById`, `calendar_providers.dart:675`;
-    `leaseHolderAmong`, `:77`) — so a delete no longer leaves a stale timer. NEITHER changes the
-    write path: a manual dated entry from the editor on a game date still displaces the Game Day
-    timer.
-  - **FIX SHAPE (not implemented).** Cheapest: make the update path consult the same rule the
-    delete path now uses — `leaseHolderAmong([holder, incoming])` — and REFUSE to overwrite
-    when the incoming entry loses, returning a new `LeaseOutcome` (e.g. `heldByHigherPriority`)
-    so the editor can say the night is held rather than "saved". That rule ranks the customer's
-    own entry ABOVE Game Day (tier 1 over 3), which matches the composer but not Policy B's
-    "Game Day holds"; if Policy B is meant to win on the controller too, the rule needs a
-    Game-Day-first variant for the lease layer only. Leasing per `(dateKey, entryId)` would need
-    N timer slots per night, which the 8-slot pool cannot afford.
+    `lib/features/ai/lumina_schedule_persistence.dart:337`) — Lumina is no longer a writer. D3
+    records the lease holder (`CalendarEntryLease.entryId`) and, on delete, re-derives the lease
+    from the best survivor under **Policy B** (`leaseHolderAmong`, `calendar_providers.dart`: a
+    `game_day` entry outranks every other entry on the date, the customer's own included; below
+    that the composer tier order, last written on a tie; `removeEntryById`) — a delete never
+    leaves a stale timer and a Game Day entry always reclaims its night. **What REMAINS is only
+    the direct write path:** a non-Lumina user entry saved from the calendar editor onto a game
+    date still takes the update path and displaces the Game Day timer, until the next weekly
+    Game Day populate re-writes `gd_<slug>` and takes the night back.
+  - **FIX SHAPE (not implemented; scoped 2026-09-30).** Contained in the lease manager plus one
+    helper move: (1) move `leaseHolderAmong` from `calendar_providers.dart` to
+    `schedule_priority_resolver.dart` — the manager cannot import `calendar_providers`, which
+    imports the manager; (2) in `_handleEntryCreatedImpl`'s update path (`:669`), when the
+    registered lease names a DIFFERENT `entryId`, look the holder up in
+    `calendarLeaseEntriesProvider` by `(dateKey, entryId)` and, if
+    `leaseHolderAmong([holder, incoming])` is the holder, return a new
+    `LeaseOutcome.heldByHigherPriority` with the registry and the controller untouched; a
+    re-write of the SAME `entryId` (the weekly Game Day populate, an edited Game Day entry) still
+    updates as today; (3) `applyEntriesDetailed` treats the new outcome like `outsideWindow`
+    (entry saved, night not armed), optionally surfacing it so the editor can say the night is
+    held rather than "saved". The sweep's promotion path calls the same method, so it inherits
+    the guard. About 80–100 lines including three unit tests (user written after Game Day → held;
+    Game Day written after user → updated; same id → updated). Leasing per `(dateKey, entryId)`
+    stays out: the 8-slot pool cannot hold N timers per night.
   - Files: `lib/features/schedule/calendar_entry_lease_manager.dart` (`_handleEntryCreatedImpl`
     update path), `lib/features/schedule/calendar_providers.dart` (`applyEntriesDetailed`,
-    `:326`; `leaseHolderAmong`, `:77`), `lib/features/schedule/schedule_priority_resolver.dart`
+    `:326`; `leaseHolderAmong`), `lib/features/schedule/schedule_priority_resolver.dart`
     (`tierForEntry`), `lib/features/schedule/calendar_entry_editor.dart` (`_saveThisGameOnly`).
     Related: **#61** (lease manager), Policy B.
 

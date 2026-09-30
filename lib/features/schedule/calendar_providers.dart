@@ -71,16 +71,23 @@ class CalendarApplyOutcome {
   static const CalendarApplyOutcome failed = CalendarApplyOutcome(ok: false);
 }
 
-/// Pure (D3): which of [entries] should hold a date's single lease. The
-/// higher [tierForEntry] wins (user, then holiday, Game Day, …); on a tie the
-/// LAST written wins, matching the primary-entry rule. Holidays never lease.
+/// Pure (D3, Policy B): which of [entries] should hold a date's single lease.
+///
+/// A Game Day entry (`sourceTag == game_day`, whatever its type — an edited
+/// Game Day entry becomes type user and keeps the tag) outranks EVERY other
+/// entry on the date, the customer's own included. That is the standing
+/// precedence decision: Game Day holds until the final or the hard cap, and
+/// the base layer is suppressed while it is armed. Below Game Day the
+/// composer's tier order applies ([tierForEntry]: user, then holiday, Game
+/// Day Group, …); on a tie the LAST written wins, matching the primary-entry
+/// rule. Holidays never lease.
 CalendarEntry? leaseHolderAmong(Iterable<CalendarEntry> entries) {
+  int rankOf(CalendarEntry e) =>
+      e.sourceTag == CalendarEntrySourceTag.gameDay ? -1 : tierForEntry(e).index;
   CalendarEntry? best;
   for (final e in entries) {
     if (e.type == CalendarEntryType.holiday) continue;
-    if (best == null || !tierForEntry(best).isHigherThan(tierForEntry(e))) {
-      best = e;
-    }
+    if (best == null || rankOf(e) <= rankOf(best)) best = e;
   }
   return best;
 }

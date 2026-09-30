@@ -5,7 +5,8 @@
 // Deleting either must leave the other — and the other must hold the night's
 // single lease: the Game Day entry reclaims the night when the override on
 // top of it goes; a delete of a bystander leaves the holder's lease alone;
-// the last delete releases the slot.
+// the last delete releases the slot. The heir is chosen under Policy B
+// (leaseHolderAmong): Game Day above everything else on the date.
 //
 // Real CalendarScheduleNotifier + real CalendarEntryLeaseManager over the
 // lease manager's own fake WLED repository, a fake UserService and a fake
@@ -176,7 +177,9 @@ Future<_Harness> _harness() async {
 }
 
 /// Writes the Game Day entry, then the customer's own: two rows on one night,
-/// the customer's (last written) holding the lease.
+/// the customer's (last written) holding the lease. That is the direct write
+/// path #117 describes — the lease layer takes whoever wrote last — and the
+/// delete tests below show what D3 does from that state.
 Future<_Harness> _sharedNight() async {
   final h = await _harness();
   expect(await h.calendar.applyEntries([_gameDay()]), isTrue);
@@ -184,7 +187,18 @@ Future<_Harness> _sharedNight() async {
   expect(await h.calendar.applyEntries([_mine()]), isTrue);
   expect(h.idsOn(_date), ['gd_team-a', 'user_1']);
   expect(h.leases.leaseFor(_date)!.entryId, 'user_1',
-      reason: 'the last write holds the night (#117)');
+      reason: 'the last write holds the night (#117, direct write path)');
+  return h;
+}
+
+/// The other write order: the customer's entry first, then the Game Day
+/// entry, so Game Day holds the lease — the state Policy B wants.
+Future<_Harness> _gameDayHeld() async {
+  final h = await _harness();
+  expect(await h.calendar.applyEntries([_mine()]), isTrue);
+  expect(await h.calendar.applyEntries([_gameDay()]), isTrue);
+  expect(h.idsOn(_date), ['user_1', 'gd_team-a']);
+  expect(h.leases.leaseFor(_date)!.entryId, 'gd_team-a');
   return h;
 }
 
@@ -253,18 +267,70 @@ void main() {
     });
   });
 
+  group('Policy B — Game Day holds the night', () {
+    test('deleting the Game Day row re-derives the lease to the customer '
+        'entry', () async {
+      final h = await _gameDayHeld();
+      final savesBefore = h.repo.savePresetCalls.length;
+
+      expect(await h.calendar.removeEntryById(_date, 'gd_team-a'), isTrue);
+
+      expect(h.idsOn(_date), ['user_1']);
+      final lease = h.leases.leaseFor(_date)!;
+      expect(lease.entryId, 'user_1');
+      expect(lease.patternName, 'Birthday Blue');
+      expect(lease.wledHour, 18);
+      expect(h.repo.savePresetCalls.length, savesBefore + 1);
+      expect(h.repo.savePresetCalls.last.presetId, lease.presetId);
+    });
+
+    test('deleting the customer row leaves the Game Day lease untouched — '
+        'no preset save', () async {
+      final h = await _gameDayHeld();
+      final savesBefore = h.repo.savePresetCalls.length;
+      final cfgBefore = h.repo.applyConfigCalls.length;
+
+      expect(await h.calendar.removeEntryById(_date, 'user_1'), isTrue);
+
+      expect(h.idsOn(_date), ['gd_team-a']);
+      final lease = h.leases.leaseFor(_date)!;
+      expect(lease.entryId, 'gd_team-a');
+      expect(lease.patternName, 'Team A Colors');
+      expect(h.repo.savePresetCalls.length, savesBefore);
+      expect(h.repo.applyConfigCalls.length, cfgBefore);
+      expect(h.users.saves.last.map((e) => e.entryId), ['gd_team-a']);
+    });
+  });
+
   group('leaseHolderAmong', () {
-    test('the customer\'s own entry outranks Game Day; Game Day outranks '
-        'other autopilot; a tie goes to the last written', () {
-      expect(leaseHolderAmong([_gameDay(), _mine()])!.entryId, 'user_1');
-      expect(leaseHolderAmong([_mine(), _gameDay()])!.entryId, 'user_1');
+    test('Policy B: Game Day outranks every other entry on the date, the '
+        'customer\'s own included, in either order', () {
+      expect(leaseHolderAmong([_gameDay(), _mine()])!.entryId, 'gd_team-a');
+      expect(leaseHolderAmong([_mine(), _gameDay()])!.entryId, 'gd_team-a');
       expect(leaseHolderAmong([_gameDay()])!.entryId, 'gd_team-a');
       final sync = _gameDay().copyWith(
           entryId: 'ns_1', sourceTag: CalendarEntrySourceTag.neighborhoodSync);
       expect(leaseHolderAmong([sync, _gameDay()])!.entryId, 'gd_team-a');
       expect(leaseHolderAmong([_gameDay(), sync])!.entryId, 'gd_team-a');
+      // An edited Game Day entry ("This game only": type user, same source
+      // tag) is still the game's night.
+      final edited =
+          _gameDay().copyWith(type: CalendarEntryType.user, autopilot: false);
+      expect(leaseHolderAmong([_mine(), edited])!.entryId, 'gd_team-a');
+      expect(leaseHolderAmong([edited, _mine()])!.entryId, 'gd_team-a');
+    });
+
+    test('below Game Day the composer tier order applies; a tie goes to the '
+        'last written', () {
+      final sync = _gameDay().copyWith(
+          entryId: 'ns_1', sourceTag: CalendarEntrySourceTag.neighborhoodSync);
+      expect(leaseHolderAmong([sync, _mine()])!.entryId, 'user_1');
+      expect(leaseHolderAmong([_mine(), sync])!.entryId, 'user_1');
       final second = _mine().copyWith(entryId: 'user_2');
       expect(leaseHolderAmong([_mine(), second])!.entryId, 'user_2');
+      final secondGame =
+          _gameDay().copyWith(entryId: CalendarEntryId.gameDay('team-b'));
+      expect(leaseHolderAmong([_gameDay(), secondGame])!.entryId, 'gd_team-b');
     });
 
     test('holidays never hold a lease', () {
