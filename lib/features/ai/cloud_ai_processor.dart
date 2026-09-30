@@ -11,7 +11,6 @@ import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart'
     show LuminaResponseTruncatedException;
-import 'package:nexgen_command/theme.dart';
 
 /// Tier 2 — Cloud AI processor for complex / creative lighting commands.
 ///
@@ -245,9 +244,9 @@ class CloudAIProcessor {
       }
     }
 
-    if (previewColors.isEmpty) {
-      previewColors.addAll(const [NexGenPalette.cyan, Color(0xFF102040)]);
-    }
+    // UX audit row 112: no colours → no preview colours. The fallback
+    // swatches (cyan and navy) used to be manufactured here and painted into
+    // the reply card and the hero for a "turn on" or "50%" reply.
 
     // Extract clarification options (if the AI provided them)
     final clarificationOptions = <String>[];

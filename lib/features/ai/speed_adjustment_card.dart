@@ -29,12 +29,14 @@ class SpeedAdjustmentCard extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Chips row
-        Row(
+        // Chips row — wraps at large text (+110 E2 accessibility).
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
           children: _presets.map((preset) {
             final isActive = preset.$1 == activeLabel;
             return Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: EdgeInsets.zero,
               child: GestureDetector(
                 onTap: () => ref
                     .read(adjustmentStateProvider.notifier)

@@ -14,7 +14,11 @@ import 'package:nexgen_command/features/design/manual_editor/edit_history.dart';
 import 'package:nexgen_command/features/design/manual_editor/pixel_design_document.dart';
 import 'package:nexgen_command/features/design/manual_editor/selection_logic.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/roofline_feature_walkthrough.dart';
+import 'package:nexgen_command/features/design/roofline_segmentation.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_preset_models.dart';
+import 'package:nexgen_command/features/design/widgets/design_dialogs.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/wled/device_write_reporter.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
@@ -158,6 +162,145 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
 
   void _selectAnchors() => _selectMapped('anchors', anchorIndices);
 
+  // ── Sections: the selection unit (+110 E2 item 1b) ──────────────────────
+  //
+  // The owner's report from the device: selecting one pixel out of hundreds
+  // on a linear strip is unusable at roofline scale. The named features the
+  // roofline walkthrough marks — corners, peaks, runs — are what a customer
+  // thinks in. So the FIRST thing on the channel is its sections: tap one to
+  // select it, then Paint. The strip below still toggles single lights, for
+  // fine-tuning INSIDE a selected section.
+
+  /// The id of the section the customer last selected, per channel.
+  final Map<int, String> _selectedSection = {};
+
+  /// The named features on [ch], in roofline order.
+  List<RooflineSegment> _sectionsFor(int ch) {
+    final config = ref.read(currentRooflineConfigProvider).valueOrNull;
+    final segs = config?.segmentsForChannel(ch) ?? const <RooflineSegment>[];
+    if (!isChannelFeatureMarked(segs)) return const [];
+    final len = _channelLengths()[ch] ?? 0;
+    return [
+      for (final s in segs)
+        if (s.startPixel < len && s.pixelCount > 0) s,
+    ]..sort((a, b) => a.startPixel.compareTo(b.startPixel));
+  }
+
+  /// Selects exactly [seg]'s lights on [ch] (replacing the selection there),
+  /// or adds them when [add].
+  void _selectSection(int ch, RooflineSegment seg, {bool add = false}) {
+    final len = _channelLengths()[ch] ?? 0;
+    final indices = segmentIndices(seg).where((i) => i >= 0 && i < len);
+    final s = _sel(ch);
+    if (!add) s.clear();
+    s.addAll(indices);
+    _selectedSection[ch] = seg.id;
+    setState(() {});
+    _stripKey.currentState?.reveal(seg.startPixel, seg.endPixel.clamp(0, len - 1));
+  }
+
+  /// "Corner 2", "Peak", "Run 3" — or the name the installer gave it.
+  static String sectionLabel(RooflineSegment seg, List<RooflineSegment> all) {
+    final kind = featureKindOf(seg);
+    final kindName = switch (kind) {
+      RooflineFeatureKind.corner => 'Corner',
+      RooflineFeatureKind.peak => 'Peak',
+      RooflineFeatureKind.run => 'Run',
+      RooflineFeatureKind.column => 'Column',
+      RooflineFeatureKind.connector => 'Connector',
+    };
+    final name = seg.name.trim();
+    final generic = name.isEmpty ||
+        RegExp(r'^(segment|section|run|corner|peak)\s*\d*$', caseSensitive: false)
+            .hasMatch(name);
+    if (!generic) return name;
+    final sameKind = all.where((s) => featureKindOf(s) == kind).toList();
+    if (sameKind.length <= 1) return kindName;
+    final n = sameKind.indexWhere((s) => s.id == seg.id) + 1;
+    return '$kindName $n';
+  }
+
+  static IconData _sectionIcon(RooflineFeatureKind kind) => switch (kind) {
+        RooflineFeatureKind.corner => Icons.turn_right,
+        RooflineFeatureKind.peak => Icons.change_history,
+        RooflineFeatureKind.run => Icons.horizontal_rule,
+        RooflineFeatureKind.column => Icons.view_column_outlined,
+        RooflineFeatureKind.connector => Icons.link,
+      };
+
+  Widget _buildSections(int ch, int len) {
+    final sections = _sectionsFor(ch);
+    if (sections.isEmpty) {
+      return Container(
+        key: const ValueKey('editor-no-sections'),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: NexGenPalette.line),
+        ),
+        child: Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            const Text(
+              "Channel sections aren't marked yet — select by light for now, "
+              'or mark the corners and peaks to paint by section.',
+              style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => openRooflineFeatureWalkthrough(context),
+              icon: const Icon(Icons.touch_app_outlined, size: 16),
+              label: const Text('Mark corners and peaks'),
+              style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: NexGenPalette.cyan),
+            ),
+          ],
+        ),
+      );
+    }
+    final selectedId = _selectedSection[ch];
+    final selected = _sel(ch);
+    return Column(
+      key: const ValueKey('editor-sections'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Sections — tap one, then Paint',
+            style: TextStyle(color: NexGenPalette.textMedium)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final seg in sections)
+              _SectionChip(
+                key: ValueKey('section-${seg.id}'),
+                label: sectionLabel(seg, sections),
+                icon: _sectionIcon(featureKindOf(seg)),
+                lights: seg.pixelCount,
+                // "Selected" means its lights are all in the selection —
+                // whether they got there by a tap here or by hand.
+                selected: seg.id == selectedId &&
+                    segmentIndices(seg)
+                        .where((i) => i < len)
+                        .every(selected.contains),
+                onTap: () => _selectSection(ch, seg),
+                onLongPress: () => _selectSection(ch, seg, add: true),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Hold a section to add it to the selection. Tap a light below to '
+          'fine-tune inside it.',
+          style: TextStyle(color: NexGenPalette.textMedium, fontSize: 11),
+        ),
+      ],
+    );
+  }
+
   /// Adds the map-derived [pick] to the selection — and SAYS SO when there is
   /// nothing to pick. These tools used to be silent no-ops whenever the map
   /// held no such feature, which is every production map today (audit F5): the
@@ -209,112 +352,35 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
     if (ch == null) return;
     final len = _channelLengths()[ch] ?? 0;
     if (len <= 0) return;
-    int start = (_patStart ?? 0).clamp(0, len - 1);
-    int end = (_patEnd ?? len - 1).clamp(0, len - 1);
-    int on = _patOn, off = _patOff;
 
-    final action = await showDialog<_PatternAction>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) {
-          final pattern =
-              onOffPatternInRange(start: start, end: end, on: on, off: off);
-          final lit = pattern.lit.length;
-          final span = end - start + 1;
-          // The one way this tool yields a single LED: a range shorter than
-          // one repeat (e.g. End left at 6 with 1 on / 6 off).
-          final degenerate = end >= start && lit <= 1 && len > on + off;
-          return AlertDialog(
-            backgroundColor: NexGenPalette.gunmetal90,
-            title: const Text('On / off pattern',
-                style: TextStyle(color: Colors.white)),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
-              _numRow('Lit', on, 1, 10, (v) => set(() => on = v)),
-              _numRow('Dark', off, 0, 20, (v) => set(() => off = v)),
-              _numRow('From LED', start, 0, len - 1, (v) => set(() => start = v)),
-              _numRow('To LED', end, 0, len - 1, (v) => set(() => end = v)),
-              const SizedBox(height: 8),
-              Text(
-                end < start
-                    ? '"To LED" is before "From LED" — nothing will be lit.'
-                    : '$on on, $off off across LEDs $start–$end '
-                        '($span LEDs) → $lit lit.',
-                key: const ValueKey('pattern-summary'),
-                style: TextStyle(
-                    color: end < start ? Colors.orangeAccent : NexGenPalette.textMedium,
-                    fontSize: 12),
-              ),
-              if (degenerate)
-                const Padding(
-                  padding: EdgeInsets.only(top: 6),
-                  child: Text(
-                    'Only one LED — the range is shorter than one repeat of the '
-                    'pattern. Raise "To LED" to cover more of the channel.',
-                    style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
-                  ),
-                ),
-            ]),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel')),
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, _PatternAction.select),
-                  child: const Text('Select')),
-              FilledButton(
-                  onPressed: () => Navigator.pop(ctx, _PatternAction.paint),
-                  child: const Text('Paint pattern')),
-            ],
-          );
-        },
-      ),
+    final result = await showOnOffPatternDialog(
+      context,
+      length: len,
+      start: (_patStart ?? 0).clamp(0, len - 1),
+      end: (_patEnd ?? len - 1).clamp(0, len - 1),
+      on: _patOn,
+      off: _patOff,
     );
     // Remember the numbers even on Cancel — the next open resumes from them.
-    _patStart = start;
-    _patEnd = end;
-    _patOn = on;
-    _patOff = off;
+    _patStart = result.start;
+    _patEnd = result.end;
+    _patOn = result.on;
+    _patOff = result.off;
+    final action = result.action;
     if (action == null || !mounted) return;
 
-    final pattern = onOffPatternInRange(start: start, end: end, on: on, off: off);
+    final start = result.start, end = result.end;
+    final pattern = onOffPatternInRange(
+        start: start, end: end, on: result.on, off: result.off);
     // Selection is REPLACED inside the range (not unioned with what was there).
     _sel(ch)
       ..removeWhere((i) => i >= start && i <= end)
       ..addAll(pattern.lit);
-    if (action == _PatternAction.paint) {
+    if (action == OnOffPatternAction.paint) {
       _commit(_doc.clearToBase(ch, pattern.dark).paint(ch, pattern.lit, _paintColor));
     } else {
       setState(() {});
     }
-  }
-
-  Widget _numRow(String label, int value, int min, int max, ValueChanged<int> onChanged) {
-    return Row(children: [
-      SizedBox(width: 72, child: Text(label, style: const TextStyle(color: NexGenPalette.textMedium))),
-      Expanded(
-        child: Slider(
-          value: value.toDouble().clamp(min.toDouble(), max.toDouble()),
-          min: min.toDouble(),
-          max: max.toDouble(),
-          divisions: (max - min).clamp(1, 1000),
-          label: '$value',
-          onChanged: (v) => onChanged(v.round()),
-        ),
-      ),
-      // − / + so an exact number is reachable: on a 162-LED channel one slider
-      // division is about 2 px of finger travel.
-      IconButton(
-        visualDensity: VisualDensity.compact,
-        icon: const Icon(Icons.remove, size: 16, color: Colors.white70),
-        onPressed: value > min ? () => onChanged(value - 1) : null,
-      ),
-      SizedBox(width: 30, child: Text('$value', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))),
-      IconButton(
-        visualDensity: VisualDensity.compact,
-        icon: const Icon(Icons.add, size: 16, color: Colors.white70),
-        onPressed: value < max ? () => onChanged(value + 1) : null,
-      ),
-    ]);
   }
 
   // ── Go to LED (audit F2) ────────────────────────────────────────────────
@@ -355,6 +421,11 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
   /// [_save] records that level.
   int? get _designBrightness => widget.initialDesign?.appliedBrightness;
 
+  /// Row 40: every channel this editor paints (the base colour covers each
+  /// of them), never the Home channel bar's selection.
+  List<int> _targets() =>
+      designTargetChannels(ref.read, _doc.channelLengths.keys);
+
   void _scheduleLivePreview() {
     _previewThrottle?.cancel();
     _previewThrottle = Timer(const Duration(milliseconds: 300), () async {
@@ -364,7 +435,8 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
           baseRgbw: _doc.baseColor,
           spansByChannel: _spans(),
           label: 'Design (preview)',
-          brightness: _designBrightness);
+          brightness: _designBrightness,
+          targetChannels: _targets());
       if (mounted) _previewReporter.report(context, ok);
     });
   }
@@ -376,17 +448,24 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
           baseRgbw: _doc.baseColor,
           spansByChannel: _spans(),
           label: 'Custom Design',
-          brightness: _designBrightness);
+          brightness: _designBrightness,
+          targetChannels: _targets());
       final ok = result.isOk;
       if (mounted) {
+        // Row 42: the result's own sentence. A closed gate (no controller,
+        // away from home) says WHY, through the shared reason.
+        final blocked = result == SpineWriteResult.noDevice ||
+            result == SpineWriteResult.noChannels;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           // #94 — an identity refusal must say so, not blame the network.
           content: Text(ok
               ? 'Applied to your lights'
               : (takeIdentityRefusalMessage() ??
+                  (blocked ? applyBlockedReason(ref.read) : null) ??
                   result.userMessage ??
                   "Couldn't reach your lights.")),
           backgroundColor: ok ? Colors.green : Colors.red.shade800,
+          duration: Duration(seconds: ok ? 3 : 6),
         ));
       }
       if (ok) maybeShowManualApplyOffWarning(ref);
@@ -402,28 +481,8 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
   Future<String?> _promptForName() async {
     final existing =
         ref.read(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
-    final controller =
-        TextEditingController(text: nextCustomDesignName(existing));
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Name This Design'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Name'),
-          onSubmitted: (v) => Navigator.of(ctx).pop(v),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(controller.text),
-              child: const Text('Save')),
-        ],
-      ),
-    );
+    return showNameDesignDialog(context,
+        initialName: nextCustomDesignName(existing));
   }
 
   Future<void> _save() async {
@@ -576,7 +635,10 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
                 ),
             ]),
           const SizedBox(height: 8),
-          // Selection strip (tap toggle + drag range).
+          // Sections first: the selection unit (item 1b).
+          _buildSections(ch, lengths[ch] ?? 0),
+          const SizedBox(height: 10),
+          // Selection strip (tap toggle + drag range) — fine-tuning.
           _SelectionStrip(
             key: _stripKey,
             length: lengths[ch] ?? 0,
@@ -598,11 +660,16 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   isDense: true,
-                  labelText: 'Go to LED  (e.g. 57 or 12-40)',
+                  // A short label and a hint: the long label was cut short at
+                  // large text (+110 E2 accessibility).
+                  labelText: 'Go to LED',
+                  hintText: '57 or 12-40',
                   labelStyle: const TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
                   errorText: _goToError,
+                  errorMaxLines: 3,
                   helperText: '${_sel(ch).length} selected on Channel ${ch + 1} '
                       '(LEDs 0–${(lengths[ch] ?? 1) - 1})',
+                  helperMaxLines: 3,
                   helperStyle: const TextStyle(color: NexGenPalette.textMedium, fontSize: 11),
                   border: const OutlineInputBorder(),
                 ),
@@ -684,7 +751,67 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
       a.length == b.length && a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
 }
 
-enum _PatternAction { select, paint }
+/// One roofline section on the active channel.
+class _SectionChip extends StatelessWidget {
+  const _SectionChip({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.lights,
+    required this.selected,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final String label;
+  final IconData icon;
+  final int lights;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? NexGenPalette.cyan.withValues(alpha: 0.18)
+                : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? NexGenPalette.cyan : NexGenPalette.line,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: selected ? NexGenPalette.cyan : Colors.white70),
+              const SizedBox(width: 6),
+              Text(
+                '$label · $lights',
+                style: TextStyle(
+                  color: selected ? NexGenPalette.cyan : Colors.white,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// A horizontal LED strip for selection: tap toggles a cell, a drag selects a
 /// range. Each cell shows its current paint color; selected cells get a ring.

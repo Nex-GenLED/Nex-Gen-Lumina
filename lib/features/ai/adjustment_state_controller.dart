@@ -7,6 +7,9 @@ import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
+import 'package:nexgen_command/shared/controller_targeting.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 
 // ---------------------------------------------------------------------------
 // State model
@@ -26,25 +29,44 @@ class AdjustmentState {
   /// Param names the user has explicitly changed (for highlights).
   final Set<String> userChangedParams;
 
+  /// Which reply card this session belongs to (+110 E2 row 108). A card
+  /// reads the session only when the key is its own; every other card in
+  /// the thread keeps showing its own suggestion.
+  final Object? sessionKey;
+
+  /// Why the last "Apply This" did not land, shown in the panel (row 110).
+  /// Null after a success or before any apply.
+  final String? failureMessage;
+
   const AdjustmentState({
     required this.originalSuggestion,
     required this.currentSuggestion,
     this.isExpanded = true,
     this.userChangedParams = const {},
+    this.sessionKey,
+    this.failureMessage,
   });
 
   AdjustmentState copyWith({
     LuminaLightingSuggestion? currentSuggestion,
     bool? isExpanded,
     Set<String>? userChangedParams,
+    String? failureMessage,
+    bool clearFailure = false,
   }) {
     return AdjustmentState(
       originalSuggestion: originalSuggestion,
       currentSuggestion: currentSuggestion ?? this.currentSuggestion,
       isExpanded: isExpanded ?? this.isExpanded,
       userChangedParams: userChangedParams ?? this.userChangedParams,
+      sessionKey: sessionKey,
+      failureMessage:
+          clearFailure ? null : (failureMessage ?? this.failureMessage),
     );
   }
+
+  /// True when this session is the one [key] asks about.
+  bool isFor(Object? key) => sessionKey == key;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,11 +78,12 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
   @override
   AdjustmentState? build() => null;
 
-  /// Start a new adjustment session.
-  void beginAdjustment(LuminaLightingSuggestion suggestion) {
+  /// Start a new adjustment session for the card identified by [sessionKey].
+  void beginAdjustment(LuminaLightingSuggestion suggestion, {Object? sessionKey}) {
     state = AdjustmentState(
       originalSuggestion: suggestion,
       currentSuggestion: suggestion,
+      sessionKey: sessionKey,
     );
 
     // Ensure refinement mode is active for voice commands
@@ -96,6 +119,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     state = state!.copyWith(
       currentSuggestion: updated,
       userChangedParams: {...state!.userChangedParams, 'brightness'},
+      clearFailure: true,
     );
   }
 
@@ -107,6 +131,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     state = state!.copyWith(
       currentSuggestion: updated,
       userChangedParams: {...state!.userChangedParams, 'speed'},
+      clearFailure: true,
     );
   }
 
@@ -127,6 +152,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     state = state!.copyWith(
       currentSuggestion: updated,
       userChangedParams: {...state!.userChangedParams, 'effect'},
+      clearFailure: true,
     );
   }
 
@@ -139,6 +165,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     state = state!.copyWith(
       currentSuggestion: updated,
       userChangedParams: {...state!.userChangedParams, 'palette'},
+      clearFailure: true,
     );
   }
 
@@ -148,6 +175,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     state = state!.copyWith(
       currentSuggestion: updated,
       userChangedParams: {...state!.userChangedParams, 'zone'},
+      clearFailure: true,
     );
   }
 
@@ -155,42 +183,97 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
   // Apply & voice sync
   // -----------------------------------------------------------------------
 
-  /// Build a WLED JSON payload and send to the device.
-  Future<void> applyToDevice() async {
-    if (state == null) return;
-    final s = state!.currentSuggestion;
-
+  /// Build a WLED JSON payload and send it — to the chosen zone's controller
+  /// when one is picked (row 107), else to the selected controller. On
+  /// success the panel collapses; on failure it STAYS OPEN and shows why
+  /// (row 110: it used to collapse silently either way).
+  Future<WriteResult> applyToDevice() async {
+    final current = state;
+    if (current == null) {
+      return const WriteResult.blocked('Nothing to apply.');
+    }
+    final s = current.currentSuggestion;
     final payload = _buildPayload(s);
-    final repo = ref.read(wledRepositoryProvider);
-    if (repo == null) return;
 
+    WriteResult result;
     try {
-      final ok = await ref.read(wledStateProvider.notifier).applyToDevice(payload, labelHint: null);
-      if (ok) {
-        ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
-              colorSequence: s.colors,
-              colorNames: s.palette.colorNames,
-              effectName: s.effect.name,
-            );
-        final paletteName = s.palette.name != 'Custom Palette' ? s.palette.name : null;
-        if (paletteName != null) {
-          ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(paletteName, ref.read(wledStateProvider));
-        } else {
-          ref.read(activePresetLabelProvider.notifier).clear();
-        }
-
-        // Update refinement context
-        ref.read(luminaSheetProvider.notifier).setPatternContext(
-              {'wled': payload},
-              null,
-            );
-      }
+      result = await _send(payload, s.zone);
     } catch (e) {
       debugPrint('Adjustment applyToDevice failed: $e');
+      result = WriteResult.failed(
+        WriteFailureKind.error,
+        message: "Couldn't reach your lights — check your connection",
+        error: e,
+      );
     }
 
+    if (state == null) return result; // cleared while in flight
+
+    if (!result.ok) {
+      state = state!.copyWith(
+        isExpanded: true,
+        failureMessage: result.message ?? kApplyBlockedFallback,
+      );
+      return result;
+    }
+
+    ref.read(wledStateProvider.notifier).setLuminaPatternMetadata(
+          colorSequence: s.colors,
+          colorNames: s.palette.colorNames,
+          effectName: s.effect.name,
+        );
+    final paletteName = s.palette.name != 'Custom Palette' ? s.palette.name : null;
+    if (paletteName != null) {
+      ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(paletteName, ref.read(wledStateProvider));
+    } else {
+      ref.read(activePresetLabelProvider.notifier).clear();
+    }
+
+    // Update refinement context
+    ref.read(luminaSheetProvider.notifier).setPatternContext(
+          {'wled': payload},
+          null,
+        );
+
     // Collapse panel
-    state = state!.copyWith(isExpanded: false);
+    state = state!.copyWith(isExpanded: false, clearFailure: true);
+    return result;
+  }
+
+  /// Row 107: a zone chip names a zone; the payload goes to THAT zone's
+  /// primary controller through its own routed repository (the same
+  /// per-target repository the fan-out helper uses), so it works at home and
+  /// away. The primary drives its DDP-synced members. "All Zones" is the
+  /// selected controller, exactly as before.
+  Future<WriteResult> _send(Map<String, dynamic> payload, ZoneInfo zone) async {
+    final zoneIp = zone.id;
+    if (zoneIp == null || zoneIp.isEmpty || zone.name == ZoneInfo.allZones.name) {
+      if (ref.read(wledRepositoryProvider) == null) {
+        return WriteResult.blocked(
+            applyBlockedReason(ref.read) ?? kApplyBlockedFallback);
+      }
+      return ref
+          .read(wledStateProvider.notifier)
+          .applyToDeviceResult(payload, labelHint: null);
+    }
+
+    // Prefer the registered record for this address (it carries the id the
+    // relay needs); fall back to a bare address on the home network.
+    final registered = ref
+        .read(linkedControllerTargetsProvider)
+        .where((t) => t.ip == zoneIp)
+        .firstOrNull;
+    final target = registered ?? ControllerTarget(ip: zoneIp, name: zone.name);
+    final repo = ref.read(controllerRepositoryProvider(target));
+    if (repo == null) {
+      return WriteResult.blocked(
+          "Couldn't reach ${zone.name} from here. Connect to your home Wi-Fi "
+          'or set up Remote Access for that controller.');
+    }
+    final ok = await repo.applyJson(payload);
+    return WriteResult.fromBool(ok,
+        onFailure: "Couldn't reach ${zone.name} — check that its controller "
+            'is powered on and online.');
   }
 
   /// Called when a voice refinement returns an updated suggestion.
@@ -199,6 +282,7 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
     state = state!.copyWith(
       currentSuggestion: updated,
       userChangedParams: {...state!.userChangedParams, ...updated.changedParams},
+      clearFailure: true,
     );
   }
 

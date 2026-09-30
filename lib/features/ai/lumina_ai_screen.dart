@@ -8,7 +8,9 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
+import 'package:nexgen_command/features/ai/lumina_conversation_actions.dart';
 import 'package:nexgen_command/features/ai/lumina_conversation_driver.dart';
+import 'package:nexgen_command/features/ai/mic_availability.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_response_card.dart';
 import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
@@ -95,7 +97,21 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
       );
 
       if (!_speechAvailable) {
+        // UX audit row 113: say so. This used to be a debug line only.
         debugPrint('Speech recognition not available');
+        bool permitted = false;
+        try {
+          permitted = await _speech.hasPermission;
+        } catch (_) {}
+        if (mounted) {
+          showMicUnavailableSnackBar(
+            context,
+            classifyMicFailure(
+              hasPermission: permitted,
+              lastError: _speech.lastError?.errorMsg,
+            ),
+          );
+        }
         return;
       }
 
@@ -311,9 +327,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
                     minHeight: 32,
                   ),
                   padding: EdgeInsets.zero,
-                  onPressed: () {
-                    ref.read(luminaSheetProvider.notifier).clearSession();
-                  },
+                  onPressed: () => clearLuminaConversation(ref),
                 ),
               ],
             ],
@@ -379,8 +393,17 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
               text: msg.text,
               preview: msg.preview,
               wledPayload: msg.wledPayload,
+              sessionKey: i,
               onApply: msg.wledPayload != null
                   ? () => _applyPattern(
+                        msg.wledPayload!,
+                        msg.preview,
+                        originalPrompt:
+                            priorLuminaUserPrompt(sheetState.messages, i),
+                      )
+                  : null,
+              onSaveFavorite: msg.wledPayload != null
+                  ? () => _driver.saveFavorite(
                         msg.wledPayload!,
                         msg.preview,
                         originalPrompt:
@@ -863,13 +886,17 @@ class _AssistantBubble extends StatelessWidget {
   final String text;
   final LuminaPatternPreview? preview;
   final Map<String, dynamic>? wledPayload;
+  final Object? sessionKey;
   final VoidCallback? onApply;
+  final VoidCallback? onSaveFavorite;
 
   const _AssistantBubble({
     required this.text,
     this.preview,
     this.wledPayload,
+    this.sessionKey,
     this.onApply,
+    this.onSaveFavorite,
   });
 
   @override
@@ -912,9 +939,11 @@ class _AssistantBubble extends StatelessWidget {
 
     return LuminaResponseCard(
       suggestion: suggestion,
+      sessionKey: sessionKey,
       onApply: onApply,
       onAdjust: () {},
-      onSaveFavorite: wledPayload != null ? () {} : null,
+      // Row 106: wired to the favourites save through the shared driver.
+      onSaveFavorite: onSaveFavorite,
     );
   }
 

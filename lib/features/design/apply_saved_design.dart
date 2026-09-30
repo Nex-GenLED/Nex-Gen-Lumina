@@ -9,6 +9,7 @@ import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 
 /// Canonical "apply a saved design" routine.
 ///
@@ -44,15 +45,27 @@ Future<void> applySavedDesign(
   if (repo == null) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No device connected')),
+        SnackBar(
+          content:
+              Text(applyBlockedReason(ref.read) ?? 'No device connected'),
+          backgroundColor: Colors.red.shade800,
+        ),
       );
     }
     return;
   }
 
+  // The gate is read for the EFFECT shape below; a positional design decides
+  // its own channels (row 40). A closed gate says why, never returns silently
+  // (row 1 / foundation P2).
   final channels = ref.read(effectiveChannelIdsProvider);
-  if (channels.isEmpty) {
-    debugPrint('applySavedDesign: skip (U1 gate — no effective channels)');
+  if (channels.isEmpty && !design.isPositional) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(applyBlockedReason(ref.read) ?? kApplyBlockedFallback),
+        backgroundColor: Colors.red.shade800,
+      ));
+    }
     return;
   }
 
@@ -64,24 +77,31 @@ Future<void> applySavedDesign(
   // toast (audit F3; bench: 257 black + one 33-LED block). The chunked spine
   // also has no payload-size ceiling, unlike a single applyJson.
   Map<String, dynamic> payload;
+  DesignMotion? motion;
   if (design.isPositional) {
     payload = const <String, dynamic>{};
-    final result = await applyCustomDesignToLights(ref, design);
-    if (result != DesignApplyResult.applied &&
-        result != DesignApplyResult.staleApplied) {
+    // +110 E2 row 42: the DETAILED report, not a blanket "couldn't reach
+    // your lights" — "the background landed but the pixels didn't" and "no
+    // controller" are different sentences. Row 41: a composed design with
+    // motion runs its effect (see applyPositionalDesignDetailed).
+    final report = await applyCustomDesignDetailed(ref, design);
+    if (!report.ok) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(result == DesignApplyResult.noMap
+          content: Text(report.result == DesignApplyResult.noMap
               ? '"${design.name}" has no lit pixels to apply.'
               // #94 — an identity refusal must say so, not blame the network.
               : (takeIdentityRefusalMessage() ??
+                  report.message ??
                   "Couldn't apply \"${design.name}\" — your lights didn't "
                       'accept it. Check the connection and try again.')),
           backgroundColor: Colors.red.shade800,
+          duration: const Duration(seconds: 6),
         ));
       }
       return;
     }
+    motion = motionEffectOf(design);
   } else {
     payload = applyChannelFilter(
       design.toWledPayload(),
@@ -105,9 +125,10 @@ Future<void> applySavedDesign(
     (c) => c.included,
     orElse: () => const ChannelDesign(channelId: 0, channelName: ''),
   );
-  // A per-pixel frame is static (fx 0) whatever effect id the channel stores.
+  // A per-pixel frame is static (fx 0) whatever effect id the channel stores
+  // — unless the composed design carries motion, which ran as its effect.
   final effectId = design.isPositional
-      ? 0
+      ? (motion?.effectId ?? 0)
       : (_wireEffectIdFromPayload(payload) ?? firstChannel.effectId);
 
   ref.read(wledStateProvider.notifier).applyPreviewSync(
@@ -117,8 +138,8 @@ Future<void> applySavedDesign(
         // an Alternating one, and the Home hero draws them differently.
         paletteId: design.isPositional ? null : _wirePaletteIdFromPayload(payload),
         effectName: design.name,
-        speed: firstChannel.speed,
-        intensity: firstChannel.intensity,
+        speed: motion?.speed ?? firstChannel.speed,
+        intensity: motion?.intensity ?? firstChannel.intensity,
         // Mirror what was SENT. A design that states no brightness left the
         // controller's level alone, so the slider must stay where it is — this
         // used to show the design's unchosen 200 until the next poll.

@@ -11,9 +11,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_theme.dart';
+import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
+import 'package:nexgen_command/features/ai/lumina_lighting_suggestion.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
+import 'package:nexgen_command/features/site/site_models.dart';
+import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/shared/accessibility/text_scale_clamp.dart';
@@ -31,6 +35,36 @@ class _SeededSheet extends LuminaSheetController {
 class _StillWled extends WledNotifier {
   @override
   WledStateModel build() => WledStateModel.initial();
+}
+
+/// +110 E2: an adjustment session open on the reply card (message index 1),
+/// after an "Apply This" that did not land (row 110's failure line).
+class _SeededAdjust extends AdjustmentStateNotifier {
+  @override
+  AdjustmentState? build() {
+    final s = LuminaLightingSuggestion.fromPreview(
+      responseText: 'Here you go.',
+      preview: _preview,
+      wledPayload: const {'on': true, 'bri': 200},
+    );
+    return AdjustmentState(
+      originalSuggestion: s,
+      currentSuggestion: s,
+      sessionKey: 1,
+      failureMessage:
+          "Couldn't reach Back Patio — check that its controller is powered "
+          'on and online.',
+    );
+  }
+}
+
+/// Two zones, so the Zone chips (row 107) render.
+class _SeededZones extends ZonesNotifier {
+  @override
+  List<ZoneModel> build() => const [
+        ZoneModel(name: 'Front Roofline', primaryIp: '192.0.2.10', members: ['192.0.2.10']),
+        ZoneModel(name: 'Back Patio', primaryIp: '192.0.2.11', members: ['192.0.2.11']),
+      ];
 }
 
 const _preview = LuminaPatternPreview(
@@ -76,8 +110,10 @@ LuminaSheetState _conversation({bool thinking = false}) => LuminaSheetState(
       ],
     );
 
-List<Override> _overrides(LuminaSheetState seed) => [
+List<Override> _overrides(LuminaSheetState seed, {bool adjusting = false}) => [
       luminaSheetProvider.overrideWith(() => _SeededSheet(seed)),
+      if (adjusting) adjustmentStateProvider.overrideWith(() => _SeededAdjust()),
+      if (adjusting) zonesProvider.overrideWith(() => _SeededZones()),
       wledStateProvider.overrideWith(() => _StillWled()),
       wledRepositoryProvider.overrideWith((ref) => null),
       authStateProvider.overrideWith((ref) => Stream.value(null)),
@@ -151,8 +187,10 @@ Future<void> _check(
 /// The sheet is a modal ROUTE, pushed onto the app's navigator — above any
 /// `home:`. So the ProviderScope must sit above the MaterialApp, which the
 /// test therefore owns, with the app-root cap installed as the app does.
-Widget _sheetApp(LuminaSheetState seed, LuminaSheetMode mode) => ProviderScope(
-      overrides: _overrides(seed),
+Widget _sheetApp(LuminaSheetState seed, LuminaSheetMode mode,
+        {bool adjusting = false}) =>
+    ProviderScope(
+      overrides: _overrides(seed, adjusting: adjusting),
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: nexGenPremiumDarkTheme,
@@ -197,6 +235,18 @@ void main() {
         ),
       );
     });
+
+    testWidgets('adjustment panel open, zone chips, failed apply (+110 E2)',
+        (tester) async {
+      await _check(
+        tester,
+        'screen / adjusting',
+        ProviderScope(
+          overrides: _overrides(_conversation(), adjusting: true),
+          child: const LuminaAIScreen(),
+        ),
+      );
+    });
   });
 
   group('Lumina sheet', () {
@@ -227,6 +277,17 @@ void main() {
         tester,
         'sheet / thinking / expanded',
         _sheetApp(_conversation(thinking: true), LuminaSheetMode.expanded),
+        host: TextScaleHost.none,
+        opensRoute: true,
+      );
+    });
+
+    testWidgets('adjustment panel open, zone chips, failed apply, expanded '
+        '(+110 E2)', (tester) async {
+      await _check(
+        tester,
+        'sheet / adjusting / expanded',
+        _sheetApp(_conversation(), LuminaSheetMode.expanded, adjusting: true),
         host: TextScaleHost.none,
         opensRoute: true,
       );

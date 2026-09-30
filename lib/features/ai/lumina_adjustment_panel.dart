@@ -17,12 +17,17 @@ import 'package:nexgen_command/features/ai/zone_adjustment_card.dart';
 /// [adjustmentStateProvider] — every tap or slider change instantly updates
 /// the preview strip above.
 class LuminaAdjustmentPanel extends ConsumerWidget {
-  const LuminaAdjustmentPanel({super.key});
+  const LuminaAdjustmentPanel({super.key, this.sessionKey});
+
+  /// The card this panel belongs to (+110 E2 row 108). The panel opens only
+  /// for the session that carries the same key.
+  final Object? sessionKey;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final adjState = ref.watch(adjustmentStateProvider);
-    final isExpanded = adjState?.isExpanded ?? false;
+    final isExpanded =
+        (adjState?.isExpanded ?? false) && (adjState?.isFor(sessionKey) ?? false);
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 300),
@@ -118,6 +123,29 @@ class LuminaAdjustmentPanel extends ConsumerWidget {
           ),
 
           const SizedBox(height: 8),
+
+          // Row 110: why the last "Apply This" did not land. The panel stays
+          // open so the customer can change something and try again.
+          if (adjState.failureMessage != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+              child: Row(
+                key: const ValueKey('adjustment-failure'),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.error_outline,
+                      size: 16, color: Colors.orangeAccent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      adjState.failureMessage!,
+                      style: const TextStyle(
+                          color: Colors.orangeAccent, fontSize: 12, height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // Apply This CTA
           Padding(

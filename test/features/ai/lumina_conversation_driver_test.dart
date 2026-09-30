@@ -5,6 +5,10 @@
 // LuminaConversationHost and the rest of the app only through
 // LuminaConversationServices, so every branch is driven here with recording
 // fakes — no widget pump, no Riverpod container, no Firebase.
+//
+// +110 package E2 rewrote the outcome-dependent branches: rows 74, 105, 106,
+// 109, 112 and item 4 (multi-night persistence). The tests that pinned the
+// old behaviour "on purpose" are replaced by the new contract.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,9 +18,11 @@ import 'package:nexgen_command/features/ai/ephemeral_session_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_conversation_driver.dart';
 import 'package:nexgen_command/features/ai/lumina_schedule_flags.dart';
+import 'package:nexgen_command/features/ai/lumina_schedule_persistence.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/recurring_sports_autopilot_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
+import 'package:nexgen_command/shared/write_result.dart';
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -57,13 +63,19 @@ class _FakeServices implements LuminaConversationServices {
   Object? routeError;
   @override
   bool hasDevice = true;
-  bool applyResult = true;
+
+  /// What [applyToDevice] answers. Defaults to success; a test sets a
+  /// blocked or failed result to drive the failure branches.
+  WriteResult applyResult = const WriteResult.success();
   Object? applyError;
   @override
   String? currentUserId = 'user-under-test';
   @override
   String displayPatternName = 'Now Playing';
   DispatchResult? dispatchResult;
+  ScheduleNightsOutcome? nightsOutcome;
+  Object? persistError;
+  WriteResult favoriteResult = const WriteResult.success(message: 'Saved');
 
   // Recorded calls
   final List<String> routedPrompts = [];
@@ -71,13 +83,14 @@ class _FakeServices implements LuminaConversationServices {
   final List<LuminaPatternPreview> metadata = [];
   final List<String> labels = [];
   int labelClears = 0;
-  final List<Map<String, dynamic>> importedSchedules = [];
+  final List<LuminaScheduleFlags> persisted = [];
   final List<int> selectedTabs = [];
   final List<EphemeralSessionIntent> dispatchedEphemeral = [];
   final List<RecurringSportsAutopilotIntent> dispatchedSports = [];
   final List<List<SchedulingIntent>> dispatchedIntents = [];
   final List<LuminaPatternPreview?> intentPreviews = [];
   final List<LuminaPatternPreview> panelSyncs = [];
+  final List<(String, Map<String, dynamic>)> savedFavorites = [];
 
   @override
   LuminaThread openThread() => thread;
@@ -90,7 +103,12 @@ class _FakeServices implements LuminaConversationServices {
   }
 
   @override
-  Future<bool> applyToDevice(Map<String, dynamic> payload) async {
+  Future<WriteResult> applyToDevice(Map<String, dynamic> payload) async {
+    if (!hasDevice) {
+      return const WriteResult.blocked(
+          'No controller is set up yet. Add your controller in Settings to '
+          'control your lights.');
+    }
     applied.add(payload);
     if (applyError != null) throw applyError!;
     return applyResult;
@@ -138,8 +156,23 @@ class _FakeServices implements LuminaConversationServices {
   }
 
   @override
-  Future<void> importSmartSchedule(Map<String, dynamic> payload) async {
-    importedSchedules.add(payload);
+  Future<ScheduleNightsOutcome> persistScheduleNights(
+      LuminaScheduleFlags flags) async {
+    persisted.add(flags);
+    if (persistError != null) throw persistError!;
+    return nightsOutcome ??
+        ScheduleNightsOutcome(
+            requested: flags.schedule.length,
+            persisted: flags.schedule.length);
+  }
+
+  @override
+  Future<WriteResult> saveFavorite({
+    required String patternName,
+    required Map<String, dynamic> wledPayload,
+  }) async {
+    savedFavorites.add((patternName, wledPayload));
+    return favoriteResult;
   }
 
   @override
@@ -213,11 +246,17 @@ const _designWled = <String, dynamic>{
   ],
 };
 
+const _refused = WriteResult.failed(WriteFailureKind.unreachable,
+    message: "Couldn't reach your lights — check your connection");
+
 Map<String, dynamic> _night(int index, int fx) => {
       'dayIndex': index,
       'date': DateTime(2026, 12, 20 + index).toIso8601String(),
       'patternName': 'Christmas night ${index + 1}',
       'effectId': fx,
+      'effectName': ['Twinkle', 'Breathe', 'Running'][index % 3],
+      'startTrigger': 'sunset',
+      'endTrigger': 'sunrise',
       'wled': {
         'on': true,
         'seg': [
@@ -253,6 +292,9 @@ LuminaCommandResult _scheduleResult({int nights = 3}) => LuminaCommandResult(
         'dayCount': nights,
         'hasVariety': true,
         'patternName': 'Christmas — $nights-Night Schedule',
+        'themeName': 'Christmas',
+        'startTrigger': 'sunset',
+        'endTrigger': 'sunrise',
         'schedule': [for (int i = 0; i < nights; i++) _night(i, 43 + i)],
       }),
     );
@@ -266,6 +308,17 @@ LuminaCommandResult _navigate(Map<String, dynamic> parameters) =>
         rawText: 'open it',
       ),
       responseText: 'Opening that now.',
+    );
+
+LuminaCommandResult _power({required bool on}) => LuminaCommandResult(
+      command: LuminaCommand(
+        type: LuminaCommandType.power,
+        parameters: {'on': on},
+        confidence: 0.98,
+        rawText: on ? 'turn on' : 'turn off',
+      ),
+      responseText: on ? 'Turning your lights on.' : 'Turning your lights off.',
+      wledPayload: {'on': on},
     );
 
 const _ephemeralJson = <String, dynamic>{
@@ -299,7 +352,7 @@ void main() {
       late _Rig rig;
       setUp(() => rig = _Rig(surface));
 
-      // ── Schedule branch (UX audit row 7) ────────────────────────────────
+      // ── Schedule branch (UX audit row 7 / item 4) ───────────────────────
 
       group('schedule branch', () {
         test('fires for a result carrying the flags', () async {
@@ -308,27 +361,30 @@ void main() {
           expect(branch, LuminaResultBranch.schedule);
         });
 
-        test('applies night 1, imports every night, labels, posts, scrolls',
+        test('applies night 1, persists every night, labels, posts honestly',
             () async {
           final result = _scheduleResult(nights: 3);
           await rig.handle(result);
 
-          // Night 1 is the live preview.
+          // Night 1 is the live apply.
           expect(rig.services.applied.length, 1);
           expect(
               (rig.services.applied.single['seg'] as List).first['fx'], 43);
 
-          // The whole plan goes to the scheduler.
-          expect(rig.services.importedSchedules.length, 1);
-          final imported = rig.services.importedSchedules.single;
-          expect((imported['schedule'] as List).length, 3);
-          expect(imported['isSchedule'], isTrue);
+          // The whole plan goes to the calendar.
+          expect(rig.services.persisted.length, 1);
+          expect(rig.services.persisted.single.schedule.length, 3);
 
           expect(rig.services.labels, ['Christmas — 3-Night Schedule']);
 
           expect(rig.thread.assistantMessages.length, 1);
           final posted = rig.thread.assistantMessages.single;
-          expect(posted.text, result.responseText);
+          // Not the plan's own "I've scheduled 3 nights" prose — a reply
+          // composed from what happened.
+          expect(posted.text, isNot(result.responseText));
+          expect(posted.text,
+              contains("Tonight's Christmas look is on your lights now."));
+          expect(posted.text, contains('other 2 nights are in your Schedule'));
           expect(posted.preview, isNotNull);
           expect(posted.preview!.colors.first, const Color(0xFFFF0000));
           expect(posted.wledPayload, result.wledPayload);
@@ -352,10 +408,7 @@ void main() {
           final branch = await rig.handle(parsed);
 
           expect(branch, LuminaResultBranch.schedule);
-          expect(
-              (rig.services.importedSchedules.single['schedule'] as List)
-                  .length,
-              2);
+          expect(rig.services.persisted.single.schedule.length, 2);
         });
 
         test('takes precedence over an ephemeral session on the same reply',
@@ -372,25 +425,53 @@ void main() {
           expect(rig.services.dispatchedEphemeral, isEmpty);
         });
 
-        test('with no device: nothing is applied, the plan still imports',
-            () async {
+        test('with no device: the reply says tonight did not land, the '
+            'nights still persist', () async {
           rig.services.hasDevice = false;
 
           await rig.handle(_scheduleResult());
 
           expect(rig.services.applied, isEmpty);
-          expect(rig.services.importedSchedules.length, 1);
-          expect(rig.thread.assistantMessages.length, 1);
+          expect(rig.services.persisted.length, 1);
+          expect(rig.services.labels, isEmpty);
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, startsWith("I couldn't put tonight's Christmas look"));
+          expect(text, contains('No controller is set up yet.'));
+          expect(text, contains('other 2 nights are in your Schedule'));
         });
 
-        test('a failed night-1 apply does not stop the import or the reply',
+        test('nights that could not be saved: only tonight, said plainly',
+            () async {
+          rig.services.nightsOutcome = const ScheduleNightsOutcome(
+              requested: 3, persisted: 0, message: 'sign in first.');
+
+          await rig.handle(_scheduleResult());
+
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, contains('Only tonight was applied'));
+          expect(text, contains('sign in first.'));
+          expect(text, isNot(contains("I've scheduled")));
+        });
+
+        test('a persistence that throws is reported, not claimed', () async {
+          rig.services.persistError = StateError('firestore down');
+
+          await rig.handle(_scheduleResult());
+
+          expect(rig.thread.assistantMessages.single.text,
+              contains('Only tonight was applied'));
+        });
+
+        test('a night-1 apply that throws does not stop the persistence',
             () async {
           rig.services.applyError = StateError('controller unreachable');
 
           await rig.handle(_scheduleResult());
 
-          expect(rig.services.importedSchedules.length, 1);
-          expect(rig.thread.assistantMessages.length, 1);
+          expect(rig.services.persisted.length, 1);
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, startsWith("I couldn't put tonight's Christmas look"));
+          expect(text, contains('other 2 nights are in your Schedule'));
         });
 
         test('flags with NO plan (season_fill) fall through to the apply',
@@ -410,7 +491,7 @@ void main() {
           // Same as before the flags were carried: the design is applied.
           expect(branch, LuminaResultBranch.apply);
           expect(rig.services.applied, [_designWled]);
-          expect(rig.services.importedSchedules, isEmpty);
+          expect(rig.services.persisted, isEmpty);
         });
       });
 
@@ -469,38 +550,68 @@ void main() {
           expect(rig.services.panelSyncs.length, 1);
         });
 
-        // Pins today's behaviour — UX audit row 74 changes it on purpose.
-        test('row 74: the reply is posted unchanged when the apply is refused',
+        test('row 74: a refused apply posts the failure, not the prose',
             () async {
-          rig.services.applyResult = false;
+          rig.services.applyResult = _refused;
 
           await rig.handle(result);
 
           expect(rig.services.metadata, isEmpty);
           expect(rig.services.labels, isEmpty);
-          expect(rig.thread.assistantMessages.single.text,
-              'Applying Royal Blue Wash now.');
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, isNot('Applying Royal Blue Wash now.'));
+          expect(text, startsWith("I couldn't apply that"));
+          expect(text, contains("Couldn't reach your lights"));
+          // The card keeps the design so it can be retried.
+          expect(rig.thread.assistantMessages.single.wledPayload, _designWled);
         });
 
-        test('row 74: the reply is posted unchanged when no device is selected',
+        test('row 74: no device → the shared reason, no completion prose',
             () async {
           rig.services.hasDevice = false;
 
           await rig.handle(result);
 
           expect(rig.services.applied, isEmpty);
-          expect(rig.thread.assistantMessages.single.text,
-              'Applying Royal Blue Wash now.');
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, contains('No controller is set up yet.'));
+          expect(text, isNot(contains('Applying')));
         });
 
-        test('an apply that throws is swallowed and the reply still posts',
+        test('row 74: "turn off" that went nowhere is not "Turning your '
+            'lights off."', () async {
+          rig.services.hasDevice = false;
+
+          await rig.handle(_power(on: false));
+
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, startsWith("I couldn't turn your lights off"));
+        });
+
+        test('an apply that throws is a failure reply, not a crash',
             () async {
           rig.services.applyError = StateError('controller unreachable');
 
           await rig.handle(result);
 
           expect(rig.services.labels, isEmpty);
-          expect(rig.thread.assistantMessages.length, 1);
+          expect(rig.thread.assistantMessages.single.text,
+              startsWith("I couldn't apply that"));
+        });
+
+        test('row 112: a power command leaves Now Playing alone', () async {
+          await rig.handle(_power(on: true));
+
+          expect(rig.services.applied, [
+            {'on': true}
+          ]);
+          expect(rig.services.labels, isEmpty);
+          expect(rig.services.labelClears, 0);
+          expect(rig.services.metadata, isEmpty);
+          // No manufactured swatches: no preview at all.
+          expect(rig.thread.assistantMessages.single.preview, isNull);
+          expect(rig.thread.assistantMessages.single.text,
+              'Turning your lights on.');
         });
 
         test('no pattern name → the label is built from the prompt words',
@@ -578,32 +689,31 @@ void main() {
           expect(rig.log.calls, isEmpty);
         });
 
-        // Pins today's behaviour — UX audit row 109 changes it on purpose.
-        test('row 109: a failed dispatch posts the prose unchanged', () async {
+        test('row 109: a failed dispatch says the revert was not set',
+            () async {
           rig.services.dispatchResult =
               _dispatch(errorMessage: 'service unavailable');
 
           await rig.handle(result);
 
-          expect(rig.thread.assistantMessages.single.text,
-              'Team colors tonight, back to warm white after.');
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, startsWith('Team colors tonight, back to warm white after.'));
+          expect(text, contains("I couldn't set the post-game revert"));
         });
 
-        test('row 109: signed out skips the dispatch, prose unchanged',
-            () async {
+        test('row 109: signed out says the revert was not set', () async {
           rig.services.currentUserId = null;
 
           await rig.handle(result);
 
           expect(rig.services.dispatchedEphemeral, isEmpty);
           expect(rig.thread.assistantMessages.single.text,
-              'Team colors tonight, back to warm white after.');
+              contains("I couldn't set the post-game revert — sign in"));
         });
 
-        // Pins today's behaviour — UX audit row 105 changes it on purpose.
-        test('row 105: the no-game sentence ignores a refused apply',
+        test('row 105: the no-game sentence reflects a refused apply',
             () async {
-          rig.services.applyResult = false;
+          rig.services.applyResult = _refused;
           rig.services.dispatchResult = _dispatch(
             noGameFoundMessage:
                 "There's no game tonight, but I've applied the colors anyway.",
@@ -611,10 +721,23 @@ void main() {
 
           await rig.handle(result);
 
-          expect(
-            rig.thread.assistantMessages.single.text,
-            endsWith("but I've applied the colors anyway."),
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, isNot(contains("I've applied the colors anyway")));
+          expect(text, contains("I couldn't apply the colors"));
+          expect(text, contains("Couldn't reach your lights"));
+        });
+
+        test('row 105: the no-game sentence keeps "applied anyway" when it '
+            'did apply', () async {
+          rig.services.dispatchResult = _dispatch(
+            noGameFoundMessage:
+                "There's no game tonight, but I've applied the colors anyway.",
           );
+
+          await rig.handle(result);
+
+          expect(rig.thread.assistantMessages.single.text,
+              contains("I've applied the colors anyway."));
         });
 
         test('an unmounted surface posts nothing', () async {
@@ -698,13 +821,15 @@ void main() {
           );
         });
 
-        test('a pipeline failure posts the snag message', () async {
+        test('a pipeline failure posts the snag message, without internals',
+            () async {
           rig.services.routeError = StateError('offline');
 
           await rig.driver.send('warm white');
 
-          expect(rig.thread.assistantMessages.single.text,
-              startsWith('I hit a snag:'));
+          final text = rig.thread.assistantMessages.single.text;
+          expect(text, startsWith('I hit a snag'));
+          expect(text, isNot(contains('offline')));
           expect(rig.log.calls.last, 'scroll');
         });
 
@@ -713,7 +838,7 @@ void main() {
 
           await rig.driver.send('christmas for the next three nights');
 
-          expect(rig.services.importedSchedules.length, 1);
+          expect(rig.services.persisted.length, 1);
           expect(rig.thread.assistantMessages.length, 1);
         });
       });
@@ -730,24 +855,70 @@ void main() {
           expect(rig.log.calls, ['snack:Now Playing applied!']);
         });
 
-        test('a refused apply shows nothing', () async {
-          rig.services.applyResult = false;
+        test('a refused apply shows why', () async {
+          rig.services.applyResult = _refused;
 
           await rig.driver.applyFromBubble(_designWled, null);
 
           expect(rig.services.labels, isEmpty);
-          expect(rig.log.calls, isEmpty);
+          expect(rig.log.calls,
+              ["snack:Couldn't reach your lights — check your connection"]);
         });
 
-        test('no device: nothing is sent', () async {
+        test('no device: nothing is sent, the reason is shown', () async {
           rig.services.hasDevice = false;
 
           await rig.driver.applyFromBubble(_designWled, null);
 
           expect(rig.services.applied, isEmpty);
-          expect(rig.log.calls, isEmpty);
+          expect(rig.log.calls.single, startsWith('snack:No controller'));
+        });
+      });
+
+      // ── Save as favourite (row 106) ─────────────────────────────────────
+
+      group('saveFavorite', () {
+        test('saves the device payload under the design name and says so',
+            () async {
+          final result = await rig.driver.saveFavorite(
+            _designWled,
+            const LuminaPatternPreview(
+                patternName: 'Royal Blue Wash', colors: [Color(0xFF0046FF)]),
+          );
+
+          expect(result.ok, isTrue);
+          final (name, payload) = rig.services.savedFavorites.single;
+          expect(name, 'Royal Blue Wash');
+          // Device keys only — no Lumina display metadata.
+          expect(payload.keys, containsAll(['on', 'bri', 'seg']));
+          expect(payload.containsKey('patternName'), isFalse);
+          expect(rig.log.calls, ['snack:Saved']);
+        });
+
+        test('a failed save says so', () async {
+          rig.services.favoriteResult = const WriteResult.failed(
+              WriteFailureKind.error, message: "Couldn't save that");
+
+          final result = await rig.driver.saveFavorite(_designWled, null,
+              originalPrompt: 'royal blue');
+
+          expect(result.ok, isFalse);
+          expect(rig.log.calls, ["snack:Couldn't save that"]);
         });
       });
     });
   }
+
+  group('helpers', () {
+    test('luminaFavoriteId is stable for the same design', () {
+      expect(luminaFavoriteId(_designWled), luminaFavoriteId(_designWled));
+      expect(luminaFavoriteId(_designWled), startsWith('lumina_'));
+    });
+
+    test('extractLuminaPreview: no colours → no preview (row 112)', () {
+      expect(extractLuminaPreview(const {'on': true}), isNull);
+      expect(extractLuminaPreview(const {'on': true, 'bri': 128}), isNull);
+      expect(extractLuminaPreview(_designWled), isNotNull);
+    });
+  });
 }

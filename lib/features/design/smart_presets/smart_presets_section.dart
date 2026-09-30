@@ -222,9 +222,9 @@ class _PresetCard extends StatelessWidget {
                       style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
+                  // Wraps in full: two lines cut the description short at
+                  // default text size (+110 E2 accessibility).
                   Text(preset.description,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           color: NexGenPalette.textMedium, fontSize: 12)),
                 ],

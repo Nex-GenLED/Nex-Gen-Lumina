@@ -170,6 +170,47 @@ final lastCompositionResultProvider = StateProvider<CompositionResult?>((ref) {
   return null;
 });
 
+/// The last result the orchestrator returned that the studio could not act
+/// on: an error, with its message and suggestions. +110 E2 audit row 2 —
+/// this used to be dropped on the floor (the text box just re-enabled), so a
+/// home with no roofline map saw every prompt do nothing. Cleared by
+/// [resetDesignStudio] and by the next successful result.
+final designStudioLastErrorProvider =
+    StateProvider<DesignStudioResult?>((ref) => null);
+
+/// Records [result] on the studio's state providers — the ONE place the three
+/// entry points (the screen's submit, [processInputProvider] and
+/// [applyClarificationsProvider]) write their outcome, so an error can never
+/// again be recorded by one and forgotten by another.
+void recordDesignStudioResult(Ref ref, DesignStudioResult result) =>
+    recordDesignStudioResultWith(ref.read, result);
+
+/// See [recordDesignStudioResult]; takes `ref.read` from a widget.
+void recordDesignStudioResultWith(
+  T Function<T>(ProviderListenable<T> provider) read,
+  DesignStudioResult result,
+) {
+  read(designStudioStateProvider.notifier).state = result.status;
+  read(designStudioLastErrorProvider.notifier).state =
+      result.isError ? result : null;
+
+  if (result.intent != null) {
+    read(currentDesignIntentProvider.notifier).setIntent(result.intent!);
+  }
+
+  if (result.needsClarification && result.pendingQuestions != null) {
+    read(pendingClarificationsProvider.notifier).state =
+        result.pendingQuestions!;
+    read(currentQuestionIndexProvider.notifier).state = 0;
+  }
+
+  if (result.isReady && result.pattern != null) {
+    read(composedPatternProvider.notifier).state = result.pattern;
+    read(pendingClarificationsProvider.notifier).state = [];
+    read(clarificationChoicesProvider.notifier).state = {};
+  }
+}
+
 // =============================================================================
 // Processing Actions
 // =============================================================================
@@ -204,22 +245,10 @@ final processInputProvider = FutureProvider.family<DesignStudioResult, String>((
     config: config,
   );
 
-  // Update state based on result
-  ref.read(designStudioStateProvider.notifier).state = result.status;
-
-  if (result.intent != null) {
-    ref.read(currentDesignIntentProvider.notifier).setIntent(result.intent!);
-  }
-
-  if (result.needsClarification && result.pendingQuestions != null) {
-    ref.read(pendingClarificationsProvider.notifier).state = result.pendingQuestions!;
-    ref.read(currentQuestionIndexProvider.notifier).state = 0;
+  if (result.needsClarification) {
     ref.read(clarificationChoicesProvider.notifier).state = {};
   }
-
-  if (result.isReady && result.pattern != null) {
-    ref.read(composedPatternProvider.notifier).state = result.pattern;
-  }
+  recordDesignStudioResult(ref, result);
 
   return result;
 });
@@ -233,7 +262,15 @@ final applyClarificationsProvider = FutureProvider<DesignStudioResult>((ref) asy
   final config = _configForAiPipeline(ref);
 
   if (intent == null || config == null) {
-    return DesignStudioResult.error('No design intent or configuration available');
+    final result = DesignStudioResult.error(
+      config == null
+          ? 'No roofline configuration found. Please set up your roofline '
+              'first.'
+          : 'Describe your design first, then answer the questions.',
+      suggestions: config == null ? const ['Go to Settings > Roofline Setup'] : const [],
+    );
+    recordDesignStudioResult(ref, result);
+    return result;
   }
 
   ref.read(designStudioStateProvider.notifier).state = DesignStudioStatus.processing;
@@ -245,43 +282,47 @@ final applyClarificationsProvider = FutureProvider<DesignStudioResult>((ref) asy
     config: config,
   );
 
-  // Update state based on result
-  ref.read(designStudioStateProvider.notifier).state = result.status;
-
-  if (result.intent != null) {
-    ref.read(currentDesignIntentProvider.notifier).setIntent(result.intent!);
-  }
-
-  if (result.needsClarification && result.pendingQuestions != null) {
-    ref.read(pendingClarificationsProvider.notifier).state = result.pendingQuestions!;
-    ref.read(currentQuestionIndexProvider.notifier).state = 0;
-    // Keep existing choices that are still relevant
-  }
-
-  if (result.isReady && result.pattern != null) {
-    ref.read(composedPatternProvider.notifier).state = result.pattern;
-    // Clear clarification state
-    ref.read(pendingClarificationsProvider.notifier).state = [];
-    ref.read(clarificationChoicesProvider.notifier).state = {};
-  }
+  // Existing choices that are still relevant are kept on a follow-up
+  // question; they are cleared only when the pattern is ready.
+  recordDesignStudioResult(ref, result);
 
   return result;
 });
+
+/// The primary action for [DesignStudioResult.suggestions] and the "no
+/// roofline" error: true when the result is about the roofline map itself,
+/// so the studio routes the customer to roofline setup rather than back to
+/// the prompt (+110 E2 row 2).
+bool isRooflineSetupError(DesignStudioResult result) {
+  final text = '${result.errorMessage ?? ''} ${result.suggestions.join(' ')}'
+      .toLowerCase();
+  return text.contains('roofline');
+}
 
 // =============================================================================
 // Helper Actions
 // =============================================================================
 
 /// Reset the design studio to initial state.
-void resetDesignStudio(WidgetRef ref) {
-  ref.read(designStudioStateProvider.notifier).state = DesignStudioStatus.idle;
-  ref.read(designStudioInputProvider.notifier).state = '';
-  ref.read(currentDesignIntentProvider.notifier).clear();
-  ref.read(pendingClarificationsProvider.notifier).state = [];
-  ref.read(currentQuestionIndexProvider.notifier).state = 0;
-  ref.read(clarificationChoicesProvider.notifier).state = {};
-  ref.read(composedPatternProvider.notifier).state = null;
-  ref.read(lastCompositionResultProvider.notifier).state = null;
+///
+/// +110 E2 row 115: called by "Start over" and when the studio screen is
+/// entered, so a pending question or a stale design from an earlier visit
+/// never greets the customer on the next one. Takes `ref.read` so a
+/// `WidgetRef` and a `Ref` can both call it.
+void resetDesignStudio(WidgetRef ref) => resetDesignStudioWith(ref.read);
+
+/// See [resetDesignStudio].
+void resetDesignStudioWith(
+    T Function<T>(ProviderListenable<T> provider) read) {
+  read(designStudioStateProvider.notifier).state = DesignStudioStatus.idle;
+  read(designStudioInputProvider.notifier).state = '';
+  read(currentDesignIntentProvider.notifier).clear();
+  read(pendingClarificationsProvider.notifier).state = [];
+  read(currentQuestionIndexProvider.notifier).state = 0;
+  read(clarificationChoicesProvider.notifier).state = {};
+  read(composedPatternProvider.notifier).state = null;
+  read(lastCompositionResultProvider.notifier).state = null;
+  read(designStudioLastErrorProvider.notifier).state = null;
 }
 
 /// Select an answer for the current clarification question.

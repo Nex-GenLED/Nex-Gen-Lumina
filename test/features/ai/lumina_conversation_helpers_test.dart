@@ -13,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
 import 'package:nexgen_command/features/ai/lumina_conversation_driver.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
-import 'package:nexgen_command/theme.dart';
 
 void main() {
   group('resolveLuminaNavigation', () {
@@ -190,27 +189,18 @@ void main() {
       expect(preview.colors.length, 5);
     });
 
-    // Pins today's behaviour — UX audit row 112 changes it on purpose: a
-    // power / brightness payload has no colors, and the preview is
-    // manufactured from the fallback swatches rather than withheld.
-    test('row 112: a payload with no colors gets the fallback swatches', () {
-      const fallback = [NexGenPalette.cyan, Color(0xFF102040)];
-
-      final power = extractLuminaPreview({'on': true})!;
-      expect(power.colors, fallback);
-      expect(power.patternName, isNull);
-      expect(power.effectId, isNull);
-
-      final brightness = extractLuminaPreview({'on': true, 'bri': 128})!;
-      expect(brightness.colors, fallback);
-
-      final colorlessSeg = extractLuminaPreview({
-        'seg': [
-          {'fx': 0},
-        ],
-      })!;
-      expect(colorlessSeg.colors, fallback);
-      expect(colorlessSeg.effectId, 0);
+    // UX audit row 112 — FIXED in +110 E2: a power / brightness payload has
+    // no colours, so there is NO preview (no manufactured swatches, no card).
+    test('row 112: a payload with no colors gets no preview', () {
+      expect(extractLuminaPreview({'on': true}), isNull);
+      expect(extractLuminaPreview({'on': true, 'bri': 128}), isNull);
+      expect(
+          extractLuminaPreview({
+            'seg': [
+              {'fx': 0},
+            ],
+          }),
+          isNull);
     });
 
     // UX audit pattern P6 — FIXED in +110. When seg[0] is the
@@ -327,14 +317,16 @@ void main() {
         );
       });
 
-      // Pins today's behaviour — UX audit row 109 changes it on purpose.
-      test('row 109: a failed dispatch adds nothing (${surface.name})', () {
+      // UX audit row 109 — FIXED in +110 E2: a failed dispatch says the
+      // revert was not set.
+      test('row 109: a failed dispatch says the revert was not set '
+          '(${surface.name})', () {
         expect(
           buildEphemeralAugmentation(
             dispatch(errorMessage: 'service unavailable'),
             surface: surface,
           ),
-          isNull,
+          contains("I couldn't set the post-game revert"),
         );
       });
     }

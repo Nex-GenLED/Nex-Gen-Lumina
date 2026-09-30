@@ -22,16 +22,24 @@ class EffectAdjustmentCard extends ConsumerWidget {
     final currentId = adjState.currentSuggestion.effect.id;
     final effects = WledEffectsCatalog.topPicks;
 
-    return SizedBox(
-      height: 36,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: effects.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final fx = effects[i];
-          final isActive = fx.id == currentId;
+    // Content-sized, not a fixed 36-point strip: at large text the chip
+    // labels were taller than the strip (+110 E2 accessibility).
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (var i = 0; i < effects.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            _chip(ref, effects[i], effects[i].id == currentId),
+          ],
+        ],
+      ),
+    );
+  }
 
+  Widget _chip(WidgetRef ref, WledEffect fx, bool isActive) {
+    {
+      {
           return GestureDetector(
             onTap: () {
               final newEffect = EffectInfo(
@@ -68,8 +76,7 @@ class EffectAdjustmentCard extends ConsumerWidget {
               ),
             ),
           );
-        },
-      ),
-    );
+      }
+    }
   }
 }

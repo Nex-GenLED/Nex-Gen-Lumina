@@ -18,8 +18,13 @@ import 'package:nexgen_command/data/holiday_color_database.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart' show safeRGBW;
 import 'package:nexgen_command/features/ai/compound_command_detector.dart';
+import 'package:nexgen_command/features/ai/local_command_parser.dart'
+    show LocalCommandParser;
 import 'package:nexgen_command/features/ai/user_variety_profile.dart';
+import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart'
+    show effectDefaultSpeedOr;
 import 'package:nexgen_command/features/ai/lumina_smart_scheduler.dart';
+import 'package:nexgen_command/features/audio/models/audio_reactive_capability.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -219,9 +224,10 @@ class LuminaBrain {
     }
 
     // TIER 0: Smart team resolution with fuzzy matching + user context
-    // Only run when the query explicitly mentions sports/teams — prevents
-    // "fireworks" or "exciting design" from fuzzy-matching team aliases.
-    if (!isOpenEnded && !_isScheduleOrTimeQuery(userPrompt) && _isSportsRequest(userPrompt)) {
+    // Only run when the query mentions sports, a team keyword, or a KNOWN
+    // TEAM NAME (+110 E2 item 3) — prevents "fireworks" or "exciting design"
+    // from fuzzy-matching team aliases.
+    if (!isOpenEnded && !_isScheduleOrTimeQuery(userPrompt)) {
       List<String>? userTeams;
       String? userLocation;
       try {
@@ -237,19 +243,12 @@ class LuminaBrain {
         debugPrint('Error in LuminaBrain reading user profile for sports: $e');
       }
 
-      final teamResult = TeamColorResolver.resolve(
+      final response = composeTeamResponse(
         userPrompt,
         userTeams: userTeams,
         userLocation: userLocation,
       );
-
-      // Only return team response for high-confidence matches (>= 0.8).
-      // Low-confidence fuzzy matches fall through to Tier 1/3 for better handling.
-      if (teamResult != null && teamResult.isHighConfidence) {
-        final context = EventThemeLibrary.detectContext(userPrompt.toLowerCase());
-        final response = _buildCanonicalTeamResponse(teamResult.team, context);
-        return response;
-      }
+      if (response != null) return response;
     }
 
     // TIER 1: Try to match against deterministic event theme library
@@ -336,7 +335,17 @@ class LuminaBrain {
 
     // Validate: reject AI responses that reference sports teams when the user
     // didn't ask for sports content.
-    if (parsed != null && !_isSportsRequest(userPrompt)) {
+    //
+    // +110 E2 item 3a — THE ROOT CAUSE of "give me a chiefs design with
+    // motion right now" → "I couldn't find a matching design". The old gate
+    // (`_hasExplicitSportsKeyword`) looked for words like "team" or "nfl" and
+    // never for a team NAME, so the prompt skipped Tier 0, went to the cloud,
+    // came back as a correct Chiefs design whose name mentioned the NFL — and
+    // was rejected HERE as "sports content in a non-sports query". The gate
+    // now recognises a known team name (isSportsRequest), so a team request
+    // is composed locally at Tier 0 and never reaches this guard; when the
+    // guard does fire, it says what it did not understand (item 3e).
+    if (parsed != null && !isSportsRequest(userPrompt)) {
       final patternName = (parsed.object['patternName'] as String? ?? '').toLowerCase();
       final thought = (parsed.object['thought'] as String? ?? '').toLowerCase();
       // Check if the AI injected sports team references
@@ -347,8 +356,7 @@ class LuminaBrain {
       if (hasSportsRef) {
         debugPrint('🚫 Rejected AI response: sports team reference in non-sports query. '
             'Input: "$userPrompt" | patternName: "$patternName"');
-        // Return a generic helpful response instead
-        return "I couldn't find a matching design. Try describing the colors or mood you're looking for.";
+        return describeMisunderstanding(userPrompt);
       }
     }
 
@@ -414,10 +422,22 @@ class LuminaBrain {
           'Make sure your system is online first.';
     }
 
-    // Read capability — the provider may already be cached
-    final capAsync = ref.read(audioCapabilityProvider(ip));
-    final cap = capAsync.valueOrNull;
-    if (cap == null || !cap.hasAudioReactiveUsermod) {
+    // UX audit row 111: WAIT for the capability check. The provider used to
+    // be read synchronously, so while the probe was still in flight the
+    // controller was declared to lack AudioReactive firmware.
+    AudioReactiveCapability? cap;
+    try {
+      cap = await ref
+          .read(audioCapabilityProvider(ip).future)
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      debugPrint('Audio capability check failed: $e');
+    }
+    if (cap == null) {
+      return "I couldn't check whether your controller supports Audio Mode "
+          "just now. Make sure it's online and try again in a moment.";
+    }
+    if (!cap.hasAudioReactiveUsermod) {
       return 'Audio Mode needs AudioReactive firmware on your controller. '
           'Check your controller settings.';
     }
@@ -552,8 +572,9 @@ class LuminaBrain {
     }
 
     // --- Attempt team resolution if holiday didn't match ---
-    // Only resolve teams when the query explicitly mentions sports context.
-    if (theme == null && !_isScheduleOrTimeQuery(lightingPrompt) && _isSportsRequest(lightingPrompt)) {
+    // Only resolve teams when the query mentions sports context or a known
+    // team name (the same gate Tier 0 uses; item 3).
+    if (theme == null && !_isScheduleOrTimeQuery(lightingPrompt) && isSportsRequest(lightingPrompt)) {
       List<String>? userTeams;
       String? userLocation;
       try {
@@ -577,6 +598,13 @@ class LuminaBrain {
 
       if (teamResult != null && teamResult.isHighConfidence) {
         final ledRgb = teamResult.team.ledOptimizedRgb;
+        // Item 3b: "with motion" on a multi-night plan → no Solid nights.
+        // The scheduler already drops fx 0 for "motion"/"animated"; the
+        // pool is ordered so an animated effect leads when motion is asked.
+        final motion = wantsMotion(lightingPrompt);
+        final suggested = teamResult.team.suggestedEffects.isNotEmpty
+            ? teamResult.team.suggestedEffects
+            : const [2, 41, 43, 12, 0];
         theme = ResolvedTheme(
           name: teamResult.team.officialName,
           colorEntries: teamResult.team.colors.asMap().entries.map((e) {
@@ -593,9 +621,9 @@ class LuminaBrain {
               'rgb': rgb,
             };
           }).toList(),
-          suggestedEffects: teamResult.team.suggestedEffects.isNotEmpty
-              ? teamResult.team.suggestedEffects
-              : [2, 41, 43, 12, 0],
+          suggestedEffects: motion
+              ? [for (final fx in suggested) if (fx != 0) fx]
+              : suggested,
           defaultSpeed: teamResult.team.defaultSpeed,
           defaultIntensity: teamResult.team.defaultIntensity,
         );
@@ -713,10 +741,86 @@ class LuminaBrain {
     return '$verbal ${jsonEncode(jsonObject)}';
   }
 
+  // ── Team requests (+110 E2 item 3) ──────────────────────────────────────
+
+  /// Motion words: "with motion", "moving", "animated", "with movement",
+  /// "make it move", "chase", "flowing"…
+  static final RegExp _motionPattern = RegExp(
+    r'\b(motion|moving|moves?|movement|animat(?:ed|ion|e)|chas(?:e|ing)|'
+    r'flow(?:ing)?|dynamic|running|sparkl(?:e|ing)|twinkl(?:e|ing)|'
+    r'pulsing|breathing|wave|waving)\b',
+    caseSensitive: false,
+  );
+
+  /// True when the customer asked for the lights to MOVE.
+  static bool wantsMotion(String prompt) => _motionPattern.hasMatch(prompt);
+
+  /// Immediacy words. They change nothing about the design — a Tier 0 result
+  /// is applied as soon as it is composed — but they must never be mistaken
+  /// for part of a team name or for a schedule.
+  static final RegExp _immediacyPattern = RegExp(
+    r'\b(right\s+now|now|immediately|straight\s+away|asap)\b',
+    caseSensitive: false,
+  );
+
+  /// The team's colours (LED-corrected, W explicit) as the response's colour
+  /// entries and as the segment `col` array.
+  static List<List<int>> _teamSegmentColors(UnifiedTeamEntry team) {
+    final ledRgb = team.ledOptimizedRgb;
+    return [
+      for (var i = 0; i < team.colors.length; i++)
+        i < ledRgb.length
+            ? safeRGBW(ledRgb[i])
+            : safeRGBW([team.colors[i].r, team.colors[i].g, team.colors[i].b]),
+    ];
+  }
+
+  /// The first ANIMATED effect a team suggests, else Running (41).
+  static int _animatedEffectFor(UnifiedTeamEntry team) {
+    for (final fx in team.suggestedEffects) {
+      if (fx != 0) return fx;
+    }
+    return 41;
+  }
+
+  /// Tier 0 for a team request, as one pure step: resolves the team named in
+  /// [prompt], picks an effect from the prompt's mood and motion words, and
+  /// returns the same verbal+JSON reply [chat] hands to the parser. Null when
+  /// the prompt names no team (or names one too ambiguously to act on), so
+  /// the caller falls through to the next tier.
+  ///
+  /// Visible so the phrase table in `lumina_team_request_test.dart` can drive
+  /// the real composition without a widget or a cloud call.
+  @visibleForTesting
+  static String? composeTeamResponse(
+    String prompt, {
+    List<String>? userTeams,
+    String? userLocation,
+  }) {
+    if (!isSportsRequest(prompt)) return null;
+    final teamResult = TeamColorResolver.resolve(
+      // Immediacy words are not part of any team's name and only lower the
+      // resolver's confidence for the words that are.
+      prompt.replaceAll(_immediacyPattern, ' '),
+      userTeams: userTeams,
+      userLocation: userLocation,
+    );
+    // Only return team response for high-confidence matches (>= 0.8).
+    // Low-confidence fuzzy matches fall through to Tier 1/3 for better handling.
+    if (teamResult == null || !teamResult.isHighConfidence) return null;
+    final context = EventThemeLibrary.detectContext(prompt.toLowerCase());
+    return _buildCanonicalTeamResponse(
+      teamResult.team,
+      context,
+      motion: wantsMotion(prompt),
+    );
+  }
+
   static String _buildCanonicalTeamResponse(
     UnifiedTeamEntry team,
-    EventContext context,
-  ) {
+    EventContext context, {
+    bool motion = false,
+  }) {
     int effectId;
     String effectName;
     int speed;
@@ -740,13 +844,27 @@ class LuminaBrain {
       case EventContext.neutral:
         effectId = team.suggestedEffects.isNotEmpty ? team.suggestedEffects.first : 2;
         effectName = _effectIdToName(effectId);
-        speed = team.defaultSpeed;
+        // The per-effect table (E1 item D) decides the pace, as every other
+        // picker does; the team's own default is the fallback.
+        speed = effectDefaultSpeedOr(effectId, team.defaultSpeed);
         intensity = team.defaultIntensity;
         isStatic = effectId == 0;
         break;
     }
 
-    final ledRgb = team.ledOptimizedRgb;
+    // Item 3b: motion was asked for, so the effect MOVES — whatever the
+    // team's first suggestion is. "Solid … with motion" is a contradiction
+    // the customer resolved by asking for motion. The speed comes from the
+    // per-effect table E1 introduced (pickers use the table), so a Chase and
+    // a Breathe start at the speed each looks right at.
+    if (motion && effectId == 0) {
+      effectId = _animatedEffectFor(team);
+      effectName = _effectIdToName(effectId);
+      speed = effectDefaultSpeedOr(effectId, team.defaultSpeed);
+      intensity = team.defaultIntensity;
+      isStatic = false;
+    }
+
     final shortName = _teamShortName(team.officialName);
     String patternName;
     String subtitle;
@@ -778,26 +896,13 @@ class LuminaBrain {
     // Every team color is funneled through safeRGBW so the W channel is
     // explicit (W=0). Without this, WLED auto-extracts W = min(R,G,B) from
     // any 3-channel input, washing dark branded reds (Chiefs `[227,24,55]`)
-    // into pink on RGBW strips.
-    final colorsArray = <Map<String, dynamic>>[];
-    for (var i = 0; i < team.colors.length; i++) {
-      final tc = team.colors[i];
-      final rgb = i < ledRgb.length
-          ? safeRGBW(ledRgb[i])
-          : safeRGBW([tc.r, tc.g, tc.b]);
-      colorsArray.add({
-        'name': tc.name,
-        'rgb': rgb,
-      });
-    }
-
-    final segCol = <List<int>>[];
-    for (var i = 0; i < team.colors.length; i++) {
-      final rgb = i < ledRgb.length
-          ? safeRGBW(ledRgb[i])
-          : safeRGBW([team.colors[i].r, team.colors[i].g, team.colors[i].b]);
-      segCol.add(rgb);
-    }
+    // into pink on RGBW strips. The colours are the team's LED table
+    // (`ledOptimizedRgb`), never the brand hex.
+    final segCol = _teamSegmentColors(team);
+    final colorsArray = <Map<String, dynamic>>[
+      for (var i = 0; i < team.colors.length; i++)
+        {'name': team.colors[i].name, 'rgb': segCol[i]},
+    ];
 
     final wledPayload = {
       'on': true,
@@ -1475,11 +1580,99 @@ Rules:
     );
   }
 
+  /// True when the query is about a team: it mentions a sport or team keyword
+  /// (game day, NFL, playoffs…) OR it names a known team ("Chiefs", "KC
+  /// Chiefs", "the Chiefs", "Kansas City Chiefs"). Gates team colour
+  /// resolution so "fireworks" cannot fuzzy-match a "fire" alias.
+  ///
+  /// +110 E2 item 3: the keyword-only gate ([hasExplicitSportsKeyword]) was
+  /// why "give me a chiefs design with motion right now" never reached the
+  /// team tier — the sentence has no sports KEYWORD, only a team NAME.
+  @visibleForTesting
+  static bool isSportsRequest(String query) =>
+      hasExplicitSportsKeyword(query) || mentionsKnownTeam(query);
+
+  /// Single-word aliases that are also ordinary lighting words. A prompt
+  /// that contains only one of these ("fire effect", "heat wave", "blues")
+  /// is not a team request; a multi-word alias ("chicago fire") still is.
+  static const Set<String> _ambiguousTeamWords = {
+    'fire', 'heat', 'magic', 'jazz', 'wild', 'sun', 'suns', 'thunder',
+    'lightning', 'blues', 'reds', 'giants', 'rangers', 'kings', 'stars',
+    'wings', 'storm', 'united', 'city', 'dc', 'red', 'blue', 'gold', 'white',
+    'orange', 'green', 'browns', 'brown', 'wave', 'flames', 'flame', 'crew',
+    'union', 'galaxy', 'earthquakes', 'rapids', 'dynamo', 'revolution',
+    'nets', 'rockets', 'spurs', 'bucks', 'jets', 'sharks', 'wizards',
+  };
+
+  /// True when [query] names a team the app knows: an exact alias match on
+  /// at least one whole word, and not a lone ordinary word.
+  @visibleForTesting
+  static bool mentionsKnownTeam(String query) {
+    final cleaned = query.replaceAll(_immediacyPattern, ' ');
+    final result = TeamColorResolver.resolve(cleaned);
+    if (result == null) return false;
+    if (result.matchType != TeamMatchType.exact &&
+        result.matchType != TeamMatchType.partial) {
+      return false;
+    }
+    final alias = result.matchedAlias.trim();
+    if (alias.contains(' ')) return true;
+    if (alias.length < 3) return false;
+    return !_ambiguousTeamWords.contains(alias);
+  }
+
+  /// The words the app knows for a lighting prompt, so a miss can say what
+  /// was and was not understood instead of "describe the colors or mood"
+  /// (+110 E2 item 3e). Pure.
+  static String describeMisunderstanding(String prompt) {
+    final words = prompt
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    const known = {
+      // request scaffolding
+      'give', 'me', 'a', 'an', 'the', 'my', 'some', 'please', 'can', 'you',
+      'i', 'want', 'lights', 'light', 'design', 'pattern', 'look', 'make',
+      'set', 'do', 'show', 'put', 'on', 'to', 'with', 'and', 'for', 'of',
+      'it', 'them', 'up', 'in', 'at', 'now', 'right', 'tonight', 'today',
+      'this', 'that', 'like', 'something', 'kind', 'colors', 'colours',
+      'color', 'colour', 'effect', 'mode', 'theme', 'vibe', 'vibes',
+      'lumina', 'house', 'roofline', 'home', 'whole', 'all', 'just', 'only',
+    };
+    final colourWords = LocalCommandParser.knownColorWords;
+    final understood = <String>[];
+    final unknown = <String>[];
+    for (final w in words) {
+      if (known.contains(w)) continue;
+      if (colourWords.contains(w) ||
+          _motionPattern.hasMatch(w) ||
+          hasExplicitSportsKeyword(w) ||
+          HolidayColorDatabase.resolve(w).resolved) {
+        understood.add(w);
+      } else {
+        unknown.add(w);
+      }
+    }
+    final tail = 'Tell me the colours you want, a team, or a holiday and '
+        "I'll build it.";
+    if (unknown.isEmpty) {
+      return "I couldn't turn that into a design. $tail";
+    }
+    final quoted = unknown.map((w) => '"$w"').join(', ');
+    if (understood.isEmpty) {
+      return "I didn't recognise $quoted. $tail";
+    }
+    return 'I understood ${understood.map((w) => '"$w"').join(', ')} but '
+        "not $quoted, so I couldn't build a design from it. $tail";
+  }
+
   /// Returns true when the query explicitly mentions a sport, team keyword,
-  /// or game-day context. Used to gate team color resolution — if this returns
-  /// false, the team resolver is skipped entirely to prevent false positives
-  /// like "fireworks" fuzzy-matching to "fire" team aliases.
-  static bool _isSportsRequest(String query) {
+  /// or game-day context. This is the PRE-+110 gate, kept for the phrase
+  /// table: it never matched a bare team name.
+  @visibleForTesting
+  static bool hasExplicitSportsKeyword(String query) {
     final lower = query.toLowerCase();
     const sportsKeywords = [
       'team', 'teams', 'game day', 'gameday', 'game night',
