@@ -430,6 +430,54 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P1 — correctness & trust
 
+- [ ] **#118 — NO RELAY COMMAND WITHOUT A PAIRED BRIDGE: a bridge-less account away from home
+  queued commands nothing could pick up, waited 45 s, and was then told the bridge was offline**
+  - Status: **functions deployed 2026-09-30 (`8b3bcdf`); app half ships in build 110** (app
+    `d838f75`, functions `8b3bcdf`, E2-surface tests `0269282`, branch `fix/relay-without-bridge`
+    rebased onto `9e5376a`) · Severity: **P1** · Evidence: **verified-by-data** (read-only fleet
+    read 2026-09-30: 124 such commands in one week across five bridge-less accounts; 0 working
+    customers cut off by the gate — every paired registry row resolved as paired) +
+    **verified-by-source**
+  - **THE CLASS BUG.** The relay path was chosen by the network heuristic alone
+    (`buildRoutedRepository` needed only a userId and a controllerId). An account with no bridge,
+    away from home, wrote `/users/{uid}/commands` docs that no bridge would ever poll; the app's
+    45 s watchdog stamped them `timeout`, the 120 s sweeper `expired`, and every surface reported
+    "bridge offline" for a bridge that did not exist.
+  - **THE FIX.** `hasPairedBridge(uid)` = a `bridge_registry` row with `pairedUid == uid` EXISTS —
+    never `lastSeen`, never `users/{uid}.bridge_paired` / `bridge_ip`. Freshness chooses failure
+    WORDING only (a paired bridge silent for 10 min or more is named in the message). `unknown`
+    (registry not answered, cold empty cache) routes exactly as before — fail open. Webhook mode
+    is never gated. Away from home with no paired bridge no repository is built and every apply
+    surface (Home, Explore, Design Studio spine and preview, Lumina) returns the blocked result
+    "You're away from home. Control from anywhere requires a Lumina Bridge…" at once. The
+    launch/resume ping is gated by a one-time read, not a watch (a watch would ping on every 30 s
+    heartbeat); the pairing wizard's untargeted ping is EXEMPT on both client (`pairing_ping.dart`)
+    and server (`isPairingPing`). Remote Access checks are gated on the registry answer as well as
+    `remote_access_enabled`, with a registry listener and a hidden-screen tick guard.
+    `CommandStatus.expired` is terminal. Every routing record carries `app_version`.
+    Server: `executeWledCommand` fails a bridge-mode command fast — `status: failed, error:
+    no_bridge_paired`, pending-only transaction; the sweeper's expiry text distinguishes "no
+    bridge is paired to this account" from "bridge offline or unreachable"; the health probe skips
+    `no_paired_bridge` and `monitoring_exclude: true` accounts (flag read only, set by hand).
+  - **What build-109 clients get from the deploy alone:** the old app treats `failed` as final, so
+    a bridge-less account's command fails in about a second instead of 45.
+  - **Contradiction recorded.** The "#112 poll keeps running behind the System tab" claim did not
+    reproduce in code: go_router wraps inactive branches in `TickerMode(enabled: false)` and the
+    poll timer honours it. The ~12 s `getInfo` bursts were repeated one-off checks (resume
+    flapping, wizard return), not a 30 s cadence. A belt-and-braces hidden-tick guard was added
+    anyway.
+  - **Hazard.** The lumina-voice repo also exports `executeWledCommand` (nodejs20) to the same
+    project; deploying its functions would silently revert the fail-fast.
+  - Files: `lib/services/bridge_pairing.dart`, `lib/services/pairing_ping.dart`,
+    `lib/features/wled/wled_providers.dart`, `lib/shared/apply_blocked_reason.dart`,
+    `lib/features/site/remote_access_screen.dart`, `lib/models/remote_command.dart`,
+    `lib/services/routing_diagnostics.dart`, `functions/src/relayEligibility.ts`,
+    `functions/src/sweepExpiredCommands.ts`, `functions/src/probeControllerHealth.ts`,
+    `functions/src/collectControllerHealth.ts`, `functions/index.js`. Tests: 30 Flutter tests
+    (pairing predicate, routing incl. the stale-paired regression, health gate, command status,
+    E2 surfaces), functions unit 618/618, emulator suite 13/13. Related: **#109**, **#112**,
+    **#114**; `docs/BUILD_LEDGER.md` "FUNCTIONS DEPLOY — relay eligibility — 2026-09-30".
+
 - [ ] **#79 — SCORE CELEBRATIONS HAVE NEVER FIRED ON HARDWARE FOR ANYONE, and the
   `start_time_passed` skip that hid the Dodgers cycle is invisible**
   - Status: **IN-PROGRESS** on `feat/gameday-unified-monitoring` · Severity: **P1** ·

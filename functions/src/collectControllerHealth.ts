@@ -32,6 +32,7 @@ import { defineString } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 import * as admin from "firebase-admin";
 import { sendEmail } from "./messaging-helpers";
+import { isMonitoringExcluded } from "./relayEligibility";
 import {
   BridgePresence,
   ControllerHealthRecord,
@@ -229,6 +230,14 @@ export async function collectAll(
     // verification harness so an end-to-end test cannot touch customer data,
     // and available for targeted re-collection after a repair.
     if (opts.onlyUid && uid !== opts.onlyUid) continue;
+    // `monitoring_exclude: true` on the user doc (reviewer/demo, bench test
+    // accounts) — no health row, no roster line, no alert. Read-only here:
+    // nothing in this codebase sets the flag. Mirrors probeControllerHealth,
+    // which writes no probe for the same accounts.
+    if (isMonitoringExcluded(userDoc)) {
+      stats.monitoring_excluded = (stats.monitoring_excluded ?? 0) + 1;
+      continue;
+    }
     const controllers = await db
       .collection("users")
       .doc(uid)

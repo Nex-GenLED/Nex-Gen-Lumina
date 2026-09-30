@@ -356,7 +356,10 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       next.whenData((health) {
         if (health == BridgeHealth.alive) {
           ref.read(bridgeReachableProvider.notifier).state = true;
-        } else if (health == BridgeHealth.unreachable) {
+        } else if (health == BridgeHealth.unreachable ||
+            health == BridgeHealth.notPaired) {
+          // notPaired: no ping was written (relay eligibility, 2026-09-30).
+          // For the indicator that is the same truth as "unreachable".
           ref.read(bridgeReachableProvider.notifier).state = false;
         }
       });

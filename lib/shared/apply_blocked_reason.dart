@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/services/bridge_pairing.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/shared/write_result.dart';
 
@@ -15,6 +16,9 @@ enum ApplyBlock {
 
   /// The network check has not finished.
   connecting,
+
+  /// Away from home, and this account has no Lumina Bridge to relay through.
+  noBridge,
 
   /// Away from home, and nothing can relay to this controller.
   remoteNotSetUp,
@@ -55,6 +59,13 @@ class ApplyBlockedReason {
   String toString() => 'ApplyBlockedReason(${kind.name})';
 }
 
+/// Shown the moment an away-from-home apply is refused because the account
+/// has no bridge (2026-09-30). Before this, the command was queued, nothing
+/// picked it up, and 45 s later the customer read "check your connection".
+const String kNoBridgeAwayMessage =
+    "You're away from home. Control from anywhere requires a Lumina Bridge. "
+    'Connect to your home Wi-Fi to control your lights.';
+
 /// Null when an apply can be sent; otherwise the ONE reason it cannot.
 ///
 /// WHY ONE PLACE. The gate being empty used to be handled by each caller on
@@ -84,6 +95,16 @@ final applyBlockedReasonProvider = Provider<ApplyBlockedReason?>((ref) {
       );
     }
     if (remote) {
+      // The registry says no bridge is paired to this account, so the routed
+      // repository declined to build a relay. Say so, in plain words. A
+      // paired bridge that is merely offline never reaches this branch: the
+      // relay is built for it and its failure reads "can't reach".
+      if (ref.watch(pairedBridgeStateProvider) == PairedBridgeState.none) {
+        return const ApplyBlockedReason(
+          ApplyBlock.noBridge,
+          kNoBridgeAwayMessage,
+        );
+      }
       return const ApplyBlockedReason(
         ApplyBlock.remoteNotSetUp,
         "You're away from home and remote access isn't set up for this "

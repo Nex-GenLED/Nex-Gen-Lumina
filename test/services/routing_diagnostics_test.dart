@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/app_version.dart';
 import 'package:nexgen_command/services/routing_diagnostics.dart';
 
 /// #114 routing diagnostics recorder: what it records, when it persists, and
@@ -58,6 +59,10 @@ void main() {
     expect(json['reported_types'], ['wifi']);
     expect(json['check_age_ms'], 5000);
     expect(json.keys.where((k) => k == 'ssid' || k.contains('ip')), isEmpty);
+    // 2026-09-30: the build that made the decision, so a fleet read can tell
+    // a fixed build from an unfixed one. Never recorded anywhere before.
+    expect(json['app_version'], kAppVersion);
+    expect(json['app_version'], matches(RegExp(r'^\d+\.\d+\.\d+\+\d+$')));
   });
 
   test('a record made before any connectivity check still persists', () {

@@ -10,6 +10,14 @@ import 'package:flutter/material.dart';
 /// and watches for the bridge to acknowledge it by changing the `status`
 /// field away from `'pending'`.
 ///
+/// RELAY ELIGIBILITY (2026-09-30). The ping is a relay command. When the
+/// account has no `bridge_registry` row paired to it there is nothing to pick
+/// the ping up, so [check] writes nothing and answers [BridgeHealth.notPaired].
+/// The caller decides pairing (`hasPairedBridge`) from the registry, never
+/// from `users/{uid}.bridge_paired`, which goes stale. The pairing wizard's
+/// own verification ping does NOT go through here — see
+/// `pairing_ping.dart` for why it is exempt.
+///
 /// TODO(firmware): The ESP32 bridge should write a continuous heartbeat
 /// document to `/users/{uid}/bridge_status` every 30 seconds containing
 /// `{ "lastSeen": <server timestamp>, "ip": "<local IP>" }`.
@@ -17,25 +25,41 @@ import 'package:flutter/material.dart';
 /// ping command, and enable a passive "last seen X seconds ago" indicator.
 /// Until this is implemented, the app relies on explicit ping round-trips.
 class BridgeHealthService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  BridgeHealthService({FirebaseFirestore? firestore})
+      : _firestore = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _firestore;
 
   /// Timeout before declaring the bridge unreachable.
   static const _timeout = Duration(seconds: 15);
+
+  /// The fixed document id of the launch/resume ping. One per account; the
+  /// write is a `set`, so a re-check replaces the previous ping.
+  static const pingDocId = 'bridge_health_check';
 
   /// Runs the health check and returns the result.
   ///
   /// [userId] — authenticated Firebase UID.
   /// [controllerIp] — IP of the target controller (written into the doc so
   ///   the bridge knows which device is being pinged).
+  /// [hasPairedBridge] — the registry's answer. False means "do not write":
+  ///   the result is [BridgeHealth.notPaired] and Firestore is not touched.
   Future<BridgeHealth> check({
     required String userId,
     required String controllerIp,
+    required bool hasPairedBridge,
   }) async {
+    if (!hasPairedBridge) {
+      debugPrint('BridgeHealth: no bridge paired to this account — ping '
+          'skipped (nothing would pick it up)');
+      return BridgeHealth.notPaired;
+    }
+
     final docRef = _firestore
         .collection('users')
         .doc(userId)
         .collection('commands')
-        .doc('bridge_health_check');
+        .doc(pingDocId);
 
     // Write the ping document.
     await docRef.set({
@@ -46,7 +70,7 @@ class BridgeHealthService {
     });
 
     final sw = Stopwatch()..start();
-    debugPrint('BridgeHealth: ping written → docId=bridge_health_check, '
+    debugPrint('BridgeHealth: ping written → docId=$pingDocId, '
         'controllerIp=$controllerIp');
 
     // Watch for the bridge to update the status field.
@@ -91,4 +115,7 @@ enum BridgeHealth {
 
   /// Bridge did not respond within the timeout window.
   unreachable,
+
+  /// No bridge is paired to this account; no ping was written.
+  notPaired,
 }

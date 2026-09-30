@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/app_version.dart';
 
 /// #114 routing diagnostics — READ-ONLY instrumentation of the local-vs-bridge
 /// decision.
@@ -162,6 +163,10 @@ class RoutingDecisionRecord {
         'controller_reachable': check?.controllerReachable,
         'probe_ms': check?.probeMs,
         'check_age_ms': checkAgeMs,
+        // Which build made this decision. Until 2026-09-30 no record anywhere
+        // carried the build number, so a fleet read could not tell a fixed
+        // build from an unfixed one.
+        'app_version': kAppVersion,
       };
 }
 
@@ -318,6 +323,7 @@ Future<bool> firestoreRoutingBatchSink(
             : 'other',
     'record_count': records.length,
     'dropped': dropped,
+    'app_version': kAppVersion,
     'records': records,
   });
   return true;

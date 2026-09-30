@@ -22,6 +22,7 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
+import 'package:nexgen_command/services/bridge_pairing.dart';
 import 'package:nexgen_command/services/reviewer_seed_service.dart';
 import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 import 'package:nexgen_command/shared/write_result.dart';
@@ -263,9 +264,67 @@ final bridgeHealthProvider = FutureProvider<BridgeHealth>((ref) async {
     return BridgeHealth.unreachable;
   }
 
+  // Relay eligibility (2026-09-30). The ping IS a relay command: with no
+  // bridge paired to this account it can only sit in the queue until the
+  // sweeper expires it. Before this gate every launch and every resume of a
+  // bridge-less account wrote one (one bridge-less account's entire command history
+  // was these pings plus the server's probes).
+  //
+  // `read`, not `watch`: the registry stream re-emits on every 30 s heartbeat,
+  // and a watch here would turn each heartbeat into a fresh ping. The answer
+  // is taken once per evaluation (launch, resume, post-pairing invalidate).
+  // A cold local cache answers `unknown` first; give the server a moment to
+  // reply so a bridge-less account is not pinged on every launch, but never
+  // hold the launch check for long — `unknown` keeps the ping, as before.
+  //
+  // The registry answers are relayed through a listener (not `.stream`, which
+  // Riverpod has deprecated) that is closed as soon as the answer is taken.
+  final lookups = StreamController<PairedBridgeLookup>();
+  final sub = ref.listen<AsyncValue<PairedBridgeLookup>>(
+    pairedBridgeProvider,
+    (_, next) => next.whenData((l) {
+      if (!lookups.isClosed) lookups.add(l);
+    }),
+    fireImmediately: true,
+  );
+  final PairedBridgeState paired;
+  try {
+    paired = await firstKnownPairedBridgeState(
+      lookups.stream,
+      initial: ref.read(pairedBridgeStateProvider),
+    );
+  } finally {
+    sub.close();
+    await lookups.close();
+  }
+
   final service = BridgeHealthService();
-  return service.check(userId: userId, controllerIp: ip);
+  return service.check(
+    userId: userId,
+    controllerIp: ip,
+    hasPairedBridge: paired != PairedBridgeState.none,
+  );
 });
+
+/// The first non-`unknown` registry answer, or `unknown` after [wait].
+///
+/// Exposed for tests; pure over the stream it is handed.
+@visibleForTesting
+Future<PairedBridgeState> firstKnownPairedBridgeState(
+  Stream<PairedBridgeLookup> lookups, {
+  required PairedBridgeState initial,
+  Duration wait = const Duration(seconds: 2),
+}) async {
+  if (initial != PairedBridgeState.unknown) return initial;
+  try {
+    final lookup = await lookups
+        .firstWhere((l) => l.state != PairedBridgeState.unknown)
+        .timeout(wait);
+    return lookup.state;
+  } catch (_) {
+    return PairedBridgeState.unknown;
+  }
+}
 
 /// Provides a WledRepository based on Demo Mode, network location, and
 /// controller registration.
@@ -407,6 +466,7 @@ final wledRepositoryProvider = Provider<WledRepository?>((ref) {
     userId: userId,
     connectivity: connectivityStatus,
     webhookUrl: userProfile?.webhookUrl,
+    pairedBridge: ref.watch(pairedBridgeStateProvider),
   ));
 });
 
@@ -421,12 +481,19 @@ class ControllerRoute {
   final ConnectivityStatus connectivity;
   final String? webhookUrl;
 
+  /// Whether a `bridge_registry` row is paired to [userId]. `unknown` routes
+  /// exactly as before the eligibility gate existed (relay). See
+  /// `lib/services/bridge_pairing.dart` for why this is existence, not
+  /// freshness.
+  final PairedBridgeState pairedBridge;
+
   const ControllerRoute({
     required this.ip,
     required this.controllerId,
     required this.userId,
     required this.connectivity,
     required this.webhookUrl,
+    this.pairedBridge = PairedBridgeState.unknown,
   });
 }
 
@@ -493,6 +560,29 @@ WledRepository? buildRoutedRepository(
   // ── 6. Remote + Firestore bridge relay ───────────────────────────────────
   if (userId != null && controllerId != null) {
     final hasWebhook = webhookUrl != null && webhookUrl.isNotEmpty;
+
+    // Relay eligibility (2026-09-30). In bridge mode a queued command is only
+    // ever picked up by a bridge paired to this account. With no registry row
+    // there is nothing to pick it up: the command sat until the sweeper
+    // expired it and the customer waited 45 s to be told to "check your
+    // connection" (124 such commands across five live accounts in one week).
+    // So: no repository. The apply gate then says at once that control from
+    // away needs a bridge.
+    //
+    //   `none`    → no relay (this branch)
+    //   `unknown` → relay, exactly as before this change (registry not yet
+    //               answered; fail OPEN so a lookup gap never strands anyone)
+    //   `paired`  → relay, whatever `lastSeen` says — a briefly offline
+    //               bridge must take the "can't reach" path and recover alone
+    //
+    // Webhook mode is a Cloud Function, not a bridge, so it is never gated.
+    if (!hasWebhook && route.pairedBridge == PairedBridgeState.none) {
+      debugPrint('RepositoryInit: selected=null, '
+          'network=${connectivityStatus.name}, hasControllerId=$controllerId, '
+          'pairedBridge=none');
+      return null;
+    }
+
     final mode = hasWebhook ? 'Webhook relay' : 'ESP32 Bridge';
     final bridgeTarget = hasWebhook ? webhookUrl : 'firestore://$userId/commands';
     debugPrint('🏠 BridgeRouter: routing via BRIDGE, url=$bridgeTarget ($mode)');
@@ -580,6 +670,7 @@ final controllerRepositoryProvider =
     userId: authUser?.uid,
     connectivity: connectivityStatus,
     webhookUrl: userProfile?.webhookUrl,
+    pairedBridge: ref.watch(pairedBridgeStateProvider),
   ));
 });
 
@@ -1996,11 +2087,28 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// A write that was attempted and did not land. [refusal] is the identity
   /// guard's sentence when the failure was a refusal, else null.
   WriteResult _failedWrite(String? refusal) => refusal == null
-      ? const WriteResult.failed(
+      ? WriteResult.failed(
           WriteFailureKind.unreachable,
-          message: _kUnreachableMessage,
+          message: _unreachableMessage(),
         )
       : WriteResult.failed(WriteFailureKind.refused, message: refusal);
+
+  /// The "did not land" sentence. Away from home with a paired bridge that
+  /// has gone quiet, name the bridge; otherwise the generic wording. Bridge
+  /// freshness chooses WORDS here and nowhere else — it never decides whether
+  /// the relay is used (`lib/services/bridge_pairing.dart`).
+  String _unreachableMessage() {
+    if (_disposed) return _kUnreachableMessage;
+    try {
+      if (!ref.read(isRemoteModeProvider)) return _kUnreachableMessage;
+      return relayUnreachableMessage(
+        bridge: ref.read(pairedBridgeInfoProvider),
+        fallback: _kUnreachableMessage,
+      );
+    } catch (_) {
+      return _kUnreachableMessage;
+    }
+  }
 
   /// Nothing was sent. Carries the shared "why not".
   WriteResult _blockedResult() => WriteResult.blocked(

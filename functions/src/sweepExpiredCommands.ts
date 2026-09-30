@@ -31,6 +31,14 @@
  * 1-minute cadence against a 1-second poll is overwhelmingly in the bridge's
  * favour, and the guard makes the rare loss harmless rather than wrong).
  *
+ * ERROR TEXT (2026-09-30). The text now says which of two different things
+ * happened: a paired bridge that did not poll in time ("bridge offline or
+ * unreachable"), or an account with no bridge paired at all ("no bridge is
+ * paired to this account"). Before, every expiry read as a bridge outage,
+ * which put five bridge-less accounts on the fleet-health call list as if a
+ * bridge had failed. One registry read per user per run, memoised; a lookup
+ * error keeps the bridge-offline wording (fail open).
+ *
  * Deployment:
  *   cd functions
  *   npm run build
@@ -50,6 +58,11 @@ import {
   STATUS_PENDING,
   isExpiredCommand,
 } from "./commandSafety";
+import {
+  EXPIRED_BRIDGE_OFFLINE_TEXT,
+  EXPIRED_NO_BRIDGE_TEXT,
+  PairedBridgeCache,
+} from "./relayEligibility";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
@@ -62,6 +75,11 @@ const WRITE_BATCH_SIZE = 450;
  * the cap logs loudly and the next tick continues — we never silently truncate.
  */
 const MAX_DOCS_PER_RUN = 2000;
+
+/** The `error` text for one expired command. Pure. */
+export function expiryErrorText(bridgePaired: boolean): string {
+  return bridgePaired ? EXPIRED_BRIDGE_OFFLINE_TEXT : EXPIRED_NO_BRIDGE_TEXT;
+}
 
 export const sweepExpiredCommands = onSchedule(
   {
@@ -127,7 +145,9 @@ export const sweepExpiredCommands = onSchedule(
       return;
     }
 
+    const pairing = new PairedBridgeCache(db);
     let written = 0;
+    let noBridge = 0;
     const perUser = new Map<string, number>();
 
     for (let i = 0; i < doomed.length; i += WRITE_BATCH_SIZE) {
@@ -138,16 +158,29 @@ export const sweepExpiredCommands = onSchedule(
         // the snapshot is stale — leave the claim alone.
         if ((d.data() as { status?: string }).status !== STATUS_PENDING) continue;
 
+        // users/{uid}/commands/{id} → parent.parent is the user doc.
+        const uid = d.ref.parent.parent?.id ?? "unknown";
+
+        // Which of the two truths applies. A lookup error reads as "paired":
+        // the legacy wording is the safe default.
+        let bridgePaired = true;
+        try {
+          bridgePaired = await pairing.lookup(uid);
+        } catch (err) {
+          console.warn(
+            `sweepExpiredCommands: registry lookup failed for ${uid}; ` +
+              "using bridge-offline wording",
+            err
+          );
+        }
+        if (!bridgePaired) noBridge++;
+
         batch.update(d.ref, {
           status: STATUS_EXPIRED,
-          error:
-            "Command expired before the bridge picked it up (bridge offline " +
-            "or unreachable at fire time).",
+          error: expiryErrorText(bridgePaired),
           expiredAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        // users/{uid}/commands/{id} → parent.parent is the user doc.
-        const uid = d.ref.parent.parent?.id ?? "unknown";
         perUser.set(uid, (perUser.get(uid) ?? 0) + 1);
         written++;
       }
@@ -162,7 +195,7 @@ export const sweepExpiredCommands = onSchedule(
       .join(" ");
     console.log(
       `sweepExpiredCommands: expired ${written} command(s) across ` +
-        `${perUser.size} user(s) — ${summary}`
+        `${perUser.size} user(s) (${noBridge} with no bridge paired) — ${summary}`
     );
 
     if (snap.size >= MAX_DOCS_PER_RUN) {

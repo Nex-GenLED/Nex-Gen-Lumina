@@ -307,8 +307,12 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
           if (_hasResult(cmd) || cmd.status == CommandStatus.completed) {
             return cmd;
           }
-          // Bridge explicitly failed — honor it; do not relabel as timeout.
-          if (cmd.status == CommandStatus.failed) {
+          // Bridge or server explicitly failed it, or the sweeper expired it
+          // — honor the terminal status; do not relabel as timeout. `expired`
+          // used to parse as `pending` and was overwritten here, which erased
+          // the server's own verdict (2026-09-30 relay-without-bridge fix).
+          if (cmd.status == CommandStatus.failed ||
+              cmd.status == CommandStatus.expired) {
             return null;
           }
           // Genuine no-response: only NOW is 'timeout' correct, and only while
