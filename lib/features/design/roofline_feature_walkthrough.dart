@@ -499,17 +499,24 @@ class _RooflineFeatureWalkthroughScreenState
           if (marks.isNotEmpty) ...[
             const SizedBox(height: 12),
             for (var i = 0; i < marks.length; i++)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: Text('${_markLabel(marks[i].kind)} at light '
-                    '${marks[i].pixel + 1}'),
-                trailing: IconButton(
-                  tooltip: 'Remove this mark',
-                  icon: const Icon(Icons.close),
-                  onPressed: _saving ? null : () => _removeMark(i),
+              // A ListTile paints its ink on the nearest Material; inside this
+              // coloured card that Material is behind the card, so Flutter
+              // 3.47 asserts in debug builds. A transparent Material of its
+              // own keeps the card's look and gives the tile a surface.
+              Material(
+                type: MaterialType.transparency,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text('${_markLabel(marks[i].kind)} at light '
+                      '${marks[i].pixel + 1}'),
+                  trailing: IconButton(
+                    tooltip: 'Remove this mark',
+                    icon: const Icon(Icons.close),
+                    onPressed: _saving ? null : () => _removeMark(i),
+                  ),
+                  onTap: () => _moveCursor(marks[i].pixel),
                 ),
-                onTap: () => _moveCursor(marks[i].pixel),
               ),
           ],
           const SizedBox(height: 8),
