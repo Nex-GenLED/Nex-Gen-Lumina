@@ -122,7 +122,52 @@ proves delivery, never content; a successful build proves neither. Verify the
 thing itself — the compiled artifact, the signer, the manifest, the device's
 `/json/state` — not the exit code of the step that was supposed to produce it.
 
+**5. Before any `build-*` tag, run analyze + test under Codemagic's Flutter version
+with `TZ=UTC0`. Green on this PC's SDK proves nothing about the gate.** Adopted
+2026-09-30 out of build-110: every gate here was green on Flutter 3.41.2 in
+Central time, and Codemagic (stable = 3.47.5, a UTC Mac) failed the tag on three
+tests that never ran under either condition — a sunset assertion written against
+the local clock face, and a `ListTile` inside a coloured card that 3.47's debug
+assertion rejects. Nothing reached TestFlight; build-111 carried the fixes.
+
+Codemagic's stable is kept as a standalone SDK at
+`%USERPROFILE%\.lumina\sdk\flutter` (outside the repo and outside the everyday
+`C:\develop\flutter`; refresh it when `releases_windows.json` says stable moved).
+From the release worktree, on the exact commit that will be tagged:
+
+```
+FL="$USERPROFILE/.lumina/sdk/flutter/bin/flutter.bat"
+$FL --version                                   # must match Codemagic's stable
+$FL pub get                                     # resolves from the COMMITTED lock
+$FL analyze --no-fatal-warnings --no-fatal-infos   # the yaml's exact flags: errors fail
+TZ=UTC0 $FL test                                # 0 failures
+git checkout -- pubspec.lock analysis_options.yaml   # toolchain rewrites; never commit
+```
+
+Read it right: `TZ=UTC0` gives Windows Dart a zero base offset but keeps the
+system daylight rule, so winter-dated code runs at UTC and summer-dated code at
++60 min — enough to expose a clock-face assumption, not a perfect UTC clone. The
+3.47.5 `pub get` rewrites `pubspec.lock` (SDK-pinned transitive bumps) and
+migrates `analysis_options.yaml` (platform/build excludes); Codemagic makes the
+same rewrites on its clone, so gate against them and then restore both. After the
+tag, poll the GitHub check-run on the tag SHA until `completed` and read its step
+list; a red "Test and analyze" step means the tag shipped nothing, and the fix
+goes on a NEW bump + tag (never rewrite a public tag).
+
 ## Operational flags
+
+### +111 — build-111 tagged 2026-09-30 (Codemagic build number: pending)
+
+| item | value |
+|---|---|
+| Tag | `build-111` = `aec40f5` (the bump commit; this row lands after, outside the tag) |
+| Base | `2c895ed` (= the +110 tree) |
+| Contents | everything in +110, plus `e4399d4` (sunset test compares the UTC instant), `ce02d50` (two Flutter 3.47 lint rules silenced inline, behaviour unchanged), `7b7dc79` (walkthrough marks list gets its own `Material`; Flutter 3.47 debug assertion), and the docs/gitignore commits since +110: `0c983b5` (+110 row), `92e0e32` (ignore the Lumina-entries cleanup script and `/backups/`), `54730a1` (`#119`), `ff0132b` (`#120`); bump 2.5.10+111 (pubspec + `lib/app_version.dart`) |
+| Why a new tag | build-110 failed Codemagic's gate on tests that were green here: this PC ran Flutter 3.41.2 in Central time, Codemagic runs stable 3.47.5 on a UTC Mac. Convention 5 below is the standing answer. |
+| Gates, local SDK (3.41.2) | analyze 0 err / 12 baseline warnings · Flutter 4,605 pass / 38 skip / 0 fail · functions unit 618/618 · emulator 203/206 (three pre-existing failures, `#119` + `#120`) |
+| Gates, Codemagic SDK (3.47.5 / Dart 3.13.4, `TZ=UTC0`) on `aec40f5` from the COMMITTED lock | `pub get` resolves (three SDK-driven transitive bumps, identical on every run) · analyze 0 err / 12 warnings / 360 infos (committed `analysis_options.yaml` gates identically to the tool-migrated one) · Flutter 4,605 pass / 38 skip / 0 fail · PII scan of every commit since `2c895ed` clean · tree clean after restoring the two toolchain rewrites |
+| Functions | no deploy: `functions/` byte-identical to the 2026-09-30 deploy `8b3bcdf` |
+| iOS build number | pending (`PROJECT_BUILD_NUMBER`) · Android not built |
 
 ### +110 — build-110 tagged 2026-09-30 (Codemagic build number: pending)
 
@@ -136,6 +181,7 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 | Code tree | identical to local `bench/110-combined` `1d3105d` except `docs/BUGS_AND_DEBT.md` |
 | iOS build number | pending (`PROJECT_BUILD_NUMBER`) · Android not built |
 | Pushed | release `9e5376a..2c895ed` and tag `build-110`, 2026-09-30 ~12:15 CDT; authorised by the owner with the emulator failures documented above |
+| Outcome | Codemagic gate failed (sunset test assumed local clock face); superseded by +111 |
 
 ### FUNCTIONS DEPLOY — relay eligibility (no relay command without a paired bridge) — 2026-09-30
 
