@@ -50,7 +50,13 @@ class _FakeDemoCodes extends DemoCodeService {
           : null;
 }
 
-UserModel _unlinked({String? dealerCode}) => UserModel(
+UserModel _unlinked({
+  String? dealerCode,
+  String? dealerName,
+  String? dealerPhone,
+  String? dealerEmail,
+}) =>
+    UserModel(
       id: kTestUid,
       email: kTestEmail,
       displayName: 'Pat',
@@ -59,6 +65,9 @@ UserModel _unlinked({String? dealerCode}) => UserModel(
       updatedAt: DateTime.utc(2026, 9, 29),
       installationRole: InstallationRole.unlinked,
       dealerCode: dealerCode,
+      dealerName: dealerName,
+      dealerPhone: dealerPhone,
+      dealerEmail: dealerEmail,
     );
 
 /// [screen] at `/screen`, with stubs (or real screens) where it sends people.
@@ -170,22 +179,20 @@ void main() {
     late List<Uri> opened;
 
     ProviderContainer scope({
-      String? dealerCode,
-      Map<String, dynamic>? dealerDoc,
+      UserModel? profile,
       bool openerFails = false,
       FakeAccountSession? session,
     }) {
       opened = [];
+      // The store holds no /dealers record on purpose: the screen must
+      // resolve the contact from the profile alone.
       final fs = FakeFirebaseFirestore();
-      if (dealerCode != null && dealerDoc != null) {
-        fs.collection('dealers').doc(dealerCode).set(dealerDoc);
-      }
       final c = ProviderContainer(overrides: [
         accountSessionProvider
             .overrideWithValue(session ?? FakeAccountSession()),
         accountFirestoreProvider.overrideWithValue(fs),
-        currentUserProfileProvider.overrideWith(
-            (ref) => Stream.value(_unlinked(dealerCode: dealerCode))),
+        currentUserProfileProvider
+            .overrideWith((ref) => Stream.value(profile ?? _unlinked())),
         externalLinkOpenerProvider.overrideWithValue((uri) async {
           opened.add(uri);
           return !openerFails;
@@ -234,32 +241,38 @@ void main() {
       expect(find.textContaining('invalid'), findsNothing);
     });
 
-    testWidgets('with no dealer_code the contact is Nex-Gen LED, by email',
-        (tester) async {
+    testWidgets(
+        'with no dealer contact on the profile, the card is Nex-Gen LED: '
+        'Call 816-408-0177 and general@nex-genled.com', (tester) async {
       await open(tester, scope());
 
       expect(find.text(kNexGenCorporateContact.name), findsOneWidget);
-      expect(find.byKey(const ValueKey('link-contact-email')), findsOneWidget);
+      expect(find.text('Call $kNexGenCorporatePhone'), findsOneWidget);
+      expect(find.text('Email $kNexGenCorporateEmail'), findsOneWidget);
       expect(find.byKey(const ValueKey('link-contact-web')), findsOneWidget);
-      // No corporate number is confirmed yet, so no Call button.
-      expect(find.byKey(const ValueKey('link-contact-call')), findsNothing);
+
+      await tapVisible(tester, find.byKey(const ValueKey('link-contact-call')));
+      await tester.pump();
+      expect(opened.single.toString(), 'tel:8164080177');
 
       await tapVisible(tester, find.byKey(const ValueKey('link-contact-email')));
       await tester.pump();
-      expect(opened.single.scheme, 'mailto');
-      expect(opened.single.path, kNexGenCorporateContact.email);
+      expect(opened.last.toString(), 'mailto:general@nex-genled.com');
     });
 
-    testWidgets("with a dealer_code the contact is the dealer's, by phone",
-        (tester) async {
+    testWidgets(
+        "with the dealer's contact on the profile, the card is the dealer's, "
+        'by phone and email; no /dealers read', (tester) async {
       await open(
         tester,
-        scope(dealerCode: 'DLR-1', dealerDoc: {
-          'companyName': 'Bright Homes LED',
-          'name': 'Bright Homes LED',
-          'phone': '(555) 010-0100',
-          'email': 'hello@example.com',
-        }),
+        scope(
+          profile: _unlinked(
+            dealerCode: '07',
+            dealerName: 'Bright Homes LED',
+            dealerPhone: '(555) 010-0100',
+            dealerEmail: 'hello@example.com',
+          ),
+        ),
       );
 
       expect(find.text('Your installer'), findsOneWidget);
@@ -269,8 +282,7 @@ void main() {
 
       await tapVisible(tester, find.byKey(const ValueKey('link-contact-call')));
       await tester.pump();
-      expect(opened.single.scheme, 'tel');
-      expect(opened.single.path, '5550100100');
+      expect(opened.single.toString(), 'tel:5550100100');
 
       await tapVisible(tester, find.byKey(const ValueKey('link-contact-email')));
       await tester.pump();
@@ -278,23 +290,29 @@ void main() {
     });
 
     testWidgets(
-        'a dealer_code whose record cannot be read falls back to Nex-Gen LED',
-        (tester) async {
-      // No dealer document at all, which is also what a rules denial looks
-      // like to the screen: the read fails, corporate is shown.
-      await open(tester, scope(dealerCode: 'DLR-MISSING'));
+        'a dealer_code alone (every profile provisioned before +110) shows '
+        'Nex-Gen LED', (tester) async {
+      await open(tester, scope(profile: _unlinked(dealerCode: '01')));
       expect(find.text(kNexGenCorporateContact.name), findsOneWidget);
+      expect(find.text('Your installer'), findsNothing);
     });
 
     testWidgets(
-        'a dealer record with neither phone nor email falls back to '
-        'Nex-Gen LED', (tester) async {
+        'a dealer name with neither phone nor email (the incomplete live '
+        'record) shows Nex-Gen LED', (tester) async {
       await open(
         tester,
-        scope(dealerCode: 'DLR-2', dealerDoc: {'companyName': 'No Contact'}),
+        scope(profile: _unlinked(dealerCode: '02', dealerName: 'No Contact')),
       );
       expect(find.text(kNexGenCorporateContact.name), findsOneWidget);
       expect(find.text('No Contact'), findsNothing);
+    });
+
+    testWidgets('an unlinked customer is never offered Manage Family Members',
+        (tester) async {
+      await open(tester, scope());
+      expect(find.textContaining('Family'), findsNothing);
+      expect(find.textContaining('Manage'), findsNothing);
     });
 
     testWidgets("a failed open leaves the contact on screen and says so",

@@ -209,6 +209,44 @@ describe("runClaimCustomerByEmail", () => {
     expect(written.data.dealer_code).toBe("07");
   });
 
+  it("copies the dealer's contact onto the profile when it stamps dealer_code", async () => {
+    const d = deps({ dbDoc: undefined, authUser });
+    d.lookupDealerContact = async (code) =>
+      code === "07"
+        ? { name: "Bright Homes LED", phone: "(555) 010-0100", email: "hello@example.com" }
+        : undefined;
+    const result = await call(d);
+
+    expect(result.dealerCodeStamped).toBe(true);
+    const written = d.db.state.writes[0].data;
+    expect(written.dealer_name).toBe("Bright Homes LED");
+    expect(written.dealer_phone).toBe("(555) 010-0100");
+    expect(written.dealer_email).toBe("hello@example.com");
+  });
+
+  it("writes no dealer contact keys when the dealer record has none", async () => {
+    const d = deps({ dbDoc: undefined, authUser });
+    d.lookupDealerContact = async () => ({ name: "Only A Name" });
+    await call(d);
+
+    const written = d.db.state.writes[0].data;
+    expect(written.dealer_name).toBe("Only A Name");
+    expect(Object.keys(written)).not.toContain("dealer_phone");
+    expect(Object.keys(written)).not.toContain("dealer_email");
+  });
+
+  it("leaves an existing dealer's contact alone when it does not stamp", async () => {
+    const d = deps({
+      dbDoc: { owner_id: UID, dealer_code: "07", dealer_phone: "keep" },
+      authUser,
+    });
+    d.lookupDealerContact = async () => ({ phone: "new" });
+    const result = await call(d);
+
+    expect(result.dealerCodeStamped).toBe(false);
+    expect(d.db.state.writes[0].data.dealer_phone).toBeUndefined();
+  });
+
   it("repairs a STUB without dropping what the stub carried", async () => {
     const d = deps({
       dbDoc: { fcmToken: "tok", referralCode: "ABC" },

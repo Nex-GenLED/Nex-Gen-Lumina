@@ -11,6 +11,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/app_theme.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
@@ -44,11 +45,14 @@ import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/site/user_profile_screen.dart';
+import 'package:nexgen_command/features/users/manage_family_members_flag.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/models/user_role.dart';
+import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/shared/accessibility/text_scale_clamp.dart';
 import 'package:nexgen_command/shared/write_result.dart';
 import 'package:nexgen_command/widgets/house_photo_uploader.dart';
@@ -159,7 +163,13 @@ class _DemoExitSheetState extends ConsumerState<_DemoExitSheetOpener> {
   Widget build(BuildContext context) => const Scaffold(body: SizedBox());
 }
 
-UserModel _unlinkedProfile({String? dealerCode}) => UserModel(
+UserModel _unlinkedProfile({
+  String? dealerCode,
+  String? dealerName,
+  String? dealerPhone,
+  String? dealerEmail,
+}) =>
+    UserModel(
       id: kTestUid,
       email: kTestEmail,
       displayName: 'Pat',
@@ -168,6 +178,9 @@ UserModel _unlinkedProfile({String? dealerCode}) => UserModel(
       updatedAt: DateTime.utc(2026, 9, 29),
       installationRole: InstallationRole.unlinked,
       dealerCode: dealerCode,
+      dealerName: dealerName,
+      dealerPhone: dealerPhone,
+      dealerEmail: dealerEmail,
     );
 
 List<Override> _session([FakeAccountSession? s]) => [
@@ -247,17 +260,28 @@ void main() {
       ]);
     });
     testWidgets('link account, contact is the dealer', (tester) async {
-      final fs = FakeFirebaseFirestore();
-      await fs.collection('dealers').doc('DLR-1').set({
-        'companyName': 'Bright Homes LED of the Greater Metropolitan Area',
-        'phone': '(555) 010-0100',
-        'email': 'hello@example.com',
-      });
       await _screen(tester, const LinkAccountScreen(), overrides: [
-        accountSessionProvider.overrideWithValue(FakeAccountSession()),
-        accountFirestoreProvider.overrideWithValue(fs),
-        currentUserProfileProvider.overrideWith(
-            (ref) => Stream.value(_unlinkedProfile(dealerCode: 'DLR-1'))),
+        ..._session(),
+        currentUserProfileProvider.overrideWith((ref) => Stream.value(
+            _unlinkedProfile(
+              dealerCode: '07',
+              dealerName: 'Bright Homes LED of the Greater Metropolitan Area',
+              dealerPhone: '(555) 010-0100',
+              dealerEmail: 'hello@example.com',
+            ))),
+      ]);
+    });
+    testWidgets('profile page, Manage Family Members flag on', (tester) async {
+      final fs = FakeFirebaseFirestore();
+      await fs.collection('users').doc(kTestUid).set({
+        ..._unlinkedProfile().toJson(),
+        'installation_role': 'primary',
+        'installation_id': 'inst-1',
+      });
+      await _screen(tester, const UserProfileScreen(), overrides: [
+        authStateProvider.overrideWith((ref) => Stream.value(FakeAuthUser())),
+        userServiceProvider.overrideWithValue(UserService(firestore: fs)),
+        manageFamilyMembersEnabledProvider.overrideWithValue(true),
       ]);
     });
     testWidgets('staff PIN', (tester) async {

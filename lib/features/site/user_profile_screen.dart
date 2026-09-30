@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/users/manage_family_members_flag.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -49,9 +50,13 @@ class UserProfileScreen extends ConsumerWidget {
                     label: 'Security & Password',
                     onTap: () => context.push(AppRoutes.security),
                   ),
-                  // Show "Manage Users" for users with installation access
-                  if (model?.installationId != null) ...[
+                  // "Manage Family Members" for users with installation
+                  // access, while the flag is on (it is off: nothing can
+                  // create a family member's account yet).
+                  if (model?.installationId != null &&
+                      ref.watch(manageFamilyMembersEnabledProvider)) ...[
                     _MenuTile(
+                      key: const ValueKey('profile-manage-family-members'),
                       icon: Icons.people_outline,
                       label: 'Manage Family Members',
                       onTap: () => context.push(AppRoutes.subUsers),
@@ -149,7 +154,7 @@ class _MenuTile extends StatelessWidget {
   final VoidCallback onTap;
   final Color? iconColor;
   final Color? labelColor;
-  const _MenuTile({required this.icon, required this.label, required this.onTap, this.iconColor, this.labelColor});
+  const _MenuTile({super.key, required this.icon, required this.label, required this.onTap, this.iconColor, this.labelColor});
 
   @override
   Widget build(BuildContext context) {

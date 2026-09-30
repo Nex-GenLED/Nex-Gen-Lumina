@@ -131,7 +131,14 @@ class UserModel {
   /// Opt-in for contributing anonymized usage data to global analytics
   final bool analyticsEnabled;
 
-  /// Preferred dealer contact for sales requests and quotes
+  /// The dealer's contact, copied onto the profile at provisioning (the
+  /// installer wizard, `createCustomerAccount`, `claimCustomerByEmail`).
+  /// Customers cannot read `/dealers`, so the link-account screen shows
+  /// the dealer's card only from these three. Absent on profiles provisioned
+  /// before +110; they see the Nex-Gen LED fallback. `dealer_email` is also
+  /// the "to" address for Lumina Studio quote requests.
+  final String? dealerName;
+  final String? dealerPhone;
   final String? dealerEmail;
 
   /// 2-digit dealer code identifying which dealer "owns" this customer.
@@ -349,6 +356,8 @@ class UserModel {
     this.seasonalColorWindows = const [],
     this.communityPatternSharing = false,
     this.analyticsEnabled = true,
+    String? dealerName,
+    String? dealerPhone,
     String? dealerEmail,
     this.dealerCode,
     String? webhookUrl,
@@ -418,7 +427,11 @@ class UserModel {
         builder = InputValidation.sanitizeString(builder, maxLength: 100),
         floorPlan = InputValidation.sanitizeString(floorPlan, maxLength: 100),
         buildYear = InputValidation.validateBuildYear(buildYear),
-        dealerEmail = InputValidation.validateDealerEmail(dealerEmail),
+        dealerName = _nullIfBlank(InputValidation.sanitizeString(dealerName, maxLength: 100)),
+        dealerPhone = _nullIfBlank(InputValidation.sanitizeString(dealerPhone, maxLength: 40)),
+        // Any well-formed address: a dealer's mailbox is on the dealer's own
+        // domain, so the old nex-genled.com allow-list would have dropped it.
+        dealerEmail = InputValidation.validateEmail(dealerEmail),
         webhookUrl = InputValidation.validateWebhookUrl(webhookUrl),
         homeSsid = InputValidation.validateSsid(homeSsid),
         changeToleranceLevel = InputValidation.validateChangeTolerance(changeToleranceLevel) ?? 2,
@@ -471,6 +484,8 @@ class UserModel {
           const [],
       communityPatternSharing: (json['community_pattern_sharing'] as bool?) ?? false,
       analyticsEnabled: (json['analytics_enabled'] as bool?) ?? true,
+      dealerName: json['dealer_name'] as String?,
+      dealerPhone: json['dealer_phone'] as String?,
       dealerEmail: json['dealer_email'] as String?,
       dealerCode: json['dealer_code'] as String?,
       webhookUrl: json['webhook_url'] as String?,
@@ -635,7 +650,11 @@ class UserModel {
       'seasonal_color_windows': seasonalColorWindows.map((e) => e.toJson()).toList(),
       'community_pattern_sharing': communityPatternSharing,
       'analytics_enabled': analyticsEnabled,
-      'dealer_email': dealerEmail,
+      // Written only when present: a merge from a writer that does not know
+      // the dealer (or an incomplete dealer record) must not blank them.
+      if (dealerName != null) 'dealer_name': dealerName,
+      if (dealerPhone != null) 'dealer_phone': dealerPhone,
+      if (dealerEmail != null) 'dealer_email': dealerEmail,
       if (dealerCode != null) 'dealer_code': dealerCode,
       'webhook_url': webhookUrl,
       'home_ssid': homeSsid,
@@ -733,6 +752,8 @@ class UserModel {
     List<SeasonalColorWindow>? seasonalColorWindows,
     bool? communityPatternSharing,
     bool? analyticsEnabled,
+    String? dealerName,
+    String? dealerPhone,
     String? dealerEmail,
     String? dealerCode,
     String? webhookUrl,
@@ -820,6 +841,8 @@ class UserModel {
       seasonalColorWindows: seasonalColorWindows ?? this.seasonalColorWindows,
       communityPatternSharing: communityPatternSharing ?? this.communityPatternSharing,
       analyticsEnabled: analyticsEnabled ?? this.analyticsEnabled,
+      dealerName: dealerName ?? this.dealerName,
+      dealerPhone: dealerPhone ?? this.dealerPhone,
       dealerEmail: dealerEmail ?? this.dealerEmail,
       dealerCode: dealerCode ?? this.dealerCode,
       webhookUrl: webhookUrl ?? this.webhookUrl,
@@ -892,3 +915,7 @@ class UserModel {
   /// Helper to check if user can invite sub-users.
   bool get canInviteSubUsers => installationRole.canInviteUsers;
 }
+
+/// `sanitizeString` returns '' for a missing value; the dealer contact fields
+/// are absent, not blank, so a merge never writes an empty string.
+String? _nullIfBlank(String value) => value.trim().isEmpty ? null : value;

@@ -4,6 +4,7 @@
 import 'dart:async';
 
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
@@ -198,4 +199,29 @@ class HangingWrite {
     calls++;
     return completer.future;
   }
+}
+
+/// A signed-in Firebase user for screens that watch `authStateProvider`.
+/// Only the members those screens read are real; everything else throws.
+class FakeAuthUser implements fb.User {
+  FakeAuthUser({
+    this.uid = kTestUid,
+    this.email = kTestEmail,
+    this.displayName = 'Pat Customer',
+  });
+
+  @override
+  final String uid;
+  @override
+  final String? email;
+  @override
+  final String? displayName;
+  @override
+  String? get photoURL => null;
+  @override
+  bool get isAnonymous => false;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('FakeAuthUser: ${invocation.memberName}');
 }

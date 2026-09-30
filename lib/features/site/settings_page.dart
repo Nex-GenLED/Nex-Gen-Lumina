@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
+import 'package:nexgen_command/features/auth/support_contact.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/premium_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -379,9 +380,9 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
               ListTile(
                 leading: const Icon(Icons.email_outlined),
                 title: const Text('Email Us'),
-                subtitle: const Text('support@nex-gen.io'),
+                subtitle: const Text(kNexGenCorporateEmail),
                 onTap: () async {
-                  final uri = Uri(scheme: 'mailto', path: 'support@nex-gen.io', queryParameters: {'subject': 'Nex-Gen Support Request'});
+                  final uri = Uri(scheme: 'mailto', path: kNexGenCorporateEmail, queryParameters: {'subject': 'Nex-Gen Support Request'});
                   await _safeLaunch(context, uri);
                 },
               ),

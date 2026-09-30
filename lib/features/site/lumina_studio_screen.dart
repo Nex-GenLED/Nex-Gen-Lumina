@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:nexgen_command/features/auth/support_contact.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/theme.dart';
@@ -73,7 +74,7 @@ class _LuminaStudioScreenState extends ConsumerState<LuminaStudioScreen> {
       };
       final doc = await FirebaseFirestore.instance.collection('studio_requests').add(payload);
 
-      final to = (profile?.dealerEmail?.isNotEmpty == true) ? profile!.dealerEmail! : 'support@nex-gen.io';
+      final to = (profile?.dealerEmail?.isNotEmpty == true) ? profile!.dealerEmail! : kNexGenCorporateEmail;
       final subject = Uri.encodeComponent('Lumina Studio Quote Request');
       final body = Uri.encodeComponent('Hello,\n\nI would like a quote for adding lighting to my $_area.\n\nFixtures:\n${counts.entries.map((e)=>'• ${e.key}: ${e.value}').join('\n')}\n\nRequest ID: ${doc.id}\n(Note: Photo is available in the app records.)\n\nThank you!');
       final uri = Uri.parse('mailto:$to?subject=$subject&body=$body');

@@ -27,6 +27,7 @@ import 'package:nexgen_command/features/referrals/services/referral_pipeline_ser
 import 'package:nexgen_command/features/sports_alerts/services/team_registration_service.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/models/installation_model.dart';
+import 'package:nexgen_command/features/installer/dealer_contact_lookup.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/models/user_role.dart';
 import 'package:nexgen_command/theme.dart';
@@ -1550,6 +1551,15 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
 
       await installationRef.set(UserService.sanitizeForFirestore(installation.toJson()));
 
+      // The dealer's contact, copied onto the profile so the customer's
+      // link-account screen can show it (customers cannot read /dealers).
+      // The staff session itself carries no phone or email, so this reads
+      // the dealer record the staff claim is allowed to read. Best effort.
+      final dealerContact = await readDealerContactForProvisioning(
+        FirebaseFirestore.instance,
+        session.dealer.dealerCode,
+      );
+
       // 5. Create UserModel with Primary role + installer preference draft
       final userModel = UserModel(
         id: userId,
@@ -1574,6 +1584,9 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
         // existing user doc — converting self-registered customers into
         // dealer-affiliated ones on installer link.
         dealerCode: session.dealer.dealerCode,
+        dealerName: dealerContact?.name,
+        dealerPhone: dealerContact?.phone,
+        dealerEmail: dealerContact?.email,
         // Auto-Pilot preferences from installer handoff
         sportsTeams: draft?.sportsTeams ?? const [],
         sportsTeamPriority: draft?.sportsTeams ?? const [],
