@@ -19,7 +19,6 @@ import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 /// Shows:
 /// - Summary of demo experience
 /// - Consultation request CTA
-/// - Option to create account
 class DemoCompletionScreen extends ConsumerStatefulWidget {
   const DemoCompletionScreen({super.key});
 
@@ -169,13 +168,6 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
         ),
       ),
     );
-  }
-
-  void _navigateToSignup() {
-    final lead = ref.read(demoLeadProvider);
-    ref.read(demoSessionProvider.notifier).endDemo();
-    // Navigate to signup with pre-filled email
-    context.go(AppRoutes.signUp, extra: lead?.email);
   }
 
   @override
@@ -337,9 +329,9 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
           const SizedBox(height: 20),
 
           // ═══ 5. SECONDARY CTA: Explore the app ═══
+          // No fixed height: the label wraps at large text sizes.
           SizedBox(
             width: double.infinity,
-            height: 48,
             child: OutlinedButton.icon(
               onPressed: () {
                 ref.read(demoModeProvider.notifier).state = true;
@@ -360,6 +352,8 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
               icon: const Icon(Icons.explore_outlined, size: 18),
               label: const Text('Explore the app first'),
               style: OutlinedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                 foregroundColor: NexGenPalette.cyan,
                 side: BorderSide(
                   color: NexGenPalette.cyan.withValues(alpha: 0.6),
@@ -375,19 +369,9 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
             ),
           ),
 
+          // No "Create an account" here: accounts are provisioned by an
+          // installer, never self-created from the demo.
           const SizedBox(height: 12),
-
-          // ═══ 6. Tertiary: Create Account ═══
-          TextButton.icon(
-            onPressed: _navigateToSignup,
-            icon: const Icon(Icons.person_add_outlined, size: 16),
-            label: const Text('Create an account'),
-            style: TextButton.styleFrom(
-              foregroundColor: NexGenPalette.textMedium,
-            ),
-          ),
-
-          const SizedBox(height: 4),
 
           // ═══ Return to login (de-emphasized) ═══
           TextButton(

@@ -398,7 +398,9 @@ void showDemoExitSheet(BuildContext context, WidgetRef ref) {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (sheetCtx) => Padding(
+    // Scrolls, and the button has no fixed height, so large text neither
+    // clips the sheet nor overflows the button.
+    builder: (sheetCtx) => SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -415,11 +417,13 @@ void showDemoExitSheet(BuildContext context, WidgetRef ref) {
           const SizedBox(height: 20),
           Text(
             'Ready for your own lights?',
+            textAlign: TextAlign.center,
             style: Theme.of(sheetCtx).textTheme.titleMedium,
           ),
           const SizedBox(height: 4),
           Text(
             'Talk to a Nex-Gen dealer about your home',
+            textAlign: TextAlign.center,
             style: Theme.of(sheetCtx).textTheme.bodySmall?.copyWith(
                   color: NexGenPalette.textMedium,
                 ),
@@ -428,7 +432,6 @@ void showDemoExitSheet(BuildContext context, WidgetRef ref) {
           // Request consultation
           SizedBox(
             width: double.infinity,
-            height: 48,
             child: FilledButton(
               onPressed: () {
                 logExit('consultation');
@@ -439,34 +442,20 @@ void showDemoExitSheet(BuildContext context, WidgetRef ref) {
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF00D4FF),
                 foregroundColor: const Color(0xFF07091A),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('Request a free consultation'),
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Create account
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: OutlinedButton(
-              onPressed: () {
-                logExit('signup');
-                Navigator.pop(sheetCtx);
-                exitDemoMode(ref);
-                context.go(AppRoutes.signUp);
-              },
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: NexGenPalette.line),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+              child: const Text(
+                'Request a free consultation',
+                textAlign: TextAlign.center,
               ),
-              child: const Text('Create an account'),
             ),
           ),
+          // No "Create an account" here: accounts are provisioned by an
+          // installer, never self-created from the demo.
           const SizedBox(height: 8),
           // Keep exploring
           TextButton(

@@ -1,14 +1,15 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:nexgen_command/models/user_model.dart';
-import 'package:nexgen_command/services/user_service.dart';
 
-/// Abstract interface for authentication
+/// Abstract interface for authentication.
+///
+/// There is no account creation here on purpose. Lumina is professionally
+/// installed: the installer wizard and the `createCustomerAccount` function
+/// create customer accounts, and the app never signs a customer up itself.
 abstract class AuthManager {
   Stream<User?> get authStateChanges;
   User? get currentUser;
   Future<UserCredential> signInWithEmailAndPassword(String email, String password);
-  Future<UserCredential> createUserWithEmailAndPassword(String email, String password, String displayName);
   Future<void> signOut();
   Future<void> sendPasswordResetEmail(String email);
 }
@@ -16,7 +17,6 @@ abstract class AuthManager {
 /// Firebase implementation of AuthManager
 class FirebaseAuthManager implements AuthManager {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final UserService _userService = UserService();
 
   @override
   Stream<User?> get authStateChanges => _auth.authStateChanges();
@@ -30,39 +30,6 @@ class FirebaseAuthManager implements AuthManager {
       return await _auth.signInWithEmailAndPassword(email: email, password: password);
     } catch (e) {
       debugPrint('Sign in error: $e');
-      rethrow;
-    }
-  }
-
-  @override
-  Future<UserCredential> createUserWithEmailAndPassword(
-    String email,
-    String password,
-    String displayName,
-  ) async {
-    try {
-      final credential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
-      
-      // Create user profile in Firestore
-      if (credential.user != null) {
-        final now = DateTime.now();
-        final userModel = UserModel(
-          id: credential.user!.uid,
-          email: email,
-          displayName: displayName,
-          ownerId: credential.user!.uid,
-          createdAt: now,
-          updatedAt: now,
-        );
-        await _userService.createUser(userModel);
-        
-        // Update Firebase Auth display name
-        await credential.user!.updateDisplayName(displayName);
-      }
-      
-      return credential;
-    } catch (e) {
-      debugPrint('Create user error: $e');
       rethrow;
     }
   }

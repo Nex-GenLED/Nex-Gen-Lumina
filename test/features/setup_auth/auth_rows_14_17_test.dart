@@ -31,7 +31,6 @@ Widget _app({
   final routes = <String, Widget Function()>{
     AppRoutes.login: () => stub('login'),
     AppRoutes.dashboard: () => stub('dashboard'),
-    AppRoutes.signUp: () => stub('signup'),
     AppRoutes.demoCode: () => stub('demo'),
     ...screens,
   };
@@ -369,8 +368,8 @@ void main() {
     });
 
     testWidgets(
-        'login "Create One" clears a leftover anonymous session from an older '
-        'build before navigating', (tester) async {
+        'login offers no way to create an account (Lumina is professionally '
+        'installed)', (tester) async {
       final session =
           FakeAccountSession(isAnonymous: true, uid: 'uid-anon', email: null);
       await tester.pumpWidget(_app(
@@ -379,12 +378,10 @@ void main() {
         overrides: [accountSessionProvider.overrideWithValue(session)],
       ));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Create One'));
-      await tester.tap(find.text('Create One'));
-      await tester.pumpAndSettle();
 
-      expect(session.signOutCalls, 1);
-      expect(find.text('PAGE:signup'), findsOneWidget);
+      expect(find.text('Create One'), findsNothing);
+      expect(find.textContaining("Don't have an account"), findsNothing);
+      expect(find.text('Experience Nex-Gen Demo'), findsOneWidget);
     });
   });
 
