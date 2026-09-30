@@ -13,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
 import 'package:nexgen_command/features/ai/lumina_conversation_driver.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
-import 'package:nexgen_command/theme.dart';
 
 void main() {
   group('resolveLuminaNavigation', () {
