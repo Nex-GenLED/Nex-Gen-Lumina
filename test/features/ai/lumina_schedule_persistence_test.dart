@@ -67,9 +67,14 @@ void main() {
           latitude: 39.1, longitude: -94.6); // Kansas City
       expect(nights.first.onTime, isNot('20:00'));
       expect(nights.first.onTime, matches(RegExp(r'^\d\d:\d\d$')));
-      // A December sunset in Kansas City is around 5 pm local.
-      final hour = int.parse(nights.first.onTime!.split(':').first);
-      expect(hour, inInclusiveRange(15, 19));
+      // SunUtils renders the sunset in the MACHINE's time zone (it uses
+      // DateTime.timeZoneOffset), so compare the instant, not the clock face:
+      // a Kansas City December sunset is about 22:58 UTC whatever zone the
+      // test runs in (Codemagic's Mac is UTC; this PC is Central).
+      final parts = nights.first.onTime!.split(':').map(int.parse).toList();
+      final asUtc = DateTime(2026, 12, 20, parts[0], parts[1]).toUtc();
+      expect(asUtc.hour, anyOf(22, 23),
+          reason: 'sunset instant must be ~22:58Z regardless of machine zone');
     });
 
     test('a specific-time plan carries no hours, so no clock', () {
