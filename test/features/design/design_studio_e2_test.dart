@@ -209,12 +209,13 @@ void main() {
       expect(find.byType(RooflineFeatureWalkthroughScreen), findsOneWidget);
     });
 
-    testWidgets('no map at all → the gate says so and offers the walkthrough',
-        (tester) async {
+    testWidgets('no map at all → the gate says so and offers Trace Roofline '
+        '(the walkthrough marks sections ON a traced map)', (tester) async {
       await _pump(tester, _overrides(roofline: Stream.value(null)));
 
       expect(find.textContaining("roofline isn't mapped yet"), findsOneWidget);
-      expect(find.byKey(const ValueKey('studio-gate-walkthrough')), findsOneWidget);
+      expect(find.byKey(const ValueKey('studio-gate-trace')), findsOneWidget);
+      expect(find.byKey(const ValueKey('studio-gate-walkthrough')), findsNothing);
     });
 
     testWidgets('partly marked → names the channel still to mark',

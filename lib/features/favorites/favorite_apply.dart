@@ -84,9 +84,14 @@ Future<FavoriteApplyOutcome> applyFavoritePayloadWith(
   if (design != null) {
     // Item B: the design's stored level is applied only when the customer
     // chose it; otherwise the house keeps its own brightness.
+    // +110 E2: a favourite keeps the Home grid's channel scope (the
+    // effective set), the way an effect favourite on the same grid does;
+    // a DESIGN apply (Design Studio, My Designs) goes to the channels the
+    // design carries content for instead.
     final result = await applyPositionalDesignWith(
       read,
       design.copyWith(brightnessStated: favoriteStatesBrightness(payload)),
+      targets: DesignApplyTargets.effective,
     );
     return FavoriteApplyOutcome(
       result == DesignApplyResult.applied

@@ -512,8 +512,8 @@ class LuminaConversationDriver {
 
     // ── Schedule detection ────────────────────────────────────────────────
     // A multi-night plan: night 1 goes on the lights now, every night goes
-    // to the calendar, and the reply says what actually happened (row 7 /
-    // item 4). Flags with NO plan attached — the cloud `season_fill` shape —
+    // to the calendar, and the reply says what actually happened (UX audit
+    // row 7 / item 4). Flags with NO plan attached — the cloud `season_fill` shape —
     // still fall through to the plain apply below, as they always have.
     final scheduleFlags = result.scheduleFlags;
     if (scheduleFlags != null &&
@@ -955,10 +955,11 @@ String luminaFavoriteId(Map<String, dynamic> wled) {
 /// after an ephemeral session dispatch.
 ///
 /// [applied] is whether the team colours reached the lights (null when there
-/// was nothing to apply); [applyMessage] is why not. Row 105: the "I've
-/// applied the colors anyway" sentence is composed from BOTH the schedule
-/// lookup and the apply outcome. Row 109: a failed dispatch says the revert
-/// was not set, instead of leaving the AI's "armed" prose standing.
+/// was nothing to apply); [applyMessage] is why not. UX audit row 105: the
+/// "I've applied the colors anyway" sentence is composed from BOTH the
+/// schedule lookup and the apply outcome. UX audit row 109: a failed dispatch
+/// says the revert was not set, instead of leaving the AI's "armed" prose
+/// standing.
 String buildEphemeralAugmentation(
   DispatchResult dispatchResult, {
   required LuminaSurface surface,
@@ -1145,8 +1146,8 @@ LuminaPatternPreview? extractLuminaPreview(Map<String, dynamic> payload) {
       }
     }
 
-    // Row 112: no colours → no preview. The card and the hero read colours
-    // from here, so a "turn on" reply no longer paints cyan-and-navy
+    // UX audit row 112: no colours → no preview. The card and the hero read
+    // colours from here, so a "turn on" reply no longer paints cyan-and-navy
     // swatches into either.
     if (colors.isEmpty) return null;
 

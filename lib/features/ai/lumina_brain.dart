@@ -844,7 +844,9 @@ class LuminaBrain {
       case EventContext.neutral:
         effectId = team.suggestedEffects.isNotEmpty ? team.suggestedEffects.first : 2;
         effectName = _effectIdToName(effectId);
-        speed = team.defaultSpeed;
+        // The per-effect table (E1 item D) decides the pace, as every other
+        // picker does; the team's own default is the fallback.
+        speed = effectDefaultSpeedOr(effectId, team.defaultSpeed);
         intensity = team.defaultIntensity;
         isStatic = effectId == 0;
         break;

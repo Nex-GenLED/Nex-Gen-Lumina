@@ -325,6 +325,18 @@ Map<String, dynamic> buildDesignMotionPayload(
 
 // ── Whole-design apply ─────────────────────────────────────────────────────
 
+/// Which channels a whole-design apply goes to.
+enum DesignApplyTargets {
+  /// Every channel the design carries content for (row 40). The Design
+  /// Studio, the manual editor and My Designs.
+  design,
+
+  /// The effective channel list (the Home channel bar's selection, less the
+  /// channels set aside). Home favourites keep this, so a per-pixel favourite
+  /// scopes the same way as an effect favourite on the same grid.
+  effective,
+}
+
 /// Applies a stored design the way the editor's own "Apply to Lights" does —
 /// the ONE routine behind My Designs, scenes, the AI studio and anything else
 /// holding a [CustomDesign] — and says what happened. Provider-side callers
@@ -334,11 +346,13 @@ Map<String, dynamic> buildDesignMotionPayload(
 ///    chase, a wave, a twinkle…) runs its EFFECT in its colours (row 41). It
 ///    used to be flattened to a still frame under an "Applied" toast.
 ///  * Any other positional design is painted per pixel through the spine.
-///  * Both go to the channels the design carries content for (row 40).
+///  * Both go to [targets]: by default the channels the design carries
+///    content for (row 40).
 Future<DesignApplyReport> applyPositionalDesignDetailed(
   ProviderReader read,
-  CustomDesign design,
-) async {
+  CustomDesign design, {
+  DesignApplyTargets targets = DesignApplyTargets.design,
+}) async {
   final spans = customDesignToSpans(design);
   if (spans.isEmpty) {
     return const DesignApplyReport(
@@ -347,7 +361,9 @@ Future<DesignApplyReport> applyPositionalDesignDetailed(
     );
   }
 
-  final targets = designTargetChannels(read, spans.keys);
+  final targetIds = targets == DesignApplyTargets.design
+      ? designTargetChannels(read, spans.keys)
+      : (read<List<int>>(effectiveChannelIdsProvider).toList()..sort());
   final repo = read(wledRepositoryProvider);
   if (repo == null) {
     return DesignApplyReport(
@@ -356,7 +372,7 @@ Future<DesignApplyReport> applyPositionalDesignDetailed(
       wire: SpineWriteResult.noDevice,
     );
   }
-  if (targets.isEmpty) {
+  if (targetIds.isEmpty) {
     return DesignApplyReport(
       DesignApplyResult.error,
       message: applyBlockedReason(read) ??
@@ -368,8 +384,8 @@ Future<DesignApplyReport> applyPositionalDesignDetailed(
 
   final motion = motionEffectOf(design);
   if (motion != null) {
-    final ok =
-        await repo.applyJson(buildDesignMotionPayload(design, motion, targets));
+    final ok = await repo
+        .applyJson(buildDesignMotionPayload(design, motion, targetIds));
     if (!ok) {
       return const DesignApplyReport(
         DesignApplyResult.error,
@@ -389,7 +405,7 @@ Future<DesignApplyReport> applyPositionalDesignDetailed(
     label: design.name,
     // The ONE brightness rule — the same getter the payload shapes read.
     brightness: design.appliedBrightness,
-    targetChannels: targets,
+    targetChannels: targetIds,
   );
   if (wire.isOk) return const DesignApplyReport(DesignApplyResult.applied);
   return DesignApplyReport(
@@ -406,9 +422,10 @@ Future<DesignApplyReport> applyPositionalDesignDetailed(
 /// only branch on success.
 Future<DesignApplyResult> applyPositionalDesignWith(
   ProviderReader read,
-  CustomDesign design,
-) async =>
-    (await applyPositionalDesignDetailed(read, design)).result;
+  CustomDesign design, {
+  DesignApplyTargets targets = DesignApplyTargets.design,
+}) async =>
+    (await applyPositionalDesignDetailed(read, design, targets: targets)).result;
 
 List<int> _rgbw(List<int> c) {
   if (c.length >= 4) {

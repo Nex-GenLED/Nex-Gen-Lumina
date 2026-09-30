@@ -114,7 +114,11 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
         child: Padding(
           padding: EdgeInsets.only(bottom: navBarTotalHeight(context)),
           child: !gate.isReady
-              ? _StudioBlockedView(gate: gate, onWalkthrough: _openWalkthrough)
+              ? _StudioBlockedView(
+                  gate: gate,
+                  onWalkthrough: _openWalkthrough,
+                  onTrace: () => context.push(AppRoutes.rooflineEditor),
+                )
               : Column(
                   children: [
                     // Roofline SETUP entry — architectural structure
@@ -792,10 +796,15 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
 /// Item 1a — the studio is closed until the roofline is segmented. Names what
 /// is missing and opens the walkthrough. Never a silent no-op.
 class _StudioBlockedView extends StatelessWidget {
-  const _StudioBlockedView({required this.gate, required this.onWalkthrough});
+  const _StudioBlockedView({
+    required this.gate,
+    required this.onWalkthrough,
+    required this.onTrace,
+  });
 
   final DesignStudioGate gate;
   final Future<void> Function() onWalkthrough;
+  final VoidCallback onTrace;
 
   @override
   Widget build(BuildContext context) {
@@ -858,6 +867,18 @@ class _StudioBlockedView extends StatelessWidget {
                   color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
             ),
           ],
+          if (gate.opensTrace)
+            FilledButton.icon(
+              key: const ValueKey('studio-gate-trace'),
+              onPressed: onTrace,
+              icon: const Icon(Icons.draw_outlined),
+              label: Text(gate.actionLabel ?? 'Trace your roofline'),
+              style: FilledButton.styleFrom(
+                backgroundColor: NexGenPalette.cyan,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
           if (gate.state == DesignStudioGateState.chooseController) ...[
             FilledButton.icon(
               onPressed: () => Navigator.of(context).maybePop(),

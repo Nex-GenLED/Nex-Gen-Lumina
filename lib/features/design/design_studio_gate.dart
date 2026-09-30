@@ -71,11 +71,15 @@ class DesignStudioGate {
 
   bool get isReady => state == DesignStudioGateState.ready;
 
-  /// True when the primary action is the feature walkthrough.
+  /// True when the primary action is the feature walkthrough (a map exists,
+  /// its sections are not all marked).
   bool get opensWalkthrough =>
-      state == DesignStudioGateState.noMap ||
       state == DesignStudioGateState.unsegmented ||
       state == DesignStudioGateState.partlySegmented;
+
+  /// True when the primary action is tracing the roofline: there is no map
+  /// yet, and the walkthrough marks sections ON a traced map.
+  bool get opensTrace => state == DesignStudioGateState.noMap;
 
   static const DesignStudioGate _loading = DesignStudioGate(
     state: DesignStudioGateState.loading,
@@ -105,9 +109,10 @@ class DesignStudioGate {
     state: DesignStudioGateState.noMap,
     title: "Your roofline isn't mapped yet",
     message: 'Design Studio needs to know where your corners, peaks and runs '
-        "are. Mark them once — one light at a time on the house — and you'll "
-        'be able to paint each section.',
-    actionLabel: 'Mark corners and peaks',
+        'are. Trace your roofline on your house photo first (or ask your '
+        "installer), then mark its corners and peaks, and you'll be able to "
+        'paint each section.',
+    actionLabel: 'Trace your roofline',
     segmentation: RooflineSegmentation.none,
   );
 }
