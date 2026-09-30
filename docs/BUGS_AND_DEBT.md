@@ -1596,6 +1596,595 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     (`match /neighborhoods/{groupId}`), `functions/src/` (new callable). Related:
     **F-3**, **#70**, **#69**.
 
+- [ ] **#109 — BRIDGE WATCHDOG IS DEFEATED: the 30 s heartbeat resets it whether or not the
+  heartbeat succeeded, so a bridge that can no longer poll never reboots itself**
+  - Status: **OPEN** (filed 2026-09-14) · Severity: **P1** · Evidence: **verified-by-source**
+    @ `f2245d6` (firmware `1.2`, `esp32-bridge/src/main.cpp`) + one field sighting that is
+    consistent with it (below — **not proof**)
+  - **DEFECT.** `loop()`, `main.cpp:252-257`:
+    ```cpp
+    writeHeartbeat();
+    lastSuccessfulPoll = millis();   // :256 — unconditional
+    ```
+    `writeHeartbeat()` (`:983`) returns `void` and only logs a non-200. The 5-minute watchdog
+    (`:273`) measures from `lastSuccessfulPoll`, so it **cannot fire while Wi-Fi is up and
+    `firebaseIdToken` is non-empty** — i.e. almost never. Every other reset site is
+    success-gated (`:792` ping, `:844` command, `:1110` / `:1164` registry 200, `:1221` /
+    `:1272` pairing).
+  - **Stall path A — token.** `ensureValidToken()` (`:672`) → `refreshFirebaseToken()`
+    (`:625`) fails → falls back to `signInFirebase()` (`:565`), which also fails. Neither
+    clears `firebaseIdToken` nor advances `tokenExpiresAt`, so every tick takes the
+    `"Token refresh failed, skipping poll"` branch (`loop()` `:229-238`, DEBUG-only log) and
+    no command is ever read again. The heartbeat PATCH 401s and still resets the watchdog.
+  - **Stall path B — poll fails, heartbeat succeeds.** `pollCommands()` (`:686`) treats any
+    non-200 other than 401/403 as `commandErrors++` and returns. If `runQuery` keeps failing
+    while the heartbeat PATCH keeps landing, the bridge **looks healthy in Firestore
+    (`bridge_status/current` updateTime stays fresh) and executes nothing**.
+  - **What the app sees.** Path A: both heartbeats fail, so `bridge_registry.lastSeen`
+    (success-gated, `:1164`) and `bridge_status/current` go stale → shows "offline", but the
+    device never self-recovers. Path B: shows online. **In both, a power-cycle is the only
+    recovery** — the watchdog is the firmware's only self-restart, and `/api/reboot`
+    (`:498`) needs someone on the LAN.
+  - **Field sighting (consistent with, NOT proof).** Bridge A — formerly the
+    bench bridge, **now paired to customer account A** on LAN `192.0.2.43`, targeting
+    controller `192.0.2.100`. Read-only admin read, 2026-09-14 19:27Z: last
+    `bridge_status/current` write **2026-09-10T19:25:02Z** (`uptime=126878s`, `errors=5`,
+    `heap=224072`); `bridge_registry.lastSeen` 19:24:56Z. **Dark four days with no
+    reboot-and-reheartbeat.** Immediately before: 15 commands in 21 s (19:22:26–:47Z),
+    **4 of them created within 85 ms** (19:22:32.279–.364), completions 9–41 s, 5
+    app-stamped `timeout`. An unplugged or off-Wi-Fi bridge looks identical from Firestore —
+    someone at that site must say whether it was powered and whether a power-cycle restored
+    it. 14-day histogram for that uid: completed 341 · timeout 214 · expired 141 (+1
+    `completed` carrying the expiry error).
+  - **The owner's home bridge (Bridge B; verified-by-data, read-only admin read 2026-09-14 20:53Z).**
+    Bridge B @ `192.0.2.96`, owner account, heartbeating live. `uptime=1610417 s`
+    ⇒ **no reboot since ≈2026-08-27 05:32Z** — so no bridge power-cycle happened anywhere in
+    the 7-day command retention window, although the owner reports recovering hangs by unplugging
+    the bridge. Counters since boot: `commands=787`, `errors=657`. Two **silent pickup
+    stalls that ended without a reboot**:
+    - 2026-09-11 18:55:25Z → ≥19:02:20Z: four `getState` never picked up (the app was
+      suspended; it stamped them `timeout` on resume at 19:00:12Z), then two more created at
+      19:00:12Z were swept `expired` at +128 s.
+    - 2026-09-14 20:42:52Z → 20:48:00Z: five backgrounded-cadence `getState` (55–86 s apart)
+      each stamped `timeout` at exactly +45.3 s by a **live** app — the bridge picked up none
+      of them for over five minutes, then completed the 20:49:00Z resume burst in 10–15 s.
+    Consistent with a transient path-A/B stall, or with the bridge briefly off the network —
+    **not distinguishable from Firestore.** A USB serial capture of the bridge across a
+    repro is the instrument that settles it.
+  - **LIVE STALL SIGHTING — 2026-09-16, the owner's home bridge `Bridge B` (`192.0.2.96`).**
+    Captured before the power-cycle; inferred from network-layer evidence only — **no serial
+    trace**.
+
+    | Time (UTC) | Evidence |
+    |---|---|
+    | 17:04:44 | Bridge heartbeating; `GET /api/info` answered in 3.7 s; `GET /api/bridge/status` timed out (8 s). App polling via the relay every 3.0 s (#112): 15 `getState` pending, 42 timeouts in 10 min. |
+    | **17:05:50** | **Last heartbeat before the freeze** — `bridge_status/current` and `bridge_registry.lastSeen` both stop here (normal cadence 30 s). Uptime at that point 1,769,590 s: no reboot since ≈2026-08-27. |
+    | 17:14:03–23 | 0 commands completed in the preceding 2 min, 13 timed out; a `ping` left pending 65 s. Queue depth falling only because the app's own 45 s watchdog stamps items `timeout`. |
+    | 17:14:52 | **ICMP ping answered** (3/3, 18–1,033 ms) while **`GET /api/info` timed out** (10 s). |
+    | **17:16:45** | **Genuine reboot** after the owner power-cycled the bridge — derived from heartbeat time minus uptime. Uptime then read 48 → 79 → 111 s, heartbeats 31 s apart, counters reset to 0, `/api/info` back in 237 ms. |
+    | 17:22:08 | Diagnostic `ping` queued (`diag_ping_20260916172208`) completed in 0.3 s — command polling confirmed resumed, not just heartbeats. |
+
+    **Reading:** the network stack stayed alive (ICMP answered) while HTTP serving, heartbeats
+    and command polling all stopped together — consistent with the main firmware `loop()`
+    being blocked. The stall began within about a minute of the #112 poll flood peaking.
+
+  - **SECOND DEFECT — the watchdog cannot fire while `loop()` is blocked.** The 5-minute check
+    (`main.cpp:273`, `millis() - lastSuccessfulPoll > 300000UL` → `ESP.restart()`) runs INSIDE
+    `loop()` (`:225`) — **verified-by-source**. So if `loop()` is stuck in a call that never
+    returns, the check never executes: here the bridge ran ~11 minutes past its last heartbeat
+    without rebooting. This is independent of the heartbeat-resets-the-watchdog defect above —
+    fixing `:256` alone would not have rebooted this bridge.
+    - **What blocked is unknown.** The firmware does bound its known blocking calls — TLS
+      handshake 30 s (`:531`), secure client 15 s (`:532`), WLED HTTP 10 s (`:902`,
+      `WLED_HTTP_TIMEOUT_MS`) — so an ~11-minute block implies something those timeouts do
+      not cover. A serial trace across a reproduction is the only way to name it (note:
+      opening a USB serial monitor usually resets an ESP32 dev board, so the monitor must be
+      attached BEFORE the stall).
+    - **Fix implication:** a watchdog that lives outside `loop()` — the ESP-IDF task watchdog
+      (`esp_task_wdt`) fed from `loop()` — reboots a blocked loop; the current software check
+      cannot.
+  - **Fix shape (not chosen):** `writeHeartbeat()` returns the HTTP result and the watchdog
+    resets only on 200; add an independent "no successful `runQuery` in N minutes" reboot
+    condition; clear the token on sign-in failure so the next tick signs in cleanly. A
+    firmware change means every deployed bridge needs a reflash (no OTA path verified).
+  - Files: `esp32-bridge/src/main.cpp`. Related: **P2-56** (commands stuck in `executing`),
+    **P2-57** (heartbeat overwrites a server-side release), **P2-29** (whose bridge id is now
+    paired to another uid), #52 timeout split (`e005a02`), `audit/BRIDGE_TRIAGE.md`, **#110**.
+
+- [ ] **#110 — RESUME / COLD-START REQUEST BURST: several unpaced, overlapping controller
+  requests fire at once, on the one path no pacing fix covers**
+  - Status: **OPEN** (filed 2026-09-14) · Severity: **P1** · Evidence: **verified-by-source**
+    @ `f2245d6` for the burst · **suspected** that the burst is what hangs the controller
+    (not bench-reproduced)
+  - **Symptom (the owner, home system, reported).** After the app sits backgrounded or closed for
+    a long time, commands stop working on reopen. An app kept in the foreground never
+    triggers it. **The owner recovers by unplugging the BRIDGE, which is on separate power from
+    the controller** (corrected 2026-09-14 — the first draft of this item assumed the
+    controller). His retained command history shows the app driving the relay path (all 527
+    commands, 2026-09-07 → 09-14), so on his system this burst lands in the **bridge's
+    queue**, not on the controller's socket. See **#109** (bridge stalls) and **#112**
+    (queue flood).
+  - **Ruled out first — there is no stale session to reuse.** Every `WledService` request sets
+    `persistentConnection = false`, and the bridge has no inbound command socket (it is a
+    Firestore poller). The problem is volume and overlap, not a reused connection.
+  - **On every resume** (process still alive):
+    1. `main.dart:296` (`resumed`) → `refreshConnectivityStatus(ref)`
+       (`wled_providers.dart:75`) bumps the refresh counter → `wledConnectivityStatusProvider`
+       restarts → `wledRepositoryProvider` (`:139`) builds a **new** `WledService`.
+       `WledService` does not override `==`, so every dependent re-runs:
+       `deviceHardwareConfigProvider` (`GET /json/cfg`), `deviceTotalLedCountProvider`,
+       `clockHealthProvider` (`clock_health_providers.dart:17`), `channelPowerStatesProvider`
+       (`zone_providers.dart:75`, a `getState`). **Not resume-only:** the same rebuild fires on
+       every 10 s connectivity tick — see **#112**.
+    2. Same handler → `refreshConnection()` (`wled_providers.dart:1068`). It sets
+       `_polling = false` **and never sets it true**, calls `getState()`, then
+       `_startPolling()` → a further `_pollOnce()`.
+    3. `WledNotifier`'s own lifecycle observer (`wled_providers.dart:510-520`) → `_pollOnce()`
+       on the same transition. Because (2) clears the in-flight flag, **(2) and (3) can
+       overlap** — the guard is defeated on exactly this path.
+    4. `neighborhoodSyncEngine.handleAppResume()` re-subscribes the command stream and, via
+       `fireImmediately`, **re-applies the active sync design** (a write) when a sync is active.
+    5. `ref.invalidate(bridgeHealthProvider)` — a Firestore ping only, no LAN controller traffic.
+    Off-LAN, (1)–(3) route through `CloudRelayRepository`, so each becomes a Firestore command
+    in the bridge's queue instead.
+  - **Additionally on cold start** (process killed during a long background — the case the
+    symptom describes): the defaults healer fires because the previous repository was null
+    (`shouldHealOnConnect`, `controller_defaults_healer.dart:1288` — cfg readback plus
+    possible cfg POSTs), and `GammaWatchdog.start()` in `WledNotifier.build()` arms its ≥60 s
+    readback. The healer also re-fires **without** a cold start whenever the endpoint key
+    changes (`_endpointKey`, `:1274`) — e.g. Wi-Fi → cellular → Wi-Fi flips `lan:` →
+    `relay:` → `lan:`.
+  - **Not covered by existing hardening.** `pausePolling` / `kControllerWritePace`
+    (`f3a2dba`) guard schedule-sync and the Game Day populate; wedge fixes A–D (`c1492a2`,
+    `c894958`, `2f97c73`, `10fa940`, merged `90a7d68`) guard the Game Day applies. None of
+    them is on the resume or cold-start path.
+  - **Firmware excluded.** `192.0.2.150` **is** the owner's home controller (confirmed
+    2026-09-14). `/json/info` 19:18Z: `ver 0.15.1`, `vid 2507300`, `release ESP32_Ethernet`,
+    `uptime 64376 s`, `resetReason0 1` (power-on) ⇒ **the controller itself lost power at
+    ≈2026-09-14 01:25Z**, one minute after the owner's last sign-in (01:24:45Z). The 0.15.4 stall
+    is not in play.
+  - **Field sighting via relay (consistent with, NOT proof):** see #109 — four commands
+    (getState/getInfo pairs) created within 85 ms, the shape of (2) + (3) + `supportsRgbw`.
+  - **Confirm before any fix.** DONE 2026-09-14: (c) the bridge is what gets unplugged, on
+    separate power; (d) home controller `.150` runs 0.15.1. **OWED:** (a) at the next hang,
+    `curl http://192.0.2.150/json/info` AND `curl http://192.0.2.96/api/bridge/status`
+    from a laptop, before touching anything; (b) `users/<owner uid>/bridge_status/current`
+    `uptime` + updateTime during the hang, then again after the unplug (the uptime reset
+    timestamps the recovery); (e) bench: force-stop the app, cold-launch on home Wi-Fi while a laptop logs
+    `curl /json/info` against .150 once a second, and watch for the controller going
+    unresponsive in the first minute. NO ANDROID TEST DEVICE EXISTS (tablet retired, 2026-09-14),
+    so `adb logcat` is unavailable; relay traffic is readable from `users/{uid}/commands`; (f) whether the phone was on home
+    Wi-Fi during the relay traffic above — if so, home control is being routed through the
+    bridge (see #112).
+  - **Fix shape (not chosen) — fix the class, not the instance:** one per-controller request
+    gate (single in-flight request, paced) that every reader AND writer goes through,
+    replacing the per-path `pausePolling` islands; collapse the duplicate resume refresh into
+    one; do not rebuild the repository when the connectivity result is unchanged.
+  - Files: `lib/main.dart`, `lib/features/wled/wled_providers.dart`,
+    `lib/features/wled/controller_defaults_healer.dart`,
+    `lib/features/neighborhood/neighborhood_sync_engine.dart`. Related: **#109**, **#111**,
+    `audit/SYNC_PACING_FIX_STATUS.md`.
+
+- [ ] **#111 — HTTP timeouts never abort the request: a timed-out connection stays open and
+  may keep holding one of the controller's few sockets**
+  - Status: **OPEN** (filed 2026-09-14) · Severity: **P2** · Evidence: **verified-by-source**
+    @ `f2245d6` for the missing abort · the socket-slot consequence on WLED is an
+    **assumption** (bench-check it before it gates code)
+  - **DEFECT.** Every `dart:io` call site does `await req.close().timeout(d)`.
+    `Future.timeout` completes the Dart future with `TimeoutException`; it does **not** cancel
+    the in-flight `HttpClientRequest` or close its socket. `grep -rn '\.abort(' lib/` → **0
+    hits.** Sites: `wled_service.dart` **16**, `wled_config_pusher.dart` 2, `ddp_service.dart`
+    1, `audio_capability_detector.dart` 1 (**20 controller-facing**), plus
+    `geocoding_service.dart` 5 (not controller traffic).
+  - **Why it matters more now.** `187dd9e` made the `WledService` clients app-lifetime
+    (`_wledClientFor`), so an orphaned connection is no longer torn down with a per-call
+    client. A controller that slows down times out more requests, each leaving a connection
+    open — the same self-amplifying loop `187dd9e` fixed for leaked clients, one level down.
+    A phone suspended mid-request can also leave the controller side half-open (assumption).
+  - **Two stale comments describe a teardown that does not happen.** `WledService.reset()`
+    (`wled_service.dart:1166`) says clients are "created per-request and already closed with
+    force:true" — false since `187dd9e`. `refreshConnection()` (`wled_providers.dart:1068`)
+    says it drops "stale connection-level resources so the first request after resume doesn't
+    sit on an iOS-invalidated socket" — `reset()` only clears two caches.
+  - **Fix shape (not chosen):** abort the request on timeout; bench-verify against 0.15.1
+    with the #110 cold-start repro, since this is a wire change on frozen firmware.
+  - Files: the five above. Related: **#110**, `audit/SYNC_PACING_FIX_STATUS.md` §1(d).
+
+## Audit index — `audit/` files filed 2026-09-14
+
+Filed from a checkout of `docs/sop-skikbily-serial-dhcp` @ `f2245d6`, which is **not**
+`main`: the two have diverged by 8 commits each way. "Re-checked" below means verified on
+2026-09-14 against `f2245d6`; everything else is the audit's own claim at its own SHA.
+**16 of these files are untracked on every ref** (never committed). The three SOLAR files are
+committed on `main` in `625bae6` and are untracked here only because this branch predates that
+commit — merging `main` into this tree will collide with the untracked copies.
+
+- [ ] **`GAMEDAY_DIRECT_APPLY_WEDGE_AUDIT.md`** (2026-08-26 @ `74036fb` / build-85) — the Game
+  Day direct apply was the third controller writer outside the pacing fix: unpaced,
+  poller-concurrent, size-unbounded, on `http.post`. One oversized saved-design POST left the
+  controller dead to direct IP until power-cycled. **FIXED** by A `c1492a2`, B `c894958`, C
+  `2f97c73`, D `10fa940` (merged `90a7d68`, shipped +86 `2e59eff`) — all ancestors
+  (re-checked). No on-device re-test of the Chiefs design is recorded in this ledger. The
+  resume / cold-start path is still uncovered → **#110**.
+- [x] **`GAMEDAY_WEDGE_U1_U6.md`** (2026-08-26 @ `74036fb`) — U6 YES: scheduled Autopilot used
+  the same route, un-awaited and unattended. U1 (Chiefs payload size) was NOT measured (no
+  client credential). **U6 FIXED** by A `c1492a2` + B `c894958`, which touches
+  `game_day_autopilot_providers.dart` (re-checked). U1 is still unmeasured; D `10fa940` now
+  refuses an oversize apply instead of sending it.
+- [ ] **`GAME_DAY_SCHEDULE_DEPENDENCY_AUDIT.md`** (2026-08-25 @ `4d614fa` / build-83) — "Fires
+  begin when your everyday schedule is set" is a server-side bare existence check
+  (`gated_no_floor`, `functions/src/gameDayGate.ts`) tied to the restore mechanism; the banner
+  overstates what is enforced. **OPEN — design decision** (`gated_no_floor` still present,
+  re-checked).
+- [x] **`LIGHT_UP_NOW_CRASH_AUDIT.md`** (2026-08-26 @ `74036fb`) — the static read found no crash
+  cause, but did find a caught #84-family nested-array Firestore write on the path. **FIXED**
+  `ba60a4b` "jsonEncode revert_wled_payload — it was aborting the app" (shipped +86 `2e59eff`;
+  ancestor re-checked). The fix commit names that write as the crash, which the audit had
+  declined to call.
+- [ ] **`NOW_PLAYING_CATEGORY_LEAK_AUDIT.md`** (2026-08-25 @ `4d614fa`) — the app does not
+  compose the category text; the only writer that can inject it is `_resolvePresetName`,
+  copying the controller's stored preset name once the 3 s guard lapses. **OPEN — device probe
+  owed** (preset names on the reporting controller). Not re-checked. Related **P1-10**,
+  **P1-11**, **P1-22**.
+- [ ] **`OVERNIGHT_CRASH_LOGGING_AUDIT.md`** (2026-08-25 @ `4d614fa`) — no crash SDK, only the
+  hand-rolled `debug_errors` sink; F-2 background isolates have no error handler (P1); F-6 the
+  Firebase ID token is persisted to SharedPreferences in plaintext (P1); F-7 home SSID logged
+  (P2). **F-6 OPEN** (`sync_event_background_persistence.dart:626`, re-checked); the rest not
+  re-checked. H5 of the error-swallowing audit disputes F-1's "design-wise sound".
+- [ ] **`OVERNIGHT_DATA_LIFECYCLE_AUDIT.md`** (2026-08-25) — Delete Account removed only
+  `users/{uid}`; ~34 subcollections, the house photo, neighborhood membership, the bridge
+  `pairedUid` and OAuth tokens all survived; Firestore-before-Auth ordering (P0). **PARTLY
+  SUPERSEDED** — `account_deletion_service.dart:298` now calls `purgeUserAccount` and
+  `storage.rules:71` allows owner delete (re-checked); whether the callable is deployed was not
+  checked. Remainder → **P2-55**.
+- [ ] **`OVERNIGHT_ERROR_SWALLOWING_AUDIT.md`** (2026-08-25 @ `4d614fa`) — H1 a geocode failure
+  still says "Solar Sync Complete"; H2 `fetchPresetNames` caches `{"error":N}`; H4
+  `supportsRgbw` caches a failure as RGB-only; H5 the error sink drops concurrent errors; H6
+  sync teardown is fire-and-forget; M1–M5, L1–L3. **OPEN** — `wled_service.dart` still has 0
+  `error`-key checks, and the "Solar Sync Complete" string is still at
+  `edit_profile_screen.dart:285` (failure branch not re-traced). `main` has `7779b70`
+  (presets.json tolerance), which is not in this checkout.
+- [ ] **`OVERNIGHT_PRIVACY_AUDIT.md`** (2026-08-25 @ `4d614fa`) — F1 the policy promises an
+  analytics opt-out that has no UI (High); F2 precise GPS vs "general location" (High); F3
+  deletion (High); F4 two iOS notification prompts at bootstrap; F5 Google / Photon /
+  Nominatim / Anthropic undisclosed; F6 photos, address, phone and voice undisclosed; F7 the
+  camera string claims "AR spatial mapping"; F9 policy dated 2026-04-01. **F1 OPEN**
+  (`analyticsPreferenceNotifierProvider` declared, 0 consumers) and **F7 OPEN**
+  (`ios/Runner/Info.plist:87`), both re-checked; the rest not re-checked.
+- [ ] **`OVERNIGHT_RELEASE_HYGIENE_AUDIT.md`** (2026-08-25 @ `4d614fa`) — P0 no evidence of an
+  off-machine Android keystore backup; P0 Codemagic ran no test or analyze step; P1 +81–83 had
+  no ledger rows and tags `build-82` / `build-83` point off `main`. CI gate **FIXED**
+  `73f6d2d` (`flutter test` + errors-only analyze; tightening is **P3-63**); +81..+83 rows now
+  exist in `BUILD_LEDGER.md` (both re-checked). **Keystore backup OPEN — the owner's confirmation
+  owed.**
+- [ ] **`OVERNIGHT_SECURITY_AUDIT.md`** (2026-08-25 @ `4d614fa`) — 24 findings, 3 CRITICAL.
+  **Re-checked @ `f2245d6`, still OPEN:** S-1b `esp32-bridge/lumina-bridge-1.2-merged.bin`
+  still contains the shared bridge account email (password bytes not re-checked); **S-2
+  `createCustomerAccount` has no caller auth check**; S-3 any authed user can read, create and
+  update any user's `controllers` (`firestore.rules:436/442/445`); **S-6
+  `triggerSyncFailover` has no auth or membership check**; S-8 `/demo_leads` allows
+  unauthenticated `get` + `update` (`firestore.rules:1460-1463`). **FIXED:** §2.2b the Admin
+  SDK key moved out of the repo, `0d3243e`. S-4, S-5, S-7 and S-9..S-24 not re-checked. **None
+  of S-1..S-24 has its own ledger item — S-1b, S-2, S-3, S-6 and S-8 should be promoted and
+  given a severity.**
+- [ ] **`OVERNIGHT_TEST_DEBT_AUDIT.md`** (2026-08-25 @ `4d614fa`) — 2,748 pass / 10 fail (all
+  **#64**); 6.3 % of screens imported by any test; 76 Firestore files with no injection seam;
+  three tiers of dead code; `#NN` is four overlapping namespaces. **Reference** — #64 still
+  open; the collision finding is what the numbering-hazard convention above encodes.
+- [ ] **`SCHEDULING_V3_AUDIT.md`** (2026-08-24 @ `c14368d`) — discovery for F1 (multiple
+  events per day), F2 (per-channel events) and F3 (full editor on tap): 9 schedule types, only
+  Game Day configs carry channel scope, and the per-pixel `i` → `frz` hazard blocks F2.
+  **Reference for design** — no defect filed.
+- [ ] **`SILENT_ERROR_PARSING_AUDIT.md`** (2026-08-25 @ `4d614fa`) — none of the 9 `jsonDecode`
+  sites in `wled_service.dart` rejects `{"error":N}`: `getState` returns it as device state,
+  `fetchPresetNames` caches `{}`, `supportsRgbw` caches `false`; only `_readPresetsHttp` is
+  hardened. **OPEN** (0 `error`-key checks, re-checked).
+- [x] **`SOLAR_BENCH_GATE.md`**, **`SOLAR_FIRING_PATH_AUDIT.md`**, **`SOLAR_PREP.md`**
+  (2026-08-27) — solar fires controller-side from slots 8/9 with `hour:255`; the gate closed
+  on the Aug 5 evidence; the 0.15.1 solar routine was ported (`0c1c950`). **Committed and
+  closed on `main` in `625bae6`** (neither commit is in this checkout). The dead
+  `hour:24/25` encoding is **P3-50**.
+- [x] **`SPORTS_ALERTS_STILL_PRESENT_ON_84.md`** (2026-08-26) — `900761e` (retire the Sports
+  Alerts screen) was not in build-84's lineage, so +84 brought the screen back. **RESOLVED** —
+  `900761e` is now an ancestor of `f2245d6` (re-checked); guides updated on `main` in
+  `d67d350`.
+- [ ] **`SYNC_PACING_FIX_STATUS.md`** (2026-08-25 @ `c14368d` / `a76e2b9`) — 2 of 5 pacing
+  items were implemented. **(a) + (c) FIXED `f3a2dba`, (d) FIXED `187dd9e`** (ancestors
+  re-checked); no bench verification of the pacing fix is recorded in this ledger. Scope
+  gaps → the wedge audit (fixed) and **#110** (open).
+
+- [ ] **#112 — THE APP FLOODS THE BRIDGE QUEUE: an unpaced 3 s segment poll and a 10 s
+  repository rebuild each become a relay command, faster than the bridge can drain them**
+  - Status: **OPEN** (filed 2026-09-14) · Severity: **P1** · Evidence: **verified-by-data**
+    (the owner's account, read-only admin read) + **verified-by-source** @ `f2245d6` for both
+    emitters
+  - **What the user sees:** "the bridge isn't accepting commands" — every relay command,
+    including the user's own, waits behind poll traffic and times out. **No bridge fault is
+    needed**, and it clears only when the app stops producing.
+  - **Observed, 2026-09-12 00:52:03Z → 00:58:24Z (194 commands).** `getState` created every
+    **3.0 s exactly** and `getInfo` every **10.0 s exactly**, plus a burst of **12 `getInfo`
+    inside one second** (00:56:31.6–00:56:32.6). Completion latency climbed to **98.6 s**;
+    79 of that hour's 186 commands timed out. User writes caught in it: `applyJson` 00:53:04Z
+    took 34.5 s; `applyJson` 00:53:43Z timed out. The queue drained within ~2 min of the
+    stream stopping. Same shape at lower intensity on 2026-09-09 16:27–16:35Z (`getInfo`
+    every 10.0 s; bursts of 3–5 commands within 100 ms).
+  - **Emitter 1 — the 3.0 s `getState`.** `ZoneSegmentsNotifier.build()`
+    (`zone_providers.dart:24`) starts `Timer.periodic(3 s, _refreshSilently)` →
+    `repo.fetchSegments()`, which on `CloudRelayRepository` is a `getState` command
+    (`cloud_relay_repository.dart:550-551`). `zoneSegmentsProvider` is not autoDispose, so
+    once the dashboard watches it (`wled_dashboard_page.dart:898`) the timer runs for the
+    life of the process: **not paced, not in-flight-guarded (`Timer.periodic` does not await),
+    not reduced in remote mode, not paused in the background.**
+  - **Emitter 2 — the 10.0 s `getInfo`.** `watchConnectivity` (`connectivity_service.dart:219`)
+    emits every 10 s even when nothing changed. In **Riverpod 2.6.1** a stream data event
+    always notifies (`FutureHandlerProviderElementMixin.handleUpdateShouldNotify` returns
+    `true` for any non-loading → non-loading transition, `riverpod-2.6.1
+    lib/src/async_notifier/base.dart:177-187`), so `wledRepositoryProvider`
+    (`wled_providers.dart:139`) rebuilds and returns a **new** repository instance, and a
+    plain `Provider` notifies on `!=` (`provider/base.dart:349-351`) — neither repository
+    overrides `==`. Every dependent re-runs: `clockHealthProvider` → `fetchClockInfo()` → a
+    `getInfo` command (`cloud_relay_repository.dart:526-527`) while the Schedule tab's
+    `ClockHealthBanner` is mounted; `channelPowerStatesProvider` → `getState` while the
+    channel selector is mounted. **On LAN the same rebuild re-fetches clock info and
+    `/json/cfg` from the controller every 10 s** — steady load on the #110 path, too.
+  - **Emitter 3 — the 30 s `getInfo`, independent of routing** (found in the 2026-09-15 live
+    test). `RemoteAccessScreen` runs `_runBridgeCheck()` on open, on every app resume
+    (`remote_access_screen.dart:119-133`), and every 30 s via `_startPolling()`
+    (`:145-160`). Each run writes a `getInfo` straight into `users/{uid}/commands`
+    (`:283-293`), bypassing `wledRepositoryProvider`. It is gated only on
+    `remoteAccessEnabled` — **not on local vs remote mode, and not on the screen being
+    visible.** The route is nested in the System tab's `StatefulShellBranch`
+    (`app_router.dart:965` → `:1036`), which preserves the branch stack, so once opened the
+    screen stays mounted behind other tabs and keeps polling. It also sets
+    `bridgeReachableProvider` from a 10 s pickup deadline. Completed and failed checks
+    **delete their own doc** (`:305`, `:313`); only >10 s pickups survive as `timeout`, so
+    command history under-counts this emitter.
+  - **Bridge drain rate.** Each command is three serial round trips on one loop thread
+    (`executing` PATCH → WLED HTTP → `completed` PATCH, `main.cpp:766-848`), at most 5 per
+    1 s poll. Idle latency 1.4–5 s; under the two emitters above demand outran it and latency
+    grew without bound.
+  - **Open question (needs the owner):** all 527 retained commands went through the relay. If the
+    phone was on home Wi-Fi for them, local/remote detection is routing home control through
+    the bridge. `isOnHomeNetwork` (`connectivity_service.dart:169-195`) only returns remote
+    when a READABLE SSID fails the hash compare — so either the phone was genuinely off-LAN,
+    or the stored hash does not match the current home SSID.
+  - **Partly answered 2026-09-14.** The owner actively changed designs on the evening of
+    2026-09-13 CDT and it felt real-time. The relay recorded ZERO commands from 2026-09-13 01Z
+    to 2026-09-14 20:42Z, so that session ran on the LAN path and home detection worked then.
+    Still to place: the 2026-09-11 evening flood (19:52-19:58 CDT) and the 2026-09-14
+    15:42-15:53 CDT relay traffic - was the phone home or away?
+  - **ANSWERED 2026-09-14: the owner was HOME for both windows.** Home control was routed through
+    the bridge — see **#114**.
+  - **Fix shape (not chosen):** do not rebuild the repository when the connectivity result is
+    unchanged (`distinct()` on the stream, or `==` on the repositories); gate
+    `ZoneSegmentsNotifier`'s timer on local mode + foreground, or delete it in favour of the
+    main poller's state; route every relay read through the single-flight gate proposed in
+    #110; coalesce reads in `CloudRelayRepository` so N concurrent `getInfo` share one command.
+  - Files: `lib/features/wled/zone_providers.dart`, `lib/features/wled/wled_providers.dart`,
+    `lib/services/connectivity_service.dart`, `lib/features/wled/clock_health_providers.dart`,
+    `lib/features/wled/cloud_relay_repository.dart`. Related: **#109**, **#110**, **#111**,
+    #52 (`e005a02`).
+
+- [ ] **#113 — the bridge could not open a TCP connection to the controller for ≥34 hours, and
+  recovered without a reboot; cause unknown**
+  - Status: **OPEN** (filed 2026-09-14) · Severity: **P2 — evidence-gathering** · Evidence:
+    **verified-by-data** (the owner's account) · cause **unknown**
+  - **Observed.** Every command in every app session from **2026-09-07T09:15Z to
+    2026-09-08T19:46Z** — 50 of 50 — came back `failed` with `ERROR: HTTP -1`
+    (`HTTPC_ERROR_CONNECTION_REFUSED`, which the ESP32 `HTTPClient` also returns for a connect
+    timeout). The bridge picked each one up promptly, so bridge→Firestore was healthy.
+    Failed cycles took 6–45 s against 1.4–5 s for successes — the extra ≈5 s matches
+    `HTTPCLIENT_DEFAULT_TCP_TIMEOUT (5000)` (framework-arduinoespressif32 `HTTPClient.h:42`;
+    the firmware never calls `setConnectTimeout`). By **2026-09-09T16:25Z** everything
+    completed again. **The bridge did not reboot in between** (uptime continuous since
+    ≈08-27).
+  - **Not determinable from Firestore:** whether the controller was down or hung (its uptime
+    only covers from 2026-09-14 01:25Z), or whether the bridge's LAN side was broken while its
+    internet side worked. Whether the app ever showed the `failed` reason to the user was not
+    checked.
+  - **To settle it next time:** from a laptop, `curl http://192.0.2.150/json/info` (does
+    the controller answer anyone?) and `curl http://192.0.2.96/api/bridge/status` (is the
+    bridge's LAN side up?), and note whether the fix was a controller or a bridge power-cycle.
+  - Files: `esp32-bridge/src/main.cpp` (`makeWledRequest`, `:891`). Related: **#109**,
+    **#110**, **P2-14** (firmware stall on cfg flash-save).
+
+- [ ] **#114 — HOME CONTROL ROUTED THROUGH THE BRIDGE: an iPhone on home Wi-Fi was classed
+  REMOTE for whole sessions, and the stored home-SSID hash is CORRECT — the misclassification
+  happens before the hash is ever compared**
+  - Status: **OPEN** (filed 2026-09-14) · Severity: **P1 — promote to P0 if it reproduces on
+    customer phones** · Evidence: **verified-by-data** (the owner's account, read-only admin read)
+    + the owner confirmed being home + **verified-by-source** @ `f2245d6` for the routing paths
+  - **Observed.** The owner's phone was on home Wi-Fi, yet the app used the relay for:
+    2026-09-11 19:52–19:58 CDT (the #112 flood, 194 commands) and 2026-09-14 15:42–15:53 CDT
+    (confirmed home; relay getState continued to 16:04 CDT, home status for that tail not
+    confirmed). These two are the ONLY confirmed-home evidence. By contrast, the owner's design session on the evening of
+    2026-09-13 CDT produced ZERO relay commands (LAN path, felt real-time). Same phone, same
+    house, different routing.
+  - **Ruled out.**
+    - **Wrong stored hash:** the owner account's `home_ssid_hash` equals the SHA-256 of the home
+      SSID, computed from this PC's connected Wi-Fi with `EncryptionService.hashSsid`'s exact
+      transform (`lower(trim(ssid))`) — read-only check 2026-09-14, no SSID recorded.
+    - **Android `<unknown ssid>`:** the owner's phone is iOS (`debug_errors.platform=ios`,
+      including three rows from the 2026-09-13 session).
+  - **What can still produce REMOTE on iOS with a correct hash (verified-by-source):**
+    1. **No `wifi` in the connectivity types.** `_checkConnectivity`
+       (`connectivity_service.dart:250-258`) treats any type list without `wifi` as "cellular
+       only" → remote, **including `[other]`**. `connectivity_plus` 6.1.5 on iOS
+       (`PathMonitorConnectivityProvider.swift:16-27`) appends `.wifi` only when
+       `path.usesInterfaceType(.wifi)`. A VPN (path over a tunnel = `.other`) or Wi-Fi Assist
+       (path over cellular) can produce a list with no `.wifi` — **assumption, device check
+       owed**.
+    2. **A readable SSID from a different network** (extender, guest, neighbour) → mismatch.
+    3. Note the inversion: when iOS CANNOT read the SSID, `isOnHomeNetwork` returns local
+       (`:182-185`). So on iOS "local" can come from a failed read, not a match.
+  - **Latent for Android customers (verified-by-source; Android behaviour = platform docs, not
+    bench-verified).** `network_info_plus` 7.0.0 returns `wifiInfo.ssid` verbatim
+    (`android/.../NetworkInfo.kt:21`). The app strips quotes (`connectivity_service.dart`
+    `getCurrentSsid`) but never rejects `<unknown ssid>`, which Android returns when the app
+    lacks location access (e.g. backgrounded without "Allow all the time"). That string is
+    non-empty, fails the hash compare, and routes the phone REMOTE while at home.
+  - **Why this likely underlies the "bridge isn't working" reports.** At home, every poll and
+    command rides the relay: 1.4–5 s idle, and with #112's emitters 98 s latency plus
+    timeouts — on a path that should be ~50 ms. Unplugging the bridge does not move the app
+    back to LAN; only a later 10 s connectivity check that says local does. A recovery
+    credited to the unplug may coincide with that flip or with the queue draining
+    (**inference**).
+  - **Live routing test, 2026-09-15 13:50:54–13:52:54Z (the owner home, iPhone on home Wi-Fi,
+    app open).** Read-only: a real-time Firestore listener on `users/the owner account/commands`
+    plus `GET http://192.0.2.150/json/state` once per second. the owner made two design
+    changes. `.150` changed at 13:51:15Z (effect 83, colour `[0,49,83]`) and 13:51:40Z
+    (colour `[255,0,0]`), and **neither produced a relay command** ⇒ that session routed
+    **LOCAL**. The only relay traffic was four `getInfo` exactly 30.0 s apart — #112 emitter
+    3, which runs in local mode too.
+  - **Retest, 2026-09-15 14:02:58–14:04:58Z (Remote Access screen closed first).** Two changes
+    reached `.150` at 14:03:00Z (effect 83, colour `[255,215,0]`) and 14:03:16Z (effect 0,
+    colour `[255,238,222]`) with **no relay command** ⇒ LOCAL again. The only relay command
+    in the window was one `getInfo` at 14:03:02Z, on emitter 3's :02/:32 phase; none followed
+    at 14:03:32, 14:04:02 or 14:04:32Z, so closing the screen stopped its timer. **Both
+    2026-09-15 sessions routed correctly; the misrouting is intermittent** — confirmed only on
+    2026-09-11 and 2026-09-14.
+  - **⚠️ Relay `getInfo` / `ping` traffic is NOT evidence of remote mode.** #112 emitter 3 and
+    `bridgeHealthProvider` (`main.dart` resume) both write to the queue while local. Only
+    relay **`getState` / `applyJson`** commands prove the repository was
+    `CloudRelayRepository`. The 2026-09-11 and 2026-09-14 windows above qualify (poller- and
+    zone-timer-shaped `getState`); an isolated `ping` + `getInfo` does not.
+  - **Nothing records the decision, and nothing SHOWS it.** Routing is logged only via
+    `debugPrint` (`BridgeRouter: isOnHomeNetwork=…`), so no field report can be attributed
+    from data. There is also **no in-app indicator of the route actually in use**:
+    - the dashboard watches `isRemoteModeProvider` and discards the value
+      (`wled_dashboard_page.dart:351`);
+    - `ConnectionStatusIndicator` (`lib/widgets/connection_status_indicator.dart`), which has
+      a `remote` state, has been mounted nowhere since `b88ad0a`;
+    - the Remote Access "On Home Network" / "Remote Mode Active" card
+      (`remote_access_screen.dart:1088-1123`) reads the connectivity **input**, not the
+      repository selected, maps loading/error to **local** (`:575-578`), and sits on a
+      settings sub-screen nobody has open mid-session. the owner confirmed it does not tell him
+      which path his commands take.
+    **Part of the fix:** a live badge on the dashboard bound to the repository type actually
+    selected (Direct vs Via Bridge) plus the last routing reason, visible to customers and
+    dealers alike.
+  - **Confirm (owed — the owner, cheap).** The Remote Access card is not a valid check (above).
+    Instead, the next time the app feels slow at home: (a) re-run the live routing test —
+    `node <scratchpad>/live_routing_watch.js 120` (read-only listener + 1 s controller poll)
+    while making one design change; a relay `getState`/`applyJson` for it confirms REMOTE;
+    (b) iPhone Settings → VPN status, Cellular → Wi-Fi Assist, and which Wi-Fi network is
+    joined. **Do NOT press "Detect Home Network" during the check** — it rewrites the stored
+    hash. **Close the Remote Access screen (pop it off the System tab) first**, or its 30 s
+    `getInfo` stream adds noise.
+  - **Fix shape (not chosen):** decide local by reachability — a ~1 s LAN probe of the
+    controller's `/json/info` — instead of SSID and interface heuristics; failing that, treat
+    `[other]`/VPN with a matching SSID as local and reject `<unknown ssid>`. Persist the
+    routing decision and its reason (bounded, no SSID) so field reports can be attributed.
+  - Files: `lib/services/connectivity_service.dart`, `lib/features/wled/wled_providers.dart`
+    (`wledConnectivityStatusProvider`, `wledRepositoryProvider`),
+    `lib/features/site/remote_access_screen.dart`. Related: **#112**, **#109**, **#110**,
+    **P2-26** (iOS SSID entitlement), **P2-33** (null-SSID non-fatal).
+
+- [ ] **#115 — THE DASHBOARD SHOWED A PATTERN AND COLOR THE CONTROLLER WAS NOT HOLDING:
+  "solid white, applied" on screen while the controller held Solid AMBER with both segments
+  OFF**
+  - Status: **OPEN** (filed 2026-09-16) · Severity: **P1 — trust** · Evidence: **reported**
+    (what the app displayed — the owner) + **verified-by-device-readback** (controller values) +
+    **physical inspection** (the owner, after the bridge recovered). Distinct from **#114**: this
+    is not about which path a command took, it is about the app asserting a device state the
+    device does not have.
+  - **Observed, 2026-09-16 (the owner's home controller `192.0.2.150`, WLED 0.15.1).** The app
+    showed a "solid white" pattern applied and the bridge connected, while the lights were
+    physically dark. Direct LAN readbacks from a PC on the same network:
+
+    | Time (UTC) | Master | Segment 0 (LEDs 0–128) | Segment 1 (LEDs 128–290) |
+    |---|---|---|---|
+    | 17:04:44 | `on:true` `bri:255` | **`on:false`**, fx 0 Solid, `[255,160,0,0]` | **`on:false`**, fx 0 Solid, `[255,170,0,0]` |
+    | 17:13:51 | `on:true` `bri:255` | `on:true`, fx 0, `[255,160,0,0]` | `on:true`, fx 0, `[255,170,0,0]` |
+
+    Between the two readbacks the segments were switched on by something other than this
+    investigation — the relay carried no writes in that window, so most likely a direct LAN
+    write or a timer; the source is **unknown**. A direct segment-on POST at 17:13Z returned
+    `{"success":true}` and read back unchanged. the owner then confirmed the physical lights were
+    **amber**, not white. **The controller never held a white color in the incident window.**
+  - **Scope — confirmed window only.** The mismatch is confirmed from the **17:04:44Z** readback
+    onward. It is **not** established that the controller held amber all day: in the same
+    day's live routing tests it held the colors the owner set (13:51Z effect 83 `[0,49,83]` then
+    `[255,0,0]`; 14:03Z `[255,215,0]` then `[255,238,222]`). When the app first began showing
+    "solid white" was not captured.
+  - **Two separate things the screen got wrong.**
+    1. **Color/pattern:** white displayed, amber held.
+    2. **Power:** the lights were dark because every segment was off while the master was on.
+       The Now Playing label only reads master power — `displayPatternNameProvider`
+       (`lib/features/wled/display_pattern_providers.dart`) returns `'Lights Off'` only when
+       `!wledState.isOn` — so a device with master on and all segments off still displays a
+       pattern name. Same "master on, segments off → dark" class as the ON-preset findings.
+  - **Where a stale display can come from (verified-by-source; causation suspected, not
+    reproduced):**
+    - **The label is app-set and sticky.** `displayPatternNameProvider` prefers
+      `activePresetLabelProvider` over anything read from the device. An app-set label stays
+      until the preset-name resolver or the cold-start reconciler replaces it, and both run
+      only when a poll returns fresh device state.
+    - **Visual fields refresh only from a successful poll.** Color and effect are written by
+      `WledNotifier._applyStateData`, which is skipped entirely when a poll returns null
+      (`wled_providers.dart` `if (data == null)`), and whose visual fields are suppressed
+      inside `_kLocalApplyPollSuppressWindow` or when the poll's dispatch token is stale
+      (`suppressVisual = _isPollOverwriteSuppressed() || tokenAtDispatch != _stateApplySeq`).
+    - **This incident had almost no successful polls.** The app was routing via the bridge
+      (#114 records: `wifi_not_reported_controller_unreachable` from 16:59:02Z), the #112 poll
+      flood backed the queue up (15 pending, 42 timeouts in 10 min), and the bridge then
+      stalled outright from 17:05:50Z until it was power-cycled (recovered ~17:16:45Z). Every
+      failed poll left the previous on-screen values in place.
+    - **A freshness flag exists but its effect is unverified.** `wledStateFreshProvider` is set
+      true on a successful state parse and false on `refreshConnection()`, and the dashboard
+      reads it (`wled_dashboard_page.dart` two sites). Whether it visibly marks the pattern or
+      color as unconfirmed was not checked.
+  - **Capture next time (owed):** a timestamped screenshot of the dashboard AND a simultaneous
+    `GET /json/state`, plus the #114 routing record for that minute — so "what did the app
+    show" is evidence rather than a report.
+  - **Fix shape (not chosen):** never render a color or pattern the device has not confirmed
+    within N seconds — show it as unconfirmed; derive "Lights Off" from master power AND
+    whether any segment is on; when polls fail repeatedly, drop the optimistic visuals rather
+    than keeping the last as-sent ones.
+  - Files: `lib/features/wled/display_pattern_providers.dart`,
+    `lib/features/wled/wled_providers.dart` (`_applyStateData`, poll suppression,
+    `wledStateFreshProvider`), `lib/features/dashboard/wled_dashboard_page.dart`. Related:
+    **#112** (the flood that backed up the relay), **#109** (bridge stall — this incident's
+    17:05:50Z stall is a live sighting), **#114** (routing), **P1-11** / **P1-22** / **P1-24**
+    (label attribution and preview-leak family).
+
+- [ ] **#116 — the bridge has no fallback controller IP (`wledIp: "0.0.0.0"`), so any command
+  that omits `controllerIp` fails as if the controller were down**
+  - Status: **OPEN** (filed 2026-09-16) · Severity: **P3 — latent; nothing depends on the
+    fallback today** · Evidence: **observed** (`GET /api/bridge/status`) +
+    **verified-by-source** (`esp32-bridge/src/main.cpp`, firmware 1.2)
+  - **Observed.** the owner's home bridge `Bridge B`, 2026-09-16 17:19Z, right after its
+    reboot: `/api/bridge/status` → `"paired":true, "authenticated":true,
+    "wledIp":"0.0.0.0"`. The bridge holds no usable address for its own controller.
+  - **Why commands work anyway.** The app always writes `controllerIp` on every relay command
+    (`CloudRelayRepository` → `RemoteCommand.toFirestore()`), and `executeCommand` only falls
+    back to `pairedWledIp` when that field is empty (`main.cpp:796–797`).
+  - **What happens without it — loud, but misleading.** The "No controller IP specified" guard
+    (`:802–804`) fires only if the fallback is ALSO empty. `"0.0.0.0"` is not empty, so the
+    bridge would send the request to `http://0.0.0.0/json/state`, the connect would fail, and
+    the command doc would read `failed: ERROR: HTTP -1` — **identical to a genuinely
+    unreachable controller** (the #113 signature). Not silent; indistinguishable.
+  - **Why the fallback is empty (verified-by-source).** `pairedWledIp` starts from
+    `DEFAULT_WLED_IP` (`:66`) and is reloaded from NVS key `wledIp` with that same default
+    (`:172`, `:180`). The **only** writer of `wledIp` is the LAN pairing endpoint
+    `handleBridgePair` (`:435–452`), and only when its request body carries a non-empty
+    `wledIp`. The app's normal **registry** pairing flow (`pollPairingRequest`) never sets it —
+    so a bridge paired that way never learns its controller's address.
+  - **Where `0.0.0.0` came from — undetermined.** Today's `esp32-bridge/src/config.h` defines
+    `DEFAULT_WLED_IP "0.0.0.0"` (`:49`, file modified 2026-09-16), but the running firmware was
+    built in May, before that edit — so the value is either what that May build compiled in
+    or what NVS holds. Not distinguishable without a flash/NVS read. (Relevant to the open
+    `config.h` investigation.)
+  - **Who could hit it:** a future Cloud Function or server-side writer that queues commands
+    without `controllerIp`, or any client path that drops the field.
+  - **Fix shape (not chosen):** either (a) make the registry pairing flow deliver the
+    controller IP and persist it to NVS, or (b) treat `0.0.0.0` / unset as empty in
+    `executeCommand` so the command fails with the honest "No controller IP specified" reason
+    instead of `HTTP -1`. (b) is a one-line firmware guard; (a) needs the IP to stay correct
+    as DHCP leases change (see memory: device-ID and IP churn are expected).
+  - Files: `esp32-bridge/src/main.cpp`, `esp32-bridge/src/config.h`. Related: **#109**
+    (same bridge, same firmware), **#113** (the `HTTP -1` signature this would mimic).
+
 ## P2 — hardening & platform
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
