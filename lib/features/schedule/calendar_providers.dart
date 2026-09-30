@@ -17,6 +17,8 @@ import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_priority_resolver.dart'
+    show tierForEntry;
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
@@ -41,6 +43,47 @@ String _dayName(int wd) => const [
     ][wd];
 
 // ─── Calendar Schedule State ──────────────────────────────────────────────────
+
+/// What to do when an entry finds no free WLED timer slot
+/// ([LeaseOutcome.noFreeSlots]) while being applied.
+enum NoFreeSlotsPolicy {
+  /// Raise the eviction picker and await the customer's choice (the Schedule
+  /// tab's behaviour). The entry stays on the calendar either way.
+  prompt,
+
+  /// Keep what fits, remove what does not, and report it
+  /// ([CalendarApplyOutcome.dropped]). For writes made from a conversation,
+  /// where a picker cannot be raised (D2).
+  drop,
+}
+
+/// The result of [CalendarScheduleNotifier.applyEntriesDetailed].
+class CalendarApplyOutcome {
+  const CalendarApplyOutcome({required this.ok, this.dropped = const []});
+
+  /// The Firestore write succeeded (the same value [applyEntries] returns).
+  final bool ok;
+
+  /// Entries removed again because no timer slot was free
+  /// ([NoFreeSlotsPolicy.drop]). Empty under [NoFreeSlotsPolicy.prompt].
+  final List<CalendarEntry> dropped;
+
+  static const CalendarApplyOutcome failed = CalendarApplyOutcome(ok: false);
+}
+
+/// Pure (D3): which of [entries] should hold a date's single lease. The
+/// higher [tierForEntry] wins (user, then holiday, Game Day, …); on a tie the
+/// LAST written wins, matching the primary-entry rule. Holidays never lease.
+CalendarEntry? leaseHolderAmong(Iterable<CalendarEntry> entries) {
+  CalendarEntry? best;
+  for (final e in entries) {
+    if (e.type == CalendarEntryType.holiday) continue;
+    if (best == null || !tierForEntry(best).isHigherThan(tierForEntry(e))) {
+      best = e;
+    }
+  }
+  return best;
+}
 
 /// An existing dated entry that a write is about to replace, with both sides
 /// so the prompt can name what is being lost AND what replaces it.
@@ -263,8 +306,34 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
       {ConflictResolution? resolution,
       RecurringIntent? recurringIntent,
       bool overwriteAcknowledged = false}) async {
+    final outcome = await applyEntriesDetailed(entries,
+        resolution: resolution,
+        recurringIntent: recurringIntent,
+        overwriteAcknowledged: overwriteAcknowledged);
+    return outcome.ok;
+  }
+
+  /// [applyEntries], plus what happened at the lease layer and a choice of
+  /// what to do when the controller's timer pool is full.
+  ///
+  /// D2 (+110 E2 follow-up): Lumina persists a multi-night plan from a chat
+  /// reply, where the eviction picker must not be raised — and cannot be: the
+  /// Schedule tab that listens for it may not be built, and the write would
+  /// then await a completer nobody completes. With [NoFreeSlotsPolicy.drop]
+  /// an entry that found no slot is REMOVED again (state and Firestore) and
+  /// listed in [CalendarApplyOutcome.dropped], so the reply can say "I
+  /// couldn't fit N nights" and the Schedule tab shows exactly what will run.
+  Future<CalendarApplyOutcome> applyEntriesDetailed(
+    List<CalendarEntry> entries, {
+    ConflictResolution? resolution,
+    RecurringIntent? recurringIntent,
+    bool overwriteAcknowledged = false,
+    NoFreeSlotsPolicy noFreeSlots = NoFreeSlotsPolicy.prompt,
+  }) async {
     // ── Conflict resolution (before optimistic update) ───────────
-    if (resolution == ConflictResolution.cancel) return false;
+    if (resolution == ConflictResolution.cancel) {
+      return CalendarApplyOutcome.failed;
+    }
 
     // ── A3 — self-overwrite guard, ENFORCED AT THE WRITE ─────────
     // Deliberately here and not only in the UI. A guard that lives in a widget
@@ -281,7 +350,7 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
             '${overwrites.map((o) => o.dateKey).join(", ")} without '
             'acknowledgement. Prompt the user, then pass '
             'overwriteAcknowledged: true.');
-        return false;
+        return CalendarApplyOutcome.failed;
       }
     }
 
@@ -291,7 +360,7 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
     // (e.g. an autopilot-created sibling), so a no-op result is normal
     // when a matching ScheduleItem already exists.
     if (recurringIntent != null) {
-      return _writeAsScheduleItem(recurringIntent);
+      return CalendarApplyOutcome(ok: await _writeAsScheduleItem(recurringIntent));
     }
 
     if (resolution == ConflictResolution.removeExisting) {
@@ -313,7 +382,7 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
 
     // Persist user entries to Firestore
     final uid = _userId;
-    if (uid == null) return false;
+    if (uid == null) return CalendarApplyOutcome.failed;
     try {
       final userService = _ref.read(userServiceProvider);
       final toSave =
@@ -330,6 +399,7 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
       // calendar display is the source of truth; the lease is just the
       // firing mechanism. A visible entry without a lease is recoverable
       // (next sweep or eviction UX), a missing entry is not.
+      final dropped = <CalendarEntry>[];
       if (ok) {
         final leaseManager =
             _ref.read(calendarEntryLeaseManagerProvider);
@@ -338,6 +408,14 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
           try {
             final result = await leaseManager.handleEntryCreated(entry);
             if (result.outcome == LeaseOutcome.noFreeSlots) {
+              if (noFreeSlots == NoFreeSlotsPolicy.drop) {
+                // D2 — no picker from a chat reply: the night does not fit,
+                // so it is not kept either (a visible entry that will never
+                // fire is the claim-without-work this codebase keeps paying
+                // for). Removed below in one write.
+                dropped.add(entry);
+                continue;
+              }
               // Prompt 4 — Option-C user-driven eviction. Surface a
               // request to the UI listener; await the user's pick.
               await _handleNoFreeSlotsForEntry(
@@ -349,11 +427,27 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
             debugPrint('CalendarLease: handleEntryCreated failed: $e');
           }
         }
+        if (dropped.isNotEmpty) {
+          var after = state;
+          for (final d in dropped) {
+            after = after.removeEntryById(d.dateKey, d.entryId);
+          }
+          state = after;
+          final saved = await userService.saveCalendarEntries(
+              uid, after.where((e) => e.type != CalendarEntryType.holiday));
+          if (!saved) {
+            debugPrint('❌ applyEntries: could not remove ${dropped.length} '
+                'unleasable entr${dropped.length == 1 ? 'y' : 'ies'}');
+          }
+          debugPrint('CalendarSchedule: dropped ${dropped.length} '
+              'entr${dropped.length == 1 ? 'y' : 'ies'} — no free timer slot '
+              '(${dropped.map((e) => e.dateKey).join(", ")})');
+        }
       }
-      return ok;
+      return CalendarApplyOutcome(ok: ok, dropped: dropped);
     } catch (e) {
       debugPrint('❌ applyEntries: $e');
-      return false;
+      return CalendarApplyOutcome.failed;
     }
   }
 
@@ -571,25 +665,52 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
 
   /// Remove exactly one row, leaving the rest of the date intact.
   ///
-  /// A date whose last non-holiday row is removed still releases its lease:
-  /// the lease manager is keyed by dateKey, so the release runs only when
-  /// nothing armable remains for that date.
+  /// D3 (+110 E2 follow-up) — the lease is keyed by date and records the
+  /// entry it was derived from ([CalendarEntryLease.entryId]). Removing:
+  ///  * the LAST armable row releases the lease (the slot is zeroed);
+  ///  * the row the lease was derived from, with others remaining, re-derives
+  ///    the lease from the best survivor ([leaseHolderAmong]) — a Game Day
+  ///    entry reclaims its night when the override on top of it goes;
+  ///  * any other row leaves the lease alone: its holder is still there.
   Future<bool> removeEntryById(String dateKey, String entryId) async {
+    // Nothing matched: no state change, no lease work, no Firestore write.
+    if (state.byId(dateKey, entryId) == null) return true;
     final next = state.removeEntryById(dateKey, entryId);
-    if (identical(next, state)) return true; // nothing matched
     state = next;
 
-    final stillArmable = next
+    final survivors = next
         .forDate(dateKey)
-        .any((e) => e.type != CalendarEntryType.holiday);
-    if (!stillArmable) {
-      try {
-        await _ref
-            .read(calendarEntryLeaseManagerProvider)
-            .handleEntryDeleted(dateKey);
-      } catch (e) {
-        debugPrint('CalendarLease: handleEntryDeleted failed: $e');
+        .where((e) => e.type != CalendarEntryType.holiday)
+        .toList();
+    try {
+      final leaseManager = _ref.read(calendarEntryLeaseManagerProvider);
+      if (survivors.isEmpty) {
+        await leaseManager.handleEntryDeleted(dateKey);
+      } else {
+        final lease = leaseManager.leaseFor(dateKey);
+        final holderGone = lease != null &&
+            (lease.entryId == null || lease.entryId == entryId);
+        if (holderGone) {
+          final heir = leaseHolderAmong(survivors);
+          if (heir == null) {
+            await leaseManager.handleEntryDeleted(dateKey);
+          } else {
+            final r = await leaseManager.handleEntryCreated(heir);
+            debugPrint('CalendarLease: $dateKey lease re-derived from '
+                '${heir.entryId} → ${r.outcome}');
+            if (r.outcome != LeaseOutcome.updated &&
+                r.outcome != LeaseOutcome.leased &&
+                r.outcome != LeaseOutcome.gateRefused) {
+              // The heir could not take the night (no clock times, expired,
+              // write failed…). A lease still describing the DELETED entry
+              // must not stay armed.
+              await leaseManager.handleEntryDeleted(dateKey);
+            }
+          }
+        }
       }
+    } catch (e) {
+      debugPrint('CalendarLease: lease update after delete failed: $e');
     }
 
     final uid = _userId;

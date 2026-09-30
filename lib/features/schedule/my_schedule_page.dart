@@ -2102,7 +2102,9 @@ class _DeleteEntryButton extends StatelessWidget {
     // calEntry takes precedence: removing the one-off override reveals
     // the recurring fallback (if any) on the next render.
     final isCalEntry = calEntry != null;
-    final label = isCalEntry ? 'Delete This Day' : 'Delete Recurring Schedule';
+    // D3 — one row, not the whole date: a Game Day entry and a customer's own
+    // entry can share a night, and deleting one must leave the other.
+    final label = isCalEntry ? 'Delete This Entry' : 'Delete Recurring Schedule';
 
     return SizedBox(
       width: double.infinity,
@@ -2125,12 +2127,13 @@ class _DeleteEntryButton extends StatelessWidget {
     final String title;
     final String body;
     if (calEntry != null) {
-      title = 'Delete this day?';
+      title = 'Delete this entry?';
       final friendlyDate = _friendlyDate(dateKey);
+      final name = calEntry!.patternName;
       body = friendlyDate != null
-          ? 'Delete the entry for $friendlyDate? '
-              "The lights won't change on this day."
-          : "Delete this day's entry? The lights won't change on this day.";
+          ? 'Delete "$name" for $friendlyDate? Anything else scheduled that '
+              'day stays.'
+          : 'Delete "$name"? Anything else scheduled that day stays.';
     } else {
       final otherDays = (recurringItem?.repeatDays.length ?? 1) - 1;
       title = 'Delete recurring schedule?';
@@ -2169,7 +2172,7 @@ class _DeleteEntryButton extends StatelessWidget {
     if (calEntry != null && dateKey != null) {
       ok = await ref
           .read(calendarScheduleProvider.notifier)
-          .removeEntry(dateKey!);
+          .removeEntryById(dateKey!, calEntry!.entryId);
     } else if (recurringItem != null) {
       ref.read(schedulesProvider.notifier).remove(recurringItem!.id);
       ok = true;

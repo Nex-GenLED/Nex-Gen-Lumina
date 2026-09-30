@@ -363,6 +363,13 @@ class CalendarEntryLease {
   /// for the canonical Mon=bit 0..Sun=bit 6 convention (Item #72).
   final int dowMask;
 
+  /// D3 (+110 E2 follow-up) — the `CalendarEntry.entryId` this lease was last
+  /// derived from, so a per-entry delete can tell whether it removed the
+  /// lease HOLDER (re-derive from a survivor) or a bystander (leave the
+  /// lease alone). Null on records persisted before the field existed; a
+  /// null holder is treated as "unknown", i.e. re-derived on any delete.
+  final String? entryId;
+
   const CalendarEntryLease({
     required this.dateKey,
     required this.slotIndex,
@@ -374,6 +381,7 @@ class CalendarEntryLease {
     required this.wledHour,
     required this.wledMin,
     required this.dowMask,
+    this.entryId,
   });
 
   CalendarEntryLease copyWith({
@@ -386,6 +394,7 @@ class CalendarEntryLease {
     int? wledHour,
     int? wledMin,
     int? dowMask,
+    String? entryId,
   }) =>
       CalendarEntryLease(
         dateKey: dateKey,
@@ -398,6 +407,7 @@ class CalendarEntryLease {
         wledHour: wledHour ?? this.wledHour,
         wledMin: wledMin ?? this.wledMin,
         dowMask: dowMask ?? this.dowMask,
+        entryId: entryId ?? this.entryId,
       );
 
   Map<String, dynamic> toJson() => {
@@ -411,11 +421,13 @@ class CalendarEntryLease {
         'wledHour': wledHour,
         'wledMin': wledMin,
         'dowMask': dowMask,
+        if (entryId != null) 'entryId': entryId,
       };
 
   static CalendarEntryLease? fromJson(Map<String, dynamic> json) {
     try {
       return CalendarEntryLease(
+        entryId: json['entryId'] as String?,
         dateKey: json['dateKey'] as String,
         slotIndex: (json['slotIndex'] as num).toInt(),
         presetId: (json['presetId'] as num).toInt(),
@@ -530,6 +542,11 @@ class CalendarEntryLeaseManager {
   /// re-read.
   List<CalendarEntryLease> get activeLeases =>
       List.unmodifiable(_activeLeases.values);
+
+  /// The registered lease for [dateKey], or null. A registered lease is not
+  /// necessarily ARMED (see [LeaseOutcome.gateRefused] and the deferred
+  /// write attempts); it is the record the manager holds for that night.
+  CalendarEntryLease? leaseFor(String dateKey) => _activeLeases[dateKey];
 
   /// Compute when a lease for [entry] would expire (entry's offTime
   /// resolved to a real DateTime, with overnight wrap if offTime <
@@ -658,6 +675,7 @@ class CalendarEntryLeaseManager {
         wledHour: onHm.hour,
         wledMin: onHm.min,
         dowMask: dowMask,
+        entryId: entry.entryId,
       );
       _activeLeases[entry.dateKey] = updated;
       await _saveToPrefs();
@@ -741,6 +759,7 @@ class CalendarEntryLeaseManager {
       wledHour: onHm.hour,
       wledMin: onHm.min,
       dowMask: dowMask,
+      entryId: entry.entryId,
     );
     _activeLeases[entry.dateKey] = lease;
     await _saveToPrefs();
