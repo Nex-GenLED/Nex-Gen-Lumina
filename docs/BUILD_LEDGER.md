@@ -124,6 +124,19 @@ thing itself — the compiled artifact, the signer, the manifest, the device's
 
 ## Operational flags
 
+### +110 — build-110 tagged 2026-09-30 (Codemagic build number: pending)
+
+| item | value |
+|---|---|
+| Tag | `build-110` = `2c895ed` (the bump commit; this row lands after, outside the tag) |
+| Base | `9e5376a` (release after package E2) |
+| Contents | relay-without-bridge app half `d838f75` + tests `0269282` + `#118` `b66fe43`; +110 E2 follow-ups D1–D6 and Policy B (`f4385cd`..`dcc639c`); bridge-audit ledger `#109`–`#116` `8b27bca`; bump 2.5.10+110 (pubspec + `lib/app_version.dart`) |
+| Functions | no deploy: `functions/` byte-identical to the 2026-09-30 deploy `8b3bcdf` |
+| Gates | analyze 0 err / 12 baseline warnings · Flutter 4,605 pass / 38 skip / 0 fail · functions unit 618/618 · emulator 203/206, three failures identical on `9e5376a` (commercialRules cross-dealer DENIED ×2 = rules gap, filed `#119`; two `beforeEach(wipe)` 5 s hook timeouts; healer suite needs the README Auth-emulator config) · PII scan clean · tree clean |
+| Code tree | identical to local `bench/110-combined` `1d3105d` except `docs/BUGS_AND_DEBT.md` |
+| iOS build number | pending (`PROJECT_BUILD_NUMBER`) · Android not built |
+| Pushed | release `9e5376a..2c895ed` and tag `build-110`, 2026-09-30 ~12:15 CDT; authorised by the owner with the emulator failures documented above |
+
 ### FUNCTIONS DEPLOY — relay eligibility (no relay command without a paired bridge) — 2026-09-30
 
 | item | value |
