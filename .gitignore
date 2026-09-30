@@ -246,3 +246,10 @@ functions/scripts/_*.js
 # under docs/ and are committed on purpose.
 /*-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
 /[0-9][0-9][0-9]-*.md
+
+# Session-written admin tooling and its local backups. The Lumina-entries
+# cleanup script writes customer calendar data to a backup file before it
+# deletes anything, and the repo is public. Tracked scripts/_*.js helpers are
+# unaffected (ignore rules only apply to untracked files).
+/scripts/_lumina_ai_entries.js
+/backups/
