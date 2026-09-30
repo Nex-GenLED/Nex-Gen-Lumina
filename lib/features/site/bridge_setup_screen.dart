@@ -9,6 +9,7 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/services/bridge_api_client.dart';
 import 'package:nexgen_command/services/bridge_discovery_service.dart';
+import 'package:nexgen_command/services/pairing_ping.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/ip_entry_sheet.dart';
@@ -609,26 +610,12 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     }
 
     try {
-      final commandsRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('commands');
-
-      final docRef = await commandsRef.add({
-        'type': 'ping',
-        'payload': '{}',
-        'controllerId': '',
-        // Deliberately untargeted. The /commands create rule DENIES any
-        // controllerIp not in the user's controller_ips, and the selected
-        // IP on an installer's phone can be stale or mDNS-picked — which
-        // surfaced as "Verification error: permission-denied" on a bridge
-        // that was paired and healthy (field install, 2026-09-18). A ping
-        // proves the bridge round trip; it needs no controller target.
-        'controllerIp': '',
-        'webhookUrl': '',
-        'createdAt': FieldValue.serverTimestamp(),
-        'status': 'pending',
-      });
+      // The wizard's own ping. Deliberately NOT routed through
+      // BridgeHealthService and its relay-eligibility gate: this is the write
+      // that proves a just-paired bridge, so it must go out whatever the
+      // app's cached registry answer still says. See pairing_ping.dart.
+      final docRef =
+          await writePairingPing(FirebaseFirestore.instance, user.uid);
 
       for (var i = 0; i < 30; i++) {
         await Future.delayed(const Duration(milliseconds: 500));

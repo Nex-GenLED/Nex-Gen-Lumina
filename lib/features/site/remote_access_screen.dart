@@ -12,6 +12,7 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/services/bridge_pairing.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/services/encryption_service.dart';
 import 'package:nexgen_command/theme.dart';
@@ -43,7 +44,25 @@ class _WebhookCheckResult {
   final String? errorMessage;
   final DateTime? checkedAt;
 
-  const _WebhookCheckResult(this.status, {this.errorMessage, this.checkedAt});
+  /// True when no check was sent because the registry has no bridge paired
+  /// to this account (relay eligibility, 2026-09-30). Changes the card's
+  /// title from "not responding" to "no bridge paired".
+  final bool noBridge;
+
+  const _WebhookCheckResult(
+    this.status, {
+    this.errorMessage,
+    this.checkedAt,
+    this.noBridge = false,
+  });
+
+  /// The result shown instead of writing a doomed test command.
+  static const noBridgePaired = _WebhookCheckResult(
+    _WebhookStatus.disconnected,
+    noBridge: true,
+    errorMessage: 'No Lumina Bridge is paired to this account yet. Use '
+        'Set Up Bridge below to add one.',
+  );
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -123,6 +142,19 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
     });
   }
 
+  // ── Relay eligibility (2026-09-30) ─────────────────────────────────────────
+  //
+  // Every bridge check this screen runs is a relay command. With no
+  // `bridge_registry` row paired to the account nothing picks it up, so the
+  // check is not sent and the card says "no bridge paired" instead of
+  // "not responding". `unknown` (registry not answered yet) is allowed
+  // through, matching the routed repository's fail-open stance. NEVER read
+  // from the profile's `bridgePaired` flag for this — it goes stale.
+
+  /// True when a bridge test may be written right now.
+  bool get _bridgeTestAllowed =>
+      ref.read(pairedBridgeStateProvider) != PairedBridgeState.none;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -166,12 +198,19 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
           orElse: () => null,
         );
     if (profile?.remoteAccessEnabled != true) return;
+    // Bridge mode with no bridge paired: nothing to poll. The registry
+    // listener in [build] starts the poll if a bridge is paired later.
+    if (_mode == RemoteAccessMode.bridge && !_bridgeTestAllowed) return;
     _poller.setWanted(true);
   }
 
-  /// One poll tick — the body of the old `Timer.periodic`, unchanged. #112
-  /// changes only when this runs, never what it does.
+  /// One poll tick — the body of the old `Timer.periodic`. #112 changes only
+  /// when this runs, never what it does.
   void _pollTick() {
+    // #112 belt-and-braces: the timer is cancelled the moment the screen
+    // leaves view, but a tick already dispatched must not write a relay
+    // command from behind another tab or a backgrounded app.
+    if (!_poller.isVisible) return;
     if (_mode == RemoteAccessMode.webhook) {
       final url = _webhookUrlController.text.trim();
       if (url.isNotEmpty) _runHealthCheck(url);
@@ -276,6 +315,13 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
   /// Firestore and checking if the bridge picks it up within 10 seconds.
   Future<void> _runBridgeCheck() async {
     if (!mounted) return;
+
+    // Relay eligibility: no paired bridge → no test command is written.
+    if (!_bridgeTestAllowed) {
+      setState(() => _bridgeCheck = _WebhookCheckResult.noBridgePaired);
+      ref.read(bridgeReachableProvider.notifier).state = false;
+      return;
+    }
 
     setState(() {
       _bridgeCheck = const _WebhookCheckResult(_WebhookStatus.checking);
@@ -590,6 +636,22 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
       if (url != null && url != _webhookUrlController.text) {
         _webhookUrlController.text = url;
         // Don't auto-run check here — initState already handles the first load.
+      }
+    });
+
+    // Relay eligibility: follow the registry. A bridge paired while this
+    // screen is open (the wizard returns here) starts the check and the poll;
+    // a pairing that disappears stops them and says so.
+    ref.listen<PairedBridgeState>(pairedBridgeStateProvider, (prev, next) {
+      if (_mode != RemoteAccessMode.bridge || prev == next) return;
+      if (next == PairedBridgeState.none) {
+        _poller.setWanted(false);
+        setState(() => _bridgeCheck = _WebhookCheckResult.noBridgePaired);
+        return;
+      }
+      if (prev == PairedBridgeState.none) {
+        _startPolling();
+        _runBridgeCheck();
       }
     });
 
@@ -968,7 +1030,7 @@ class _RemoteAccessScreenState extends ConsumerState<RemoteAccessScreen>
       case _WebhookStatus.disconnected:
         icon = Icons.error_outline;
         color = Colors.red;
-        title = 'Bridge Not Responding';
+        title = check.noBridge ? 'No Bridge Paired' : 'Bridge Not Responding';
         subtitle = check.errorMessage ?? 'Could not reach the ESP32 bridge.';
         break;
       case _WebhookStatus.idle:

@@ -5,11 +5,12 @@ import 'package:flutter/foundation.dart';
 
 /// Status of a remote command in the queue.
 enum CommandStatus {
-  pending,    // Command queued, waiting for Cloud Function
-  executing,  // Cloud Function is processing
+  pending,    // Command queued, waiting for the bridge / Cloud Function
+  executing,  // Bridge / Cloud Function is processing
   completed,  // Command executed successfully
-  failed,     // Command failed (network error, device offline, etc.)
-  timeout,    // Command timed out waiting for response
+  failed,     // Command failed (network error, device offline, no bridge paired, etc.)
+  timeout,    // The APP stopped waiting (45 s watchdog, no terminal status seen)
+  expired,    // The SERVER sweeper expired it before any bridge picked it up
 }
 
 /// A remote command to be executed via the cloud relay.
@@ -82,7 +83,7 @@ class RemoteCommand {
       controllerIp: data['controllerIp'] as String? ?? '',
       webhookUrl: data['webhookUrl'] as String? ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      status: _parseStatus(data['status'] as String?),
+      status: parseCommandStatus(data['status'] as String?),
       result: parsedResult,
       completedAt: (data['completedAt'] as Timestamp?)?.toDate(),
       error: data['error'] as String?,
@@ -158,12 +159,23 @@ class RemoteCommand {
   bool get isPending => status == CommandStatus.pending || status == CommandStatus.executing;
 
   /// Check if command has finished (success or failure).
-  bool get isComplete => status == CommandStatus.completed || status == CommandStatus.failed || status == CommandStatus.timeout;
+  bool get isComplete =>
+      status == CommandStatus.completed ||
+      status == CommandStatus.failed ||
+      status == CommandStatus.timeout ||
+      status == CommandStatus.expired;
 
   /// Check if command was successful.
   bool get isSuccess => status == CommandStatus.completed;
 
-  static CommandStatus _parseStatus(String? status) {
+  /// Wire status → [CommandStatus].
+  ///
+  /// `failed` and `expired` are TERMINAL FAILURES. Until 2026-09-30 `expired`
+  /// (written only by the server-side sweeper) fell through to `pending`, so
+  /// the relay's watchdog never resolved on it and, 45 s later, overwrote the
+  /// server's verdict with `timeout`. An unrecognised status is still read as
+  /// `pending`: the watchdog's reconcile transaction remains the backstop.
+  static CommandStatus parseCommandStatus(String? status) {
     switch (status) {
       case 'pending':
         return CommandStatus.pending;
@@ -175,6 +187,8 @@ class RemoteCommand {
         return CommandStatus.failed;
       case 'timeout':
         return CommandStatus.timeout;
+      case 'expired':
+        return CommandStatus.expired;
       default:
         return CommandStatus.pending;
     }
