@@ -558,11 +558,11 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Files: `functions/jest.emulator.config.js`, `firebase.json`, `functions/test/emulator/README.md`.
     Related: **#119** (the real failure in the same suite).
 
-- [ ] **#121 — LUMINA WRITES A PERMANENT RECURRING SCHEDULE FROM A TEMPORARY REQUEST (smoke F1 + F2):
+- [x] **#121 — LUMINA WRITES A PERMANENT RECURRING SCHEDULE FROM A TEMPORARY REQUEST (smoke F1 + F2):
   the Schedule tab's Lumina box collapses three or more identical nights into ONE `ScheduleItem`, and
   the chat's `schedulingIntents` branch mints `ai-<ts>-<i>` items — neither goes through the D2
   dated-entry persistence**
-  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test (2026-09-30); not fixed** ·
+  - Status: **DONE d635780 on `fix/112-dated-scheduling` (2026-10-01), NOT merged — both Lumina paths route through the D2 persistence; recurring only on explicit words; prompt example replaced; Policy B refusal at the write** ·
     Severity: **P1** · Evidence: **verified-by-data** (smoke run: "chiefs all week" typed into the
     Schedule tab's Lumina box on cellular became one recurring `lumina-chat-*` item, fx 0 Solid,
     FIRST colour only, which the 800 ms auto-sync then pushed as presets over the bridge — see
@@ -598,9 +598,9 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     `lib/features/ai/lumina_schedule_persistence.dart`.
     Related: **#122** (F3), **#123** (F4), **#124**, **#127**, **#117**, D2 (+110 E2 follow-ups).
 
-- [ ] **#123 — OFF-LAN SCHEDULE SAVE PSAVES THE LADDER AND THE PATTERN OVER THE BRIDGE, THEN THE CFG
+- [x] **#123 — OFF-LAN SCHEDULE SAVE PSAVES THE LADDER AND THE PATTERN OVER THE BRIDGE, THEN THE CFG
   GATE REFUSES (smoke F4): six flash writes per save with nothing armed**
-  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test; not fixed** · Severity: **P1**
+  - Status: **DONE fd9f59b (+ fec255c for the payload sidecar) on `fix/112-dated-scheduling` (2026-10-01), NOT merged — off-LAN sync writes nothing; a deferred lease is unregistered and re-armed by the next LAN sweep (update path: see #129)** · Severity: **P1**
     · Evidence: **verified-by-data** (the owner's home controller, command log 2026-09-30/10-01 UTC
     + `/json/info` `fs.pmt` readback 2026-10-01) + **verified-by-source** @ `aec40f5`
   - **Mechanism.** `schedule_sync.dart:1096-1098`: when `activeRepo` is not a `WledService` (bridge
@@ -2444,9 +2444,9 @@ commit — merging `main` into this tree will collide with the untracked copies.
 
 ## P2 — hardening & platform
 
-- [ ] **#122 — "NEXT THREE NIGHTS" IS NOT A MULTI-NIGHT REQUEST (smoke F3): the compound detector
+- [x] **#122 — "NEXT THREE NIGHTS" IS NOT A MULTI-NIGHT REQUEST (smoke F3): the compound detector
   matches "days" only**
-  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test; not fixed** · Severity: **P2**
+  - Status: **DONE 78fd273 on `fix/112-dated-scheduling` (2026-10-01), NOT merged — nights / evenings / weeks / through-day / next-week detected; phrase table test added** · Severity: **P2**
     · Evidence: **verified-by-data** (smoke: "next three nights" produced a Tier 0 single look,
     applied at once, nothing scheduled) + **verified-by-source** @ `aec40f5`
   - `compound_command_detector.dart:171-174` `_nextNDaysPattern` =
@@ -2462,9 +2462,9 @@ commit — merging `main` into this tree will collide with the untracked copies.
   - Files: `lib/features/ai/compound_command_detector.dart`, `lib/features/ai/lumina_brain.dart`.
     Related: **#121**, **#127**.
 
-- [ ] **#124 — THE "+" SCHEDULE EDITOR IS RECURRING-ONLY WITH NO ONE-TIME OPTION, AND THE DAY SHEET
+- [x] **#124 — THE "+" SCHEDULE EDITOR IS RECURRING-ONLY WITH NO ONE-TIME OPTION, AND THE DAY SHEET
   CANNOT ADD**
-  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test; product gap, not fixed** ·
+  - Status: **DONE 16215ed on `fix/112-dated-scheduling` (2026-10-01), NOT merged — option (c): "Just this day" + date picker in the "+" editor, "Add for this day" on every day sheet, plain repeat copy; dated entries carry a full payload (fec255c)** ·
     Severity: **P2** · Evidence: **reported** (iOS, build 111) + **verified-by-source** @ `aec40f5`
   - **The "+" flow.** `my_schedule_page.dart:515-519` (FAB) opens `_ScheduleEditor` (`:4237`). The
     editor holds no date state; the "Repeat Days" chips (`:4542`) default to all seven (`:4283`);
@@ -2537,8 +2537,8 @@ commit — merging `main` into this tree will collide with the untracked copies.
   - Files: `lib/firebase_options.dart`, `android/app/google-services.json`, `firebase.json`.
     Related: **#125**, **#127**, `android-build-108-2026-09-24.md` (repo root, untracked).
 
-- [ ] **#127 — NEXT-PLANNED-BUILD PACKAGE (build-111 smoke follow-ups): one package, NO hotfix 112**
-  - Status: **OPEN — package tracking entry, filed 2026-10-01** · Severity: **P1** (carries #121 and
+- [x] **#127 — NEXT-PLANNED-BUILD PACKAGE (build-111 smoke follow-ups): one package, NO hotfix 112**
+  - Status: **DONE — members #121–#124 fixed on `fix/112-dated-scheduling` (head 16215ed, 2026-10-01), NOT merged, NOT tagged; #125 / #126 untouched (Android riders); follow-ups #128 / #129 filed from the same work** · Severity: **P1** (carries #121 and
     #123) · Evidence: see the member entries
   - **Decision 2026-10-01.** No hotfix 112. **#121** (F1 + F2), **#122** (F3), **#123** (F4) and
     **#124** ("+" editor) all date to builds 74–82; none is a 111 regression; none crashes or loses
@@ -2556,6 +2556,38 @@ commit — merging `main` into this tree will collide with the untracked copies.
   - **Gate.** Flutter 3.47.5 + `TZ=UTC0` (convention 5); bench `.173` presets + timers readback for
     #123 / #124; PII scan of every commit.
   - Related: **#121**–**#126**, **#117**, **#118**.
+
+- [ ] **#128 — WHOLE-DATE REMOVAL STILL EXISTS OUTSIDE THE DETAIL SHEET: recurring-add conflict
+  resolution and the overload banner remove EVERY entry on a date, Game Day included**
+  - Status: **OPEN — filed 2026-10-01 from the +112 Phase 0 audit (0d); not fixed** · Severity:
+    **P2** · Evidence: **verified-by-source** @ `aec40f5`
+  - D3 (build 110) made the entry detail sheet's delete remove ONE row (`removeEntryById`). Two
+    callers of the whole-date `removeEntry(dateKey)` remain: `schedule_providers.dart:706` and
+    `:785` (the `ConflictResolution.removeExisting` branch of `add` / `addAll` — a recurring
+    schedule that overlaps a dated night removes the whole date), and
+    `schedule_overload_banner.dart:243` (the overload picker's selected keys). Either can remove a
+    Game Day entry, which Policy B says holds its date; the +112 refusal guards WRITES
+    (`applyEntriesDetailed`), not these removals.
+  - **Fix shape:** resolve conflicts by `removeEntryById` on the non-Game-Day entries of the date
+    (never the Game Day row; the recurring item then simply loses that night to the lease), and
+    make the overload banner list entries, not dates.
+  - Files: `lib/features/schedule/schedule_providers.dart`,
+    `lib/features/schedule/schedule_overload_banner.dart`,
+    `lib/features/schedule/calendar_providers.dart`. Related: **#117**, **#124**, **#127**.
+
+- [ ] **#129 — A DATED ENTRY EDITED OFF-LAN KEEPS THE OLD LOOK ARMED: the lease update path is
+  deferred without a retry**
+  - Status: **OPEN — filed 2026-10-01 while fixing #123; not fixed** · Severity: **P3** ·
+    Evidence: **verified-by-source** (branch `fix/112-dated-scheduling`)
+  - +112 made a NEW lease that cannot be armed off-LAN unregistered, so the next LAN sweep arms it.
+    An EXISTING armed lease whose entry is edited off-LAN now keeps its previous record (the
+    controller still holds the old preset and timer) and reports `LeaseOutcome.deferred` — but
+    nothing re-applies the edit later: the sweep skips registered dates, and the entry is only
+    re-attempted when the calendar write happens again on the LAN (an autopilot repopulate or
+    another edit). The old look fires on that night.
+  - **Fix shape:** carry a `pendingPayload` on the lease record (or a `dirty` flag) and have the
+    sweep re-run the update path for dirty records when `repoCanWriteCfg` is true.
+  - Files: `lib/features/schedule/calendar_entry_lease_manager.dart`. Related: **#123**, **#127**.
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
