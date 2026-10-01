@@ -163,13 +163,33 @@ class CompoundCommandDetector {
 
   static final _thisWeekPattern = RegExp(
     r'\b(every\s+night\s+this\s+week|all\s+week(\s+long)?|this\s+week|'
-    r'for\s+the\s+(rest\s+of\s+the\s+)?week|'
+    r'for\s+the\s+(rest\s+of\s+the\s+)?week|(the\s+)?rest\s+of\s+the\s+week|'
     r'every\s+(night|evening|day)(\s+this\s+week)?)\b',
     caseSensitive: false,
   );
 
+  /// +112 (#122) — "next N days" was the only shape; "nights", "evenings"
+  /// and "weeks" carried no temporal signal, so "chiefs for the next three
+  /// nights" fell to a single look. Group 2 is the count word ("few" = 3,
+  /// "couple of" = 2), group 3 the unit (weeks multiply by seven).
   static final _nextNDaysPattern = RegExp(
-    r'\b(for\s+the\s+next|next)\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+days?\b',
+    r'\b(for\s+the\s+next|the\s+next|next)\s+'
+    r'(few|couple\s+of|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+'
+    r'(days?|nights?|evenings?|weeks?)\b',
+    caseSensitive: false,
+  );
+
+  /// +112 (#122) — a bare "next week" / "for the next week": seven nights.
+  static final _nextWeekPattern = RegExp(
+    r'\b(?:for\s+the\s+next|the\s+next|next)\s+week\b',
+    caseSensitive: false,
+  );
+
+  /// +112 (#122) — "through Sunday", "until Saturday": a run from today to
+  /// that day inclusive. Day names only; clock times keep their own pattern.
+  static final _throughDayPattern = RegExp(
+    r'\b(?:through|thru|until|till|til|up\s+to)\s+'
+    r'(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
     caseSensitive: false,
   );
 
@@ -247,8 +267,13 @@ class CompoundCommandDetector {
     r'every\s+night(\s+this\s+week)?|every\s+day(\s+this\s+week)?|'
     r'every\s+evening|all\s+week(\s+long)?|this\s+week|'
     r'for\s+the\s+(rest\s+of\s+the\s+)?week|this\s+weekend|'
-    r'all\s+weekend|for\s+the\s+next\s+\d+\s+days?|'
-    r'next\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+days?|'
+    r'all\s+weekend|(the\s+)?rest\s+of\s+the\s+week|'
+    r'(for\s+the\s+next|the\s+next|next)\s+'
+    r'(few|couple\s+of|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+'
+    r'(days?|nights?|evenings?|weeks?)|'
+    r'(for\s+the\s+next|the\s+next|next)\s+week|'
+    r'(through|thru|until|till|til|up\s+to)\s+'
+    r'(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|'
     r'tonight|this\s+evening|this\s+night|'
     r'from\s+sunset(\s+to\s+sunrise)?|from\s+dusk(\s+to\s+dawn)?|'
     r'sunset\s+to\s+sunrise|dusk\s+to\s+dawn|'
@@ -279,12 +304,14 @@ class CompoundCommandDetector {
   ///
   /// Returns a [CompoundCommandResult] regardless — check [isCompound]
   /// to determine whether a schedule was detected.
-  static CompoundCommandResult detect(String input) {
+  static CompoundCommandResult detect(String input, {DateTime? now}) {
     final lower = input.toLowerCase();
 
     final hasTemporalSignal = _dateRangePattern.hasMatch(lower) ||
         _thisWeekPattern.hasMatch(lower) ||
         _nextNDaysPattern.hasMatch(lower) ||
+        _nextWeekPattern.hasMatch(lower) ||
+        _throughDayPattern.hasMatch(lower) ||
         _weekendsPattern.hasMatch(lower) ||
         _weekdaysPattern.hasMatch(lower) ||
         _tonightPattern.hasMatch(lower) ||
@@ -302,7 +329,7 @@ class CompoundCommandDetector {
       );
     }
 
-    final temporal = _parseTemporalIntent(lower);
+    final temporal = _parseTemporalIntent(lower, now: now);
     final lightingIntent = _extractLightingIntent(input);
 
     // If nothing meaningful remains after stripping, keep original
@@ -323,28 +350,45 @@ class CompoundCommandDetector {
   // Internal parsers
   // -----------------------------------------------------------------------
 
-  static TemporalIntent _parseTemporalIntent(String lower) {
+  static TemporalIntent _parseTemporalIntent(String lower, {DateTime? now}) {
     RecurrenceType recurrence;
     int dayCount;
     List<int> weekdays = [];
     DateTime? startDate;
     DateTime? endDate;
+    final today = now ?? DateTime.now();
 
     // Check "starting X through Y" date range first — it takes priority
     // over general recurrence patterns since it carries explicit bounds.
     final dateRangeMatch = _dateRangePattern.firstMatch(lower);
+    final throughDayMatch = _throughDayPattern.firstMatch(lower);
     if (dateRangeMatch != null) {
       final rawStart = dateRangeMatch.group(1) ?? '';
       final rawEnd = dateRangeMatch.group(2) ?? '';
-      startDate = resolveDate(rawStart);
+      startDate = resolveDate(rawStart, now: today);
       endDate = (startDate != null)
-          ? resolveDate(rawEnd, onOrAfter: startDate)
-          : resolveDate(rawEnd);
+          ? resolveDate(rawEnd, now: today, onOrAfter: startDate)
+          : resolveDate(rawEnd, now: today);
       if (startDate != null && endDate != null) {
         dayCount = endDate.difference(startDate).inDays + 1;
         recurrence = dayCount == 1 ? RecurrenceType.once : RecurrenceType.daily;
       } else {
         // Fallback if date resolution fails
+        recurrence = RecurrenceType.once;
+        dayCount = 1;
+      }
+    } else if (throughDayMatch != null) {
+      // +112 (#122) — "through Sunday": today up to and including that day.
+      // A day name that is today resolves to today (one night), never to
+      // next week, matching resolveDate's same-day rule.
+      final start = DateTime(today.year, today.month, today.day);
+      final end = resolveDate(throughDayMatch.group(1) ?? '', now: today);
+      startDate = start;
+      endDate = end;
+      if (end != null) {
+        dayCount = end.difference(start).inDays + 1;
+        recurrence = dayCount == 1 ? RecurrenceType.once : RecurrenceType.daily;
+      } else {
         recurrence = RecurrenceType.once;
         dayCount = 1;
       }
@@ -366,7 +410,13 @@ class CompoundCommandDetector {
       final ndMatch = _nextNDaysPattern.firstMatch(lower);
       if (ndMatch != null) {
         final numWord = ndMatch.group(2) ?? '7';
-        dayCount = _wordToInt(numWord);
+        final unit = (ndMatch.group(3) ?? 'days').toLowerCase();
+        final n = _wordToInt(numWord);
+        // +112 (#122) — nights and evenings are days; weeks are seven each.
+        dayCount = unit.startsWith('week') ? n * 7 : n;
+        recurrence = RecurrenceType.daily;
+      } else if (_nextWeekPattern.hasMatch(lower)) {
+        dayCount = 7;
         recurrence = RecurrenceType.daily;
       } else {
         recurrence = RecurrenceType.once;
@@ -479,8 +529,11 @@ class CompoundCommandDetector {
     const map = {
       'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
       'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+      // +112 (#122) — "the next few nights" / "the next couple of nights".
+      'few': 3, 'couple of': 2, 'couple': 2,
     };
-    return map[word.toLowerCase()] ?? int.tryParse(word) ?? 7;
+    final key = word.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+    return map[key] ?? int.tryParse(key) ?? 7;
   }
 
   // -----------------------------------------------------------------------
