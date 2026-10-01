@@ -246,6 +246,9 @@ CalendarEntry? calendarEntryForNight(PlannedNight night, {required String batchI
     autopilot: true,
     sourceTag: kLuminaAiSourceTag,
     note: 'Lumina: ${night.effectName}',
+    // +112 — the night fires with its full look (effect, palette, every
+    // colour), not a first-colour solid. Null when the plan carried none.
+    wledPayload: night.wled.isEmpty ? null : night.wled,
   );
 }
 

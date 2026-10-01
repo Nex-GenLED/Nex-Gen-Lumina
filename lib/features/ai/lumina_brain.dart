@@ -809,6 +809,32 @@ class LuminaBrain {
     return 41;
   }
 
+  /// +112 (#121) — the team look's WLED payload for a request that names a
+  /// team, or null. Shares [composeTeamResponse] so a dated night written
+  /// from the Schedule tab fires the same design the chat's Tier 0 applies
+  /// (both colours, the team's motion), never a first-colour solid.
+  static Map<String, dynamic>? teamPayloadFor(
+    String prompt, {
+    List<String>? userTeams,
+    String? userLocation,
+  }) {
+    try {
+      final raw = composeTeamResponse(prompt,
+          userTeams: userTeams, userLocation: userLocation);
+      if (raw == null) return null;
+      // "<verbal prefix> {json}" — the payload sits under `wled`.
+      final start = raw.indexOf('{');
+      final end = raw.lastIndexOf('}');
+      if (start < 0 || end <= start) return null;
+      final decoded = jsonDecode(raw.substring(start, end + 1));
+      final p = decoded is Map ? decoded['wled'] : null;
+      return p is Map ? Map<String, dynamic>.from(p) : null;
+    } catch (e) {
+      debugPrint('LuminaBrain.teamPayloadFor: unreadable team reply — $e');
+      return null;
+    }
+  }
+
   /// Tier 0 for a team request, as one pure step: resolves the team named in
   /// [prompt], picks an effect from the prompt's mood and motion words, and
   /// returns the same verbal+JSON reply [chat] hands to the parser. Null when

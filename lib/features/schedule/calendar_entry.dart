@@ -23,6 +23,10 @@ class CalendarEntrySourceTag {
   static const gameDayGroup = 'game_day_group';
   static const neighborhoodSync = 'neighborhood_sync';
   static const autopilot = 'autopilot';
+
+  /// +112 — written by Lumina, from the chat or the Schedule tab's box. The
+  /// same string as `kLuminaAiSourceTag` (lumina_schedule_persistence.dart).
+  static const luminaAi = 'lumina_ai';
 }
 
 /// How an entry's END is determined — Scheduling V3 A1.
@@ -181,6 +185,24 @@ class CalendarEntry {
   /// True when this entry has no stated clock end — the display must not
   /// render [offTime] as a real boundary for these.
   bool get isOpenEnded => endMode != CalendarEntryEndMode.fixedTime;
+
+  /// Policy B — a Game Day entry holds its date, whatever its type (an edited
+  /// Game Day row becomes type user and keeps the tag).
+  bool get holdsGameDay =>
+      sourceTag == CalendarEntrySourceTag.gameDay ||
+      sourceTag == CalendarEntrySourceTag.gameDayGroup;
+
+  /// The team named in a Game Day entry's note ("Team vs Opponent — …"),
+  /// or null when the note has no such shape.
+  String? get gameDayTeamName {
+    final n = note;
+    if (n == null) return null;
+    for (final sep in const [' vs ', ' @ ']) {
+      final i = n.indexOf(sep);
+      if (i > 0) return n.substring(0, i).trim();
+    }
+    return null;
+  }
 
   CalendarEntry copyWith({
     String? entryId,

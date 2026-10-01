@@ -13,6 +13,9 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
+import 'package:nexgen_command/features/schedule/dated_entry_compose.dart'
+    show firstColorOfPayload;
+import 'package:nexgen_command/features/ai/recurring_request_phrases.dart';
 import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
@@ -59,7 +62,12 @@ enum NoFreeSlotsPolicy {
 
 /// The result of [CalendarScheduleNotifier.applyEntriesDetailed].
 class CalendarApplyOutcome {
-  const CalendarApplyOutcome({required this.ok, this.dropped = const []});
+  const CalendarApplyOutcome({
+    required this.ok,
+    this.dropped = const [],
+    this.message,
+    this.refusedDateKey,
+  });
 
   /// The Firestore write succeeded (the same value [applyEntries] returns).
   final bool ok;
@@ -68,7 +76,54 @@ class CalendarApplyOutcome {
   /// ([NoFreeSlotsPolicy.drop]). Empty under [NoFreeSlotsPolicy.prompt].
   final List<CalendarEntry> dropped;
 
+  /// +112 — plain words for the customer when the write was refused.
+  final String? message;
+
+  /// +112 Policy B — the date a Game Day entry holds, when that is why.
+  final String? refusedDateKey;
+
+  bool get refusedForGameDay => refusedDateKey != null;
+
   static const CalendarApplyOutcome failed = CalendarApplyOutcome(ok: false);
+
+  factory CalendarApplyOutcome.refusedGameDay(String dateKey, String? team) =>
+      CalendarApplyOutcome(
+        ok: false,
+        message: gameDayHoldsNightMessage(team),
+        refusedDateKey: dateKey,
+      );
+}
+
+/// +112 Policy B — the one sentence every surface uses for the refusal.
+String gameDayHoldsNightMessage(String? team) => team == null
+    ? 'A Game Day already has that night.'
+    : 'The $team game already has that night.';
+
+/// +112 Policy B — the dates among [incoming] that a Game Day entry already
+/// holds. Only a customer's own entry is refused (type user, not itself Game
+/// Day); a Game Day write, an edited Game Day row (type user, tag kept) and
+/// autopilot sources pass.
+List<({String dateKey, String? team})> gameDayRefusals(
+  CalendarEntrySet state,
+  Iterable<CalendarEntry> incoming,
+) {
+  final out = <({String dateKey, String? team})>[];
+  final seen = <String>{};
+  for (final e in incoming) {
+    if (e.type != CalendarEntryType.user || e.holdsGameDay) continue;
+    if (!seen.add(e.dateKey)) continue;
+    CalendarEntry? holder;
+    for (final x in state.forDate(e.dateKey)) {
+      if (x.holdsGameDay) {
+        holder = x;
+        break;
+      }
+    }
+    if (holder != null) {
+      out.add((dateKey: e.dateKey, team: holder.gameDayTeamName));
+    }
+  }
+  return out;
 }
 
 /// Pure (D3, Policy B): which of [entries] should hold a date's single lease.
@@ -361,6 +416,21 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
       }
     }
 
+    // ── +112 Policy B — Game Day holds its date, ENFORCED AT THE WRITE ───
+    // Same reasoning as A3: a guard only in the editor is bypassed by the next
+    // writer. A customer's dated entry onto a night a Game Day entry holds is
+    // refused with the sentence every surface shows; the Game Day timer is
+    // never displaced. Lumina paths skip such dates before they get here.
+    if (recurringIntent == null) {
+      final refusals = gameDayRefusals(state, entries);
+      if (refusals.isNotEmpty) {
+        final first = refusals.first;
+        debugPrint('CalendarSchedule: REFUSED write — ${first.dateKey} is '
+            'held by a Game Day entry (${first.team ?? "team unknown"})');
+        return CalendarApplyOutcome.refusedGameDay(first.dateKey, first.team);
+      }
+    }
+
     // Recurring-intent fast path: skip CalendarEntry storage entirely and
     // write a single ScheduleItem instead. The schedules-provider addAll
     // path has its own content-fingerprint dedup against existing entries
@@ -488,18 +558,23 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
     final b = (color.b * 255).round();
     final colRgbw = rgbToRgbw(r, g, b, forceZeroWhite: true);
     final briWled = (intent.brightness * 255 / 100).round().clamp(0, 255);
-    final wledPayload = <String, dynamic>{
-      'on': true,
-      'bri': briWled,
-      'seg': [
-        {
-          'fx': 0,
-          'sx': 128,
-          'ix': 128,
-          'col': [colRgbw],
-        }
-      ],
-    };
+    // +112 (#121) — a request that named a team carries the team look (both
+    // colours, motion); the solid first-colour build is the fallback only.
+    final carried = intent.wledPayload;
+    final wledPayload = carried != null && carried['seg'] is List
+        ? <String, dynamic>{...carried, 'on': true, 'bri': briWled}
+        : <String, dynamic>{
+            'on': true,
+            'bri': briWled,
+            'seg': [
+              {
+                'fx': 0,
+                'sx': 128,
+                'ix': 128,
+                'col': [colRgbw],
+              }
+            ],
+          };
 
     // Order repeatDays Mon-Sun for stable dedup against autopilot-written
     // siblings (SchedulesNotifier.mergeWithDedup fingerprints on repeatDays.join).
@@ -803,6 +878,10 @@ class RecurringIntent {
   /// week", "every weekday") for debug logs.
   final String intentSummary;
 
+  /// +112 (#121) — the look to repeat, when the request named a team (full
+  /// colours and motion). Null → the solid first-colour build.
+  final Map<String, dynamic>? wledPayload;
+
   const RecurringIntent({
     required this.patternName,
     required this.color,
@@ -812,7 +891,20 @@ class RecurringIntent {
     required this.repeatDays,
     required this.originalChanges,
     required this.intentSummary,
+    this.wledPayload,
   });
+
+  RecurringIntent withPayload(Map<String, dynamic>? payload) => RecurringIntent(
+        patternName: patternName,
+        color: color,
+        onTime: onTime,
+        offTime: offTime,
+        brightness: brightness,
+        repeatDays: repeatDays,
+        originalChanges: originalChanges,
+        intentSummary: intentSummary,
+        wledPayload: payload ?? wledPayload,
+      );
 }
 
 final pendingCalendarProvider =
@@ -864,7 +956,7 @@ Rules:
 • "brightness" is 0–100.
 • Common patterns and their hex colors:
     Warm White #FFE8C0 | Ocean Pulse #00C2FF | Ember Glow #FF6B35
-    Aurora #9B6DFF | KC Chiefs Red #E31837 | Spring Bloom #FF9ECD
+    Aurora #9B6DFF | Sunset Glow #FF7F50 | Spring Bloom #FF9ECD
     Independence Blue #0033A0 | Harvest Moon #FF8C00
     Winter Frost #B0E0FF | FIFA Green #00A86B | Off null
 • You are NOT limited to the patterns above. If the user requests a team, theme, or design not listed (e.g. "Royals", "Lakers", "patriotic"), create a descriptive pattern name and pick an appropriate hex color. For sports teams, use their official primary color.
@@ -966,10 +1058,23 @@ Rules:
     }
 
     debugPrint('📅 Calendar AI raw response: $raw');
-    return _parseAiResponse(raw);
+    return _parseAiResponse(raw, request: userRequest);
   }
 
-  static PendingCalendarChanges? _parseAiResponse(String raw) {
+  /// +112 (#121) — the look for a request that names a team, from the same
+  /// composer the chat's Tier 0 uses, so a dated night fires both colours and
+  /// the team's motion instead of a first-colour solid. Null when the request
+  /// names no team (or the composer cannot read it).
+  static Map<String, dynamic>? teamPayloadFor(String request) =>
+      LuminaBrain.teamPayloadFor(request);
+
+  @visibleForTesting
+  static PendingCalendarChanges? parseAiResponseForTest(String raw,
+          {required String request}) =>
+      _parseAiResponse(raw, request: request);
+
+  static PendingCalendarChanges? _parseAiResponse(String raw,
+      {required String request}) {
     // Strip any accidental markdown fences
     String cleaned = raw.trim();
     final fence = RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(cleaned);
@@ -1011,23 +1116,61 @@ Rules:
       );
     }
 
-    // Optional Claude hint: when the model judges the request to be a
-    // uniform recurring pattern it may set top-level recurringIntent:true.
-    // This lowers the detector's entry-count threshold so borderline
-    // 2-entry cases collapse when the natural-language signal was strong.
-    final claudeFlag = parsed['recurringIntent'] == true;
-    final intent = _detectRecurringIntent(
-      changes,
-      claudeFlaggedRecurring: claudeFlag,
-    );
-    if (intent != null) {
-      debugPrint('📅 LuminaCalendar: recurring intent detected '
-          '(${intent.intentSummary}) — '
-          'will route to ScheduleItem write on confirm');
+    // ── +112 (#121): every night Lumina writes is tagged and keeps the look ─
+    // The entries are Lumina's (sourceTag lumina_ai, autopilot true — the D2
+    // shape, so the purge tooling and the display treat chat and tab alike).
+    // A request that names a team carries the team look on every night, with
+    // the entry colour set to the team's first colour.
+    final teamPayload = teamPayloadFor(request);
+    final teamColor = firstColorOfPayload(teamPayload);
+    final tagged = <CalendarEntry>[
+      for (final c in changes)
+        c.patternName == 'Off'
+            ? c.copyWith(
+                sourceTag: CalendarEntrySourceTag.luminaAi, autopilot: true)
+            : c.copyWith(
+                sourceTag: CalendarEntrySourceTag.luminaAi,
+                autopilot: true,
+                wledPayload: teamPayload,
+                color: teamColor,
+              ),
+    ];
+
+    // ── +112 (#121): recurring ONLY when the words asked for it ──────────
+    // "All week" and "the next three nights" are a run of dated nights. The
+    // old detector collapsed any three identical consecutive days (RULE 1)
+    // or any Claude-flagged set (RULE 0) into one weekly ScheduleItem that
+    // repeated forever. The customer's own words are now the only gate; the
+    // model's hint and the shape of the dates only decide WHICH days repeat.
+    RecurringIntent? intent;
+    if (explicitRecurringRequested(request)) {
+      intent = _detectRecurringIntent(tagged, claudeFlaggedRecurring: true);
+      if (intent == null && tagged.isNotEmpty) {
+        final named = explicitRecurringWeekdays(request);
+        final first = tagged.first;
+        intent = RecurringIntent(
+          patternName: first.patternName,
+          color: first.color,
+          onTime: first.onTime,
+          offTime: first.offTime,
+          brightness: first.brightness,
+          repeatDays: named.isEmpty
+              ? const {'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'}
+              : named,
+          originalChanges: tagged,
+          intentSummary: 'explicit recurring request',
+        );
+      }
+      intent = intent?.withPayload(teamPayload);
+      debugPrint('📅 LuminaCalendar: recurring requested in words '
+          '(${intent?.intentSummary}) — will write a ScheduleItem on confirm');
+    } else {
+      debugPrint('📅 LuminaCalendar: ${tagged.length} dated night(s) — '
+          'no recurring words in the request');
     }
     return PendingCalendarChanges(
       message: message,
-      changes: changes,
+      changes: tagged,
       recurringIntent: intent,
     );
   }

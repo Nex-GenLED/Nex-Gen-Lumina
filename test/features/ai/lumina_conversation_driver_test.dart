@@ -145,6 +145,7 @@ class _FakeServices implements LuminaConversationServices {
 
   @override
   Future<void> dispatchSchedulingIntents({
+    required String prompt,
     required List<SchedulingIntent> intents,
     required LuminaCommandResult result,
     required LuminaPatternPreview? preview,

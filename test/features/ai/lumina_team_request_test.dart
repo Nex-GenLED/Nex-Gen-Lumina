@@ -181,7 +181,8 @@ class _Services implements LuminaConversationServices {
       throw UnimplementedError();
   @override
   Future<void> dispatchSchedulingIntents(
-          {required List<SchedulingIntent> intents,
+          {required String prompt,
+          required List<SchedulingIntent> intents,
           required LuminaCommandResult result,
           required LuminaPatternPreview? preview,
           VoidCallback? onMessagePosted}) =>

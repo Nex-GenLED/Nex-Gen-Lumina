@@ -29,6 +29,11 @@ import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_overload_banner.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/dated_entry_compose.dart';
+import 'package:nexgen_command/features/schedule/widgets/dated_schedule_controls.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
@@ -701,12 +706,36 @@ Future<void> _showPendingPreviewSheet(
       if (resolution == ConflictResolution.cancel) return;
     }
 
+    final notifier = ref.read(calendarScheduleProvider.notifier);
+    var changes = pending.changes;
+    final skipped = <String>[];
+
     // A3 — a pending batch can replace user-authored dated entries. Ask first.
     var overwriteAck = false;
     if (pending.recurringIntent == null) {
-      final overwrites = ref
-          .read(calendarScheduleProvider.notifier)
-          .findDatedOverwrites(pending.changes);
+      // +112 Policy B — a Game Day holds its night: skip those dates, name
+      // them, and never displace the Game Day timer.
+      final refusals =
+          gameDayRefusals(ref.read(calendarScheduleProvider), changes);
+      if (refusals.isNotEmpty) {
+        final held = refusals.map((r) => r.dateKey).toSet();
+        for (final r in refusals) {
+          final d = DateTime.tryParse(r.dateKey);
+          skipped.add('Skipped ${d == null ? r.dateKey : formatDatedDate(d)} '
+              '— ${gameDayHoldsNightMessage(r.team)}');
+        }
+        changes = changes.where((c) => !held.contains(c.dateKey)).toList();
+      }
+      if (changes.isEmpty) {
+        ref.read(pendingCalendarProvider.notifier).state = null;
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Nothing saved. ${skipped.join(' ')}'),
+          duration: const Duration(seconds: 5),
+        ));
+        return;
+      }
+      final overwrites = notifier.findDatedOverwrites(changes);
       if (overwrites.isNotEmpty) {
         if (!context.mounted) return;
         final choice = await showDatedOverwriteDialog(context, overwrites);
@@ -715,26 +744,48 @@ Future<void> _showPendingPreviewSheet(
       }
     }
 
-    final ok = await ref
-        .read(calendarScheduleProvider.notifier)
-        .applyEntries(
-          pending.changes,
-          resolution: resolution,
-          recurringIntent: pending.recurringIntent,
-          overwriteAcknowledged: overwriteAck,
-        );
-    if (pending.changes.isNotEmpty) {
+    // +112 — pool-full is REPORTED (drop), never the eviction picker from
+    // here: the batch can be a week of nights and the picker speaks of one.
+    final outcome = await notifier.applyEntriesDetailed(
+      changes,
+      resolution: resolution,
+      recurringIntent: pending.recurringIntent,
+      overwriteAcknowledged: overwriteAck,
+      noFreeSlots: NoFreeSlotsPolicy.drop,
+    );
+    final ok = outcome.ok;
+    if (changes.isNotEmpty) {
       ref.read(selectedCalendarDateProvider.notifier).state =
-          pending.changes.first.dateKey;
+          changes.first.dateKey;
     }
     ref.read(pendingCalendarProvider.notifier).state = null;
     if (!context.mounted) return;
+    final String savedText;
+    if (!ok) {
+      savedText = outcome.message ??
+          'Schedule could not be saved. Please try again.';
+    } else if (pending.recurringIntent != null) {
+      savedText = 'Schedule saved — '
+          '${recurrenceCopy(pending.recurringIntent!.repeatDays.toList())}';
+    } else {
+      final landed = changes.length - outcome.dropped.length;
+      savedText = landed == 1
+          ? 'Saved for ${formatDatedDate(DateTime.parse(changes.first.dateKey))}'
+          : 'Saved $landed nights';
+    }
+    final unfitted = outcome.dropped.length;
+    final extra = <String>[
+      ...skipped,
+      if (unfitted > 0)
+        "Couldn't fit $unfitted ${unfitted == 1 ? 'night' : 'nights'} — your "
+            'schedule is full. Free a slot in My Schedule and try again.',
+    ];
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok
-            ? 'Schedule saved'
-            : 'Schedule could not be saved. Please try again.'),
-        duration: const Duration(seconds: 2),
+        duration: Duration(seconds: extra.isEmpty ? 2 : 6),
+        content: Text(extra.isEmpty
+            ? savedText
+            : '$savedText. ${extra.join(' ')}'),
       ),
     );
   }

@@ -176,18 +176,22 @@ Future<_Harness> _harness() async {
   return _Harness(repo, users, leases, calendar);
 }
 
-/// Writes the Game Day entry, then the customer's own: two rows on one night,
-/// the customer's (last written) holding the lease. That is the direct write
-/// path #117 describes — the lease layer takes whoever wrote last — and the
-/// delete tests below show what D3 does from that state.
+/// Two rows on one night with the CUSTOMER'S entry holding the lease — the
+/// #117 "last write wins" state. +112 Policy B refuses that write at
+/// applyEntriesDetailed (see the group at the bottom), so the state can no
+/// longer be CREATED here; builds up to 111 did create it, and D3's delete
+/// semantics must still hold for those nights. Seed it the way legacy data
+/// arrives: both rows present, then the lease layer handed the night to the
+/// customer's row.
 Future<_Harness> _sharedNight() async {
   final h = await _harness();
-  expect(await h.calendar.applyEntries([_gameDay()]), isTrue);
-  expect(h.leases.leaseFor(_date)!.entryId, 'gd_team-a');
   expect(await h.calendar.applyEntries([_mine()]), isTrue);
-  expect(h.idsOn(_date), ['gd_team-a', 'user_1']);
+  expect(await h.calendar.applyEntries([_gameDay()]), isTrue);
+  expect(h.idsOn(_date), ['user_1', 'gd_team-a']);
+  final handed = await h.leases.handleEntryCreated(_mine());
+  expect(handed.outcome, LeaseOutcome.updated);
   expect(h.leases.leaseFor(_date)!.entryId, 'user_1',
-      reason: 'the last write holds the night (#117, direct write path)');
+      reason: "the legacy #117 state: the customer's row holds the night");
   return h;
 }
 
@@ -261,7 +265,7 @@ void main() {
       final h = await _sharedNight();
       final savesBefore = h.users.saves.length;
       expect(await h.calendar.removeEntryById(_date, 'nope'), isTrue);
-      expect(h.idsOn(_date), ['gd_team-a', 'user_1']);
+      expect(h.idsOn(_date), ['user_1', 'gd_team-a']);
       expect(h.users.saves.length, savesBefore);
       expect(h.leases.leaseFor(_date)!.entryId, 'user_1');
     });
@@ -299,6 +303,36 @@ void main() {
       expect(h.repo.savePresetCalls.length, savesBefore);
       expect(h.repo.applyConfigCalls.length, cfgBefore);
       expect(h.users.saves.last.map((e) => e.entryId), ['gd_team-a']);
+    });
+  });
+
+  group('+112 Policy B — the write is refused, not displaced', () {
+    test("a customer's entry onto a Game Day night is refused at the write, "
+        'names the team, and leaves the Game Day lease untouched', () async {
+      final h = await _harness();
+      expect(await h.calendar.applyEntries([_gameDay()]), isTrue);
+      final savesBefore = h.repo.savePresetCalls.length;
+
+      final outcome = await h.calendar.applyEntriesDetailed([_mine()]);
+
+      expect(outcome.ok, isFalse);
+      expect(outcome.refusedForGameDay, isTrue);
+      expect(outcome.refusedDateKey, _date);
+      expect(outcome.message, 'The Team A game already has that night.');
+      expect(h.idsOn(_date), ['gd_team-a'], reason: 'nothing was written');
+      expect(h.leases.leaseFor(_date)!.entryId, 'gd_team-a');
+      expect(h.repo.savePresetCalls.length, savesBefore,
+          reason: 'no controller traffic for a refused write');
+    });
+
+    test('an edited Game Day row (type user, tag kept) still writes — it IS '
+        'the game', () async {
+      final h = await _harness();
+      expect(await h.calendar.applyEntries([_gameDay()]), isTrue);
+      final edited = _gameDay().copyWith(
+          type: CalendarEntryType.user, autopilot: false, brightness: 40);
+      expect((await h.calendar.applyEntriesDetailed([edited])).ok, isTrue);
+      expect(h.idsOn(_date), ['gd_team-a']);
     });
   });
 
