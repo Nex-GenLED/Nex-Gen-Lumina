@@ -90,7 +90,7 @@ void main() {
       // imply either. This is the whole point of the deferredOffLan channel.
       final msg = result.summaryMessage.toLowerCase();
       expect(msg, contains('saved'));
-      expect(msg, contains('home wifi'));
+      expect(msg, contains('home wi-fi'));
       for (final alarming in ['fail', 'error', 'exception', 'offline']) {
         expect(msg, isNot(contains(alarming)), reason: 'copy must stay calm');
       }
@@ -111,6 +111,32 @@ void main() {
         reason: 'REGRESSION GUARD: a cfg write over the bridge silently '
             'evaporates while reporting 200 — never send one',
       );
+    });
+
+    test(
+        '+112 (#123): queues NO command of any kind — no ladder psave, no '
+        'pattern psave, no live-state restore, no cfg', () async {
+      final h = harness(_bridgeRepo);
+      final result =
+          await svc.syncAll(h.container.read(_refProvider), [_item()]);
+      expect(result.deferredOffLan, isTrue);
+
+      final cmds = await h.fs
+          .collection('users')
+          .doc('u1')
+          .collection('commands')
+          .get();
+      // The WLED poller may queue a read (getState/getInfo) of its own when
+      // the provider is first built; the SYNC must queue no write at all.
+      const writes = {'savePreset', 'applyJson', 'applyConfig', 'applyState'};
+      final types = cmds.docs.map((d) => d.data()['type']).toList();
+      expect(types.where(writes.contains), isEmpty,
+          reason: 'a cellular save used to psave 1/2/3/4/5 + the pattern '
+              'preset + an applyJson restore over the bridge (six flash '
+              'writes) before the cfg gate refused — now it writes nothing. '
+              'Queued: $types');
+      expect(result.summaryMessage,
+          "Saved. Your schedule will arm the next time you're on your home Wi-Fi.");
     });
 
     test('never throws CfgWriteUnsupportedException at the caller', () async {

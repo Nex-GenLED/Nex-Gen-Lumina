@@ -1012,6 +1012,24 @@ class ScheduleSyncService {
     // psaveIfChanged closure, so capture it once here after the guard.
     final activeRepo = repo;
 
+    // ── +112 (#123): off-LAN, write NOTHING ──────────────────────────────
+    // Arming is a /json/cfg write the bridge can never carry, and this gate
+    // used to sit BELOW the preset phase: with a relay repo the preset read is
+    // skipped (deviceEmpty), every ladder slot looked absent, and a cellular
+    // save psaved 1/2/3/4/5 + the pattern preset + a live-state restore over
+    // the bridge — six flash writes — before the cfg gate refused. Observed
+    // 2026-09-30. The presets would be rewritten by the next LAN sync anyway,
+    // so off-LAN there is nothing useful a preset write can do: return the
+    // deferral BEFORE any controller traffic. The later gate stays as the
+    // backstop for any path that reaches the timer write another way.
+    if (!repoCanWriteCfg(activeRepo)) {
+      debugPrint('ScheduleSync: off-LAN — no preset or cfg writes attempted; '
+          'schedule saved, arms on the next LAN sync');
+      return finish(ScheduleSyncResult.deferredOffLan(
+        schedulesWithPresets: schedules,
+      ));
+    }
+
     // ── Solar scheduling gate (Option B, bench-gated) ─────────────────────
     // Correctly-encoded sunrise/sunset (WLED 0.15.1 positional slots 8/9) is
     // routed ONLY when the solar_scheduling flag is ON *and* the controller has
@@ -2415,7 +2433,7 @@ class ScheduleSyncResult {
 /// failure: the schedule IS saved, it just can't reach the controller's timer
 /// table from here.
 const String kScheduleOffLanNotice =
-    "Saved — your schedule will arm next time you're on your home WiFi.";
+    "Saved. Your schedule will arm the next time you're on your home Wi-Fi.";
 
 /// Interim copy shown while verifying the write through the controller's
 /// post-commit stall. Not an error — the write committed and the controller
