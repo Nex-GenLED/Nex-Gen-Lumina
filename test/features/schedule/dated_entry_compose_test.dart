@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/dated_entry_compose.dart';
+import 'package:nexgen_command/utils/sun_utils.dart';
 
 void main() {
   final date = DateTime(2026, 10, 9); // Friday
@@ -94,7 +95,12 @@ void main() {
       expect(c.solarResolved, isTrue);
     });
 
-    test('sunset with coordinates resolves to that evening', () {
+    // Convention 5: compare the computed instant, never a clock-face hour —
+    // under TZ=UTC0 the same sunset prints as a different hour.
+    String hhmm(DateTime t) =>
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+    test('sunset with coordinates resolves to THAT date\'s sunset', () {
       final c = resolveDatedClock(
         trigger: 'Sunset',
         date: date,
@@ -104,11 +110,10 @@ void main() {
       );
       expect(c.fromSolar, isTrue);
       expect(c.solarResolved, isTrue);
-      final h = int.parse(c.hhmm.split(':')[0]);
-      expect(h, inInclusiveRange(17, 20), reason: 'an October sunset');
+      expect(c.hhmm, hhmm(SunUtils.sunsetLocal(39.0, -94.6, date)!));
     });
 
-    test('sunrise as the END resolves on the next morning', () {
+    test('sunrise as the END resolves on the NEXT morning', () {
       final c = resolveDatedClock(
         trigger: 'Sunrise',
         date: date,
@@ -117,8 +122,10 @@ void main() {
         longitude: -94.6,
       );
       expect(c.fromSolar, isTrue);
-      final h = int.parse(c.hhmm.split(':')[0]);
-      expect(h, inInclusiveRange(5, 8));
+      final nextDay = date.add(const Duration(days: 1));
+      expect(c.hhmm, hhmm(SunUtils.sunriseLocal(39.0, -94.6, nextDay)!));
+      expect(c.hhmm, isNot(hhmm(SunUtils.sunriseLocal(39.0, -94.6, date)!)),
+          reason: 'the morning after, not the same morning');
     });
 
     test('solar with no coordinates falls back and says so', () {

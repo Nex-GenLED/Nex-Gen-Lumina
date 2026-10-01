@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/ai/dated_intent_nights.dart';
 import 'package:nexgen_command/features/ai/lumina_schedule_persistence.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
+import 'package:nexgen_command/utils/sun_utils.dart';
 
 void main() {
   final wed = DateTime(2026, 4, 1); // Wednesday
@@ -73,8 +74,10 @@ void main() {
         longitude: -94.6,
       );
       expect(nights.single.offTime, '23:30');
-      final h = int.parse(nights.single.onTime!.split(':')[0]);
-      expect(h, inInclusiveRange(18, 21));
+      // Convention 5: the computed instant, not a clock-face hour range.
+      final sunset = SunUtils.sunsetLocal(39.0, -94.6, DateTime(2026, 4, 2))!;
+      expect(nights.single.onTime,
+          '${sunset.hour.toString().padLeft(2, '0')}:${sunset.minute.toString().padLeft(2, '0')}');
     });
 
     test('two intents on the same date: first claims it; sorted by date', () {
