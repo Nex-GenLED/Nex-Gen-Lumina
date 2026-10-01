@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:nexgen_command/features/ai/dated_intent_nights.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
+import 'package:nexgen_command/features/ai/recurring_request_phrases.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
@@ -65,6 +67,7 @@ const _kFrost = Color(0xFFDCF0FF);
 Future<void> handleSchedulingIntents({
   required WidgetRef ref,
   required BuildContext context,
+  required String prompt,
   required List<SchedulingIntent> intents,
   required LuminaCommandResult result,
   required LuminaPatternPreview? preview,
@@ -156,6 +159,25 @@ Future<void> handleSchedulingIntents({
       "set it up.",
     );
     onMessagePosted?.call();
+    return;
+  }
+
+  // ── +112 (#121): DATED unless the customer asked to repeat ─────────────
+  // This branch used to mint `ai-<ts>-<i>` recurring items for every reply
+  // that carried schedulingIntents — a request for a few nights became a
+  // weekly routine until deleted. The customer's words are the gate: with no
+  // "every night / every Friday / nightly" the intents become dated nights
+  // through the D2 persistence (sourceTag lumina_ai, Game Day dates skipped
+  // and named, pool-full reported, never prompted).
+  if (!explicitRecurringRequested(prompt)) {
+    await offerDatedNightsFromIntents(
+      ref: ref,
+      context: context,
+      intents: schedulableIntents,
+      result: result,
+      preview: preview,
+      onMessagePosted: onMessagePosted,
+    );
     return;
   }
 

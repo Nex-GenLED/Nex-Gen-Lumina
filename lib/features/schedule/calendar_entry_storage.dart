@@ -52,6 +52,7 @@
 
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
+import 'package:nexgen_command/features/schedule/payload_sidecar.dart';
 import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 
 /// Separates the date from the entry id in a composite storage key.
@@ -75,10 +76,18 @@ Map<String, Map<String, dynamic>> encodeCalendarEntries(CalendarEntrySet set) =>
 /// key and its scope stay addressable from each other. It is rebuilt in full on
 /// every write, so clearing an entry's scope deletes its sidecar row rather
 /// than leaving a stale one behind.
-({Map<String, Map<String, dynamic>> entries, Map<String, dynamic> scope})
-    encodeCalendarEntriesWithScope(CalendarEntrySet set) {
+///
+/// +112 — and the payload sidecar (`calendar_entry_payload`), same keying, same
+/// full rebuild. See `payload_sidecar.dart` for why an inline field alone does
+/// not survive an older build's write.
+({
+  Map<String, Map<String, dynamic>> entries,
+  Map<String, dynamic> scope,
+  Map<String, dynamic> payload,
+}) encodeCalendarEntriesWithScope(CalendarEntrySet set) {
   final out = <String, Map<String, dynamic>>{};
   final scopes = <String, ItemScope>{};
+  final payloads = <String, PayloadSidecarRow?>{};
   for (final dateKey in set.sortedDateKeys) {
     final list = set.forDate(dateKey);
     if (list.isEmpty) continue;
@@ -88,12 +97,25 @@ Map<String, Map<String, dynamic>> encodeCalendarEntries(CalendarEntrySet set) =>
       final key = isPrimary
           ? dateKey
           : '$dateKey$kCalendarStorageKeySeparator${entry.entryId}';
-      out[key] = entry.toJson();
+      final json = entry.toJson();
+      out[key] = json;
       scopes[key] = ItemScope(
           channels: entry.channels, controllerId: entry.controllerId);
+      final payload = entry.wledPayload;
+      payloads[key] = payload == null
+          ? null
+          : PayloadSidecarRow(
+              payload: payload,
+              patternName: entry.patternName,
+              colorHex: json['color'] as String?,
+            );
     }
   }
-  return (entries: out, scope: encodeScopeSidecar(scopes));
+  return (
+    entries: out,
+    scope: encodeScopeSidecar(scopes),
+    payload: encodePayloadSidecar(payloads),
+  );
 }
 
 /// Decode the `calendar_entries` field.
@@ -117,6 +139,12 @@ CalendarEntrySet decodeCalendarEntries(
   /// `channels` was stripped by an old-build rewrite recovers its scope from
   /// here — that is the entire reason the sidecar exists.
   dynamic scopeSidecar,
+
+  /// +112 — the payload sidecar (`users/{uid}.calendar_entry_payload`). An
+  /// entry whose inline `wledPayload` was stripped by an older build's rewrite
+  /// recovers it from here, but only while the row's name and colour still
+  /// match (a replaced entry must not inherit a stale look).
+  dynamic payloadSidecar,
   void Function(String key, Object error)? onCorrupt,
 }) {
   // dateKey -> (composite entries by storage key, primary)
@@ -163,6 +191,18 @@ CalendarEntrySet decodeCalendarEntries(
     if (scope.isScoped && entry.channels == null) {
       entry = entry.copyWith(
           channels: scope.channels, controllerId: scope.controllerId);
+    }
+
+    // +112 — recover the payload an older build's rewrite dropped. The inline
+    // copy wins when present (it is the newer write).
+    if (entry.wledPayload == null) {
+      final recovered = decodePayloadSidecarEntry(
+        payloadSidecar,
+        key,
+        patternName: entry.patternName,
+        colorHex: json['color'] as String?,
+      );
+      if (recovered != null) entry = entry.copyWith(wledPayload: recovered);
     }
 
     if (keyEntryId == null) {

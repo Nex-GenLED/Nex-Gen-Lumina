@@ -277,6 +277,13 @@ enum LeaseOutcome {
   /// refusal that does not say which shape was wrong is a counter, not a
   /// diagnosis (#68).
   gateRefused,
+
+  /// +112 (#123) — the controller could not be reached for a cfg write (off
+  /// the LAN behind the bridge, or no repository at all). NOTHING was written
+  /// and the date is NOT registered: the entry stays on the calendar and the
+  /// next on-LAN sweep promotes it. Distinct from [gateRefused] (registered,
+  /// geometry wrong) and [writeFailed] (a write was attempted and failed).
+  deferred,
 }
 
 /// P0-9 (part a) — the tri-state result of [CalendarEntryLeaseManager.activeLeaseTimers].
@@ -482,6 +489,16 @@ class LeaseResult {
         outcome: LeaseOutcome.gateRefused,
         lease: lease,
         errorMessage: reason,
+      );
+
+  /// +112 (#123) — no controller traffic, nothing registered (new lease) or
+  /// the previous record kept (update). [errorMessage] is the plain-words
+  /// notice a caller may show; it is not an error.
+  factory LeaseResult.deferred(String notice, {CalendarEntryLease? lease}) =>
+      LeaseResult(
+        outcome: LeaseOutcome.deferred,
+        lease: lease,
+        errorMessage: notice,
       );
 }
 
@@ -725,11 +742,27 @@ class CalendarEntryLeaseManager {
             lease: updated,
           );
 
-        case _WriteAttempt.success:
         case _WriteAttempt.noRepo:
         case _WriteAttempt.cfgUnsupported:
+          // +112 (#123) — DEFERRED, and said so. The controller still holds
+          // the PREVIOUS lease (preset + timer), so the registry must keep
+          // describing that, not the edit that never reached it. Restore
+          // `existing`; the entry is re-applied on the next calendar write,
+          // which re-attempts the update on the LAN.
+          _activeLeases[entry.dateKey] = existing;
+          await _saveToPrefs();
+          debugPrint('$_kLogPrefix update DEFERRED for ${entry.dateKey} — '
+              'off-LAN or no controller; previous lease kept as armed');
+          return LeaseResult.deferred(
+            "Saved. This night will update on your controller the next time "
+            "you're on your home Wi-Fi.",
+            lease: existing,
+          );
+
+        case _WriteAttempt.success:
         case _WriteAttempt.flagOff:
-          // Armed, or DEFERRED with no controller traffic — keep `updated`.
+          // Armed (or live writes are off by flag — the registry still tracks
+          // the day so the manager's view survives the flag flipping on).
           break;
       }
       debugPrint('$_kLogPrefix updated ${entry.dateKey} '
@@ -797,13 +830,30 @@ class CalendarEntryLeaseManager {
           lease: lease,
         );
 
-      case _WriteAttempt.success:
       case _WriteAttempt.noRepo:
       case _WriteAttempt.cfgUnsupported:
+        // +112 (#123) — DEFERRED means UNREGISTERED. This used to keep the
+        // record "for a later on-LAN retry", but the sweep's promotion loop
+        // skips every registered dateKey, so a lease registered off the LAN
+        // was never written: the preset never existed and the next LAN
+        // schedule sync still merged its timer (macro → an empty or stale
+        // slot). Drop the record; the entry stays on the calendar, it is
+        // inside its window, and the next on-LAN sweep promotes it afresh.
+        _activeLeases.remove(entry.dateKey);
+        await _saveToPrefs();
+        debugPrint('$_kLogPrefix lease DEFERRED for ${entry.dateKey} — '
+            'off-LAN or no controller; not registered, next on-LAN sweep '
+            'arms it');
+        return LeaseResult.deferred(
+          "Saved. This night will arm on your controller the next time "
+          "you're on your home Wi-Fi.",
+        );
+
+      case _WriteAttempt.success:
       case _WriteAttempt.flagOff:
-        // Keep the lease in registry. The last three are DEFERRED (not
-        // failures): no controller traffic happened, so the record is retained
-        // for a later on-LAN/flag-on retry.
+        // Armed, or live writes are off by flag: the registry still tracks
+        // the day so the manager's view stays consistent across sessions
+        // when the flag flips on.
         break;
     }
     debugPrint('$_kLogPrefix leased ${entry.dateKey} '
@@ -1094,6 +1144,24 @@ class CalendarEntryLeaseManager {
         // Mirrors the schedule OFF preset (schedule_sync.dart).
         'ib': true,
       };
+    }
+
+    // +112 — an entry that carries its own look fires with it: effect,
+    // palette and every colour survive instead of collapsing to the first
+    // colour as a solid. Root on/bri/ib are the lease's, not the payload's:
+    // the entry's brightness is what the customer set, and ib is what makes
+    // the preset load from a master-off strip (see below).
+    final carried = entry.wledPayload;
+    if (carried != null && carried['seg'] is List) {
+      return <String, dynamic>{
+        ...carried,
+        'on': true,
+        'bri': (entry.brightness.clamp(0, 100) * 255 / 100).round(),
+        'ib': true,
+      }
+        ..remove('psave')
+        ..remove('n')
+        ..remove('transition');
     }
 
     final color = entry.color ?? const Color(0xFFFFFFFF);

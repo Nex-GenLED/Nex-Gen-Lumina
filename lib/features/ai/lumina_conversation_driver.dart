@@ -146,8 +146,10 @@ abstract class LuminaConversationServices {
     VoidCallback? onMessagePosted,
   });
 
-  /// Runs the shared [handleSchedulingIntents] handler.
+  /// Runs the shared [handleSchedulingIntents] handler. [prompt] is the
+  /// customer's own words — the gate for recurring vs dated (+112, #121).
   Future<void> dispatchSchedulingIntents({
+    required String prompt,
     required List<SchedulingIntent> intents,
     required LuminaCommandResult result,
     required LuminaPatternPreview? preview,
@@ -271,6 +273,7 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
 
   @override
   Future<void> dispatchSchedulingIntents({
+    required String prompt,
     required List<SchedulingIntent> intents,
     required LuminaCommandResult result,
     required LuminaPatternPreview? preview,
@@ -279,6 +282,7 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
       handleSchedulingIntents(
         ref: ref,
         context: ref.context,
+        prompt: prompt,
         intents: intents,
         result: result,
         preview: preview,
@@ -570,10 +574,12 @@ class LuminaConversationDriver {
       return LuminaResultBranch.recurringSportsAutopilot;
     }
 
-    // ── Scheduling intents (recurring weekly/daily, 1 or N) ───────────────
+    // ── Scheduling intents (1 or N) — dated nights unless the words asked
+    // to repeat (+112, #121); the handler decides from [prompt]. ──────────
     final intents = result.schedulingIntents ?? const <SchedulingIntent>[];
     if (intents.isNotEmpty) {
       await services.dispatchSchedulingIntents(
+        prompt: prompt,
         intents: intents,
         result: result,
         preview: _previewFor(result),

@@ -29,6 +29,11 @@ import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_overload_banner.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/dated_entry_compose.dart';
+import 'package:nexgen_command/features/schedule/widgets/dated_schedule_controls.dart';
+import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
+    show repoCanWriteCfg;
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
@@ -701,12 +706,36 @@ Future<void> _showPendingPreviewSheet(
       if (resolution == ConflictResolution.cancel) return;
     }
 
+    final notifier = ref.read(calendarScheduleProvider.notifier);
+    var changes = pending.changes;
+    final skipped = <String>[];
+
     // A3 — a pending batch can replace user-authored dated entries. Ask first.
     var overwriteAck = false;
     if (pending.recurringIntent == null) {
-      final overwrites = ref
-          .read(calendarScheduleProvider.notifier)
-          .findDatedOverwrites(pending.changes);
+      // +112 Policy B — a Game Day holds its night: skip those dates, name
+      // them, and never displace the Game Day timer.
+      final refusals =
+          gameDayRefusals(ref.read(calendarScheduleProvider), changes);
+      if (refusals.isNotEmpty) {
+        final held = refusals.map((r) => r.dateKey).toSet();
+        for (final r in refusals) {
+          final d = DateTime.tryParse(r.dateKey);
+          skipped.add('Skipped ${d == null ? r.dateKey : formatDatedDate(d)} '
+              '— ${gameDayHoldsNightMessage(r.team)}');
+        }
+        changes = changes.where((c) => !held.contains(c.dateKey)).toList();
+      }
+      if (changes.isEmpty) {
+        ref.read(pendingCalendarProvider.notifier).state = null;
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Nothing saved. ${skipped.join(' ')}'),
+          duration: const Duration(seconds: 5),
+        ));
+        return;
+      }
+      final overwrites = notifier.findDatedOverwrites(changes);
       if (overwrites.isNotEmpty) {
         if (!context.mounted) return;
         final choice = await showDatedOverwriteDialog(context, overwrites);
@@ -715,26 +744,48 @@ Future<void> _showPendingPreviewSheet(
       }
     }
 
-    final ok = await ref
-        .read(calendarScheduleProvider.notifier)
-        .applyEntries(
-          pending.changes,
-          resolution: resolution,
-          recurringIntent: pending.recurringIntent,
-          overwriteAcknowledged: overwriteAck,
-        );
-    if (pending.changes.isNotEmpty) {
+    // +112 — pool-full is REPORTED (drop), never the eviction picker from
+    // here: the batch can be a week of nights and the picker speaks of one.
+    final outcome = await notifier.applyEntriesDetailed(
+      changes,
+      resolution: resolution,
+      recurringIntent: pending.recurringIntent,
+      overwriteAcknowledged: overwriteAck,
+      noFreeSlots: NoFreeSlotsPolicy.drop,
+    );
+    final ok = outcome.ok;
+    if (changes.isNotEmpty) {
       ref.read(selectedCalendarDateProvider.notifier).state =
-          pending.changes.first.dateKey;
+          changes.first.dateKey;
     }
     ref.read(pendingCalendarProvider.notifier).state = null;
     if (!context.mounted) return;
+    final String savedText;
+    if (!ok) {
+      savedText = outcome.message ??
+          'Schedule could not be saved. Please try again.';
+    } else if (pending.recurringIntent != null) {
+      savedText = 'Schedule saved — '
+          '${recurrenceCopy(pending.recurringIntent!.repeatDays.toList())}';
+    } else {
+      final landed = changes.length - outcome.dropped.length;
+      savedText = landed == 1
+          ? 'Saved for ${formatDatedDate(DateTime.parse(changes.first.dateKey))}'
+          : 'Saved $landed nights';
+    }
+    final unfitted = outcome.dropped.length;
+    final extra = <String>[
+      ...skipped,
+      if (unfitted > 0)
+        "Couldn't fit $unfitted ${unfitted == 1 ? 'night' : 'nights'} — your "
+            'schedule is full. Free a slot in My Schedule and try again.',
+    ];
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok
-            ? 'Schedule saved'
-            : 'Schedule could not be saved. Please try again.'),
-        duration: const Duration(seconds: 2),
+        duration: Duration(seconds: extra.isEmpty ? 2 : 6),
+        content: Text(extra.isEmpty
+            ? savedText
+            : '$savedText. ${extra.join(' ')}'),
       ),
     );
   }
@@ -1242,7 +1293,9 @@ class _DayHeroCard extends ConsumerWidget {
     final bri = brightness != null ? brightness / 100.0 : 1.0;
 
     final sourceLabel = leadDated == null
-        ? (leadRecurring != null ? 'Recurring Schedule' : 'Autopilot')
+        ? (leadRecurring != null
+            ? recurrenceCopy(leadRecurring.repeatDays)
+            : 'Autopilot')
         : switch (leadDated.type) {
             CalendarEntryType.holiday => 'Holiday',
             CalendarEntryType.user =>
@@ -1777,21 +1830,16 @@ void showDayDetailSheet(
               ),
             ),
             const SizedBox(height: 12),
-            if (timeline.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: TextButton.icon(
-                  style:
-                      TextButton.styleFrom(foregroundColor: NexGenPalette.cyan),
-                  icon: const Icon(Icons.add_alarm_rounded, size: 18),
-                  label: const Text('Add a schedule'),
-                  onPressed: () {
-                    Navigator.of(sheetCtx).pop();
-                    showScheduleEditor(context, ref);
-                  },
-                ),
-              )
-            else
+            // +112 (#124) — every day can take a one-night entry, empty or
+            // not. Opens the "+" editor in "Just this day" with this date.
+            AddForThisDayButton(
+              onPressed: () {
+                Navigator.of(sheetCtx).pop();
+                showScheduleEditor(context, ref,
+                    dateKey: dateKey, justThisDay: true);
+              },
+            ),
+            if (timeline.isNotEmpty)
               Flexible(
                 child: SingleChildScrollView(
                   child: Column(
@@ -1865,7 +1913,10 @@ void showTimelineEntryDetail(
             ? formatTimelineTime(entry.endsAt, timeFormat: timeFormat)
             : null),
     brightnessPercent: dated?.brightness,
-    source: timelineSourceLabel(entry),
+    // +112 (#124) — a recurring row says how it repeats, in words.
+    source: recurring != null
+        ? '${timelineSourceLabel(entry)} · ${recurrenceCopy(recurring.repeatDays)}'
+        : timelineSourceLabel(entry),
     timeFormat: timeFormat,
     ref: ref,
     calEntry: dated,
@@ -4091,9 +4142,17 @@ const String _kSchedulePatternPickerRoute = 'schedule-pattern-picker';
 void showScheduleEditor(
   BuildContext context,
   WidgetRef ref, {
-  int? preselectedDayIndex,
   ScheduleItem? editing,
   PatternSelection? initialPattern,
+
+  /// +112 (#124) — the day the editor was opened from (the day sheet).
+  /// Pre-selects that weekday for a weekly schedule and that date for
+  /// "Just this day". Replaces the dead `preselectedDayIndex`, which had no
+  /// caller since the old week list was removed.
+  String? dateKey,
+
+  /// +112 (#124) — open in "Just this day" mode (the day sheet's action).
+  bool justThisDay = false,
 }) {
   showModalBottomSheet(
     context: context,
@@ -4104,10 +4163,11 @@ void showScheduleEditor(
       minChildSize: 0.5,
       maxChildSize: 0.95,
       builder: (ctx, scroll) => _ScheduleEditor(
-        preselectedDayIndex: preselectedDayIndex,
         editing: editing,
         initialPattern: initialPattern,
         scrollController: scroll,
+        dateKey: dateKey,
+        justThisDay: justThisDay,
       ),
     ),
   );
@@ -4146,13 +4206,8 @@ class _ScheduleCard extends ConsumerWidget {
         ? item.actionLabel.substring(9)
         : null;
 
-    // Build recurrence label
-    final recurrence = item.repeatDays.length == 7
-        ? 'Daily'
-        : item.repeatDays.length == 5 &&
-                item.repeatDays.every((d) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].contains(d))
-            ? 'Weekdays'
-            : item.repeatDays.join(', ');
+    // +112 (#124) — plain words: "Repeats every Tuesday", "Repeats every day".
+    final recurrence = recurrenceCopy(item.repeatDays);
 
     return GestureDetector(
       // Tap the card to EDIT — opens the same create-editor pre-filled with
@@ -4235,14 +4290,23 @@ class _ScheduleCard extends ConsumerWidget {
 }
 
 class _ScheduleEditor extends ConsumerStatefulWidget {
-  final int? preselectedDayIndex; // 0..6 => S..S
   final ScheduleItem? editing;
   final ScrollController? scrollController;
 
   /// A design chosen elsewhere (Explore's "Save to schedule") to open a NEW
   /// schedule with. Nothing is sent to the controller by pre-selecting it.
   final PatternSelection? initialPattern;
-  const _ScheduleEditor({this.preselectedDayIndex, this.editing, this.scrollController, this.initialPattern});
+
+  /// +112 (#124) — see [showScheduleEditor].
+  final String? dateKey;
+  final bool justThisDay;
+  const _ScheduleEditor({
+    this.editing,
+    this.scrollController,
+    this.initialPattern,
+    this.dateKey,
+    this.justThisDay = false,
+  });
   @override
   ConsumerState<_ScheduleEditor> createState() => _ScheduleEditorState();
 }
@@ -4278,12 +4342,20 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
   late Set<int> _selectedDays;
   bool _enabled = true;
 
+  // +112 (#124) — one night or a weekly routine. A date opened from the day
+  // sheet pre-selects itself; the FAB defaults to weekly with "Just this
+  // day" one tap away.
+  ScheduleEditorMode _mode = ScheduleEditorMode.repeatsWeekly;
+  late DateTime _date;
+
   @override
   void initState() {
     super.initState();
     // Defaults: all days (Daily) unless a specific day was preselected
     _selectedDays = {0, 1, 2, 3, 4, 5, 6};
     _enabled = true;
+    final now = DateTime.now();
+    _date = DateTime(now.year, now.month, now.day);
     // The field default for a NEW schedule's OFF boundary is solarEvent
     // ("off at sunrise"). With the solar flag off that default alone would
     // mint an unarmable schedule for a user who never touched the Solar
@@ -4382,9 +4454,170 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
       }
       // Hydrate audio reactive state
       _useAudioReactive = editing.useAudioReactive ?? false;
-    } else if (widget.preselectedDayIndex != null && widget.preselectedDayIndex! >= 0 && widget.preselectedDayIndex! <= 6) {
-      _selectedDays = {widget.preselectedDayIndex!};
+    } else {
+      final fromKey =
+          widget.dateKey == null ? null : DateTime.tryParse(widget.dateKey!);
+      if (fromKey != null) {
+        _date = DateTime(fromKey.year, fromKey.month, fromKey.day);
+        // DateTime.sunday == 7 → chip index 0.
+        _selectedDays = {fromKey.weekday % 7};
+        if (widget.justThisDay) _mode = ScheduleEditorMode.justThisDay;
+      }
     }
+  }
+
+  /// +112 (#124) — "Just this day": ONE dated entry, the customer's own
+  /// (type user, no source tag), written through the calendar notifier with
+  /// the overwrite prompt, the Policy B refusal and pool-full REPORTED. The
+  /// controller is never written from here; the lease manager arms the night
+  /// on the home LAN (deferred, and said so, anywhere else).
+  Future<void> _saveJustThisDay(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    void say(String text, {int seconds = 4}) => messenger.showSnackBar(
+        SnackBar(content: Text(text), duration: Duration(seconds: seconds)));
+
+    if (_useAudioReactive) {
+      say("React to Music can't run on a single night — pick a pattern.");
+      return;
+    }
+    if (_action == _ActionType.runPattern && _selectedPattern == null) {
+      say('Choose a pattern to run');
+      return;
+    }
+    if (_action == _ActionType.runPattern &&
+        _selectedPattern?.wledPayload == null) {
+      say("That pattern can't be saved for one night — pick it from Explore "
+          'or My Designs.');
+      return;
+    }
+    final now = DateTime.now();
+    if (_date.isBefore(DateTime(now.year, now.month, now.day))) {
+      say('Pick today or a later day');
+      return;
+    }
+
+    final profile = ref.read(currentUserProfileProvider).valueOrNull;
+    final on = resolveDatedClock(
+      trigger: _onTrigger == _TriggerType.specificTime
+          ? clockFromTimeOfDay(_onTime)
+          : _onSolar,
+      date: _date,
+      isEnd: false,
+      latitude: profile?.latitude,
+      longitude: profile?.longitude,
+    );
+    final off = _hasOffTime
+        ? resolveDatedClock(
+            trigger: _offTrigger == _TriggerType.specificTime
+                ? clockFromTimeOfDay(_offTime)
+                : _offSolar,
+            date: _date,
+            isEnd: true,
+            latitude: profile?.latitude,
+            longitude: profile?.longitude,
+          )
+        : null;
+    final entry = composeDatedEntry(
+      date: _date,
+      action: switch (_action) {
+        _ActionType.powerOff => DatedAction.powerOff,
+        _ActionType.brightness => DatedAction.brightness,
+        _ActionType.runPattern => DatedAction.runPattern,
+      },
+      onHhmm: on.hhmm,
+      offHhmm: off?.hhmm,
+      patternName: _selectedPattern?.name,
+      patternPayload: _selectedPattern?.wledPayload,
+      brightnessPercent: _brightness.round(),
+      channels: _channels,
+      controllerId: _controllerId,
+    );
+
+    final notifier = ref.read(calendarScheduleProvider.notifier);
+    final refusals =
+        gameDayRefusals(ref.read(calendarScheduleProvider), [entry]);
+    if (refusals.isNotEmpty) {
+      say(gameDayHoldsNightMessage(refusals.first.team));
+      return;
+    }
+    var ack = false;
+    final overwrites = notifier.findDatedOverwrites([entry]);
+    if (overwrites.isNotEmpty) {
+      final choice = await showDatedOverwriteDialog(context, overwrites);
+      if (choice == DatedOverwriteChoice.cancel) return;
+      ack = true;
+      if (!context.mounted) return;
+    }
+
+    final outcome = await notifier.applyEntriesDetailed(
+      [entry],
+      overwriteAcknowledged: ack,
+      noFreeSlots: NoFreeSlotsPolicy.drop,
+    );
+    if (!context.mounted) return;
+    final when = formatDatedDate(_date);
+    if (!outcome.ok) {
+      say(outcome.message ??
+          "Couldn't save that night. Check your connection and try again.");
+      return;
+    }
+    if (outcome.dropped.isNotEmpty) {
+      say("Couldn't save for $when — your controller's timer slots are full "
+          'that night. Free a slot in My Schedule and try again.',
+          seconds: 6);
+      return;
+    }
+    final repo = ref.read(wledRepositoryProvider);
+    final offLan = repo == null || !repoCanWriteCfg(repo);
+    final solarNote = (on.fromSolar && !on.solarResolved) ||
+            (off != null && off.fromSolar && !off.solarResolved)
+        ? ' Set your home address in Settings for exact sun times.'
+        : '';
+    Navigator.of(context).pop();
+    say(
+      offLan
+          ? 'Saved for $when. It will arm on your controller the next time '
+              "you're on your home Wi-Fi.$solarNote"
+          : 'Saved for $when.$solarNote',
+      seconds: offLan || solarNote.isNotEmpty ? 6 : 3,
+    );
+  }
+
+  /// The sentence under the date for a solar trigger — the resolved time for
+  /// THAT day, or why it could not be resolved.
+  String? _datedSolarNote() {
+    final usesSolar = _onTrigger == _TriggerType.solarEvent ||
+        (_hasOffTime && _offTrigger == _TriggerType.solarEvent);
+    if (!usesSolar) return null;
+    final profile = ref.watch(currentUserProfileProvider).valueOrNull;
+    final parts = <String>[];
+    var unresolved = false;
+    if (_onTrigger == _TriggerType.solarEvent) {
+      final c = resolveDatedClock(
+          trigger: _onSolar,
+          date: _date,
+          isEnd: false,
+          latitude: profile?.latitude,
+          longitude: profile?.longitude);
+      parts.add('$_onSolar is ${friendlyClock(c.hhmm)}');
+      unresolved |= !c.solarResolved;
+    }
+    if (_hasOffTime && _offTrigger == _TriggerType.solarEvent) {
+      final c = resolveDatedClock(
+          trigger: _offSolar,
+          date: _date,
+          isEnd: true,
+          latitude: profile?.latitude,
+          longitude: profile?.longitude);
+      parts.add('$_offSolar is ${friendlyClock(c.hhmm)}');
+      unresolved |= !c.solarResolved;
+    }
+    final day = formatDatedDate(_date);
+    return unresolved
+        ? 'Set your home address in Settings for exact sun times on $day. '
+            'Using ${parts.join(' and ')} for now.'
+        : 'On $day, ${parts.join(' and ')}. A one-night schedule uses the '
+            'clock time.';
   }
 
   @override
@@ -4440,6 +4673,16 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                   CupertinoSwitch(value: _enabled, activeColor: NexGenPalette.cyan, onChanged: (v) => setState(() => _enabled = v)),
                 ]),
                 const SizedBox(height: 16),
+
+                // +112 (#124) — one night or weekly. Editing an existing row
+                // keeps its kind; only a NEW schedule chooses.
+                if (widget.editing == null) ...[
+                  ScheduleModeToggle(
+                    mode: _mode,
+                    onChanged: (m) => setState(() => _mode = m),
+                  ),
+                  const SizedBox(height: 16),
+                ],
 
                 // ON TIME Section
                 Container(
@@ -4544,22 +4787,39 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                 ),
 
                 const SizedBox(height: 16),
-                Text('Repeat Days', style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 8),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  for (int i = 0; i < 7; i++)
-                    _DayCircleChip(
-                      label: _dayLabelsShort[i],
-                      selected: _selectedDays.contains(i),
-                      onTap: () => setState(() {
-                        if (_selectedDays.contains(i)) {
-                          _selectedDays.remove(i);
-                        } else {
-                          _selectedDays.add(i);
-                        }
-                      }),
-                    ),
-                ]),
+                if (_mode == ScheduleEditorMode.justThisDay) ...[
+                  // +112 (#124) — the ONE day this runs on, with a day /
+                  // month / year picker, and the resolved sun time when a
+                  // solar trigger is chosen (a dated timer takes a clock time).
+                  ScheduleDateRow(
+                    date: _date,
+                    onChanged: (d) => setState(() => _date = d),
+                  ),
+                  if (_datedSolarNote() case final note?)
+                    DatedScheduleNote(text: note),
+                ] else ...[
+                  Text('Repeat Days', style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    for (int i = 0; i < 7; i++)
+                      _DayCircleChip(
+                        label: _dayLabelsShort[i],
+                        selected: _selectedDays.contains(i),
+                        onTap: () => setState(() {
+                          if (_selectedDays.contains(i)) {
+                            _selectedDays.remove(i);
+                          } else {
+                            _selectedDays.add(i);
+                          }
+                        }),
+                      ),
+                  ]),
+                  const SizedBox(height: 6),
+                  DatedScheduleNote(
+                    text: recurrenceCopy(
+                        [for (final i in _selectedDays) _dayAbbr[i]]),
+                  ),
+                ],
 
                 // D4 — channel scope. Self-hides on a single-channel
                 // controller, so the common install sees no new chrome.
@@ -4765,6 +5025,13 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                 ],
                 FilledButton(
                   onPressed: () async {
+                    // +112 (#124) — "Just this day" writes a dated entry and
+                    // never touches the recurring pool below.
+                    if (widget.editing == null &&
+                        _mode == ScheduleEditorMode.justThisDay) {
+                      await _saveJustThisDay(context);
+                      return;
+                    }
                     // Limit enforcement
                     if (widget.editing == null && schedules.length >= 20) {
                       await showDialog<void>(
