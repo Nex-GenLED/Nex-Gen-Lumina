@@ -156,6 +156,22 @@ goes on a NEW bump + tag (never rewrite a public tag).
 
 ## Operational flags
 
+### +112 — build-112 tagged 2026-10-01 (Codemagic build number: pending)
+
+| item | value |
+|---|---|
+| Tag | `build-112` = `1035425` (the bump commit; this row lands after, outside the tag) |
+| Base | `a87f725` (= `79098d5` + the docs branch `docs/build-111-smoke-debt-2026-10-01`, #121–#127 filed) |
+| Contents | the +112 "specific-day scheduling" package, merged `2a0e29f` from `fix/112-dated-scheduling` (`fec255c`..`6b9b6d5`): dated entries carry a WLED payload through the `calendar_entry_payload` sidecar older builds leave alone (`fec255c`); off-LAN sync writes nothing and a deferred lease re-arms on the next LAN sweep, #123 (`fd9f59b`); multi-night phrases detected and one gate decides recurring, #122 (`78fd273`); both Lumina paths write dated nights unless asked to repeat, Game Day holds its date at the write, #121 + Policy B (`d635780`); "Just this day" in the "+" editor and an add action on every day sheet, #124 (`16215ed`); debt `4305de5` (#121–#124, #127 done; #128, #129 filed); sun-time tests compare the instant (`6b9b6d5`); bump 2.5.10+112 (pubspec + `lib/app_version.dart`). Code tree == the branch tip byte-for-byte (`git diff --stat 6b9b6d5 1035425 -- . ':(exclude)docs'` empty apart from the bump). |
+| Gates, local SDK (3.41.2) on `1035425` after `flutter clean` | analyze 0 err / 12 baseline warnings / 355 infos · Flutter 4,762 pass / 38 skip / 0 fail |
+| Gates, Codemagic SDK (3.47.5 / Dart 3.13.4, `TZ=UTC0`) on `1035425` after `flutter clean`, from the COMMITTED lock | analyze 0 err / 12 warnings / 360 infos (identical to the +111 gate) · Flutter 4,762 pass / 38 skip / 0 fail · lock + yaml restored, tree clean · PII scan of every message and added line `79098d5..1035425` clean |
+| Functions | no deploy: `functions/` byte-identical to the 2026-09-30 deploy `8b3bcdf` (`git diff 8b3bcdf 1035425 -- functions/` empty). No config, rules or functions touched. |
+| Check-run | GitHub check-run `110503647374` "iOS Release" on `1035425`: completed / **success** 2026-10-01 17:07:13Z → 17:48:45Z (41 min; first surfaced on the commits endpoint as `110493587413`, the result arrived under the new id — see the standing note). Every step OK: Preparing build machine 0:35 · Fetching app sources 0:08 · Installing SDKs 1:13 · keychain/signing 0:08 · **Test and analyze (build gate) 15:00** · Set build number 0:01 · Install CocoaPods 0:22 · **Build IPA 5:32** · Dump signed entitlements 0:01 · **Publishing 1:20** · Cleaning up. Polled unauthenticated (`gh` is not installed on this PC): `scratchpad/poll_checkrun.sh` + `cr_steps.js`. |
+| iOS build number | pending (`PROJECT_BUILD_NUMBER`) |
+| Android | NOT built — #125 (Flutter 3.47.5 needs Gradle ≥ 8.14, wrapper pinned 8.12). Next Android artifact must be ≥ versionCode 112. |
+| Gotcha recorded | running the 3.47.5 tests in a worktree whose `.dart_tool`/`build` were produced by 3.41.2 throws `Asset 'shaders/ink_sparkle.frag' … Runtime stages buffer failed verification` in the first widget test of ~46 files — `flutter clean` before each SDK's gate (convention 5 now says so in practice). |
+| Rollback | **What persists if 112 is expired.** (1) Dated entries written by 112 — the customer's own ("Just this day": type user, no tag) and Lumina's (type user, `sourceTag lumina_ai`) — stay in `users/{uid}.calendar_entries`; builds 109–111 read them as ordinary dated entries (the inline `wledPayload` key is ignored, never thrown on) and their lease renders the entry colour as a solid; 111's next calendar save drops the inline key. (2) The `calendar_entry_payload` sidecar field stays on the user doc untouched (109–111 never read or write it) and is harmless; a later 112+ read restores the look from it as long as the row's name + colour still match. (3) Nothing is written to any controller by the rollback; a night 112 armed on the LAN keeps its lease preset (26–41) and timer until it expires or the sweep clears it, exactly as 111 would handle its own. (4) Recurring items are unchanged in shape. No data cleanup is needed; `scripts/_lumina_ai_entries.js` (main checkout, untracked) now LISTS payload-carrying dated user entries in its dry run and never deletes them. **Tester text:** "Open TestFlight → Nex-Gen Lumina → Previous Builds → install 2.5.10 (111). Your schedules and nights stay; a one-night look saved on 112 shows as a solid colour on 111 until you move back to 112." |
+
 ### +111 — build-111 tagged 2026-09-30 (Codemagic build number: pending)
 
 | item | value |
