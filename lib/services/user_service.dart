@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart' hide Type;
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_storage.dart';
+import 'package:nexgen_command/features/schedule/payload_sidecar.dart';
 import 'package:nexgen_command/features/schedule/scope_sidecar.dart';
 import 'package:nexgen_command/features/schedule/data/legacy_array_schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
@@ -1063,6 +1064,10 @@ class UserService {
             // entry and its scope can never be half-persisted. Rebuilt in full
             // every time, so a cleared scope disappears rather than lingering.
             kCalendarEntryScopeField: encoded.scope,
+            // +112 — the payload sidecar, same update, same full rebuild. An
+            // older build never reads or writes this field, which is what
+            // lets a dated entry's look survive that build's calendar save.
+            kCalendarEntryPayloadField: encoded.payload,
             'updated_at': FieldValue.serverTimestamp(),
           }),
         );
@@ -1089,6 +1094,7 @@ class UserService {
     return decodeCalendarEntries(
       raw,
       scopeSidecar: data[kCalendarEntryScopeField],
+      payloadSidecar: data[kCalendarEntryPayloadField],
       // Same skip-and-log behaviour as the pre-V3 loader: one corrupt row must
       // never cost the user their whole calendar.
       onCorrupt: (key, error) =>

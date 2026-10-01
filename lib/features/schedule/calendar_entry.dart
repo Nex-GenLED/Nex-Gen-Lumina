@@ -4,6 +4,8 @@
 // These sit on top of (and override) the recurring ScheduleItem system.
 // Lumina AI writes here; the calendar reads from here.
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
@@ -141,6 +143,18 @@ class CalendarEntry {
   /// load-bearing. Do not make it so.
   final DateTime? hardCapAt;
 
+  /// +112 — the look this entry fires with, as a WLED state payload (effect,
+  /// palette, every colour). Null means "render [color] as a solid", which is
+  /// what every pre-112 entry does and what the lease renderer still does when
+  /// this is absent.
+  ///
+  /// DURABILITY: also persisted to the `calendar_entry_payload` sidecar, keyed
+  /// by the entry's storage key, because an older build rewrites the whole
+  /// `calendar_entries` field through a model that has no such key and would
+  /// otherwise strip it (see `payload_sidecar.dart`). Serialised as a JSON
+  /// STRING inline — `col` is an array of arrays, which Firestore refuses (#84).
+  final Map<String, dynamic>? wledPayload;
+
   const CalendarEntry({
     this.entryId = CalendarEntryId.legacy,
     required this.dateKey,
@@ -158,6 +172,7 @@ class CalendarEntry {
     this.endMode = CalendarEntryEndMode.fixedTime,
     this.estimatedEnd,
     this.hardCapAt,
+    this.wledPayload,
   });
 
   /// True when this entry targets a subset of channels rather than the strip.
@@ -188,6 +203,10 @@ class CalendarEntry {
     CalendarEntryEndMode? endMode,
     DateTime? estimatedEnd,
     DateTime? hardCapAt,
+    Map<String, dynamic>? wledPayload,
+    /// Clears the payload — `wledPayload: null` cannot express removal
+    /// through the `?? this.x` idiom.
+    bool clearPayload = false,
   }) =>
       CalendarEntry(
         entryId: entryId ?? this.entryId,
@@ -207,6 +226,7 @@ class CalendarEntry {
         endMode: endMode ?? this.endMode,
         estimatedEnd: estimatedEnd ?? this.estimatedEnd,
         hardCapAt: hardCapAt ?? this.hardCapAt,
+        wledPayload: clearPayload ? null : (wledPayload ?? this.wledPayload),
       );
 
   /// Parse one change entry from Lumina AI JSON.
@@ -307,6 +327,9 @@ class CalendarEntry {
         'endMode': endMode.name,
         if (estimatedEnd != null) 'estimatedEnd': estimatedEnd!.toIso8601String(),
         if (hardCapAt != null) 'hardCapAt': hardCapAt!.toIso8601String(),
+        // A string, never a nested list (#84). An older build's fromJson ignores
+        // the key; its toJson drops it — the sidecar carries it across.
+        if (wledPayload != null) 'wledPayload': jsonEncode(wledPayload),
       };
 
   /// Deserialize from Firestore map.
@@ -376,7 +399,23 @@ class CalendarEntry {
       endMode: endMode,
       estimatedEnd: estimatedEnd,
       hardCapAt: _tryParseIso(json['hardCapAt']),
+      wledPayload: _tryParsePayload(json['wledPayload']),
     );
+  }
+
+  /// Defensive payload parse — a JSON string (the wire form), a map (an
+  /// in-memory round trip), or anything else → null. A corrupt payload must
+  /// never cost the user the entry it rides on: the solid-colour fallback is
+  /// exactly the pre-112 behaviour.
+  static Map<String, dynamic>? _tryParsePayload(dynamic raw) {
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is! String || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Defensive ISO-8601 parse — absence, wrong type, or a malformed string all

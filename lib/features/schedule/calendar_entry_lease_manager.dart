@@ -1096,6 +1096,24 @@ class CalendarEntryLeaseManager {
       };
     }
 
+    // +112 — an entry that carries its own look fires with it: effect,
+    // palette and every colour survive instead of collapsing to the first
+    // colour as a solid. Root on/bri/ib are the lease's, not the payload's:
+    // the entry's brightness is what the customer set, and ib is what makes
+    // the preset load from a master-off strip (see below).
+    final carried = entry.wledPayload;
+    if (carried != null && carried['seg'] is List) {
+      return <String, dynamic>{
+        ...carried,
+        'on': true,
+        'bri': (entry.brightness.clamp(0, 100) * 255 / 100).round(),
+        'ib': true,
+      }
+        ..remove('psave')
+        ..remove('n')
+        ..remove('transition');
+    }
+
     final color = entry.color ?? const Color(0xFFFFFFFF);
     // Mirror calendar_providers.dart:275-277 — new normalized Color API.
     final r = (color.r * 255).round();
