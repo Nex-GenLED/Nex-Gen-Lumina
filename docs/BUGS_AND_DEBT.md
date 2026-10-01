@@ -558,6 +558,78 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Files: `functions/jest.emulator.config.js`, `firebase.json`, `functions/test/emulator/README.md`.
     Related: **#119** (the real failure in the same suite).
 
+- [ ] **#121 — LUMINA WRITES A PERMANENT RECURRING SCHEDULE FROM A TEMPORARY REQUEST (smoke F1 + F2):
+  the Schedule tab's Lumina box collapses three or more identical nights into ONE `ScheduleItem`, and
+  the chat's `schedulingIntents` branch mints `ai-<ts>-<i>` items — neither goes through the D2
+  dated-entry persistence**
+  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test (2026-09-30); not fixed** ·
+    Severity: **P1** · Evidence: **verified-by-data** (smoke run: "chiefs all week" typed into the
+    Schedule tab's Lumina box on cellular became one recurring `lumina-chat-*` item, fx 0 Solid,
+    FIRST colour only, which the 800 ms auto-sync then pushed as presets over the bridge — see
+    **#123**) + **verified-by-source** @ `aec40f5`
+  - **F1 — Schedule-tab Lumina box.** `calendar_providers.dart:1019` calls
+    `_detectRecurringIntent` (`:1056`; RULE 0 "trust Claude's recurring flag" at `:1086`), which
+    collapses ≥3 identical consecutive days (or any Claude-flagged set) into a `RecurringIntent`. On
+    confirm, `applyEntriesDetailed` `:369` DISCARDS the per-night entries and `_writeAsScheduleItem`
+    `:472` writes a single `ScheduleItem` (`lumina-chat-<uuid>`, `fx: 0`, first colour, brightness %)
+    through `mergeWithDedup`. A request for one week becomes a schedule that repeats every week until
+    the customer deletes it, and the motion and second colour are gone (the comment at `:479-485`
+    calls this "a Solid-fallback degradation, not data loss" — for a team request it is the whole
+    look).
+  - **F2 — chat `schedulingIntents` branch.** `lumina_conversation_driver.dart:574-582` routes a
+    cloud reply carrying `schedulingIntents` to `LuminaResultBranch.schedulingIntents`;
+    `scheduling_intent_handler.dart:488` mints `ai-<batchTs>-<i>` `ScheduleItem`s behind an "Add"
+    SnackBar. Also recurring, also outside D2.
+  - **Why D2 did not cover it.** D2 (`lumina_schedule_persistence.dart`, build 110) covers only
+    the chat's compound / smart-scheduler reply: dated user entries, `sourceTag: lumina_ai`, Game Day
+    dates skipped. Both paths above predate it — F1 `6b28d55` (2026-05-15, build-74), F2 `ddd0e39`
+    (2026-05-26, build-74; the driver file `c3f0a88` of 09-29 is a refactor). Not a 111 regression.
+  - **Also in scope:** the calendar AI prompt carries a hardcoded example `KC Chiefs Red #E31837`
+    (`calendar_providers.dart:867`). Remove it; the model should not be handed one team's colour.
+  - **Fleet exposure (read-only, 2026-09-30/10-01):** 0 `lumina-chat-*` items fleet-wide; `ai-*`
+    items on two accounts, both written before build 111.
+  - **Fix shape (package #127):** route F1 and F2 through the D2 persistence — dated user entries,
+    `sourceTag lumina_ai`, Game Day dates skipped, full colours and effect kept — and write a
+    recurring `ScheduleItem` ONLY on an explicit "every night / every Friday". One phrase table
+    covers all three entry points (chat compound, chat `schedulingIntents`, Schedule-tab box).
+  - Files: `lib/features/schedule/calendar_providers.dart`,
+    `lib/features/ai/lumina_conversation_driver.dart`,
+    `lib/features/ai/scheduling_intent_handler.dart`,
+    `lib/features/ai/lumina_schedule_persistence.dart`.
+    Related: **#122** (F3), **#123** (F4), **#124**, **#127**, **#117**, D2 (+110 E2 follow-ups).
+
+- [ ] **#123 — OFF-LAN SCHEDULE SAVE PSAVES THE LADDER AND THE PATTERN OVER THE BRIDGE, THEN THE CFG
+  GATE REFUSES (smoke F4): six flash writes per save with nothing armed**
+  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test; not fixed** · Severity: **P1**
+    · Evidence: **verified-by-data** (the owner's home controller, command log 2026-09-30/10-01 UTC
+    + `/json/info` `fs.pmt` readback 2026-10-01) + **verified-by-source** @ `aec40f5`
+  - **Mechanism.** `schedule_sync.dart:1096-1098`: when `activeRepo` is not a `WledService` (bridge
+    mode) the preset read is skipped and `PresetsRead.deviceEmpty()` is assumed, so EVERY ladder slot
+    looks absent. `psaveIfChanged` then writes 1 / 2 / 3 / 4 / 5, the pattern preset is written under
+    `alwaysWrite` (`:1199`), the live-state restore `applyJson` goes out (`:1527-1546`), and only
+    then does `repoCanWriteCfg` (`:1833`) return `deferredOffLan`. The bridge delivers every psave
+    (`cloud_relay_repository.dart:683-705`) but can never carry `/json/cfg` (`supportsCfgWrites` is
+    webhook-only, `:488`).
+  - **Observed.** Cellular save ~01:40:40Z → getInfo ×3, psave 1 On / 2 Off / 3 Dim / 4 Low /
+    5 Medium (01:40:46–01:41:21Z), psave 10 (01:41:26Z), applyJson restore (01:41:31Z), NO
+    applyConfig command — timers untouched. A LAN save at 02:22Z re-psaved the same six slots
+    (`fs.pmt` = 02:22:00Z; slots 1-5 and 10 now sit at the END of `presets.json`). Twelve preset
+    writes in 42 minutes for two saves, on a controller whose `presets.json` already carries flash
+    damage (seven `0xFF` bytes, unchanged since 2026-09-21).
+  - **Consequence.** Off the LAN nothing arms (and nothing re-arms on reconnect — the "will arm on
+    next LAN sync" wording in `ScheduleSyncResult.deferredOffLan` describes a sync the user has to
+    cause), every cellular save costs six flash writes for no benefit, and each ladder psave
+    re-captures whatever the segments were doing at that moment.
+  - **Age:** `5b285af` (2026-07-15, build-74) placed the gate below the preset phase. Not a 111
+    regression.
+  - **Fix shape (package #127):** evaluate `repoCanWriteCfg(repo)` BEFORE the preset phase. Off-LAN,
+    write nothing and return `deferredOffLan` — the schedule is saved; presets and timers both land
+    on the next LAN sync. Keep the preset-read tri-state for the LAN path.
+  - Files: `lib/features/schedule/schedule_sync.dart`,
+    `lib/features/wled/cloud_relay_repository.dart`.
+    Related: **#118**, **#121**, **#127**, base-ladder ambient capture (`audit/BASE_LADDER.md`),
+    flash-corruption note of 2026-09-21.
+
 - [ ] **#79 — SCORE CELEBRATIONS HAVE NEVER FIRED ON HARDWARE FOR ANYONE, and the
   `start_time_passed` skip that hid the Dodgers cycle is invisible**
   - Status: **IN-PROGRESS** on `feat/gameday-unified-monitoring` · Severity: **P1** ·
@@ -2371,6 +2443,119 @@ commit — merging `main` into this tree will collide with the untracked copies.
     Related: **#61** (lease manager), Policy B.
 
 ## P2 — hardening & platform
+
+- [ ] **#122 — "NEXT THREE NIGHTS" IS NOT A MULTI-NIGHT REQUEST (smoke F3): the compound detector
+  matches "days" only**
+  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test; not fixed** · Severity: **P2**
+    · Evidence: **verified-by-data** (smoke: "next three nights" produced a Tier 0 single look,
+    applied at once, nothing scheduled) + **verified-by-source** @ `aec40f5`
+  - `compound_command_detector.dart:171-174` `_nextNDaysPattern` =
+    `\b(for\s+the\s+next|next)\s+(one|…|\d+)\s+days?\b`. "nights", "evenings", "weeks", "through
+    Sunday" and "this weekend" carry no temporal signal, so `lumina_brain.dart:230` takes the Tier 0
+    `composeTeamResponse` path and applies one look now. The cloud model, which understands these
+    phrases, is never reached because team names are Tier 0 since E2 item 3.
+  - **Age:** `2564c26` (2026-03-10, build-74). Not a 111 regression.
+  - **Fix shape (package #127):** expand `_nextNDaysPattern` and the strip pattern, then add an
+    E2-style phrase table test (`test/unit/compound_command_detector_test.dart`, rows in the style of
+    `test/features/ai/lumina_schedule_persistence_test.dart`): "next three nights", "nights",
+    "evenings", "weeks", "through Sunday", "this weekend".
+  - Files: `lib/features/ai/compound_command_detector.dart`, `lib/features/ai/lumina_brain.dart`.
+    Related: **#121**, **#127**.
+
+- [ ] **#124 — THE "+" SCHEDULE EDITOR IS RECURRING-ONLY WITH NO ONE-TIME OPTION, AND THE DAY SHEET
+  CANNOT ADD**
+  - Status: **OPEN — filed 2026-10-01 from the build-111 smoke test; product gap, not fixed** ·
+    Severity: **P2** · Evidence: **reported** (iOS, build 111) + **verified-by-source** @ `aec40f5`
+  - **The "+" flow.** `my_schedule_page.dart:515-519` (FAB) opens `_ScheduleEditor` (`:4237`). The
+    editor holds no date state; the "Repeat Days" chips (`:4542`) default to all seven (`:4283`);
+    `preselectedDayIndex` (`:4385`) has had no caller since `683348a`. Save → `composeEditedSchedule`
+    → `SchedulesNotifier.add` (`schedule_providers.dart:675`) → arrayUnion on
+    `users/{uid}.schedules`. `ScheduleItem` has no date or run-once field (`disabledUntil` is the
+    eviction snooze); the sync emits `dow`-mask timers only. No date picker has ever existed in the
+    file.
+  - **The day sheet.** `:1719`. An empty day offers "Add a schedule" (`:1783-1791`), which opens
+    the same editor with no date; a non-empty day has no add affordance. "Edit This Day"
+    (`:2063-2075`) edits an EXISTING dated entry only — on time, off time, brightness, channel scope
+    (`calendar_entry_editor.dart:22-26`, `:380-520`). No screen creates a dated user entry from
+    scratch; the writers are the Edit-This-Day override, the Schedule-tab Lumina box
+    (`CalendarEntry.fromAiJson`, untagged) and chat D2 (`lumina_ai`). "Delete This Entry" is on the
+    entry detail sheet beside the edit button (`:2085-2175`).
+  - **Age:** editor always; day-sheet add `c9d56b8` (2026-08-24, build-82). Byte-identical across
+    build-109, `9e5376a` and `aec40f5` — not a regression.
+  - **Fix shape (package #127, option c):** label "+" honestly ("Repeats every <weekday>"); add an
+    optional date / "Just this day" that writes a dated user entry (`type user`, `autopilot false`,
+    `sourceTag null` — the user contract, `calendar_entry.dart:13-24`) through `applyEntries` with
+    the overwrite prompt; add "Add for this day" to the day sheet. Constraints to decide up front:
+    `CalendarEntry` has no effect payload (`_synthesizeWledPayload` renders solid fx 0,
+    `calendar_entry_lease_manager.dart:1084-1125`), clock times only (no solar), and it arms only
+    within 48 h on the LAN. Either extend the model with an optional payload (codec + scope sidecar
+    + lease manager) or accept the solid degrade with honest copy.
+  - Files: `lib/features/schedule/my_schedule_page.dart`,
+    `lib/features/schedule/calendar_entry_editor.dart`, `lib/features/schedule/calendar_entry.dart`,
+    `lib/features/schedule/calendar_entry_lease_manager.dart`.
+    Related: **#117**, **#121**, **#127**.
+
+- [ ] **#125 — ANDROID TOOLCHAIN GAP: Flutter 3.47.5 (the Codemagic SDK) cannot build Android here —
+  its Gradle plugin needs Gradle ≥ 8.14, the wrapper is pinned at 8.12; the +111 AAB was built with
+  3.41.2**
+  - Status: **OPEN — filed 2026-10-01; not fixed** · Severity: **P2** · Evidence: **verified-by-run**
+    (2026-09-30 Android build attempt) + **verified-by-source** @ `79098d5`
+  - `android/gradle/wrapper/gradle-wrapper.properties` pins `gradle-8.12-all`; AGP 8.7.3 and Kotlin
+    2.1.0 in `android/settings.gradle`. Flutter 3.47.5's Gradle plugin requires ≥ 8.14, and its
+    migrator rewrites `android/gradle.properties` (`builtInKotlin` / `newDsl=false`) plus
+    `analysis_options.yaml` and `pubspec.lock` at `pub get`. Result: for +111 the iOS artifact
+    (Codemagic, 3.47.5, `TZ=UTC0`) and the Android AAB (local 3.41.2) were built from the same commit
+    with two SDKs, and the standing gate (BUILD_LEDGER convention 5) is proven only on the 3.47.5
+    side.
+  - **Fix shape:** bump the wrapper to ≥ 8.14 (AGP / Kotlin as required), run the 3.47.5 migrator
+    ONCE and commit its output deliberately, build the next Android artifact with 3.47.5 and retire
+    3.41.2. Tracked change ⇒ a new bump and tag; do it at the start of the next build, never inside a
+    release.
+  - Files: `android/gradle/wrapper/gradle-wrapper.properties`, `android/settings.gradle`,
+    `android/gradle.properties`. Related: BUILD_LEDGER convention 5, **#126**, **#127**.
+
+- [ ] **#126 — FIREBASE ANDROID APP ID MISMATCH: the app initialises the legacy Dreamflow-era Android
+  registration while the package is `com.nexgenled.lumina`**
+  - Status: **OPEN — accepted for +108 and +111; decision owed before the next Android build** ·
+    Severity: **P2** · Evidence: **verified-by-data** (Firebase Management API, read-only,
+    2026-09-23) + **verified-by-source** @ `79098d5`
+  - The Firebase project has TWO Android apps: "Lumina Android" (`…android:1c0e2b…`, package
+    `com.nexgenled.lumina`, both release SHA-1s registered) and the legacy "nexgen_twinkle_approach
+    (android)" (`…android:4837f…`, package `com.nexgenled.command`, one old key).
+    `lib/firebase_options.dart:60` sets the android `appId` to `4837f…`; `android/app/build.gradle:48`
+    sets `applicationId = "com.nexgenled.lumina"`; the committed `android/app/google-services.json`
+    is a hand-edited 712 B copy of the `4837f…` client with the package renamed. Every Play artifact
+    so far (+59 / +74 / +75, +108, +111) shipped this pairing. It is NOT visible from
+    `google-services.json`: Firebase emits `certificate_hash` only for Android OAuth clients, and
+    this project has none.
+  - **Risk.** Analytics, crash and any registration-keyed Firebase feature attribute to the wrong
+    app. Installing the genuine export WITHOUT changing `firebase_options.dart` would switch the
+    native side to `1c0e2b…` while Dart still initialises `4837f…` — a silent split, not a no-op.
+  - **Fix shape.** Decision A: adopt `1c0e2b…` — install the real export AND change the android
+    `appId` in `firebase_options.dart` in one tracked commit, verify with the Management API
+    (`androidApps`, `sha1Hashes`), then build. Decision B: keep `4837f…` and record why.
+  - Files: `lib/firebase_options.dart`, `android/app/google-services.json`, `firebase.json`.
+    Related: **#125**, **#127**, `android-build-108-2026-09-24.md` (repo root, untracked).
+
+- [ ] **#127 — NEXT-PLANNED-BUILD PACKAGE (build-111 smoke follow-ups): one package, NO hotfix 112**
+  - Status: **OPEN — package tracking entry, filed 2026-10-01** · Severity: **P1** (carries #121 and
+    #123) · Evidence: see the member entries
+  - **Decision 2026-10-01.** No hotfix 112. **#121** (F1 + F2), **#122** (F3), **#123** (F4) and
+    **#124** ("+" editor) all date to builds 74–82; none is a 111 regression; none crashes or loses
+    data; fleet exposure on 111 is five accounts and zero affected items. Smoke step 6 PASSES:
+    "Delete This Entry" lives on the entry detail sheet beside the edit button
+    (`my_schedule_page.dart:2085-2175`); "Edit This Day" is the edit-only button.
+  - **Scope.** (1) **#121** — F1 and F2 through the D2 persistence (dated user entries, `sourceTag
+    lumina_ai`, Game Day dates skipped, full colours and effect kept; recurring only on an explicit
+    "every night / every Friday"); remove the `KC Chiefs Red #E31837` prompt example
+    (`calendar_providers.dart:867`). (2) **#122** — detector phrases ("next three nights", "nights",
+    "evenings", "weeks", "through Sunday", "this weekend") + E2-style phrase table test. (3) **#123**
+    — the off-LAN sync skips ladder and pattern psaves when the cfg gate will refuse anyway. (4)
+    **#124** option (c) — "Repeats every <weekday>" copy, and "Just this day" writing a dated user
+    entry. Optional riders if the build touches Android: **#125**, **#126**.
+  - **Gate.** Flutter 3.47.5 + `TZ=UTC0` (convention 5); bench `.173` presets + timers readback for
+    #123 / #124; PII scan of every commit.
+  - Related: **#121**–**#126**, **#117**, **#118**.
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
