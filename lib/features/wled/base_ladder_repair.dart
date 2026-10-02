@@ -40,6 +40,10 @@
 //      failed backup aborts) and to the controller doc (best effort);
 //   3. capture the live state (REQUIRED: without it the psaves would change the
 //      house's look with no way back);
+//   3b. a SECOND fresh read of the controller: the guards run again on it (a
+//      lease armed while the record write stalled is seen), and any planned
+//      slot that changed since the plan aborts the run (never overwrite what
+//      was not backed up). Firestore writes are bounded and best effort;
 //   4. one psave per bad preset, through the geometry gate, no retry pass;
 //   5. restore the captured live state;
 //   6. read back, record the outcome, republish the ladder facts, and set the
@@ -452,6 +456,11 @@ class LadderRepairDeps {
   final Duration readinessTimeout;
   final Duration readinessPoll;
 
+  /// Bound on each Firestore write (record, republish). Best effort: a write
+  /// that has not completed by then is abandoned, never awaited — an offline
+  /// set() can wait for the network indefinitely.
+  final Duration recordTimeout;
+
   const LadderRepairDeps({
     required this.svc,
     required this.controllerId,
@@ -469,6 +478,7 @@ class LadderRepairDeps {
     this.settle = kLadderRepairSettle,
     this.readinessTimeout = const Duration(minutes: 2),
     this.readinessPoll = const Duration(seconds: 5),
+    this.recordTimeout = const Duration(seconds: 10),
   });
 }
 
@@ -484,6 +494,15 @@ class BaseLadderRepairRunner {
   BaseLadderRepairRunner(this.d);
 
   void _log(String m) => debugPrint('[LadderRepair] ${d.controllerId}: $m');
+
+  /// Best-effort, bounded record write (see [LadderRepairDeps.recordTimeout]).
+  Future<void> _record(Map<String, Object?> record) async {
+    try {
+      await d.writeRecord(record).timeout(d.recordTimeout);
+    } catch (e) {
+      _log('record write did not complete ($e) — continuing');
+    }
+  }
 
   /// Consider a repair after a connect whose published verdict was
   /// [atConnect]. Never throws.
@@ -556,7 +575,7 @@ class BaseLadderRepairRunner {
     // the record says what WOULD happen and whether the guards would allow it
     // now — which is what a fleet review of dry-run records needs.
     if (mode == LadderRepairMode.dryRun) {
-      await d.writeRecord({
+      await _record({
         'version': kLadderRepairVersion,
         'state': 'dry_run',
         'plan': planJson,
@@ -584,7 +603,7 @@ class BaseLadderRepairRunner {
       return LadderRepairRun(LadderRepairOutcome.aborted,
           'local backup failed — nothing written', plan: plan);
     }
-    await d.writeRecord({
+    await _record({
       'version': kLadderRepairVersion,
       'state': 'started',
       'plan': planJson,
@@ -601,13 +620,30 @@ class BaseLadderRepairRunner {
           'live state unreadable — nothing written', plan: plan);
     }
 
-    // Last look before the first write: still the same controller, guards
-    // still pass on the clock as it is NOW.
+    // ── Last look before the first write, on a SECOND fresh read. The steps
+    // above include a Firestore write, which can stall; a lease armed, a clock
+    // moved or a preset rewritten in the meantime must be seen, not assumed
+    // from the first read. Still the same controller; every planned slot
+    // still holds exactly what was planned (and backed up); the guards still
+    // pass on the clock as it is NOW.
     if (!d.stillConnected()) {
       return LadderRepairRun(LadderRepairOutcome.deferred,
           'controller changed before the first write', plan: plan);
     }
-    gate = _gate(fresh, await d.gameDay());
+    final recheck = await _freshReads();
+    if (recheck == null) {
+      return LadderRepairRun(LadderRepairOutcome.aborted,
+          'controller unreadable on the final check — nothing written',
+          plan: plan);
+    }
+    for (final step in plan) {
+      if (jsonEncode(recheck.presets[step.presetId]) !=
+          jsonEncode(fresh.presets[step.presetId])) {
+        return LadderRepairRun(LadderRepairOutcome.deferred,
+            'preset ${step.presetId} changed during the repair', plan: plan);
+      }
+    }
+    gate = _gate(recheck, await d.gameDay());
     if (!gate.allowed) {
       return LadderRepairRun(LadderRepairOutcome.deferred, gate.toString(),
           plan: plan);
@@ -684,7 +720,7 @@ class BaseLadderRepairRunner {
       'repaired': repaired,
       'still_bad': stillBad,
     };
-    await d.writeRecord(record);
+    await _record(record);
     await d.store.markRan(d.controllerId, record);
     await d.store.saveStatus(LadderRepairStatus(
       controllerId: d.controllerId,
@@ -695,12 +731,14 @@ class BaseLadderRepairRunner {
     ));
     if (after.isKnown) {
       try {
-        await d.republish(
-          ladderAssertsSegments(
-              presets: after.presets,
-              deviceChannelIds: fresh.deviceChannelIds),
-          afterVerdict,
-        );
+        await d
+            .republish(
+              ladderAssertsSegments(
+                  presets: after.presets,
+                  deviceChannelIds: fresh.deviceChannelIds),
+              afterVerdict,
+            )
+            .timeout(d.recordTimeout);
       } catch (e) {
         _log('republish failed: $e');
       }

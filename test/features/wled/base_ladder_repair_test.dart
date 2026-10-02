@@ -9,6 +9,8 @@
 //      back → one-time marker. Nothing else touches the controller.
 //   3. Mode off / dry_run / already-ran write nothing to the controller.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_service.dart';
@@ -234,6 +236,14 @@ class _Harness {
   final List<Map<String, Object?>> records = [];
   final List<({bool? asserts, LadderRestoreVerdict? v})> republished = [];
 
+  /// Runs inside the record write — i.e. between the first fresh read and the
+  /// final check. Tests use it to change the world mid-repair.
+  void Function(Map<String, Object?> record)? onRecord;
+
+  /// Replaces the record write's result (e.g. a future that never completes).
+  Future<bool> Function()? recordResult;
+  Duration recordTimeout = const Duration(seconds: 10);
+
   BaseLadderRepairRunner runner() => BaseLadderRepairRunner(LadderRepairDeps(
         svc: ctl,
         controllerId: 'AA00000000A1',
@@ -243,16 +253,18 @@ class _Harness {
         mode: () async => mode,
         gameDay: () async => activity,
         store: store,
-        writeRecord: (r) async {
+        writeRecord: (r) {
           ctl.log.add('record:${r['state']}');
           records.add(r);
-          return true;
+          onRecord?.call(r);
+          return recordResult?.call() ?? Future.value(true);
         },
         republish: (a, v) async => republished.add((asserts: a, v: v)),
         stillConnected: () => connected,
         settle: Duration.zero,
         readinessTimeout: Duration.zero,
         readinessPoll: Duration.zero,
+        recordTimeout: recordTimeout,
       ));
 
   LadderRestoreVerdict connectVerdict() => evaluateLadderRestore(
@@ -619,6 +631,16 @@ void main() {
       expect(h.store.status!.repairedIds, [1, 4]);
     });
 
+    test('a Firestore record write that never completes does not hold the '
+        'repair (bounded, best effort)', () async {
+      final h = _Harness()
+        ..recordResult = (() => Completer<bool>().future)
+        ..recordTimeout = const Duration(milliseconds: 20);
+      final run = await h.run();
+      expect(run.outcome, LadderRepairOutcome.repaired);
+      expect(h.store.ran, isTrue);
+    });
+
     test('a save that fails → partial, still one-time (no retry loop)',
         () async {
       final h = _Harness(failSaves: {4});
@@ -745,6 +767,37 @@ void main() {
     test('the app switched controllers before the first write', () async {
       await expectNoControllerWrite(
           _Harness(connected: false), LadderRepairOutcome.deferred);
+    });
+
+    test('a LEASE armed while the record write was in flight is caught by the '
+        'final fresh read', () async {
+      final h = _Harness();
+      h.onRecord = (r) {
+        if (r['state'] == 'started') {
+          h.ctl.timers = [
+            {'en': 1, 'hour': 13, 'min': 3, 'macro': 40, 'dow': 16},
+          ];
+        }
+      };
+      final run = await h.run();
+      expect(run.outcome, LadderRepairOutcome.deferred);
+      expect(run.reason, contains('lease_timer_near'));
+      expect(h.ctl.controllerWrites, 0);
+      expect(h.store.ran, isFalse);
+    });
+
+    test('a planned preset rewritten during the repair is NOT overwritten',
+        () async {
+      final h = _Harness();
+      h.onRecord = (r) {
+        if (r['state'] == 'started') {
+          h.ctl.presets = {...h.ctl.presets, 4: _black('Someone Else', 90)};
+        }
+      };
+      final run = await h.run();
+      expect(run.outcome, LadderRepairOutcome.deferred);
+      expect(run.reason, contains('preset 4 changed'));
+      expect(h.ctl.controllerWrites, 0);
     });
 
     test('the fresh read finds the ladder already lit', () async {
