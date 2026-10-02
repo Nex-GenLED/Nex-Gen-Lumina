@@ -4022,6 +4022,84 @@ commit — merging `main` into this tree will collide with the untracked copies.
     Tools card that supersedes it, or delete the 9 screens. Leaving it is the worst option — it
     reads as a shipped feature to anyone grepping the tree, and it already misled a user guide.
 
+- [ ] **#143 — GAME DAY CALENDAR ROWS CARRY NO TEAM ID: the +114 served-lease skip recovers the
+  team from the NOTE**
+  - Status: **OPEN — filed 2026-10-02 from `fix/114-gameday-app`** · Severity: **P2** · Evidence:
+    **verified-by-source**
+  - Plan §3.2 assumed Game Day rows are `entryId: gd_<slug>` (`CalendarEntryId.gameDay`). Nothing
+    calls it: `GameDayAutopilotService._buildCalendarEntry` never sets `entryId`, so every
+    production Game Day row is `primary`. `served_game_day.dart` maps a row to its team through
+    the note (`"<teamName> vs|@ <opponent> — Game Day autopilot"`) and the enabled configs'
+    `teamName`, honouring a `gd_` id first. A team whose display name changes between the weekly
+    regen and the game is not recognised as served until the next regen — the safe direction (the
+    phone leases it, as 112 did).
+  - **Fix shape:** write `entryId: CalendarEntryId.gameDay(slug)` in `_buildCalendarEntry`, and make
+    the regen remove the old `primary` Game Day row on the same date first (A1 upserts by
+    `(dateKey, entryId)`, so without that a regen ADDS a second row). Or a `team_slug` field with a
+    sidecar (old builds strip unknown keys, see `payload_sidecar.dart`).
+
+- [ ] **#144 — SCHEDULE-SYNC LADDER PSAVES ARE NOT GAME-DAY / TIMER GUARDED (the on-connect repair
+  is)**
+  - Status: **OPEN — filed 2026-10-02** · Severity: **P2** · Evidence: **verified-by-source**
+  - `ScheduleSyncService.syncAll` psaves ladder slots 1-5 when one fails the existing bar (name +
+    root `on` + segments named on); +114's look is written but not asserted, so a lit ladder is
+    never re-saved for its colour. It restores the captured live look after. It runs whenever a
+    schedule sync runs — a user save/Sync, and automatic triggers such as the lease sweep's
+    eviction-expiry `runSyncNow`. None of them consults the guards `base_ladder_repair.dart` applies
+    (live Game Day, ±10 min of an armed timer). In practice it writes the ladder only on a
+    controller whose ladder is broken under the old bar, which the connect repair fixes first.
+  - **Fix shape:** run `evaluateLadderRepairGuards` (timer + Game Day) before the ladder phase of
+    `syncAll` and defer only the LADDER psaves (not the schedule's own preset) when it refuses.
+
+- [ ] **#145 — SERVER-RUN TEAMS STILL CELEBRATE FROM THE PHONE (plan D3, until step G)**
+  - Status: **OPEN — by design until G; app half not built** · Severity: **P3** · Evidence:
+    **verified-by-source**
+  - +114 observe mode stops the phone's start/end for a served team but leaves celebrations on the
+    phone (the server has none). When G ships, the app half is: parse `gameday_server.celebrations`
+    in `game_day_server_status.dart` and exclude those slugs in `computeLiveCelebrationTeams`.
+
+- [ ] **#146 — SERVER PRE-FLIGHT P4 CANNOT SEE A LIT-BUT-BLACK LADDER**
+  - Status: **OPEN — server decision** · Severity: **P2** · Evidence: **verified-by-source**
+  - P4 (`gameDayPreflight.checkLadder`, `fix/gameday-server-ab`) reads
+    `base_ladder_asserts_segments`, which is true for a ladder whose segments are all named on but
+    coloured black (`healer_ladder_restore_publish_test.dart` pins exactly that). +114 publishes
+    `base_ladder_restore_lit` / `base_ladder_dark_channels` beside it.
+  - **Fix shape (functions):** P4 requires `base_ladder_restore_lit === true` as well
+    (`preflight_ladder_bad` when false, `_unknown` when absent). Not on the app branch.
+
+- [ ] **#147 — THE LADDER REPAIR DOES NOT CREATE A MISSING PRESET 1 OR 2**
+  - Status: **OPEN — decision owed** · Severity: **P3** · Evidence: **verified-by-source**
+  - `base_ladder_restore_lit` is false when preset 1 or 2 is absent (a server end restore loads
+    one of them). The connect repair rewrites PRESENT bad slots only, matching the healer's
+    long-standing rule that schedule sync owns creating the ladder. A never-synced controller
+    therefore stays `restore_lit:false` and an end restore leaves the team look up.
+  - **Decision:** create 1 and 2 on connect (Lumina Blue ON, all-off OFF) — a restore would then
+    light the house with no OFF timer to follow — or keep "sync creates it" and have pre-flight
+    skip such homes (it already does via P4 once #146 lands).
+
+- [ ] **#148 — THE "WHO RUNS GAME DAY" BANNER AGES OUT ON REBUILD, NOT ON A TIMER**
+  - Status: **OPEN — accepted** · Severity: **P3** · Evidence: **verified-by-source**
+  - A served flag whose planner stops writing reads "Phone" at every DECISION (lease, engine read
+    the time then), but the banner/badge/tag re-evaluate only when something rebuilds them (a
+    snapshot, a visit to the screen). A one-minute ticker provider was tried and removed in
+    `7583b00`: a timer-backed provider outlived widget-test trees.
+
+- [ ] **#149 — THE ONE-TIME LADDER REPAIR MARKER IS PER PHONE**
+  - Status: **OPEN — accepted** · Severity: **P3** · Evidence: **verified-by-source**
+  - The marker (`base_ladder_connect_repair.v1.<controllerId>`) and the backup live in
+    SharedPreferences. A second phone on the account, or a reinstall, considers the controller
+    once more — under the same guards, and only if its ladder still does not light. The
+    controller-doc record (`base_ladder_repair`) is the cross-phone history for support.
+
+- [ ] **#150 — SERVER P7 TREATS BUILD 113 AS "RETRACTS LEASES"; THE RETRACTION SHIPS IN 114**
+  - Status: **OPEN — one-line functions change** · Severity: **P3** · Evidence:
+    **verified-by-source**
+  - `gameDayPreflight.MIN_SERVED_APP_BUILD = 113` (`fix/gameday-server-ab`) was written when step
+    C was expected to be build 113. Build 113 is the roofline build (`fix/113-roofline-segments`);
+    the served-lease skip and retraction are in 114. P7 is informational (`lease_hygiene_unknown`,
+    never a skip), so the only effect is a 113 phone reported as lease-clean when it is not.
+  - **Fix shape:** `MIN_SERVED_APP_BUILD = 114` and its test, in the next functions deploy.
+
 ---
 
 ## P3 — debt (no launch relevance)
