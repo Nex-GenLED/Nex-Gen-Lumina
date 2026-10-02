@@ -682,6 +682,56 @@ void main() {
       }
     });
 
+    // +114 — the Game Day screen's Alert Sensitivity picker reaches the
+    // coordinator. It was forced to allEvents, which made the picker a no-op.
+    for (final sens in AlertSensitivity.values) {
+      test('alert sensitivity ${sens.name} is honoured, from either machine',
+          () {
+        final c = cfg('a').copyWith(alertSensitivity: sens);
+        for (final teams in [
+          computeLiveCelebrationTeams(
+            sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+            ephemeralSessions: const [],
+            configs: [c],
+          ),
+          computeLiveCelebrationTeams(
+            sessions: const {},
+            ephemeralSessions: [ephemeral('a', EphemeralSessionPhase.liveGame)],
+            configs: [c],
+          ),
+        ]) {
+          expect(teams.single.sensitivity, sens);
+          expect(teams.single.toAlertConfig().sensitivity, sens,
+              reason: 'the diff engine filters on the config it is handed');
+        }
+      });
+    }
+
+    test('a config that never chose reads its stored default (majorOnly), not '
+        'the old forced allEvents', () {
+      final teams = computeLiveCelebrationTeams(
+        sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+        ephemeralSessions: const [],
+        configs: [cfg('a')],
+      );
+      expect(teams.single.sensitivity, AlertSensitivity.majorOnly);
+    });
+
+    test('a sensitivity change is a NEW CelebrationTeam (the coordinator '
+        're-syncs)', () {
+      final before = computeLiveCelebrationTeams(
+        sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+        ephemeralSessions: const [],
+        configs: [cfg('a')],
+      ).single;
+      final after = computeLiveCelebrationTeams(
+        sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
+        ephemeralSessions: const [],
+        configs: [cfg('a').copyWith(alertSensitivity: AlertSensitivity.allEvents)],
+      ).single;
+      expect(before == after, isFalse);
+    });
+
     test('no pick stays null — never defaulted into a choice', () {
       final teams = computeLiveCelebrationTeams(
         sessions: {'a': session('a', AutopilotSessionPhase.liveGame)},
@@ -738,5 +788,58 @@ void main() {
       expect(alerts, hasLength(1));
       expect(alerts.first.eventType, AlertEventType.touchdown);
     });
+
+    // +114 — the path the coordinator uses: CelebrationTeam → toAlertConfig →
+    // the diff engine. Under the default majorOnly a field goal no longer
+    // flashes the house; a touchdown still does.
+    for (final (sens, fgCelebrates) in [
+      (AlertSensitivity.majorOnly, false),
+      (AlertSensitivity.allEvents, true),
+    ]) {
+      test('${sens.name}: field goal ${fgCelebrates ? 'celebrates' : 'does '
+          'not'}; touchdown celebrates', () async {
+        final espn = _FakeEspn();
+        final monitor = ScoreMonitorService(espnApi: espn);
+        addTearDown(monitor.dispose);
+        final alerts = <ScoreAlertEvent>[];
+        final sub = monitor.alertStream.listen(alerts.add);
+        addTearDown(sub.cancel);
+
+        final nfl = kTeamColors.entries
+            .firstWhere((e) => e.value.sport == SportType.nfl);
+        final config = CelebrationTeam(
+          teamSlug: nfl.key,
+          sport: SportType.nfl,
+          sensitivity: sens,
+        ).toAlertConfig();
+
+        GameState game(int home) => GameState(
+              gameId: 'g1',
+              homeTeam: 'H',
+              awayTeam: 'A',
+              homeTeamId: nfl.value.espnTeamId,
+              awayTeamId: 'other',
+              homeScore: home,
+              awayScore: 0,
+              status: GameStatus.inProgress,
+              period: '2',
+              lastUpdated: DateTime(2026, 1, 1),
+            );
+
+        espn.games = [game(0)];
+        await monitor.checkScores([config]);
+        await _settle();
+
+        espn.games = [game(3)]; // field goal
+        await monitor.checkScores([config]);
+        await _settle();
+        expect(alerts.length, fgCelebrates ? 1 : 0);
+
+        espn.games = [game(10)]; // touchdown
+        await monitor.checkScores([config]);
+        await _settle();
+        expect(alerts.last.eventType, AlertEventType.touchdown);
+      });
+    }
   });
 }
