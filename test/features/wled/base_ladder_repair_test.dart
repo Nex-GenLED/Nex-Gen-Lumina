@@ -10,6 +10,7 @@
 //   3. Mode off / dry_run / already-ran write nothing to the controller.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -170,6 +171,87 @@ class _Ctl extends WledService {
   }
 }
 
+/// A controller that behaves like WLED for the parts the restore touches: a
+/// psave APPLIES its inline state live before persisting; an apply merges into
+/// live state by segment id; an apply carrying geometry fails like the wire
+/// pin does in debug.
+class _Device extends _Ctl {
+  _Device({
+    required super.presets,
+    required Map<String, dynamic> state,
+    super.failSaves,
+    this.applyOnFail = false,
+    this.refuseApplies = 0,
+  }) : state = jsonDecode(jsonEncode(state)) as Map<String, dynamic>;
+
+  Map<String, dynamic> state;
+  final bool applyOnFail;
+  int refuseApplies;
+  int psaveCount = 0;
+  bool sawRepairLookLive = false;
+
+  void _merge(Map<String, dynamic> payload) {
+    if (payload['on'] != null) state['on'] = payload['on'];
+    if (payload['bri'] != null) state['bri'] = payload['bri'];
+    final segs = payload['seg'];
+    if (segs is! List) return;
+    final live = (state['seg'] as List).cast<Map<String, dynamic>>();
+    for (final raw in segs.cast<Map>()) {
+      final id = raw['id'];
+      final target = live.firstWhere((x) => x['id'] == id,
+          orElse: () => <String, dynamic>{});
+      if (target.isEmpty) continue;
+      raw.forEach((k, v) {
+        if (k != 'id') target['$k'] = jsonDecode(jsonEncode(v));
+      });
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getState() async {
+    log.add('state');
+    return jsonDecode(jsonEncode(state)) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<bool> savePreset({
+    required int presetId,
+    required Map<String, dynamic> state,
+    String? presetName,
+  }) async {
+    final ok = await super.savePreset(
+        presetId: presetId, state: state, presetName: presetName);
+    if (ok || applyOnFail) {
+      psaveCount++;
+      _merge(state);
+      final seg0 = (this.state['seg'] as List).first as Map;
+      if (this.state['on'] == true && seg0['fx'] == 0) {
+        sawRepairLookLive = true;
+      }
+    }
+    return ok;
+  }
+
+  @override
+  Future<bool> applyJson(Map<String, dynamic> payload) async {
+    log.add('apply');
+    applied.add(payload);
+    for (final sg in (payload['seg'] as List? ?? const []).cast<Map>()) {
+      for (final k in const ['start', 'stop', 'rev', 'mi']) {
+        if (sg.containsKey(k)) {
+          throw AssertionError('GEOMETRY ON THE WIRE: $k');
+        }
+      }
+    }
+    if (refuseApplies > 0) {
+      refuseApplies--;
+      return false;
+    }
+    _merge(payload);
+    return true;
+  }
+}
+
 class _Store implements LadderRepairStore {
   bool ran;
   final bool backupWorks;
@@ -228,8 +310,14 @@ class _Harness {
     store = _Store.withLog(ctl.log, ran: ran, backupWorks: backupWorks);
   }
 
-  late final _Ctl ctl;
-  late final _Store store;
+  late _Ctl ctl;
+  late _Store store;
+
+  /// Swap in a stateful controller, keeping the same store/record wiring.
+  void useDevice(_Device d) {
+    ctl = d;
+    store = _Store.withLog(d.log, ran: store.ran);
+  }
   LadderRepairMode mode;
   GameDayActivity activity;
   bool connected;
@@ -862,19 +950,69 @@ void main() {
     });
   });
 
-  group('mode parsing', () {
-    test('default repair; dry_run/off by exact string; enabled:false wins', () {
-      expect(ladderRepairModeFrom(null), LadderRepairMode.repair);
-      expect(ladderRepairModeFrom({}), LadderRepairMode.repair);
-      expect(ladderRepairModeFrom({'connect_repair': 'dry_run'}),
+  group('mode — writes need an explicit "repair" (owner decision 2026-10-02)',
+      () {
+    Future<LadderRepairMode> read(Future<Map<String, dynamic>?> Function() r) =>
+        readLadderRepairMode(r, timeout: const Duration(milliseconds: 50));
+
+    test('ABSENT document → dry run (never repair)', () async {
+      expect(ladderRepairModeFrom(null), LadderRepairMode.dryRun);
+      expect(await read(() async => null), LadderRepairMode.dryRun);
+    });
+
+    test('UNREADABLE document (read throws: 403, offline) → dry run', () async {
+      expect(
+          await read(() async => throw StateError('permission-denied')),
           LadderRepairMode.dryRun);
-      expect(ladderRepairModeFrom({'connect_repair': 'off'}),
-          LadderRepairMode.off);
-      expect(ladderRepairModeFrom({'connect_repair': 'DRY RUN'}),
+    });
+
+    test('UNREADABLE document (no answer within the bound) → dry run',
+        () async {
+      expect(await read(() => Completer<Map<String, dynamic>?>().future),
+          LadderRepairMode.dryRun);
+    });
+
+    test('"dry_run" → dry run', () async {
+      expect(await read(() async => {'connect_repair': 'dry_run'}),
+          LadderRepairMode.dryRun);
+    });
+
+    test('"repair" → repair — the ONLY value that writes', () async {
+      expect(await read(() async => {'connect_repair': 'repair'}),
           LadderRepairMode.repair);
+    });
+
+    test('"off" → off', () async {
+      expect(await read(() async => {'connect_repair': 'off'}),
+          LadderRepairMode.off);
+    });
+
+    test('document present without the field, or any other value → dry run',
+        () {
+      expect(ladderRepairModeFrom({}), LadderRepairMode.dryRun);
+      expect(ladderRepairModeFrom({'enabled': true}), LadderRepairMode.dryRun);
+      for (final v in ['REPAIR', 'Repair', 'repair ', 'yes', true, 1, null]) {
+        expect(ladderRepairModeFrom({'connect_repair': v}),
+            LadderRepairMode.dryRun,
+            reason: '$v must not enable writes');
+      }
+    });
+
+    test('the old kill switch enabled:false wins over "repair"', () {
       expect(
           ladderRepairModeFrom({'enabled': false, 'connect_repair': 'repair'}),
           LadderRepairMode.off);
+    });
+
+    test('end to end: with no config at all, a bad ladder is PLANNED and '
+        'RECORDED, and the controller is not written', () async {
+      final h = _Harness(mode: await read(() async => null));
+      final run = await h.run();
+      expect(run.outcome, LadderRepairOutcome.dryRun);
+      expect(h.ctl.controllerWrites, 0);
+      expect(h.records.single['state'], 'dry_run');
+      expect(h.store.ran, isFalse,
+          reason: 'a later explicit "repair" must still run');
     });
   });
 
@@ -904,6 +1042,147 @@ void main() {
       );
       await healer.run();
       expect(ctl.saves, 0);
+    });
+  });
+
+  group('the restore leaves the house EXACTLY as it was (owner decision '
+      '2026-10-02)', () {
+    Map<String, dynamic> offHouse() => {
+          'on': false,
+          'bri': 90,
+          'transition': 7,
+          'seg': [
+            for (final id in _buses)
+              {
+                'id': id,
+                'start': id * 100,
+                'stop': id * 100 + 100,
+                'rev': id == 1,
+                'on': true,
+                'fx': 0,
+                'pal': 0,
+                'bri': 255,
+                'frz': false,
+                'col': [
+                  [255, 160, 40, 0],
+                  [0, 0, 0, 0],
+                  [0, 0, 0, 0],
+                ],
+              },
+          ],
+        };
+
+    Map<String, dynamic> litTeamLook() => {
+          'on': true,
+          'bri': 140,
+          'transition': 7,
+          'seg': [
+            for (final id in _buses)
+              {
+                'id': id,
+                'start': id * 100,
+                'stop': id * 100 + 100,
+                'rev': false,
+                'on': id != 2, // one channel deliberately dark tonight
+                'fx': 12,
+                'sx': 40,
+                'ix': 180,
+                'pal': 5,
+                'bri': id == 0 ? 200 : 255,
+                'frz': id == 1,
+                'col': [
+                  [227, 24, 55, 0],
+                  [255, 184, 28, 0],
+                  [0, 0, 0, 0],
+                ],
+              },
+          ],
+        };
+
+    /// What the house shows: master power + brightness and each segment's look
+    /// and on/off — everything a restore must put back. (`ps`/`transition` are
+    /// bookkeeping, not light.)
+    Map<String, dynamic> visible(Map<String, dynamic> st) => {
+          'on': st['on'],
+          'bri': st['bri'],
+          'seg': [
+            for (final sg in (st['seg'] as List).cast<Map>())
+              {
+                for (final k in const [
+                  'id', 'start', 'stop', 'rev', 'on', 'fx', 'sx', 'ix', 'pal',
+                  'bri', 'frz', 'col'
+                ])
+                  if (sg.containsKey(k)) k: sg[k],
+              },
+          ],
+        };
+
+    for (final (label, house) in [
+      ('an OFF house stays OFF', offHouse),
+      ('a LIT house gets its exact look back (team design, one channel dark, '
+          'a frozen segment, per-segment opacity)', litTeamLook),
+    ]) {
+      test(label, () async {
+        final start = house();
+        final h = _Harness();
+        final dev = _Device(presets: _broken(), state: start);
+        h.useDevice(dev);
+
+        final run = await h.run();
+
+        expect(run.outcome, LadderRepairOutcome.repaired);
+        expect(dev.psaveCount, 2, reason: 'presets 1 and 4 were rewritten');
+        expect(dev.sawRepairLookLive, isTrue,
+            reason: 'the psave really did change the house mid-repair');
+        expect(visible(dev.state), visible(start),
+            reason: 'after the restore the house is exactly as captured');
+        expect(h.records.last['restore'], 'ok');
+      });
+    }
+
+    test('the restore never states geometry (the wire pin asserts in debug)',
+        () {
+      final p = BaseLadderRepairRunner.restorePayloadFor(litTeamLook());
+      for (final sg in (p['seg'] as List).cast<Map>()) {
+        for (final k in const ['start', 'stop', 'rev', 'mi']) {
+          expect(sg.containsKey(k), isFalse, reason: '$k must be stripped');
+        }
+      }
+      expect(p['on'], true);
+      expect(p['transition'], 0);
+    });
+
+    test('a save that FAILED still triggers the restore (it may have applied)',
+        () async {
+      final start = offHouse();
+      final h = _Harness(failSaves: {1, 4});
+      final dev = _Device(
+          presets: _broken(), state: start, failSaves: {1, 4}, applyOnFail: true);
+      h.useDevice(dev);
+      final run = await h.run();
+      expect(run.outcome, LadderRepairOutcome.failed);
+      expect(visible(dev.state), visible(start));
+      expect(h.records.last['restore'], 'ok');
+    });
+
+    test('a controller that refuses the first restore gets a second one',
+        () async {
+      final start = offHouse();
+      final h = _Harness();
+      final dev = _Device(presets: _broken(), state: start, refuseApplies: 1);
+      h.useDevice(dev);
+      await h.run();
+      expect(visible(dev.state), visible(start));
+      expect(h.records.last['restore'], 'ok');
+    });
+
+    test('a restore that fails twice is RECORDED as failed (support can see '
+        'it)', () async {
+      final h = _Harness();
+      final dev = _Device(presets: _broken(), state: offHouse(), refuseApplies: 2);
+      h.useDevice(dev);
+      await h.run();
+      expect(h.records.last['restore'], 'failed');
     });
   });
 }

@@ -51,10 +51,12 @@
 //      controller (whatever the outcome — a repair that did not take is a
 //      support case, not a loop).
 //
-// MODES — `config/base_ladder_repair.connect_repair`: `repair` (default),
-// `dry_run` (plan recorded, nothing written, marker NOT set so a later flip to
-// repair still runs), `off`. The existing kill switch `enabled:false` on the
-// same document stops it too.
+// MODES — `config/base_ladder_repair.connect_repair`: `repair` is the ONLY
+// value that writes. Absent document, unreadable document, missing field or any
+// other value = `dry_run` (plan recorded, nothing written, marker NOT set so a
+// later flip to repair still runs). `off` records nothing. The existing kill
+// switch `enabled:false` on the same document means off. Owner decision
+// 2026-10-02: the first customer rollout is dry run by default.
 
 import 'dart:async';
 import 'dart:convert';
@@ -71,6 +73,8 @@ import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
     show deviceChannelsFromConfig;
+import 'package:nexgen_command/features/wled/geometry_wire_pin.dart'
+    show stripGeometry;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
@@ -96,17 +100,44 @@ const String kLadderRepairRecordField = 'base_ladder_repair';
 
 enum LadderRepairMode { repair, dryRun, off }
 
-/// `config/base_ladder_repair` → mode. Only exact strings change the default;
-/// the existing `enabled:false` kill switch wins over everything.
+/// `config/base_ladder_repair` → mode.
+///
+/// WRITES NEED AN EXPLICIT OPT-IN (owner decision 2026-10-02, first customer
+/// rollout). Only `connect_repair: "repair"` lets the repair write to a
+/// controller. An absent document, an unreadable one (null here — see
+/// [readLadderRepairMode]), a missing field, or any other value is DRY RUN:
+/// the plan is recorded, nothing is written. `"off"` records nothing either.
+/// The older kill switch on the same document, `enabled: false`, still wins
+/// over everything and means off.
+///
+/// This is deliberately the opposite of `baseLadderRepairEnabledProvider`,
+/// which fails OPEN for schedule sync's segment check: that one guards a
+/// predicate on a user-initiated sync; this one decides whether every 114
+/// phone writes presets on its own at the next connect.
 LadderRepairMode ladderRepairModeFrom(Map<String, dynamic>? data) {
-  if (data != null && data['enabled'] == false) return LadderRepairMode.off;
-  switch (data?['connect_repair']) {
+  if (data == null) return LadderRepairMode.dryRun;
+  if (data['enabled'] == false) return LadderRepairMode.off;
+  switch (data['connect_repair']) {
+    case 'repair':
+      return LadderRepairMode.repair;
     case 'off':
       return LadderRepairMode.off;
-    case 'dry_run':
-      return LadderRepairMode.dryRun;
     default:
-      return LadderRepairMode.repair;
+      return LadderRepairMode.dryRun;
+  }
+}
+
+/// Read the mode through [read] (the config document's data, null when the
+/// document does not exist). A read that throws or does not answer within
+/// [timeout] is UNREADABLE and reads as dry run — never as repair.
+Future<LadderRepairMode> readLadderRepairMode(
+  Future<Map<String, dynamic>?> Function() read, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  try {
+    return ladderRepairModeFrom(await read().timeout(timeout));
+  } catch (_) {
+    return LadderRepairMode.dryRun;
   }
 }
 
@@ -651,6 +682,11 @@ class BaseLadderRepairRunner {
 
     // ── 4. One psave per bad preset, gated, no retry pass.
     final saved = <int>[];
+    // Any save that was ATTEMPTED may have applied live — a psave applies its
+    // state before it persists, and a save that timed out or returned false
+    // may still have landed. So the restore keys off attempts, not successes.
+    var attempted = false;
+    var restore = 'not_needed';
     d.pausePolling?.call();
     try {
       final expected = await _expectedShape();
@@ -664,27 +700,25 @@ class BaseLadderRepairRunner {
           read: () async => segmentShapeFromState(await d.svc.getState()),
           reprovision: _reprovision,
           label: 'ladder repair',
-          save: () => d.svc.savePreset(
-            presetId: step.presetId,
-            state: ladderRepairState(step.presetId, live),
-            presetName: step.name,
-          ),
+          save: () {
+            attempted = true;
+            return d.svc.savePreset(
+              presetId: step.presetId,
+              state: ladderRepairState(step.presetId, live),
+              presetName: step.name,
+            );
+          },
         );
         if (out.saved) saved.add(step.presetId);
         if (!out.saved) _log('p${step.presetId} not saved: ${out.message}');
       }
 
-      // ── 5. Restore the look the house had — every psave applied live.
-      if (saved.isNotEmpty) {
-        final restore = <String, dynamic>{
-          'transition': 0,
-          if (live['on'] != null) 'on': live['on'],
-          if (live['bri'] != null) 'bri': live['bri'],
-          if (live['seg'] != null) 'seg': live['seg'],
-        };
-        if (restore.length > 1 && !await d.svc.applyJson(restore)) {
-          _log('live-state restore after the repair FAILED');
-        }
+      // ── 5. Restore the house exactly as it was captured — every psave
+      // applied live, and the repair must leave no visible trace: an OFF house
+      // stays off (master `on:false` restored), a lit house gets its look back
+      // (master bri, every segment's on/colour/effect/palette/opacity/freeze).
+      if (attempted) {
+        restore = await _restoreLive(live) ? 'ok' : 'failed';
       }
     } finally {
       d.resumePolling?.call();
@@ -719,6 +753,7 @@ class BaseLadderRepairRunner {
       'saved': saved,
       'repaired': repaired,
       'still_bad': stillBad,
+      'restore': restore,
     };
     await _record(record);
     await d.store.markRan(d.controllerId, record);
@@ -746,6 +781,39 @@ class BaseLadderRepairRunner {
     return LadderRepairRun(outcome,
         'wrote ${saved.length} of ${plan.length} planned preset(s)',
         plan: plan, repairedIds: repaired, stillBadIds: stillBad);
+  }
+
+  /// PURE. The payload that puts [live] (a `/json/state` capture) back.
+  ///
+  /// Geometry (`start`/`stop`/`rev`/`mi`) is STRIPPED: a capture carries it,
+  /// the repair never changed it, and an apply must never re-state shape —
+  /// the wire pin strips it in release and ASSERTS in debug, which would
+  /// abort the restore after the saves and leave the house on the repair's
+  /// look. `transition: 0` snaps back with no fade.
+  @visibleForTesting
+  static Map<String, dynamic> restorePayloadFor(Map<String, dynamic> live) =>
+      stripGeometry(<String, dynamic>{
+        'transition': 0,
+        if (live['on'] != null) 'on': live['on'],
+        if (live['bri'] != null) 'bri': live['bri'],
+        if (live['seg'] != null) 'seg': live['seg'],
+      });
+
+  /// Apply [restorePayloadFor] once, and once more after the settle if the
+  /// controller did not accept it. True when it was accepted.
+  Future<bool> _restoreLive(Map<String, dynamic> live) async {
+    final payload = restorePayloadFor(live);
+    if (payload.length <= 1) return true; // captured nothing restorable
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await Future<void>.delayed(d.settle);
+      try {
+        if (await d.svc.applyJson(payload)) return true;
+      } catch (e) {
+        _log('restore attempt ${attempt + 1} threw: $e');
+      }
+    }
+    _log('live-state restore after the repair FAILED twice');
+    return false;
   }
 
   LadderRepairGate _gate(_FreshReads f, GameDayActivity activity) =>

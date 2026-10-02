@@ -301,16 +301,10 @@ final ladderRepairCoordinatorProvider = Provider<LadderRepairConsider>((ref) {
       participating: participating,
       now: nowFn,
       phoneUtcOffset: nowFn().timeZoneOffset,
-      mode: () async {
-        try {
-          final data = await ref
-              .read(baseLadderRepairConfigProvider.future)
-              .timeout(const Duration(seconds: 5));
-          return ladderRepairModeFrom(data);
-        } catch (_) {
-          return ladderRepairModeFrom(null);
-        }
-      },
+      // Absent or unreadable config = dry run; only an explicit "repair"
+      // writes (ladderRepairModeFrom).
+      mode: () => readLadderRepairMode(
+          () => ref.read(baseLadderRepairConfigProvider.future)),
       gameDay: ref.read(gameDayActivityProbeProvider),
       store: SharedPrefsLadderRepairStore(
         onStatus: (s) => ref.read(ladderRepairStatusProvider.notifier).show(s),

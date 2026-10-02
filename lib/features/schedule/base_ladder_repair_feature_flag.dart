@@ -83,10 +83,10 @@ bool _extractEnabled(DocumentSnapshot<Map<String, dynamic>> snap) {
 /// +114 — the whole `config/base_ladder_repair` document, for the on-connect
 /// ladder repair's MODE (`connect_repair`: repair | dry_run | off), which lives
 /// beside the kill switch. Emits null for every degraded state (missing doc,
-/// read error, 403); `ladderRepairModeFrom(null)` is `repair`, the same
-/// fail-open default as [baseLadderRepairEnabledProvider], and `enabled:false`
-/// still stops it. See base_ladder_repair.dart for why fail-open is right for a
-/// repair that only rewrites presets that do not light.
+/// read error, 403), and null reads as DRY RUN: the repair writes to a
+/// controller only on an explicit `connect_repair: "repair"` (owner decision
+/// 2026-10-02 — the opposite of [baseLadderRepairEnabledProvider]'s fail-open,
+/// on purpose; see `ladderRepairModeFrom`).
 final baseLadderRepairConfigProvider =
     StreamProvider<Map<String, dynamic>?>((ref) async* {
   try {
