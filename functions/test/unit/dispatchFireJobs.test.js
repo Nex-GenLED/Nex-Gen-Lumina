@@ -300,3 +300,142 @@ describe("A2: retries", () => {
     expect((await job(f)).state).toBe("dispatched");
   });
 });
+
+// ---------------------------------------------------------------------------
+// B2 / B3 — what the dispatcher records about a Game Day fire: the scorecard
+// entry's start.* / end.*, and users/{uid}.gameday_server.last_fire.
+// ---------------------------------------------------------------------------
+describe("B2/B3: scorecard and last_fire", () => {
+  const { runSweepTick } = require("../../lib/sweepExpiredCommands");
+  const DAY = "2026-10-11";
+  const SC = (eventId = EVENT) => `gameday_scorecard/${DAY}/entries/${UID}_${eventId}`;
+  const SESSION = (eventId = EVENT) => `users/${UID}/game_day_sessions/${eventId}`;
+  const BUDGET = { retryUntil: { toMillis: () => NOW + 30 * M } };
+  const at = async (f, ms, fn) => { f.setNow(ms); return fn(ms); };
+
+  /** What the planner leaves behind at mint (B3). */
+  function minted(f, eventId = EVENT) {
+    f.put(SESSION(eventId), { startPlannedAt: f.ts(NOW - 6 * 60 * M), scorecard_key: DAY });
+    f.put(SC(eventId), {
+      uid: UID, event_id: eventId, served: true,
+      start: { job_id: `${eventId}_start`, state: "scheduled", attempts: 0 },
+      end: null, stuck_executing_count: 0, controllers_fired: 0,
+    });
+  }
+
+  test("dispatch → completed fills start.* and publishes last_fire", async () => {
+    const f = world({ job: BUDGET });
+    minted(f);
+    await at(f, NOW, (t) => tick(f, t));
+    let sc = await read(f, SC());
+    expect(sc.start).toMatchObject({ state: "dispatched", attempts: 1 });
+    expect(sc.start.dispatched_at.toMillis()).toBe(NOW);
+
+    const j = await read(f, JOB(`${EVENT}_start`));
+    f.patch(CMD(j.commandId), { status: "completed", completedAt: f.ts(NOW + 2_000) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+
+    sc = await read(f, SC());
+    expect(sc.start).toMatchObject({ state: "completed", outcome: "completed", attempts: 1 });
+    // fireAt (NOW − 10 s) → completed (NOW + 2 s)
+    expect(sc.start.latency_ms).toBe(12_000);
+    expect(sc.start.command_latency_ms).toBe(2_000);
+    expect(sc.controllers_fired).toBe(1);
+
+    const lf = (await read(f, `users/${UID}`)).gameday_server.last_fire;
+    expect(lf).toMatchObject({ event_id: EVENT, seq: "start", state: "completed", latency_ms: 12_000 });
+    expect(lf.completed_at.toMillis()).toBe(NOW + 2_000);
+  });
+
+  test("a retry is recorded; latency is measured from the FIRST fireAt; stuck is counted", async () => {
+    const f = world({ job: BUDGET });
+    minted(f);
+    await at(f, NOW, (t) => tick(f, t));
+    const first = await read(f, JOB(`${EVENT}_start`));
+    f.patch(CMD(first.commandId), { status: "executing" });
+    await at(f, NOW + 190 * S, (t) => runSweepTick(f.db, t)); // stuck → failed
+    await at(f, NOW + 200 * S, (t) => tick(f, t)); // retry
+    let sc = await read(f, SC());
+    expect(sc.start).toMatchObject({ state: "scheduled", retries: 1, last_outcome: "stuck_executing" });
+    expect(sc.stuck_executing_count).toBe(1);
+
+    await at(f, NOW + 240 * S, (t) => tick(f, t)); // attempt 2
+    const second = await read(f, JOB(`${EVENT}_start`));
+    f.patch(CMD(second.commandId), { status: "completed", completedAt: f.ts(NOW + 242 * S) });
+    await at(f, NOW + 300 * S, (t) => tick(f, t));
+    sc = await read(f, SC());
+    expect(sc.start).toMatchObject({ state: "completed", attempts: 2 });
+    expect(sc.start.latency_ms).toBe(252 * S); // from NOW − 10 s, the fire's first due time
+  });
+
+  test("an end's final → completed latency uses the planner's espn_final_seen_at", async () => {
+    const f = world({ job: { seq: "end", payload: '{"ps":1}', ...BUDGET } });
+    f.store.delete(JOB(`${EVENT}_start`));
+    f.put(JOB(`${EVENT}_end`), {
+      eventId: EVENT, seq: "end", controllerId: CTRL, fireAt: f.ts(NOW - 10 * S),
+      type: "applyJson", payload: '{"ps":1}', state: "scheduled", source: "game_day", ...BUDGET,
+    });
+    minted(f);
+    f.patch(SC(), { end: { state: "scheduled", espn_final_seen_at: f.ts(NOW - 6 * M) } });
+    await at(f, NOW, (t) => tick(f, t));
+    const j = await read(f, JOB(`${EVENT}_end`));
+    f.patch(CMD(j.commandId), { status: "completed", completedAt: f.ts(NOW + 3_000) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+    const sc = await read(f, SC());
+    expect(sc.end).toMatchObject({ state: "completed", latency_ms: 13_000 });
+    expect(sc.end.latency_from_final_ms).toBe(6 * M + 3_000);
+  });
+
+  test("a hand-off end is mirrored onto the SURVIVOR's start", async () => {
+    const SURV = `gd_nfl_other_9000002`;
+    const f = world();
+    f.store.delete(JOB(`${EVENT}_start`));
+    f.put(JOB(`${EVENT}_end`), {
+      eventId: EVENT, seq: "end", controllerId: CTRL, fireAt: f.ts(NOW - 10 * S),
+      type: "applyJson", payload: START_PAYLOAD, state: "scheduled", source: "game_day",
+      handoffTo: SURV, handoffToTeam: "nfl_other",
+    });
+    minted(f);
+    minted(f, SURV);
+    f.patch(SC(SURV), { start: { job_id: `${EVENT}_end`, state: "scheduled", attempts: 0 } });
+    await at(f, NOW, (t) => tick(f, t));
+    expect((await read(f, SC(SURV))).start).toMatchObject({ state: "dispatched", attempts: 1 });
+    const j = await read(f, JOB(`${EVENT}_end`));
+    f.patch(CMD(j.commandId), { status: "completed", completedAt: f.ts(NOW + S) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+    const surv = await read(f, SC(SURV));
+    expect(surv.start).toMatchObject({ state: "completed", outcome: "completed" });
+    expect(surv.controllers_fired).toBe(1);
+  });
+
+  test("an event minted BEFORE this shipped gets no invented entry", async () => {
+    const f = world({ job: BUDGET });
+    await at(f, NOW, (t) => tick(f, t));
+    const j = await read(f, JOB(`${EVENT}_start`));
+    f.patch(CMD(j.commandId), { status: "completed", completedAt: f.ts(NOW + S) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+    expect(await read(f, SC())).toBeUndefined();
+    expect((await read(f, JOB(`${EVENT}_start`))).state).toBe("completed"); // the fire itself is unaffected
+  });
+
+  test("publish_server_status:false → no last_fire", async () => {
+    const f = world({ job: BUDGET });
+    f.put("config/gameday_planner", { write_jobs: true, publish_server_status: false });
+    minted(f);
+    await at(f, NOW, (t) => tick(f, t));
+    const j = await read(f, JOB(`${EVENT}_start`));
+    f.patch(CMD(j.commandId), { status: "completed", completedAt: f.ts(NOW + S) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+    expect((await read(f, `users/${UID}`)).gameday_server).toBeUndefined();
+    expect((await read(f, SC())).start.state).toBe("completed"); // the scorecard is not gated
+  });
+
+  test("a non-Game-Day fire job is not observed", async () => {
+    const f = world({ job: { eventId: "bench_probe_1", seq: "start" } });
+    await at(f, NOW, (t) => tick(f, t));
+    const j = await read(f, JOB(`${EVENT}_start`));
+    f.patch(CMD(j.commandId), { status: "completed", completedAt: f.ts(NOW + S) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+    expect((await read(f, `users/${UID}`)).gameday_server).toBeUndefined();
+  });
+});

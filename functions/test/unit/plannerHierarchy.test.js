@@ -48,74 +48,34 @@ const RGB = {
 };
 
 // ---------------------------------------------------------------------------
-// In-memory Firestore. Path-keyed, doc-id ordered, with the exact surface the
-// planner uses: collection().get(), .where("f","==",v), .doc().get/set/update/
-// create(), and users/{uid}.ref.set(). FieldValue sentinels are stored as-is.
+// In-memory Firestore: the SHARED fake (support/fakeFirestore.js), wrapped in
+// the helper surface this suite was written against. Since B1 (2026-10-02)
+// the planner also reads the bridge registry, the heartbeat's update time and
+// the app-version breadcrumbs, and writes a P6 probe — the shared fake has the
+// query/transaction/updateTime surface those need. `tick` keeps the fake's
+// clock and the bridge heartbeat in step with the planner's `now`, as a live
+// bridge would.
 // ---------------------------------------------------------------------------
-function makeDb(seed) {
-  const store = new Map();
-  const writes = [];
-  const reads = [];
-  const parentOf = (p) => p.split("/").slice(0, -1).join("/");
-  const idOf = (p) => p.split("/").pop();
+const { makeFakeFirestore } = require("./support/fakeFirestore");
+const fakes = new WeakMap();
 
-  const snap = (path) => {
-    const data = store.get(path);
-    return {
-      id: idOf(path),
-      exists: data !== undefined,
-      data: () => (data === undefined ? undefined : { ...data }),
-      get: (f) => (data === undefined ? undefined : data[f]),
-      ref: docRef(path),
-    };
-  };
-  const docRef = (path) => ({
-    id: idOf(path),
-    path,
-    collection: (name) => collRef(`${path}/${name}`),
-    get: async () => { reads.push(path); return snap(path); },
-    set: async (data, opts) => {
-      const prev = store.get(path);
-      store.set(path, opts && opts.merge && prev ? { ...prev, ...data } : { ...data });
-      writes.push({ op: "set", path, data });
-    },
-    update: async (data) => {
-      const prev = store.get(path);
-      if (prev === undefined) throw new Error(`update on missing ${path}`);
-      store.set(path, { ...prev, ...data });
-      writes.push({ op: "update", path, data });
-    },
-    create: async (data) => {
-      if (store.has(path)) { const e = new Error("already exists"); e.code = 6; throw e; }
-      store.set(path, { ...data });
-      writes.push({ op: "create", path, data });
-    },
-  });
-  const collRef = (path, filters = []) => ({
-    doc: (id) => docRef(`${path}/${id}`),
-    where: (f, op, v) => {
-      if (op !== "==") throw new Error(`unexpected op ${op}`);
-      return collRef(path, [...filters, [f, v]]);
-    },
-    limit: () => collRef(path, filters),
-    get: async () => {
-      const docs = [...store.keys()]
-        .filter((p) => parentOf(p) === path)
-        .sort()
-        .map(snap)
-        .filter((s) => filters.every(([f, v]) => s.get(f) === v));
-      return { docs, empty: docs.length === 0 };
-    },
-  });
-  for (const [path, data] of Object.entries(seed)) store.set(path, { ...data });
+function makeDb(seed) {
+  const f = makeFakeFirestore({ now: at(0) });
+  for (const [path, data] of Object.entries(seed)) f.put(path, data);
+  fakes.set(f.db, f);
   return {
-    db: { collection: (name) => collRef(name) },
-    store, writes, reads,
-    get: (p) => store.get(p),
-    job: (id) => store.get(`users/${UID}/fire_jobs/${id}`),
-    session: (eventId) => store.get(`users/${UID}/game_day_sessions/${eventId}`),
+    db: f.db,
+    reads: f.reads,
+    writes: f.writes,
+    get: (p) => f.get(p),
+    job: (id) => f.get(`users/${UID}/fire_jobs/${id}`),
+    session: (eventId) => f.get(`users/${UID}/game_day_sessions/${eventId}`),
     /** The dispatcher, in one line. */
-    dispatched: (id) => { const j = store.get(`users/${UID}/fire_jobs/${id}`); if (!j) throw new Error(`no job ${id}`); j.state = "completed"; },
+    dispatched: (id) => {
+      if (!f.get(`users/${UID}/fire_jobs/${id}`)) throw new Error(`no job ${id}`);
+      f.patch(`users/${UID}/fire_jobs/${id}`, { state: "completed" });
+    },
+    fake: f,
   };
 }
 
@@ -127,11 +87,15 @@ function seed({ user = {}, configs }) {
   const s = {
     [`users/${UID}`]: { ...user },
     [`users/${UID}/controllers/${CTRL}`]: {
-      ip: "192.168.1.150",
+      ip: "192.0.2.150",
       participating_channels: [0, 1],
       participating_channels_device_ids: [0, 1],
       participating_channels_at: { toMillis: () => at(0) },
+      // B1 P4: the base ladder is verified, so pre-flight passes.
+      base_ladder_asserts_segments: true,
     },
+    // B1 P1: a bridge is paired to the account.
+    ["bridge_registry/BR_TEST_HIER"]: { pairedUid: UID, status: "paired" },
   };
   for (const [slug, over] of Object.entries(configs)) {
     const t = TEAMS[slug];
@@ -179,7 +143,15 @@ function games(spec) {
 const ev = (slug, gameId) => `gd_${slug}_${gameId}`;
 const payloadOf = (job) => JSON.parse(job.payload);
 const firstColor = (job) => payloadOf(job).seg[0].col[0];
-const tick = (db, t) => runPlannerTick(db, t, ARMED);
+const tick = (db, t) => {
+  const f = fakes.get(db);
+  if (f) {
+    f.setNow(t);
+    // B1 P2: the bridge heartbeats every 30 s.
+    f.put(`users/${UID}/bridge_status/current`, { uptime: 1, version: "1.2" });
+  }
+  return runPlannerTick(db, t, ARMED);
+};
 const rows = (res, pred) => res.logRows.filter(pred);
 
 beforeEach(() => {

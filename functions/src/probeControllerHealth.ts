@@ -97,7 +97,21 @@ export async function probeOneController(args: {
    */
   bridgePaired?: boolean;
   monitoringExcluded?: boolean;
-}): Promise<{ written: boolean; reason: string }> {
+  /**
+   * B1 (2026-10-02). The Game Day pre-flight reuses this writer for its P6
+   * reachability probe. Defaults keep the daily probe byte-for-byte unchanged:
+   *   source       PROBE_SOURCE ("health_probe") — the collector folds ONLY
+   *                this source, so a pre-flight probe never touches the
+   *                controller_health record or its alert counters.
+   *   skipBackoff  false — the daily cadence's weekly backoff for a dark
+   *                controller. Pre-flight must probe regardless: "is it
+   *                reachable before THIS game" is not a cadence question.
+   *   idPrefix     "health" — the deterministic doc-id stem.
+   */
+  source?: string;
+  skipBackoff?: boolean;
+  idPrefix?: string;
+}): Promise<{ written: boolean; reason: string; commandId?: string }> {
   const { db, uid, controllerId, controllerIp, totalControllersForUser, pendingCommands, nowMs } =
     args;
 
@@ -112,17 +126,19 @@ export async function probeOneController(args: {
   // One extra read per controller per day (15/day at today's fleet). Cheap, and
   // it is what stops a permanently-dark controller costing a write every day
   // forever while still catching a repair inside a week.
-  const healthSnap = await db
-    .collection("users")
-    .doc(uid)
-    .collection("controller_health")
-    .doc(controllerId)
-    .get();
-  const previous = healthSnap.exists
-    ? (healthSnap.data() as Partial<ControllerHealthRecord>)
-    : null;
-  const due = shouldProbeToday(previous, nowMs);
-  if (!due.probe) return { written: false, reason: due.reason };
+  if (!args.skipBackoff) {
+    const healthSnap = await db
+      .collection("users")
+      .doc(uid)
+      .collection("controller_health")
+      .doc(controllerId)
+      .get();
+    const previous = healthSnap.exists
+      ? (healthSnap.data() as Partial<ControllerHealthRecord>)
+      : null;
+    const due = shouldProbeToday(previous, nowMs);
+    if (!due.probe) return { written: false, reason: due.reason };
+  }
 
   // ── One-in-flight-per-controller (audit/COMMAND_SAFETY.md §3.4) ──────────
   // A1: age-capped for `executing` — an abandoned claim no longer blocks.
@@ -145,7 +161,7 @@ export async function probeOneController(args: {
   }
 
   const fireAtSeconds = Math.floor(nowMs / 1000);
-  const docId = fireJobDocId(`health_${controllerId}`, fireAtSeconds);
+  const docId = fireJobDocId(`${args.idPrefix ?? "health"}_${controllerId}`, fireAtSeconds);
 
   const payload: Record<string, unknown> = {
     type: PROBE_TYPE,
@@ -159,7 +175,7 @@ export async function probeOneController(args: {
     // 120 s DEFAULT_COMMAND_TTL_MS is sized for an app command with a user
     // waiting; a probe is a liveness measurement and a late one is worthless.
     expiresAt: admin.firestore.Timestamp.fromMillis(nowMs + PROBE_GRACE_MS),
-    source: PROBE_SOURCE,
+    source: args.source ?? PROBE_SOURCE,
     webhookUrl: null,
   };
 
@@ -176,13 +192,13 @@ export async function probeOneController(args: {
     // so the write itself is the idempotency barrier and a retried invocation
     // cannot double-probe (commandSafety.fireJobDocId's contract).
     await ref.create(payload);
-    return { written: true, reason: target.targeting };
+    return { written: true, reason: target.targeting, commandId: docId };
   } catch (err) {
     const code = (err as { code?: unknown })?.code;
     // 6 / "already-exists" — a retry of this same tick. Treat as success: the
     // probe exists, which is the outcome we wanted.
     if (code === 6 || code === "already-exists") {
-      return { written: false, reason: "already_exists_idempotent" };
+      return { written: false, reason: "already_exists_idempotent", commandId: docId };
     }
     throw err;
   }

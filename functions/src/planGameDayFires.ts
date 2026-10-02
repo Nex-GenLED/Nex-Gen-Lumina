@@ -24,6 +24,17 @@
  *        scope COLLECTION, single-field equality → automatic single-field index
  *   3. users/{uid}/fire_jobs .where("eventId","==",X)
  *        scope COLLECTION, single-field equality → automatic single-field index
+ *   B1/B2 (2026-10-02), allowlisted accounts only:
+ *   4. bridge_registry .where("pairedUid","==",uid).limit(1)       (P1)
+ *        scope COLLECTION, single-field equality → automatic index (the same
+ *        query relayEligibility already runs in production)
+ *   5. users/{uid}/debug_errors .orderBy("timestamp","desc").limit(25)  (P7)
+ *        scope COLLECTION, single-field order → automatic index; the context
+ *        filter is applied in memory precisely so no composite is needed
+ *   6. users/{uid}/commands .where("status","in",[pending,executing])  (P6)
+ *        scope COLLECTION, single-field `in` → automatic index (as the probe)
+ *   7. users/{uid}/fire_jobs .where("state","==","scheduled")      (B2 next_fire)
+ *        scope COLLECTION, single-field equality → automatic index
  *
  * **NO collection-group query is used anywhere in this file.** That is a
  * deliberate constraint, not a coincidence: iterating users and then reading
@@ -55,7 +66,30 @@ import {
   endRetryUntilMs,
   FIRE_JOBS_COLLECTION,
   startRetryUntilMs,
+  teamSlugFromEventId,
 } from "./fireJobs";
+import {
+  NextFire,
+  PreflightMode,
+  PreflightVerdict,
+  PREFLIGHT_PROBE_ID_PREFIX,
+  PREFLIGHT_PROBE_SOURCE,
+  SCORECARD_COLLECTION,
+  SCORECARD_ENTRIES,
+  ServerStatusCore,
+  decideP6,
+  evaluatePreflight,
+  p6HoldsAccount,
+  p6RecordFrom,
+  preflightModeFrom,
+  publishServerStatusFrom,
+  scorecardDateKey,
+  scorecardEntryId,
+  serverStatusKey,
+  storedServerStatusKey,
+} from "./gameDayPreflight";
+import { hasPairedBridge } from "./relayEligibility";
+import { probeOneController } from "./probeControllerHealth";
 import {
   PLAN_HORIZON_MS,
   argbToRgb,
@@ -141,6 +175,18 @@ interface PlanStats {
   skipped: Record<string, number>;
   /** END-phase outcomes. Reconciles against `endsPlanned`, not against START. */
   endSkipped: Record<string, number>;
+  /**
+   * B1. Allowlisted, gate-armed accounts whose NEW starts pre-flight withheld
+   * this tick (enforce mode), plus P6 skips of an already-minted start. Not a
+   * START bucket: the config still counts once in `skipped`/`startsPlanned`.
+   */
+  preflightSkips: number;
+  /** B1. The same failures in observe mode — logged, nothing withheld. */
+  preflightObserved: number;
+  /** B1 P6. Reachability probes written this tick. */
+  p6Probes: number;
+  /** B2. users/{uid}.gameday_server writes this tick. */
+  serverStatusWrites: number;
   espnErrors: number;
   errors: number;
 }
@@ -209,18 +255,124 @@ export function writesJobsFor(policy: WriteJobsPolicy, uid: string): boolean {
   return policy.allowlist.includes(uid);
 }
 
-/** Read the write-jobs policy. Defaults OFF — log-only until deliberately on. */
-async function readWriteJobsPolicy(
-  db: admin.firestore.Firestore
-): Promise<WriteJobsPolicy> {
+/** Everything the planner reads from `config/gameday_planner`, once per tick. */
+export interface PlannerFlags {
+  policy: WriteJobsPolicy;
+  /** B2 — write users/{uid}.gameday_server. Default true. */
+  publishServerStatus: boolean;
+  /** B1 — enforce (default) or observe. */
+  preflightMode: PreflightMode;
+}
+
+/**
+ * Read the flags. Defaults: write-jobs OFF (log-only until deliberately on),
+ * publish ON, pre-flight ENFORCE. A read failure keeps log-only AND stops the
+ * status publish for that tick: a transient error must not flip every account
+ * to `served:false` — the app's staleness window covers a longer outage.
+ */
+async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerFlags> {
   try {
     const d = await db.collection("config").doc("gameday_planner").get();
-    if (!d.exists) return WRITE_JOBS_OFF;
-    return writeJobsPolicyFrom(d.data());
+    const data = d.exists ? d.data() : undefined;
+    return {
+      policy: d.exists ? writeJobsPolicyFrom(data) : WRITE_JOBS_OFF,
+      publishServerStatus: publishServerStatusFrom(data),
+      preflightMode: preflightModeFrom(data),
+    };
   } catch (err) {
     logger.warn("planGameDayFires: flag read failed; staying LOG-ONLY", err);
-    return WRITE_JOBS_OFF;
+    return { policy: WRITE_JOBS_OFF, publishServerStatus: false, preflightMode: "enforce" };
   }
+}
+
+/**
+ * B1 — the I/O half of pre-flight for one account: P1 (registry), P2 (heartbeat
+ * update time), P7 (last app version). Every read fails SOFT: an error makes
+ * P1 pass (fail open, the relay predicate's rule), P2 read as no heartbeat,
+ * and P7 unknown. The decision itself is gameDayPreflight.evaluatePreflight.
+ */
+async function readPreflightFacts(
+  db: admin.firestore.Firestore,
+  uid: string
+): Promise<{
+  bridgePaired: boolean | null;
+  bridgeStatusUpdateMs: number | null;
+  bridgeFw: string | null;
+  appVersion: string | null;
+}> {
+  let bridgePaired: boolean | null = null;
+  try {
+    bridgePaired = await hasPairedBridge(db, uid);
+  } catch (err) {
+    logger.warn(`planGameDayFires: preflight P1 lookup failed for ${uid}; failing open`, err);
+  }
+  let bridgeStatusUpdateMs: number | null = null;
+  let bridgeFw: string | null = null;
+  try {
+    const bs = await db.collection("users").doc(uid).collection("bridge_status").doc("current").get();
+    if (bs.exists) {
+      bridgeStatusUpdateMs = bs.updateTime ? bs.updateTime.toMillis() : null;
+      const v = bs.get("version");
+      bridgeFw = typeof v === "string" ? v : null;
+    }
+  } catch (err) {
+    logger.warn(`planGameDayFires: preflight P2 read failed for ${uid}`, err);
+  }
+  let appVersion: string | null = null;
+  try {
+    // The routing-diagnostics batches carry app_version. No composite index:
+    // newest 25 by the single-field timestamp index, filtered in memory.
+    const recent = await db
+      .collection("users").doc(uid).collection("debug_errors")
+      .orderBy("timestamp", "desc").limit(25).get();
+    for (const d of recent.docs) {
+      if (d.get("context") === "routing_decisions" && typeof d.get("app_version") === "string") {
+        appVersion = d.get("app_version") as string;
+        break;
+      }
+    }
+  } catch (err) {
+    logger.warn(`planGameDayFires: preflight P7 read failed for ${uid}`, err);
+  }
+  return { bridgePaired, bridgeStatusUpdateMs, bridgeFw, appVersion };
+}
+
+/** B3 — one scorecard entry, merged. Never throws: observability must not stop planning. */
+async function mergeScorecard(
+  db: admin.firestore.Firestore,
+  dateKey: string,
+  uid: string,
+  eventId: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  try {
+    const day = db.collection(SCORECARD_COLLECTION).doc(dateKey);
+    await day.set(
+      { date: dateKey, updated_at: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    await day
+      .collection(SCORECARD_ENTRIES)
+      .doc(scorecardEntryId(uid, eventId))
+      .set({ ...data, updated_at: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  } catch (err) {
+    logger.warn(`planGameDayFires: scorecard write failed for ${uid}/${eventId}`, err);
+  }
+}
+
+/** The reserved / zeroed fields every new scorecard entry starts with. */
+function scorecardSkeleton(): Record<string, unknown> {
+  return {
+    controllers_fired: 0,
+    // E (Policy B re-assert) is not built; zeroes, so a reader never sees undefined.
+    reasserts: { planned: 0, completed: 0, user_override: 0 },
+    // G (server celebrations) is not built.
+    celebrations: null,
+    stuck_executing_count: 0,
+    // C (app build 113) owns these; null = not measured, never "zero".
+    lease_residue_rows: null,
+    app_foreground_during_game: null,
+  };
 }
 
 /**
@@ -322,6 +474,156 @@ export function eventIdFor(teamSlug: string, gameId: string): string {
   return `gd_${teamSlug}_${gameId}`;
 }
 
+/**
+ * B1 P6 — one step of the reachability check for one event (gameDayPreflight
+ * .decideP6 decides; this does the reads and writes). Called at mint and on
+ * every later tick while this system's start is still `scheduled`.
+ *
+ * `unreachable` in ENFORCE mode skips the start (state `skipped`, never
+ * `cancelled`: per the #98 convention `cancelled` means a HUMAN retracted a
+ * fire; this is the system declining). The skip is transactional on the job
+ * still being `scheduled`, so a start the dispatcher already fired is never
+ * rewritten. In OBSERVE mode the verdict is recorded and logged and nothing is
+ * skipped.
+ */
+async function stepP6(a: {
+  db: admin.firestore.Firestore;
+  uid: string;
+  eventId: string;
+  teamSlug: string;
+  sRef: admin.firestore.DocumentReference;
+  controller: admin.firestore.QueryDocumentSnapshot;
+  controllersTotal: number;
+  record: ReturnType<typeof p6RecordFrom>;
+  startFireAtMs: number;
+  nowMs: number;
+  mode: PreflightMode;
+  bridgePaired: boolean | null;
+  scorecardKey: string | null;
+  logRows: Array<Record<string, unknown>>;
+  stats: PlanStats;
+}): Promise<void> {
+  const { db, uid, eventId, teamSlug, sRef, nowMs } = a;
+  try {
+    if (a.record?.verdict === "ok" || a.record?.verdict === "unreachable") return;
+    const startRef = db.collection("users").doc(uid)
+      .collection(FIRE_JOBS_COLLECTION).doc(`${eventId}_start`);
+    const startSnap = await startRef.get();
+    if (startSnap.get("state") !== "scheduled") return;
+
+    const cmds = db.collection("users").doc(uid).collection("commands");
+    const statuses: Array<string | null> = [];
+    for (const p of a.record?.probes ?? []) {
+      const d = await cmds.doc(p.commandId).get();
+      statuses.push(d.exists ? String(d.get("status")) : null);
+    }
+    const action = decideP6({
+      record: a.record,
+      statuses,
+      nowMs,
+      startFireAtMs: a.startFireAtMs,
+    });
+
+    if (action.kind === "wait" || action.kind === "too_close") return;
+
+    if (action.kind === "ok") {
+      await sRef.set(
+        { preflight_p6: { probes: a.record?.probes ?? [], verdict: "ok" } },
+        { merge: true }
+      );
+      return;
+    }
+
+    if (action.kind === "write_probe") {
+      const inflight = await cmds.where("status", "in", ["pending", "executing"]).get();
+      const ipRaw = a.controller.get("ip");
+      const res = await probeOneController({
+        db, uid,
+        controllerId: a.controller.id,
+        controllerIp: typeof ipRaw === "string" && ipRaw.length > 0 ? ipRaw : null,
+        totalControllersForUser: a.controllersTotal,
+        pendingCommands: inflight.docs.map((d) => ({
+          controllerId: d.get("controllerId"),
+          status: d.get("status"),
+          createdAt: d.get("createdAt") ?? null,
+        })),
+        nowMs,
+        // P1's own answer (a lookup error fails open as paired).
+        bridgePaired: a.bridgePaired !== false,
+        // A Game Day check, not health monitoring: the exclusion flag is for
+        // digests and the daily cadence, not for "can tonight's fire land".
+        monitoringExcluded: false,
+        source: PREFLIGHT_PROBE_SOURCE,
+        skipBackoff: true,
+        idPrefix: PREFLIGHT_PROBE_ID_PREFIX,
+      });
+      if (!res.commandId) {
+        // in_flight / unresolvable_target / no_paired_bridge: try next tick.
+        a.logRows.push({ uid, teamSlug, eventId, action: "preflight_probe_deferred", reason: res.reason });
+        return;
+      }
+      const keep = action.n === 1 ? [] : (a.record?.probes ?? []).slice(0, 1);
+      await sRef.set(
+        {
+          preflight_p6: {
+            probes: [...keep, { commandId: res.commandId, writtenAtMs: nowMs }],
+            verdict: "pending",
+          },
+        },
+        { merge: true }
+      );
+      if (res.written) a.stats.p6Probes++;
+      return;
+    }
+
+    // unreachable — two consecutive failures, five minutes apart.
+    await sRef.set(
+      {
+        preflight_p6: { probes: a.record?.probes ?? [], verdict: "unreachable" },
+        served: false,
+        served_reason: "preflight_controller_unreachable",
+      },
+      { merge: true }
+    );
+    if (a.mode === "observe") {
+      a.logRows.push({
+        uid, teamSlug, eventId, action: "preflight_skip",
+        reason: "preflight_controller_unreachable", observeOnly: true,
+      });
+      a.stats.preflightObserved++;
+      return;
+    }
+    const skipped = await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(startRef);
+      if (fresh.get("state") !== "scheduled") return false;
+      tx.update(startRef, {
+        state: "skipped",
+        skipReason: "preflight_controller_unreachable",
+        skippedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+    if (!skipped) return;
+    a.logRows.push({
+      uid, teamSlug, eventId, action: "preflight_skip",
+      reason: "preflight_controller_unreachable",
+    });
+    a.stats.preflightSkips++;
+    if (a.scorecardKey) {
+      await mergeScorecard(db, a.scorecardKey, uid, eventId, {
+        served: false,
+        preflight_ok: false,
+        preflight_reasons: admin.firestore.FieldValue.arrayUnion("preflight_controller_unreachable"),
+        start: { state: "skipped", outcome: "preflight_controller_unreachable" },
+      });
+    }
+  } catch (err) {
+    // P6 is a check, never a reason to stop planning. A failed step retries
+    // on the next tick; the start stands.
+    logger.warn(`planGameDayFires: P6 step failed for ${uid}/${eventId}`, err);
+  }
+}
+
 export async function runPlannerTick(
   db: admin.firestore.Firestore,
   nowMs: number,
@@ -329,16 +631,26 @@ export async function runPlannerTick(
     onlyUid?: string;
     forceWriteJobs?: boolean;
     forcePolicy?: WriteJobsPolicy;
+    /** Overrides for the B1/B2 flags when the policy is forced (tests, bench). */
+    forceFlags?: { publishServerStatus?: boolean; preflightMode?: PreflightMode };
   } = {}
 ): Promise<PlanStats & { logRows: Array<Record<string, unknown>> }> {
   // Policy, not a boolean: `write_jobs` can be armed globally or scoped to a
   // uid allowlist. forceWriteJobs is kept for existing callers/tests and means
-  // "globally armed".
-  const policy: WriteJobsPolicy =
-    opts.forcePolicy ??
-    (opts.forceWriteJobs === undefined
-      ? await readWriteJobsPolicy(db)
-      : { enabled: opts.forceWriteJobs, allowlist: null });
+  // "globally armed". A forced policy takes the documented flag DEFAULTS
+  // (publish on, pre-flight enforce) unless forceFlags says otherwise — the
+  // production path, not a test-only shape.
+  const forced =
+    opts.forcePolicy !== undefined || opts.forceWriteJobs !== undefined;
+  const flags: PlannerFlags = forced
+    ? {
+        policy:
+          opts.forcePolicy ?? { enabled: opts.forceWriteJobs === true, allowlist: null },
+        publishServerStatus: opts.forceFlags?.publishServerStatus ?? true,
+        preflightMode: opts.forceFlags?.preflightMode ?? "enforce",
+      }
+    : await readPlannerFlags(db);
+  const policy: WriteJobsPolicy = flags.policy;
   const stats: PlanStats = {
     usersScanned: 0,
     configsEnabled: 0,
@@ -348,6 +660,10 @@ export async function runPlannerTick(
     hardCapsPlanned: 0,
     skipped: {},
     endSkipped: {},
+    preflightSkips: 0,
+    preflightObserved: 0,
+    p6Probes: 0,
+    serverStatusWrites: 0,
     espnErrors: 0,
     errors: 0,
   };
@@ -368,6 +684,7 @@ export async function runPlannerTick(
     // clear F1 (the end path has never executed) fleet-wide.
     const allowlisted = writesJobsFor(policy, uid);
     if (opts.onlyUid && uid !== opts.onlyUid) continue;
+    const udata = u.data() || {};
 
     const configs = await db
       .collection("users")
@@ -375,7 +692,26 @@ export async function runPlannerTick(
       .collection("game_day_autopilot")
       .where("enabled", "==", true) // COLLECTION scope → automatic index
       .get();
-    if (configs.empty) continue;
+    if (configs.empty) {
+      // B2: an account the server WAS serving, whose last team was disabled
+      // or deleted, must stop saying so now — not when the app's staleness
+      // window lapses. Only accounts carrying served:true pay a write.
+      const prior = udata.gameday_server as Record<string, unknown> | undefined;
+      if (flags.publishServerStatus && prior?.served === true) {
+        try {
+          await u.ref.update({
+            "gameday_server.served": false,
+            "gameday_server.teams": [],
+            "gameday_server.next_fire": null,
+            "gameday_server.checked_at": admin.firestore.FieldValue.serverTimestamp(),
+          });
+          stats.serverStatusWrites++;
+        } catch (_) {
+          /* a failed status write must never stop planning */
+        }
+      }
+      continue;
+    }
     stats.usersScanned++;
 
     // One controller read per user, shared by every config.
@@ -388,7 +724,6 @@ export async function runPlannerTick(
     // accounts predate the old client prompt, so a toggle-time check would
     // still gate nobody. An already-enabled account is evaluated here with
     // no user action, and graduates the tick after it becomes ready.
-    const udata = u.data() || {};
     // The R1 floor check and its `/users/{uid}/schedules` probe were removed
     // 2026-08-26. That read ran per account per tick purely to feed R1, so it
     // goes with it rather than lingering as an unused cost.
@@ -487,10 +822,12 @@ export async function runPlannerTick(
     const windowByEvent = new Map<string, TeamWindow>();
     const sessionByEvent = new Map<string, Record<string, unknown>>();
     const configByEvent = new Map<string, Record<string, unknown>>();
+    // B4: the user's own zone when usable (IANA), else the fleet's UTC−5.
+    // Shared by the pre-pass window and the B3 scorecard date.
+    const offsetHoursAt = tzOffsetResolverFor(udata);
     if (controller) {
       const lat = u.get("latitude");
       const lon = u.get("longitude");
-      const offsetHoursAt = tzOffsetResolverFor(udata);
       for (let order = 0; order < orderedDocs.length; order++) {
         const d = orderedDocs[order];
         const c = d.data();
@@ -538,6 +875,51 @@ export async function runPlannerTick(
       }
     }
 
+    // ── B1 PRE-FLIGHT (plan §3.7) ──────────────────────────────────────
+    // Allowlisted accounts only: a scoped-out account fires nothing, so it
+    // pays none of these reads. Evaluated every tick; gates the minting of NEW
+    // starts (`writeStarts`) and never an end — see gameDayPreflight.ts.
+    let preflight: PreflightVerdict | null = null;
+    let bridgePairedForProbe: boolean | null = null;
+    let bridgeFw: string | null = null;
+    if (allowlisted) {
+      const facts = await readPreflightFacts(db, uid);
+      bridgePairedForProbe = facts.bridgePaired;
+      bridgeFw = facts.bridgeFw;
+      preflight = evaluatePreflight({
+        bridgePaired: facts.bridgePaired,
+        bridgeStatusUpdateMs: facts.bridgeStatusUpdateMs,
+        controller: controller ? (controller.data() as Record<string, unknown>) : null,
+        gate,
+        p6Unreachable: [...sessionByEvent.values()].some((s) => p6HoldsAccount(s, nowMs)),
+        appVersion: facts.appVersion,
+        nowMs,
+      });
+    }
+    const preflightBlocks =
+      preflight !== null && !preflight.ok && flags.preflightMode === "enforce";
+    // Starts are minted only for an account the allowlist arms, the gate
+    // arms, and (in enforce mode) pre-flight passes. Ends keep `writeJobs`.
+    const writeStarts = writeJobs && !preflightBlocks;
+    if (writeJobs && preflight !== null && !preflight.ok) {
+      // One row per (uid, reasons) per day — no per-tick field, so arrayUnion
+      // dedupes it exactly like the gate rows.
+      logRows.push({
+        uid, action: "preflight_skip", reasons: preflight.reasons,
+        ...(flags.preflightMode === "observe" ? { observeOnly: true } : {}),
+      });
+      if (preflightBlocks) stats.preflightSkips++;
+      else stats.preflightObserved++;
+    }
+    const preflightFields = {
+      preflight_ok: preflight ? preflight.ok : null,
+      preflight_reasons: preflight ? preflight.reasons : [],
+      preflight_info: preflight ? preflight.info : [],
+      preflight_mode: flags.preflightMode,
+    };
+    // B2: the teams the server can fire for this account (D2, per team).
+    const servableTeams: string[] = [];
+
     for (const cfgDoc of orderedDocs) {
       stats.configsEnabled++;
       const c = cfgDoc.data();
@@ -546,6 +928,24 @@ export async function runPlannerTick(
       const espnTeamId = String(c.espn_team_id ?? "");
 
       try {
+        // B2: a team is "served" when the server could build its fire at all —
+        // participation usable and a payload the server path accepts (a
+        // per-pixel saved design is refused). Independent of whether a game is
+        // on the board today.
+        if (controller && writeStarts) {
+          const pv = participationForFire(controller.data(), nowMs);
+          if (
+            pv.usable &&
+            !("refuse" in buildGameDayPayload({
+              config: c,
+              participatingChannels: pv.channels,
+              deviceChannelIds: pv.deviceChannelIds,
+            }))
+          ) {
+            servableTeams.push(teamSlug);
+          }
+        }
+
         if (!controller) {
           bump(stats.skipped, "no_controller");
           // ATTRIBUTABLE (2026-08-11): counter-only buckets were nameable but
@@ -707,8 +1107,44 @@ export async function runPlannerTick(
                 // log-only-era row, and the corpus stops being auditable the
                 // moment the flip is partial.
                 ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
+                // B1: armed and allowlisted, but pre-flight withheld the start.
+                ...(writeJobs && !writeStarts ? { preflightSkipped: true } : {}),
               });
-              if (writeJobs) {
+              const startRetryUntil = startRetryUntilMs({
+                fireAtMs: startFireAt,
+                leadMs: leadMinutesFor(c) * 60_000,
+                gameStartMs: game.startMs,
+              });
+              const scorecardKey = scorecardDateKey(game.startMs, offsetHoursAt(game.startMs));
+              if (writeJobs && !writeStarts && preflight !== null) {
+                // B3: an allowlisted account pre-flight skipped still appears on
+                // the scorecard, with its reasons — no silent absences. Written
+                // when the reasons change, not every tick.
+                const reasonsKey = JSON.stringify(preflight.reasons);
+                if (session.preflight_skip_reasons_key !== reasonsKey) {
+                  await sRef.set(
+                    {
+                      preflight_skip_reasons_key: reasonsKey,
+                      scorecard_key: scorecardKey,
+                      gameStartMs: game.startMs,
+                      teamSlug, sport,
+                    },
+                    { merge: true }
+                  );
+                  await mergeScorecard(db, scorecardKey, uid, eventId, {
+                    uid, event_id: eventId, team_slug: teamSlug, sport,
+                    game_start: admin.firestore.Timestamp.fromMillis(game.startMs),
+                    served: false,
+                    ...preflightFields,
+                    controllers_total: controllers.size,
+                    bridge_fw: bridgeFw,
+                    start: null,
+                    end: null,
+                    ...scorecardSkeleton(),
+                  });
+                }
+              }
+              if (writeStarts) {
                 await db
                   .collection("users").doc(uid)
                   .collection(FIRE_JOBS_COLLECTION).doc(`${eventId}_start`)
@@ -724,13 +1160,7 @@ export async function runPlannerTick(
                     // this instant (fireJobs.startRetryUntilMs). The ONLY field
                     // added to the start job; payload and every other field
                     // are unchanged.
-                    retryUntil: admin.firestore.Timestamp.fromMillis(
-                      startRetryUntilMs({
-                        fireAtMs: startFireAt,
-                        leadMs: leadMinutesFor(c) * 60_000,
-                        gameStartMs: game.startMs,
-                      })
-                    ),
+                    retryUntil: admin.firestore.Timestamp.fromMillis(startRetryUntil),
                   })
                   .catch((e) => {
                     if (e.code !== 6 && e.code !== "already-exists") throw e;
@@ -740,9 +1170,39 @@ export async function runPlannerTick(
                     startPlannedAt: admin.firestore.FieldValue.serverTimestamp(),
                     gameStartMs: game.startMs,
                     teamSlug, sport,
+                    // B3: the dispatcher finds this event's scorecard entry here.
+                    scorecard_key: scorecardKey,
                   },
                   { merge: true }
                 );
+                // B3: the entry, at mint. The dispatcher fills start.* / end.*.
+                await mergeScorecard(db, scorecardKey, uid, eventId, {
+                  uid, event_id: eventId, team_slug: teamSlug, sport,
+                  game_start: admin.firestore.Timestamp.fromMillis(game.startMs),
+                  served: true,
+                  ...preflightFields,
+                  controllers_total: controllers.size,
+                  bridge_fw: bridgeFw,
+                  start: {
+                    job_id: `${eventId}_start`,
+                    fire_at: admin.firestore.Timestamp.fromMillis(startFireAt),
+                    retry_until: admin.firestore.Timestamp.fromMillis(startRetryUntil),
+                    state: "scheduled",
+                    attempts: 0,
+                  },
+                  end: null,
+                  ...scorecardSkeleton(),
+                });
+                // B1 P6: probe 1, in the same tick the start is minted.
+                await stepP6({
+                  db, uid, eventId, teamSlug, sRef, controller,
+                  controllersTotal: controllers.size,
+                  record: null,
+                  startFireAtMs: startFireAt,
+                  nowMs, mode: flags.preflightMode,
+                  bridgePaired: bridgePairedForProbe,
+                  scorecardKey, logRows, stats,
+                });
               }
               stats.startsPlanned++;
               // Visible to every team walked after this one, this tick: they
@@ -792,6 +1252,28 @@ export async function runPlannerTick(
           });
         }
 
+        // ── B1 P6 — reachability, while this system's own start is still
+        // scheduled. Runs for allowlisted, gate-armed accounts (writeJobs)
+        // whose start this system minted; a hand-off "start" (another team's
+        // end job) is not probed — the house is already lit.
+        if (
+          writeJobs &&
+          session.startPlannedAt &&
+          (typeof session.startJobId !== "string" || session.startJobId === `${eventId}_start`)
+        ) {
+          await stepP6({
+            db, uid, eventId, teamSlug, sRef, controller,
+            controllersTotal: controllers.size,
+            record: p6RecordFrom(session.preflight_p6),
+            startFireAtMs: startFireAt,
+            nowMs, mode: flags.preflightMode,
+            bridgePaired: bridgePairedForProbe,
+            scorecardKey:
+              typeof session.scorecard_key === "string" ? session.scorecard_key : null,
+            logRows, stats,
+          });
+        }
+
         // ── END — the guards. GUARD 0 (#66) first: never end a show this
         // system did not start. startPlannedAt is the ONLY evidence that a
         // start job was actually written; it is set inside `if (writeJobs)`
@@ -826,12 +1308,26 @@ export async function runPlannerTick(
           });
         }
 
+        // B3: when ESPN first said final (for the scorecard's
+        // final→restore latency). Reset if ESPN takes the final back.
+        const finalSeenAtMs =
+          decision.nextConsecutive > 0
+            ? typeof session.finalSeenAtMs === "number"
+              ? session.finalSeenAtMs
+              : nowMs
+            : null;
         if (writeJobs || session.startPlannedAt) {
           await sRef.set(
-            { consecutiveFinalPolls: decision.nextConsecutive, gameStartMs: game.startMs },
+            {
+              consecutiveFinalPolls: decision.nextConsecutive,
+              gameStartMs: game.startMs,
+              finalSeenAtMs,
+            },
             { merge: true }
           );
         }
+        const sessionScorecardKey =
+          typeof session.scorecard_key === "string" ? session.scorecard_key : null;
 
         // GUARD 0b (#66) — the end is about to fire; confirm the START job this
         // system wrote actually reached the device. One read, only at the
@@ -895,6 +1391,11 @@ export async function runPlannerTick(
                 { merge: true }
               );
               win.endFired = true;
+              if (sessionScorecardKey) {
+                await mergeScorecard(db, sessionScorecardKey, uid, eventId, {
+                  end: { reason: "not_owner", owner: owner.teamSlug, state: "suppressed" },
+                });
+              }
             }
             continue;
           }
@@ -981,6 +1482,23 @@ export async function runPlannerTick(
               { merge: true }
             );
             win.endFired = true;
+            if (sessionScorecardKey) {
+              await mergeScorecard(db, sessionScorecardKey, uid, eventId, {
+                end: {
+                  job_id: `${eventId}_end`,
+                  reason: decision.reason,
+                  espn_final_seen_at:
+                    finalSeenAtMs !== null
+                      ? admin.firestore.Timestamp.fromMillis(finalSeenAtMs)
+                      : null,
+                  fire_at: admin.firestore.Timestamp.fromMillis(nowMs),
+                  retry_until: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs)),
+                  state: "scheduled",
+                  attempts: 0,
+                  ...(handoff ? { handoff_to: handoff.to.teamSlug } : {}),
+                },
+              });
+            }
             if (handoff) {
               // The survivor now holds the house. `startPlannedAt` is what
               // GUARD 0 requires before its own end may fire, and `startJobId`
@@ -990,12 +1508,40 @@ export async function runPlannerTick(
               const toSession = sessionByEvent.get(handoff.to.eventId) ?? {};
               const alreadyStarted =
                 toSession.startPlannedAt !== null && toSession.startPlannedAt !== undefined;
+              // B3: a survivor lit by hand-off gets its own scorecard entry,
+              // whose `start` is this end job (the dispatcher mirrors it).
+              const toScorecardKey = scorecardDateKey(
+                handoff.to.gameStartMs,
+                offsetHoursAt(handoff.to.gameStartMs)
+              );
               const startFields = alreadyStarted
                 ? {}
                 : {
                     startPlannedAt: admin.firestore.FieldValue.serverTimestamp(),
                     startJobId: `${eventId}_end`,
+                    scorecard_key: toScorecardKey,
                   };
+              if (!alreadyStarted) {
+                const toSport = String(configByEvent.get(handoff.to.eventId)?.sport ?? "");
+                await mergeScorecard(db, toScorecardKey, uid, handoff.to.eventId, {
+                  uid, event_id: handoff.to.eventId, team_slug: handoff.to.teamSlug,
+                  sport: toSport,
+                  game_start: admin.firestore.Timestamp.fromMillis(handoff.to.gameStartMs),
+                  served: true,
+                  ...preflightFields,
+                  controllers_total: controllers.size,
+                  bridge_fw: bridgeFw,
+                  start: {
+                    job_id: `${eventId}_end`,
+                    via_handoff_from: teamSlug,
+                    fire_at: admin.firestore.Timestamp.fromMillis(nowMs),
+                    state: "scheduled",
+                    attempts: 0,
+                  },
+                  end: null,
+                  ...scorecardSkeleton(),
+                });
+              }
               await sessionRef(db, uid, handoff.to.eventId).set(
                 {
                   ...startFields,
@@ -1024,6 +1570,70 @@ export async function runPlannerTick(
       } catch (err) {
         stats.errors++;
         logger.error(`planGameDayFires: ${uid}/${teamSlug} failed`, err);
+      }
+    }
+
+    // ── B2: users/{uid}.gameday_server ──────────────────────────────────
+    // served = this account's starts are minted by the server this tick.
+    // Written EVERY tick for a served account (D1: `checked_at` is the
+    // heartbeat the app uses to distrust a dead planner) and ON CHANGE
+    // otherwise. Dotted-path update: each named field is replaced whole, and
+    // the dispatcher-owned `last_fire` is never touched. Inside a catch, like
+    // the gate persist above — a failed status write must never stop planning.
+    if (flags.publishServerStatus) {
+      try {
+        const served = writeStarts;
+        let nextFire: NextFire | null = null;
+        if (served) {
+          const sched = await db
+            .collection("users").doc(uid)
+            .collection(FIRE_JOBS_COLLECTION)
+            .where("state", "==", "scheduled") // COLLECTION scope → automatic index
+            .get();
+          for (const j of sched.docs) {
+            const ev = j.get("eventId");
+            const at = (j.get("fireAt") as { toMillis?: () => number } | undefined)?.toMillis?.();
+            if (typeof ev !== "string" || teamSlugFromEventId(ev) === null) continue;
+            if (typeof at !== "number") continue;
+            if (nextFire === null || at < nextFire.fire_at_ms) {
+              nextFire = {
+                event_id: ev,
+                team_slug: teamSlugFromEventId(ev),
+                seq: String(j.get("seq") ?? ""),
+                fire_at_ms: at,
+              };
+            }
+          }
+        }
+        const core: ServerStatusCore = {
+          served,
+          teams: served ? servableTeams : [],
+          preflight: preflight
+            ? { ok: preflight.ok, reasons: preflight.reasons, info: preflight.info, mode: flags.preflightMode }
+            : null,
+          next_fire: nextFire,
+        };
+        if (served || storedServerStatusKey(udata.gameday_server) !== serverStatusKey(core)) {
+          await u.ref.update({
+            "gameday_server.served": core.served,
+            "gameday_server.teams": core.teams,
+            "gameday_server.checked_at": admin.firestore.FieldValue.serverTimestamp(),
+            "gameday_server.preflight": core.preflight
+              ? { ...core.preflight, at: admin.firestore.FieldValue.serverTimestamp() }
+              : null,
+            "gameday_server.next_fire": core.next_fire
+              ? {
+                  event_id: core.next_fire.event_id,
+                  team_slug: core.next_fire.team_slug,
+                  seq: core.next_fire.seq,
+                  fire_at: admin.firestore.Timestamp.fromMillis(core.next_fire.fire_at_ms),
+                }
+              : null,
+          });
+          stats.serverStatusWrites++;
+        }
+      } catch (_) {
+        /* a failed status write must never stop planning */
       }
     }
   }
@@ -1065,6 +1675,11 @@ export async function runPlannerTick(
     skipped: stats.skipped,
     // END phase, counted separately so the START sum stays exact.
     endSkipped: stats.endSkipped,
+    // B1/B2 — pre-flight and the published server status.
+    preflightSkips: stats.preflightSkips,
+    preflightObserved: stats.preflightObserved,
+    p6Probes: stats.p6Probes,
+    serverStatusWrites: stats.serverStatusWrites,
     espnErrors: stats.espnErrors,
     errors: stats.errors,
   };

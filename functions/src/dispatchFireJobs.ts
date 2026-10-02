@@ -46,7 +46,15 @@ import {
   decideRetry,
   jobStateForCommandStatus,
   rollup,
+  teamSlugFromEventId,
+  toMillisOrNull,
 } from "./fireJobs";
+import {
+  SCORECARD_COLLECTION,
+  SCORECARD_ENTRIES,
+  publishServerStatusFrom,
+  scorecardEntryId,
+} from "./gameDayPreflight";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
@@ -93,6 +101,104 @@ const bump = (m: Record<string, number>, k: string) => {
 };
 
 /**
+ * B2 + B3 — what the dispatcher tells the world about a Game Day fire, beyond
+ * the job itself: `users/{uid}.gameday_server.last_fire` (the app's "Last
+ * fire: 6:45 PM, 2 s") and the scorecard entry's `start.*` / `end.*`.
+ *
+ * OBSERVABILITY ONLY. Every write here is best-effort and swallowed: a failed
+ * scorecard update must never change what fired. The scorecard entry is found
+ * through the session's `scorecard_key` (written by the planner at mint), and
+ * updated with update(): an event minted before this shipped has no entry, and
+ * the update simply finds nothing — no partial entries invented here.
+ */
+class GameDayObservers {
+  private readonly keyCache = new Map<string, Promise<string | null>>();
+
+  constructor(
+    private readonly db: admin.firestore.Firestore,
+    private readonly publishLastFire: boolean
+  ) {}
+
+  /** A start or end of a Game Day event — the only jobs observed. */
+  static isGameDayFire(eventId: unknown, seq: unknown): eventId is string {
+    return (
+      typeof eventId === "string" &&
+      teamSlugFromEventId(eventId) !== null &&
+      (seq === "start" || seq === "end")
+    );
+  }
+
+  private entryKey(uid: string, eventId: string): Promise<string | null> {
+    const k = `${uid}/${eventId}`;
+    let p = this.keyCache.get(k);
+    if (!p) {
+      p = this.db
+        .collection("users").doc(uid)
+        .collection("game_day_sessions").doc(eventId)
+        .get()
+        .then((d) => {
+          const v = d.exists ? d.get("scorecard_key") : null;
+          return typeof v === "string" && v.length > 0 ? v : null;
+        })
+        .catch(() => null);
+      this.keyCache.set(k, p);
+    }
+    return p;
+  }
+
+  private async entryRef(uid: string, eventId: string) {
+    const key = await this.entryKey(uid, eventId);
+    if (!key) return null;
+    return this.db
+      .collection(SCORECARD_COLLECTION).doc(key)
+      .collection(SCORECARD_ENTRIES).doc(scorecardEntryId(uid, eventId));
+  }
+
+  /** update() the event's entry; absent entry or any error → nothing. */
+  async scorecard(uid: string, eventId: string, data: Record<string, unknown>): Promise<void> {
+    try {
+      const ref = await this.entryRef(uid, eventId);
+      if (ref) await ref.update(data);
+    } catch (_) {
+      /* observability only */
+    }
+  }
+
+  /** An end's final→completed latency needs the planner's espn_final_seen_at. */
+  async endFinalLatency(uid: string, eventId: string, completedMs: number): Promise<number | null> {
+    try {
+      const ref = await this.entryRef(uid, eventId);
+      if (!ref) return null;
+      const snap = await ref.get();
+      const finalMs = toMillisOrNull(snap.get("end.espn_final_seen_at"));
+      return finalMs !== null && completedMs >= finalMs ? completedMs - finalMs : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async lastFire(uid: string, data: Record<string, unknown>): Promise<void> {
+    if (!this.publishLastFire) return;
+    try {
+      // Dotted path: replaces last_fire whole and touches nothing the planner owns.
+      await this.db.collection("users").doc(uid).update({ "gameday_server.last_fire": data });
+    } catch (_) {
+      /* observability only */
+    }
+  }
+}
+
+/** B2's flag, read once per tick. Read failure → do not publish (planner rule). */
+async function readPublishLastFire(db: admin.firestore.Firestore): Promise<boolean> {
+  try {
+    const d = await db.collection("config").doc("gameday_planner").get();
+    return publishServerStatusFrom(d.exists ? d.data() : undefined);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
  * One dispatcher tick. Exported so the bench harness drives the REAL code path
  * rather than a reimplementation (the discipline S6 established).
  *
@@ -119,6 +225,8 @@ export async function runDispatchTick(
       skippedTerminal: {},
       errors: 0,
     };
+
+    const observers = new GameDayObservers(db, await readPublishLastFire(db));
 
     /** end-to-end: command createdAt → completedAt */
     const e2eSamples: number[] = [];
@@ -186,6 +294,9 @@ export async function runDispatchTick(
         // an absence, not a failure; do not invent an outcome. Terminalize as
         // `expired` ONLY if we can prove it was never picked up; otherwise mark
         // it unknown and stop re-reading it.
+        const jobEventId = jobSnap.get("eventId");
+        const jobSeq = jobSnap.get("seq");
+        const observed = GameDayObservers.isGameDayFire(jobEventId, jobSeq);
         if (!cmd.exists) {
           await jobSnap.ref.update({
             state: "expired",
@@ -194,6 +305,12 @@ export async function runDispatchTick(
           });
           stats.reconciled++;
           stats.expired++;
+          if (observed) {
+            await observers.scorecard(uid, jobEventId as string, {
+              [`${jobSeq}.state`]: "expired",
+              [`${jobSeq}.outcome`]: "command_document_absent",
+            });
+          }
           continue;
         }
 
@@ -257,6 +374,16 @@ export async function runDispatchTick(
           if (rescheduled) {
             stats.retried++;
             bump(stats.retriedBy, cls.outcome);
+            if (observed) {
+              await observers.scorecard(uid, jobEventId as string, {
+                [`${jobSeq}.state`]: "scheduled",
+                [`${jobSeq}.retries`]: admin.firestore.FieldValue.increment(1),
+                [`${jobSeq}.last_outcome`]: cls.outcome,
+                ...(cls.outcome === "stuck_executing"
+                  ? { stuck_executing_count: admin.firestore.FieldValue.increment(1) }
+                  : {}),
+              });
+            }
           }
           continue;
         }
@@ -277,6 +404,54 @@ export async function runDispatchTick(
         if (nextState === "completed") stats.completed++;
         else if (nextState === "failed") stats.failed++;
         else if (nextState === "expired") stats.expired++;
+
+        if (observed) {
+          // fireAt → completed: measured from when the fire was FIRST due, so
+          // a retried start reports the delay the house actually saw.
+          const dueMs =
+            toMillisOrNull(jobSnap.get("firstFireAt")) ?? toMillisOrNull(jobSnap.get("fireAt"));
+          const fireLatencyMs =
+            nextState === "completed" && completedMs !== null && dueMs !== null
+              ? completedMs - dueMs
+              : null;
+          const completedAt =
+            completedMs !== null ? admin.firestore.Timestamp.fromMillis(completedMs) : null;
+          const fields: Record<string, unknown> = {
+            [`${jobSeq}.state`]: nextState,
+            [`${jobSeq}.outcome`]: cls.outcome,
+            [`${jobSeq}.completed_at`]: completedAt,
+            [`${jobSeq}.latency_ms`]: fireLatencyMs,
+            [`${jobSeq}.command_latency_ms`]: latencyMs,
+            ...(cls.outcome === "stuck_executing"
+              ? { stuck_executing_count: admin.firestore.FieldValue.increment(1) }
+              : {}),
+            ...(jobSeq === "start" && nextState === "completed" ? { controllers_fired: 1 } : {}),
+          };
+          if (jobSeq === "end" && nextState === "completed" && completedMs !== null) {
+            fields["end.latency_from_final_ms"] = await observers.endFinalLatency(
+              uid, jobEventId as string, completedMs
+            );
+          }
+          await observers.scorecard(uid, jobEventId as string, fields);
+          // A hand-off end is the survivor's START: mirror it onto theirs.
+          const handoffTo = jobSnap.get("handoffTo");
+          if (jobSeq === "end" && typeof handoffTo === "string") {
+            await observers.scorecard(uid, handoffTo, {
+              "start.state": nextState,
+              "start.outcome": cls.outcome,
+              "start.completed_at": completedAt,
+              "start.latency_ms": fireLatencyMs,
+              ...(nextState === "completed" ? { controllers_fired: 1 } : {}),
+            });
+          }
+          await observers.lastFire(uid, {
+            event_id: jobEventId,
+            seq: jobSeq,
+            state: nextState,
+            completed_at: completedAt,
+            latency_ms: fireLatencyMs,
+          });
+        }
       } catch (err) {
         stats.errors++;
         logger.error(`dispatchFireJobs: reconcile failed for ${jobSnap.ref.path}`, err);
@@ -343,6 +518,12 @@ export async function runDispatchTick(
               skippedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             bump(stats.skippedTerminal, decision.reason.split(":")[0]);
+            if (GameDayObservers.isGameDayFire(job.eventId, job.seq)) {
+              await observers.scorecard(uid, job.eventId, {
+                [`${job.seq}.state`]: "skipped",
+                [`${job.seq}.outcome`]: decision.reason.split(":")[0],
+              });
+            }
           } else {
             bump(stats.skippedTransient, decision.reason.split(":")[0]);
           }
@@ -368,6 +549,12 @@ export async function runDispatchTick(
             skippedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
           bump(stats.skippedTerminal, gate.reason as string);
+          if (GameDayObservers.isGameDayFire(job.eventId, job.seq)) {
+            await observers.scorecard(uid, job.eventId, {
+              [`${job.seq}.state`]: "skipped",
+              [`${job.seq}.outcome`]: gate.reason,
+            });
+          }
           continue;
         }
 
@@ -496,6 +683,19 @@ export async function runDispatchTick(
           writeHopMs,
           attempts: admin.firestore.FieldValue.increment(1),
         });
+
+        if (GameDayObservers.isGameDayFire(job.eventId, job.seq)) {
+          const dispatchedFields = (prefix: string) => ({
+            [`${prefix}.state`]: "dispatched",
+            [`${prefix}.dispatched_at`]: admin.firestore.FieldValue.serverTimestamp(),
+            [`${prefix}.attempts`]: admin.firestore.FieldValue.increment(1),
+          });
+          await observers.scorecard(uid, job.eventId, dispatchedFields(String(job.seq)));
+          const handoffTo = jobSnap.get("handoffTo");
+          if (job.seq === "end" && typeof handoffTo === "string") {
+            await observers.scorecard(uid, handoffTo, dispatchedFields("start"));
+          }
+        }
 
         // Block any further job for this controller on this same tick.
         pending.push({
