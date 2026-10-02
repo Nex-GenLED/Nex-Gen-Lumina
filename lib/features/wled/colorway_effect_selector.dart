@@ -39,6 +39,11 @@ import 'package:nexgen_command/features/game_day/game_day_design_save.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
     show showScheduleEditor, PatternSelection;
 
+/// Under the Static setup chips while another effect is being previewed:
+/// the chips are the way back to Static, and they say so.
+const String kStaticSetupReturnHint =
+    'Applies to Static. Tap Blocks or Alternating to switch back.';
+
 /// Compose a richer Now Playing label for the Colorway / Architectural
 /// Apply path. Stopgap for the current single-string `activePresetLabelProvider`
 /// model — the systemic fix (NowPlayingContext struct + migration of all
@@ -845,6 +850,36 @@ class _ColorwayEffectSelectorPageState
     return _solidFieldsFor(ref.read(selectorEffectIdProvider));
   }
 
+  /// Select [effectId] as a tile tap does — from the tile itself, or from a
+  /// Static setup chip / grouping number tapped while another effect was
+  /// being previewed (the way back to Static).
+  void _selectEffect(int effectId) {
+    ref.read(selectorEffectIdProvider.notifier).state = effectId;
+    // Item D: start at this effect's curated roofline speed (and, for the
+    // one effect whose rate is intensity, that too). The sliders stay free
+    // above and below it. An effect whose speed is not a pace keeps the
+    // current speed.
+    ref.read(selectorSpeedProvider.notifier).state = effectDefaultSpeedOr(
+        effectId, ref.read(selectorSpeedProvider));
+    final ix = effectDefaultIntensity(effectId);
+    if (ix != null) ref.read(selectorIntensityProvider.notifier).state = ix;
+    _sendToWled();
+  }
+
+  /// The colour-layout card's visibility for [effectId], from the one shared
+  /// decider (solid_palette_blocks.dart). Callers watch the effect and layout
+  /// providers themselves; this reads the layout.
+  StaticSetupControls _staticSetupControls(int effectId) =>
+      staticSetupControls(
+        effectId: effectId,
+        colorCount: _paletteColors.length,
+        layout: ref.read(selectorSolidLayoutProvider),
+        isArchitectural: _isArchitectural,
+        isBrightnessGradient: _isBrightnessGradient,
+        effectUsesColorLayout:
+            WledEffectsCatalog.effectUsesColorLayout(effectId),
+      );
+
   /// [dragging]: a slider step — away from home the preview waits for the
   /// drag to settle ([AdjustmentPacer]).
   void _sendToWled({bool dragging = false}) {
@@ -1394,10 +1429,12 @@ class _ColorwayEffectSelectorPageState
     // the Blocks/Alternating toggle changes (the helpers below use ref.read).
     ref.watch(selectorSolidLayoutProvider);
 
-    final effect = WledEffectsCatalog.getById(effectId);
-    final hasMultipleColors = _paletteColors.length > 1;
-    final showColorLayout = !_isBrightnessGradient &&
-        ((effect?.usesColorLayout ?? false) || (effectId == 0 && hasMultipleColors));
+    // The colour-layout card. Decided in one place (solid_palette_blocks.dart,
+    // [staticSetupControls]) from the PALETTE and the layout chip, not only
+    // from the effect being previewed: the Static setup (Blocks | Alternating)
+    // stays on screen while another effect is tried, so the user can come
+    // back to Static without re-opening the card (field report 2026-10-02).
+    final showColorLayout = _staticSetupControls(effectId).showCard;
 
     // CELEBRATION MODE takes its own, much smaller render path — see
     // [_buildCelebrationBody]. Returning here rather than threading more
@@ -2232,18 +2269,7 @@ class _ColorwayEffectSelectorPageState
     };
 
     return InkWell(
-      onTap: () {
-        ref.read(selectorEffectIdProvider.notifier).state = effect.id;
-        // Item D: start at this effect's curated roofline speed (and, for the
-        // one effect whose rate is intensity, that too). The sliders stay free
-        // above and below it. An effect whose speed is not a pace keeps the
-        // current speed.
-        ref.read(selectorSpeedProvider.notifier).state = effectDefaultSpeedOr(
-            effect.id, ref.read(selectorSpeedProvider));
-        final ix = effectDefaultIntensity(effect.id);
-        if (ix != null) ref.read(selectorIntensityProvider.notifier).state = ix;
-        _sendToWled();
-      },
+      onTap: () => _selectEffect(effect.id),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         margin: const EdgeInsets.only(bottom: 4),
@@ -2331,6 +2357,9 @@ class _ColorwayEffectSelectorPageState
   // ---------------------------------------------------------------------------
 
   Widget _buildColorLayoutSelector(int colorGroup) {
+    final effectId = ref.watch(selectorEffectIdProvider);
+    final layout = ref.watch(selectorSolidLayoutProvider);
+    final controls = _staticSetupControls(effectId);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(12),
@@ -2342,14 +2371,17 @@ class _ColorwayEffectSelectorPageState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Blocks vs Alternating — only meaningful when Solid is being
-          // substituted for a multi-colour palette. Both names are new
-          // product copy: docs/guides-2026-09 has no term for either layout,
-          // the catalog calls them "Solid Pattern" / "Solid Pattern Tri", and
-          // the AI composer's enum says `alternating`. Flagged in the report.
-          if (_solidFieldsFor(ref.watch(selectorEffectIdProvider)) != null) ...[
+          // Blocks vs Alternating — the Static setup for a multi-colour
+          // palette. Shown whenever it applies to the palette, whatever effect
+          // is being previewed (StaticSetupControls); the chips highlight only
+          // while Static is selected, and tapping one while another effect
+          // plays is the way back to Static. Both names are product copy:
+          // docs/guides-2026-09 has no term for either layout, the catalog
+          // calls them "Solid Pattern" / "Solid Pattern Tri", and the AI
+          // composer's enum says `alternating`.
+          if (controls.showChips) ...[
             Text(
-              'Layout',
+              'Static setup',
               style: TextStyle(
                 color: NexGenPalette.textSecondary,
                 fontSize: 12,
@@ -2358,25 +2390,45 @@ class _ColorwayEffectSelectorPageState
             const SizedBox(height: 8),
             Row(
               children: [
-                for (final layout in SolidLayout.values) ...[
-                  _buildFilterChip(
-                    label: layout == SolidLayout.blocks
-                        ? 'Blocks'
-                        : 'Alternating',
-                    isSelected:
-                        ref.watch(selectorSolidLayoutProvider) == layout,
-                    onTap: () {
-                      ref.read(selectorSolidLayoutProvider.notifier).state =
-                          layout;
-                      _sendToWled();
-                    },
+                for (final option in SolidLayout.values) ...[
+                  KeyedSubtree(
+                    key: ValueKey('static-setup-${option.name}'),
+                    child: _buildFilterChip(
+                      label: option == SolidLayout.blocks
+                          ? 'Blocks'
+                          : 'Alternating',
+                      isSelected: controls.chipsActive && layout == option,
+                      onTap: () {
+                        ref.read(selectorSolidLayoutProvider.notifier).state =
+                            option;
+                        if (controls.chipsActive) {
+                          _sendToWled();
+                        } else {
+                          _selectEffect(0);
+                        }
+                      },
+                    ),
                   ),
                   const SizedBox(width: 6),
                 ],
               ],
             ),
+            if (!controls.chipsActive) ...[
+              const SizedBox(height: 6),
+              Text(
+                kStaticSetupReturnHint,
+                key: const ValueKey('static-setup-hint'),
+                style: TextStyle(
+                  color: NexGenPalette.textMedium,
+                  fontSize: 11,
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
           ],
+          // Alternating's band width. Hidden under Blocks (positional thirds
+          // ignore it); kept for the colour-layout effects that read grp.
+          if (controls.showGrouping) ...[
           Text(
             'LEDs per color',
             style: TextStyle(
@@ -2391,9 +2443,14 @@ class _ColorwayEffectSelectorPageState
               final value = i + 1;
               final isSelected = colorGroup == value;
               return GestureDetector(
+                key: ValueKey('leds-per-color-$value'),
                 onTap: () {
                   ref.read(selectorColorGroupProvider.notifier).state = value;
-                  _sendToWled();
+                  if (controls.groupingReturnsToStatic) {
+                    _selectEffect(0);
+                  } else {
+                    _sendToWled();
+                  }
                 },
                 child: Container(
                   width: 48,
@@ -2428,10 +2485,14 @@ class _ColorwayEffectSelectorPageState
             }),
           ),
           const SizedBox(height: 12),
+          ],
           // The OFF count. There was no control for `spc` anywhere in the
           // tuner — it could only be inherited from whichever "N On M Off"
           // card was opened (max 4 off) and could never be changed, so going
           // from "4 off" to "6 off" was impossible here (followup N3b).
+          // With the dot row below, it describes the SELECTED effect, so both
+          // step aside while a non-layout effect is previewed over the chips.
+          if (controls.showSpacingAndPreview) ...[
           Text(
             'Dark LEDs between',
             style: TextStyle(
@@ -2443,6 +2504,7 @@ class _ColorwayEffectSelectorPageState
           _buildSpacingSelector(ref.watch(selectorSpacingProvider)),
           const SizedBox(height: 8),
           _buildColorLayoutPreview(colorGroup),
+          ],
         ],
       ),
     );
