@@ -320,7 +320,29 @@ export interface EndSignalDecision {
 }
 
 /**
+ * `config/gameday_planner.status_aware_cap` — what the cap knows about ESPN.
+ * Absent (or `statusAware` false) is the cap as it shipped: a clock and nothing
+ * else.
+ */
+export interface CapContext {
+  statusAware: boolean;
+  /** `espnReportsLive` for this tick's read of the game. */
+  espnLive: boolean;
+}
+
+/**
  * The end decision: ESPN's final behind its guards, then the HARD CAP.
+ *
+ * STATUS-AWARE CAP (flag `status_aware_cap`, 2026-10-02). With the flag on, the
+ * cap's bound is unchanged but it is HELD while ESPN reports the game being
+ * played (`espnReportsLive`: in progress, halftime, between periods, delayed),
+ * up to the sport's absolute ceiling (`capCeilingMs`). It fires at the bound
+ * exactly as before when ESPN reports anything else — postponed, cancelled,
+ * suspended, scheduled — or nothing at all (the game is gone). A held cap only
+ * ever moves an end LATER, never earlier: `reason: "cap_held_live"` while held,
+ * `"hard_cap_ceiling"` when the ceiling ends a game ESPN still calls live.
+ * Before this, a college lightning delay or an MLB rain delay reached the
+ * bound mid-game and the base look came back with the game still on.
  *
  * THE CAP. A game ESPN never marks final — postponed after the start fired,
  * suspended, or a feed that simply stops updating — used to hold the house in
@@ -347,15 +369,27 @@ export function decideEndSignal(args: {
   state: EndSignalState;
   sport: string;
   nowMs: number;
+  cap?: CapContext;
 }): EndSignalDecision {
   const d = decideEndSignalFromEspn(args);
   if (d.fireEnd || d.reason === "no_start" || d.reason === "already_fired") return d;
   const startMs =
     typeof args.state.gameStartMs === "number" ? args.state.gameStartMs : null;
-  if (startMs !== null && args.nowMs > fallbackEndMs(startMs, args.sport)) {
+  if (args.cap?.statusAware !== true) {
+    // The cap as it shipped (rev 00015) — byte for byte.
+    if (startMs !== null && args.nowMs > fallbackEndMs(startMs, args.sport)) {
+      return { fireEnd: true, reason: "hard_cap", nextConsecutive: d.nextConsecutive };
+    }
+    return d;
+  }
+  if (startMs === null || args.nowMs <= fallbackEndMs(startMs, args.sport)) return d;
+  if (!args.cap.espnLive) {
     return { fireEnd: true, reason: "hard_cap", nextConsecutive: d.nextConsecutive };
   }
-  return d;
+  if (args.nowMs > capCeilingMs(startMs, args.sport)) {
+    return { fireEnd: true, reason: "hard_cap_ceiling", nextConsecutive: d.nextConsecutive };
+  }
+  return { fireEnd: false, reason: "cap_held_live", nextConsecutive: d.nextConsecutive };
 }
 
 /**
@@ -641,4 +675,124 @@ export function estimatedDurationMs(sport: string): number {
     default:
       return 3 * 3600_000;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Status-aware cap — the ceiling and the "is it being played" rule
+// ---------------------------------------------------------------------------
+
+const HOUR_MS = 3600_000;
+
+/**
+ * The ABSOLUTE ceiling per sport, as kickoff + this: the latest a held cap can
+ * wait while ESPN still says the game is on. Only read with
+ * `status_aware_cap` on. Each is the sport's normal length plus the longest
+ * interruption worth waiting out at night; past it, a feed still saying "in
+ * progress" is more likely stuck than right, and the house goes back to base.
+ * The 3.5 h football estimate is NOT changed — the daylight rule and the
+ * hierarchy's windows keep reading `estimatedDurationMs`.
+ *
+ *   football (nfl, ncaaFB) 6 h — owner decision 2026-10-02. NFL runs ~3h10,
+ *       college ~3h30; a lightning delay (30 min, restarting with every strike)
+ *       or several college overtimes adds 1–2 h. The shipped cap (est + 1 h =
+ *       4.5 h) ended exactly those games mid-play.
+ *   mlb 7 h — ~2h40 with the pitch clock, extra innings short (ghost runner).
+ *       Rain delays are the long tail: a game is waited out for 2–3 h before
+ *       it is suspended, and a suspended game reports STATUS_SUSPENDED, which
+ *       releases the hold at once. 2h40 + ~4 h ≈ 7 h.
+ *   nba, ncaaMB, wnba 4.5 h — ~2h15 (WNBA ~2 h); each overtime is five clock
+ *       minutes (~15 real). Interruptions are rare (a clock or floor fault, a
+ *       roof leak). 4.5 h is several overtimes plus one long stoppage. (The
+ *       WNBA estimate is the 3 h default here, so its shipped bound is 4 h;
+ *       4.5 h still sits above it.)
+ *   nhl 5 h — ~2h30 regular season. Playoff overtime is full 20-minute periods
+ *       with intermissions, ~40 min each; 5 h covers three of them.
+ *   soccer (mls, nwsl, epl, fifa, championsLeague) 5 h — ~1h55 with half-time;
+ *       a knockout adds extra time and penalties (~45 min), and MLS / NWSL
+ *       lightning delays run 1–2 h. 5 h covers both together.
+ *   any other sport — the shipped bound + 1 h (CAP_CEILING_DEFAULT_EXTRA_MS).
+ *
+ * A ceiling below a sport's shipped bound would make the status-aware cap fire
+ * EARLIER than the shipped one; `capCeilingMs` takes the later of the two, and
+ * a unit test pins every sport above its bound.
+ */
+export const CAP_CEILING_MS: Record<string, number> = {
+  nfl: 6 * HOUR_MS,
+  ncaaFB: 6 * HOUR_MS,
+  mlb: 7 * HOUR_MS,
+  nba: 4.5 * HOUR_MS,
+  ncaaMB: 4.5 * HOUR_MS,
+  wnba: 4.5 * HOUR_MS,
+  nhl: 5 * HOUR_MS,
+  mls: 5 * HOUR_MS,
+  nwsl: 5 * HOUR_MS,
+  epl: 5 * HOUR_MS,
+  fifa: 5 * HOUR_MS,
+  championsLeague: 5 * HOUR_MS,
+};
+export const CAP_CEILING_DEFAULT_EXTRA_MS = HOUR_MS;
+
+/** The instant past which a held cap fires regardless of ESPN. */
+export function capCeilingMs(gameStartMs: number, sport: string): number {
+  const bound = fallbackEndMs(gameStartMs, sport);
+  const per = CAP_CEILING_MS[sport];
+  const ceiling =
+    per !== undefined ? gameStartMs + per : bound + CAP_CEILING_DEFAULT_EXTRA_MS;
+  return Math.max(ceiling, bound);
+}
+
+/**
+ * Statuses that HOLD the cap whatever ESPN's `state` says: a delay is a game
+ * that will still be played tonight, including one delayed before its start
+ * (ESPN can report that as `state: "pre"`).
+ */
+export const CAP_HOLD_STATUS_NAMES: ReadonlySet<string> = new Set([
+  "STATUS_IN_PROGRESS",
+  "STATUS_HALFTIME",
+  "STATUS_END_PERIOD",
+  "STATUS_DELAYED",
+  "STATUS_RAIN_DELAY",
+]);
+
+/** Statuses that never hold it, even under `state: "in"`: no more play tonight. */
+export const CAP_RELEASE_STATUS_NAMES: ReadonlySet<string> = new Set([
+  "STATUS_POSTPONED",
+  "STATUS_CANCELED",
+  "STATUS_CANCELLED",
+  "STATUS_SUSPENDED",
+  "STATUS_FORFEIT",
+  "STATUS_ABANDONED",
+]);
+
+/**
+ * Does ESPN say this game is being played (or delayed, to resume tonight)?
+ * The hold needs POSITIVE evidence: a final, a release status, a scheduled
+ * game, an unknown status and no answer at all are all "no" — the cap fires at
+ * its shipped bound.
+ */
+export function espnReportsLive(g: {
+  isFinal: boolean;
+  statusName: string;
+  statusState?: string;
+}): boolean {
+  if (g.isFinal) return false;
+  if (CAP_RELEASE_STATUS_NAMES.has(g.statusName)) return false;
+  if (CAP_HOLD_STATUS_NAMES.has(g.statusName)) return true;
+  return g.statusState === "in";
+}
+
+/**
+ * The instant the cap fires for this game on this tick — and therefore the
+ * instant its hierarchy window closes (planGameDayFires sets
+ * `TeamWindow.windowEndMs` from this when the flag is on), so a held game keeps
+ * owning the house for exactly as long as its end is held.
+ */
+export function capBoundMs(args: {
+  gameStartMs: number;
+  sport: string;
+  statusAware: boolean;
+  espnLive: boolean;
+}): number {
+  if (!args.statusAware || !args.espnLive) return fallbackEndMs(args.gameStartMs, args.sport);
+  return capCeilingMs(args.gameStartMs, args.sport);
 }
