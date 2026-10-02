@@ -172,6 +172,14 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
     _loadFromFirestore();
   }
 
+  /// +114 — true once the user's saved entries have been read (including a
+  /// read that found none). False while loading, when signed out, and after a
+  /// failed read. Not reactive state: the on-connect ladder repair polls it to
+  /// tell "no Game Day tonight" from "the calendar has not loaded yet", which
+  /// the holiday-seeded state cannot say on its own.
+  bool get loadedFromFirestore => _loaded;
+  bool _loaded = false;
+
   // Seed with well-known holiday presets so the calendar is never empty.
   static CalendarEntrySet _buildHolidayDefaults() {
     final m = <String, CalendarEntry>{};
@@ -222,6 +230,7 @@ class CalendarScheduleNotifier extends StateNotifier<CalendarEntrySet> {
     try {
       final userService = _ref.read(userServiceProvider);
       final saved = await userService.loadCalendarEntries(uid);
+      _loaded = true;
       if (saved.isNotEmpty) {
         // Saved entries merge ON TOP of the holiday defaults by
         // (dateKey, entryId). A saved entry that shares a holiday's date now

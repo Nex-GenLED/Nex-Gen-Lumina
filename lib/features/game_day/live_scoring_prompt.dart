@@ -108,7 +108,8 @@ Future<void> maybePromptLiveScoring({
         SnackBar(
           content: Text(
               'Live scoring enabled for ${teamInfo.teamName}! '
-              'Your lights will celebrate every score.'),
+              'Your lights will celebrate your team\'s scores while the app '
+              'is open.'),
           duration: const Duration(seconds: 3),
         ),
       );
@@ -243,7 +244,8 @@ class _LiveScoringPromptSheet extends StatelessWidget {
             // Prompt text
             Text(
               'Want to enable live scoring effects? '
-              'Your lights will celebrate every score during the game.',
+              'Your lights will celebrate your team\'s scores while the app '
+              'is open.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,

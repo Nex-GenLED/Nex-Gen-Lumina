@@ -134,6 +134,11 @@ class TimelineRowTile extends StatelessWidget {
   /// dashboard card, where vertical space is scarce.
   final bool compact;
 
+  /// +114 — who runs a Game Day row: `server`, `phone` or `setup needed`
+  /// (game_day_run_mode.dart), shown after the time range. Null for every
+  /// other row. Passed in, like [scopeLabel], so this widget stays pure.
+  final String? runnerTag;
+
   const TimelineRowTile({
     super.key,
     required this.entry,
@@ -142,6 +147,7 @@ class TimelineRowTile extends StatelessWidget {
     this.compact = false,
     this.scopeLabel,
     this.controllerLabel,
+    this.runnerTag,
   });
 
   @override
@@ -205,7 +211,13 @@ class TimelineRowTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    timelineTimeRange(entry, timeFormat: timeFormat),
+                    // The runner tag rides on the time line, which wraps.
+                    // On the header row it squeezed the single-line title to
+                    // a few letters at large text sizes (text-scale harness).
+                    runnerTag != null
+                        ? '${timelineTimeRange(entry, timeFormat: timeFormat)}'
+                            ' · $runnerTag'
+                        : timelineTimeRange(entry, timeFormat: timeFormat),
                     style: TextStyle(
                       fontSize: compact ? 11 : 12,
                       color: NexGenPalette.textMedium,
@@ -329,6 +341,9 @@ class DayTimelineList extends StatelessWidget {
   /// has more than one controller.
   final String? Function(TimelineEntry)? controllerLabelFor;
 
+  /// +114 — resolves a Game Day row's runner tag (server / phone).
+  final String? Function(TimelineEntry)? runnerTagFor;
+
   const DayTimelineList({
     super.key,
     required this.timeline,
@@ -339,6 +354,7 @@ class DayTimelineList extends StatelessWidget {
     this.onMoreTap,
     this.scopeLabelFor,
     this.controllerLabelFor,
+    this.runnerTagFor,
   });
 
   @override
@@ -360,6 +376,7 @@ class DayTimelineList extends StatelessWidget {
             onTap: onRowTap,
             scopeLabel: scopeLabelFor?.call(e),
             controllerLabel: controllerLabelFor?.call(e),
+            runnerTag: runnerTagFor?.call(e),
           ),
         if (hidden > 0) TimelineMoreRow(hiddenCount: hidden, onTap: onMoreTap),
       ],

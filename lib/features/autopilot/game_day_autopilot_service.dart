@@ -301,11 +301,37 @@ class GameDayAutopilotService {
   List<int>? Function(GameDayAutopilotConfig config)?
       onResolveParticipatingChannels;
 
+  /// +114 (plan §3.2, D3) — the team slugs OUR SERVERS run right now
+  /// (`users/{uid}.gameday_server`, fresh heartbeat, per team).
+  ///
+  /// A served team gets an OBSERVE-ONLY session: it is tracked through the
+  /// same phase machine (so priority, hand-off and the celebration derivation
+  /// still see it), but the phone never puts its design on the wire, never
+  /// resumes the normal schedule for it, and never hands the house to it —
+  /// the server fires the start and the end. Celebrations are untouched until
+  /// the server runs them too (step G): an observed team that owns the house
+  /// still celebrates from the phone.
+  ///
+  /// Read at every DECISION, not cached per evaluate pass: a heartbeat that
+  /// goes stale mid-game turns the phone back on for the next decision (D1).
+  /// Unwired, null, or throwing → empty → every team behaves exactly as 112.
+  Set<String> Function()? onGetServedTeams;
+
   GameDayAutopilotService({
     required EspnApiService espnApi,
     required GameScheduleService scheduleService,
   })  : _espnApi = espnApi,
         _scheduleService = scheduleService;
+
+  bool _isObserved(String teamSlug) {
+    try {
+      return onGetServedTeams?.call().contains(teamSlug) ?? false;
+    } catch (e) {
+      debugPrint('[GameDayAutopilot] served-team read failed: $e '
+          '(phone path)');
+      return false;
+    }
+  }
 
   // ── Public API ──────────────────────────────────────────────────────────
 
@@ -840,6 +866,15 @@ class GameDayAutopilotService {
       return;
     }
 
+    if (_isObserved(config.teamSlug)) {
+      // +114 — the server fires this start. The session exists so the phase
+      // machine, priority and celebrations behave as before; the wire is the
+      // server's.
+      debugPrint('[GameDayAutopilot] Pre-game OBSERVED (server-run, no apply) '
+          'for ${config.teamName}');
+      return;
+    }
+
     // Select design — now passes user's style preferences via callback
     final preferredStyles = onGetPreferredStyles?.call() ?? const [];
     final design = selectDesign(config, preferredStyles: preferredStyles);
@@ -873,7 +908,17 @@ class GameDayAutopilotService {
       teamPriority: teamPriority,
     );
 
+    // +114 — a server-run team's END is the server's: it restores the base
+    // ladder at the final. The phone resuming too would turn the house OFF
+    // (onResumeNormalSchedule is togglePower(false)) on top of that restore.
+    final relinquishingObserved = _isObserved(relinquishingSlug);
+
     if (winner == null) {
+      if (relinquishingObserved) {
+        debugPrint('[GameDayAutopilot] $relinquishingSlug finished '
+            '(server-run) — the server restores the house; phone does nothing');
+        return;
+      }
       debugPrint('[GameDayAutopilot] $relinquishingSlug finished, no other '
           'team still playing — resuming normal schedule');
       onResumeNormalSchedule?.call();
@@ -889,13 +934,22 @@ class GameDayAutopilotService {
       // design up for a team that is no longer configured.
       debugPrint('[GameDayAutopilot] hand-off target ${winner.teamSlug} has '
           'no ${session == null ? "session" : "config"} — resuming instead');
-      onResumeNormalSchedule?.call();
+      if (!relinquishingObserved) onResumeNormalSchedule?.call();
       return;
     }
 
     // Taking over IS un-deferring. From here the team owns the lights and,
     // because `ownsLights` gates it, its celebrations start firing.
     _sessions[winner.teamSlug] = session.copyWith(deferred: false);
+
+    if (_isObserved(winner.teamSlug)) {
+      // +114 — the survivor is server-run; its look on the wire is the
+      // server's. Owning the house still matters for celebrations (D3).
+      _notifySessionChanged(winner.teamSlug);
+      debugPrint('[GameDayAutopilot] HAND-OFF: $relinquishingSlug finished → '
+          '${config.teamName} (server-run, observed — no apply)');
+      return;
+    }
 
     final preferredStyles = onGetPreferredStyles?.call() ?? const [];
     final design = selectDesign(config, preferredStyles: preferredStyles);

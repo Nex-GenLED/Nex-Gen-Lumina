@@ -39,6 +39,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/game_day/served_game_day.dart'
+    show ServedVerdict, servedGameDayEntryTestProvider;
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
@@ -284,6 +286,14 @@ enum LeaseOutcome {
   /// next on-LAN sweep promotes it. Distinct from [gateRefused] (registered,
   /// geometry wrong) and [writeFailed] (a write was attempted and failed).
   deferred,
+
+  /// +114 (plan §3.2, D5) — a Game Day entry whose team OUR SERVERS run
+  /// (`users/{uid}.gameday_server`, fresh heartbeat). No preset save, no cfg
+  /// write, nothing registered: the server fires the start and the end, and a
+  /// phone lease would double the start and never end it. The calendar row is
+  /// kept (D5). If the server stops serving the team (stale heartbeat,
+  /// pre-flight skip) the next sweep inside the window leases it as today.
+  servedByServer,
 }
 
 /// P0-9 (part a) — the tri-state result of [CalendarEntryLeaseManager.activeLeaseTimers].
@@ -500,6 +510,10 @@ class LeaseResult {
         lease: lease,
         errorMessage: notice,
       );
+
+  /// +114 — the server runs this Game Day; the phone leases nothing.
+  factory LeaseResult.servedByServer() =>
+      const LeaseResult(outcome: LeaseOutcome.servedByServer);
 }
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
@@ -648,6 +662,20 @@ class CalendarEntryLeaseManager {
     // Holiday entries are bundled defaults; user/autopilot/auto can lease.
     if (entry.type == CalendarEntryType.holiday) {
       return LeaseResult.outsideWindow();
+    }
+
+    // +114 — THE ONE ENTRY POINT every lease path goes through (calendar
+    // writes, the sweep's promotion, eviction-and-lease, heir re-derivation),
+    // so the served stand-down lives here and nowhere else. No device traffic
+    // for a served night; an existing lease for it is retracted (LAN only).
+    if (await _isServedGameDay(entry, waitIfUnknown: true)) {
+      final existing = _activeLeases[entry.dateKey];
+      if (existing != null) {
+        await _retractLeases({entry.dateKey: existing});
+      }
+      debugPrint('$_kLogPrefix ${entry.dateKey} is a server-run Game Day — '
+          'no lease');
+      return LeaseResult.servedByServer();
     }
 
     if (entry.onTime == null ||
@@ -951,6 +979,11 @@ class CalendarEntryLeaseManager {
       await _saveToPrefs();
     }
 
+    // +114 (D4) — retract every still-armed lease whose night is now a
+    // server-run Game Day. One merged cfg POST zeroes them all; presets 26-41
+    // stay on the controller (inert without a timer row; no new pdel traffic).
+    await _retractServedGameDayLeases();
+
     // Clear `disabledUntil` on any ScheduleItem whose soft-eviction
     // expiry just passed. Triggers a re-sync so the freed item
     // reaches the controller without waiting for the next user-driven
@@ -1027,6 +1060,106 @@ class CalendarEntryLeaseManager {
     }
     debugPrint('$_kLogPrefix sweep END (expired=${expiredKeys.length}, '
         'promoted=$promoted, evictions cleared=$evictionsCleared)');
+  }
+
+  // ─── +114: server-run Game Day stand-down ─────────────────────────
+
+  /// How long a lease decision for a Game Day night waits for the server
+  /// status and the team list to load before falling back to the 112
+  /// behaviour (lease it). See [ServedVerdict] for why it waits at all.
+  @visibleForTesting
+  Duration servedStatusWait = const Duration(seconds: 10);
+
+  static const Duration _kServedStatusPoll = Duration(milliseconds: 250);
+
+  ServedVerdict _servedVerdict(CalendarEntry entry) =>
+      _ref.read(servedGameDayEntryTestProvider)(entry, nowProvider());
+
+  /// Never throws; any failure to answer reads as NOT served (the phone path).
+  ///
+  /// [waitIfUnknown] is the lease decision: wait (bounded) for the status to
+  /// load rather than lease a night the server may own. The sweep's
+  /// retraction pass does not wait — an unknown night is simply left for the
+  /// next sweep.
+  Future<bool> _isServedGameDay(CalendarEntry entry,
+      {bool waitIfUnknown = false}) async {
+    try {
+      var v = _servedVerdict(entry);
+      if (waitIfUnknown) {
+        var waited = Duration.zero;
+        while (v == ServedVerdict.unknown && waited < servedStatusWait) {
+          await Future<void>.delayed(_kServedStatusPoll);
+          waited += _kServedStatusPoll;
+          v = _servedVerdict(entry);
+        }
+        if (v == ServedVerdict.unknown) {
+          debugPrint('$_kLogPrefix ${entry.dateKey}: Game Day status still '
+              'loading after ${servedStatusWait.inSeconds}s — treated as not '
+              'served (112 behaviour)');
+        }
+      }
+      return v == ServedVerdict.served;
+    } catch (e) {
+      debugPrint('$_kLogPrefix served check failed — $e (treated as not '
+          'served)');
+      return false;
+    }
+  }
+
+  /// D4 — the sweep's retraction pass. Returns how many were retracted.
+  Future<int> _retractServedGameDayLeases() async {
+    if (_activeLeases.isEmpty) return 0;
+    List<CalendarEntry> entries;
+    try {
+      entries = _ref.read(calendarLeaseEntriesProvider);
+    } catch (_) {
+      return 0;
+    }
+    final byDate = {for (final e in entries) e.dateKey: e};
+    final served = <String, CalendarEntryLease>{};
+    for (final l in _activeLeases.values) {
+      final e = byDate[l.dateKey];
+      if (e != null && await _isServedGameDay(e)) served[l.dateKey] = l;
+    }
+    if (served.isEmpty) return 0;
+    return _retractLeases(served);
+  }
+
+  /// Drop [leases] from the registry and zero their timer rows in ONE merged
+  /// cfg write.
+  ///
+  /// LAN ONLY, and the registry follows the device: off the LAN the zero write
+  /// cannot land, and dropping the records anyway would leave the timer rows
+  /// armed with nothing in the app remembering them (the next schedule sync
+  /// would merge them back in, or not, by accident). So off the LAN nothing
+  /// changes and the next on-LAN sweep retracts. A failed write restores the
+  /// records for the same reason. With live writes off by flag the manager
+  /// never armed anything, so the records simply go.
+  Future<int> _retractLeases(Map<String, CalendarEntryLease> leases) async {
+    if (leases.isEmpty) return 0;
+    if (_readLiveWritesEnabled()) {
+      final repo = _readRepo();
+      if (repo == null || !repoCanWriteCfg(repo)) {
+        debugPrint('$_kLogPrefix served-lease retraction deferred — off-LAN '
+            '(${leases.keys.join(', ')})');
+        return 0;
+      }
+    }
+    for (final k in leases.keys) {
+      _activeLeases.remove(k);
+    }
+    await _saveToPrefs();
+    final ok = await _writeZeroedSlot(leases.values.first.slotIndex);
+    if (!ok) {
+      _activeLeases.addAll(leases);
+      await _saveToPrefs();
+      debugPrint('$_kLogPrefix served-lease retraction FAILED — records kept '
+          '(${leases.keys.join(', ')})');
+      return 0;
+    }
+    debugPrint('$_kLogPrefix retracted server-run Game Day lease(s) '
+        '${leases.keys.join(', ')}');
+    return leases.length;
   }
 
   // ─── Window detection ───────────────────────────────────────────

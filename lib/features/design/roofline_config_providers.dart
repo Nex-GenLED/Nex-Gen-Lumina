@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
+import 'package:nexgen_command/features/design/roofline_repair.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
@@ -18,6 +19,15 @@ import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/services/user_service.dart';
 import 'package:nexgen_command/shared/explicit_selection.dart';
 import 'package:uuid/uuid.dart';
+
+/// The fields a cleanup backup leaves on a pixelMap channel doc
+/// ([RooflineConfigService.backupChannelSegments]). Carried forward by every
+/// [RooflineConfigService.savePixelMap] so a later full save keeps them.
+const List<String> kSegmentsBackupKeys = [
+  'segments_backup',
+  'segments_backup_at',
+  'segments_backup_reason',
+];
 
 /// Service for CRUD operations on roofline / pixel-map configurations.
 ///
@@ -163,18 +173,57 @@ class RooflineConfigService {
       }
     }
 
+    // A cleanup's backup of the channel's previous segments lives on the same
+    // doc (see [backupChannelSegments]); a full set() would drop it on the
+    // next ordinary save, so it is carried forward the same way.
+    final existingById = {for (final d in existing.docs) d.id: d.data()};
+
     final batch = _firestore.batch();
     for (final ch in channels) {
-      batch.set(
-        col.doc(ch.channelIndex.toString()),
-        UserService.sanitizeForFirestore(ch.toJson()),
-      );
+      final json = UserService.sanitizeForFirestore(ch.toJson());
+      final prev = existingById[ch.channelIndex.toString()];
+      if (prev != null) {
+        for (final key in kSegmentsBackupKeys) {
+          if (prev.containsKey(key)) json[key] = prev[key];
+        }
+      }
+      batch.set(col.doc(ch.channelIndex.toString()), json);
     }
     for (final doc in existing.docs) {
       if (!keepIds.contains(doc.id)) {
         batch.delete(doc.reference);
       }
     }
+    await batch.commit();
+  }
+
+  /// Keeps a reversible copy of each channel's CURRENT segments on its own
+  /// pixelMap doc before a cleanup replaces them: `segments_backup` (the
+  /// segment list as stored), `segments_backup_at`, `segments_backup_reason`.
+  /// A merge write, so nothing else on the doc changes; [savePixelMap] then
+  /// carries the three fields across every later full save. Restoring is
+  /// copying `segments_backup` back over `segments`.
+  Future<void> backupChannelSegments(
+    String userId,
+    String controllerId,
+    Map<int, List<RooflineSegment>> segmentsByChannel, {
+    required String reason,
+  }) async {
+    if (segmentsByChannel.isEmpty) return;
+    final col = pixelMapCollection(userId, controllerId);
+    final batch = _firestore.batch();
+    final now = Timestamp.now();
+    segmentsByChannel.forEach((ch, segments) {
+      batch.set(
+        col.doc(ch.toString()),
+        UserService.sanitizeForFirestore({
+          'segments_backup': segments.map((s) => s.toJson()).toList(),
+          'segments_backup_at': now,
+          'segments_backup_reason': reason,
+        }),
+        SetOptions(merge: true),
+      );
+    });
     await batch.commit();
   }
 
@@ -681,6 +730,15 @@ class RooflineConfigEditorNotifier
     state = state!.removeSegment(segmentId);
   }
 
+  /// Remove a segment and give its lights to its neighbour on the channel,
+  /// so the channel keeps its length ([RooflineConfiguration.removeSegmentMerging]).
+  /// Falls back to [removeSegment] when the segment is alone on its channel.
+  void removeSegmentMerging(String segmentId) {
+    if (state == null) return;
+    final merged = state!.removeSegmentMerging(segmentId);
+    state = identical(merged, state) ? state!.removeSegment(segmentId) : merged;
+  }
+
   /// Reorder segments (drag and drop).
   void reorderSegments(int oldIndex, int newIndex) {
     if (state == null) return;
@@ -844,6 +902,55 @@ class RooflineConfigEditorNotifier
           'again.',
           e);
     }
+  }
+
+  /// Applies a duplicate cleanup ([planRooflineCleanup]) to the loaded map:
+  /// backs up every affected channel's current segments on its own pixelMap
+  /// doc FIRST ([RooflineConfigService.backupChannelSegments]), then saves
+  /// the cleaned map through [save]. Returns false with [lastSaveMessage] on
+  /// any refusal or failure; the backup is never written without the
+  /// cleaned save being attempted right after it.
+  Future<bool> applyCleanup(
+    Map<int, ChannelCleanupPlan> plans, {
+    String reason = 'duplicate cleanup',
+  }) async {
+    lastSaveError = null;
+    lastSaveMessage = null;
+    final current = state;
+    if (current == null) return _failSave('There is nothing to clean up yet.');
+    if (!cleanupHasWork(plans)) return true;
+    final uid = _ref.read(effectiveUserUidProvider);
+    if (uid == null) return _failSave('Sign in to clean up your roofline.');
+    final target = _ref.read(rooflineEditTargetProvider);
+    if (!target.hasSelection) {
+      return _failSave(
+          target.reason ?? 'Choose which controller this roofline belongs to.');
+    }
+    final controllerId = target.value!.id;
+    final loadedFrom = loadedControllerId;
+    if (loadedFrom != null && loadedFrom != controllerId) {
+      return _failSave('The controller changed since this roofline was '
+          'opened. Reopen it for ${controllerDisplayName(target.value!)} '
+          'before cleaning up.');
+    }
+    try {
+      await _ref.read(rooflineConfigServiceProvider).backupChannelSegments(
+        uid,
+        controllerId,
+        {
+          for (final p in plans.values)
+            if (p.hasWork) p.channelIndex: p.original,
+        },
+        reason: reason,
+      );
+    } catch (e) {
+      return _failSave(
+          "The backup didn't write ($e), so nothing was changed.", e);
+    }
+    state = applyCleanupPlans(current, plans);
+    final ok = await save();
+    if (!ok) state = current;
+    return ok;
   }
 
   /// Clear the editor state.

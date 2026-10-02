@@ -109,9 +109,40 @@ List<RooflineSegment> applyFeatureMarksToChannel({
     pixelCount: pixelCount,
     marks: marks,
   );
-  return [
-    for (final f in compiled) _carryForward(f, old),
-  ];
+  return withUniqueSectionIds(
+    [for (final f in compiled) _carryForward(f, old)],
+    channelIndex,
+  );
+}
+
+/// [sections] with every id unique on the channel. A section carried forward
+/// from the stored map keeps the id it was stored under; a new section is
+/// named by where it starts (`ch1_at42`); a collision is renamed the same way.
+///
+/// Re-marking a channel used to hand two sections the same id: the compiler
+/// names sections by POSITION (`ch1_seg1`), and a section that matched an old
+/// range kept the old positional id — so after a corner was added before it,
+/// the new section at position 1 and the old `ch1_seg1` sat on the channel
+/// together. One delete in Segment Setup then removed both, and the trace
+/// merge (which keys by id) brought a deleted one back. Compiling the same
+/// marks twice yields the same ids, so a repeated save changes nothing.
+List<RooflineSegment> withUniqueSectionIds(
+    List<RooflineSegment> sections, int channelIndex) {
+  final seen = <String>{};
+  final out = <RooflineSegment>[];
+  for (final s in sections) {
+    if (seen.add(s.id)) {
+      out.add(s);
+      continue;
+    }
+    var id = 'ch${channelIndex}_at${s.startPixel}';
+    var n = 2;
+    while (!seen.add(id)) {
+      id = 'ch${channelIndex}_at${s.startPixel}_${n++}';
+    }
+    out.add(s.copyWith(id: id));
+  }
+  return out;
 }
 
 RooflineSegment _carryForward(RooflineSegment f, List<RooflineSegment> old) {
@@ -163,6 +194,10 @@ RooflineSegment _carryForward(RooflineSegment f, List<RooflineSegment> old) {
   }
   anchors.sort();
   return f.copyWith(
+    // Named by where it starts, not by its position in the list, so it can
+    // never collide with a carried-forward positional id (see
+    // [withUniqueSectionIds]).
+    id: 'ch${f.channelIndex}_at${f.startPixel}',
     anchorPixels: anchors.toSet().toList(),
     level: container?.level ?? f.level,
     direction:
@@ -259,16 +294,212 @@ RooflineConfiguration replaceChannelSegments(
   );
 }
 
-/// The channel's length for the walkthrough: what the stored map covers, or
-/// the live strip length when the map has nothing on that channel.
+/// The channel's length for the walkthrough — device truth first.
+///
+///  1. the live strip length, when the controller being marked is the one
+///     the app is connected to;
+///  2. else the strip length recorded on the channel's map doc
+///     (`source_pixel_count`, surfaced as [RooflineConfiguration.channelPixelCounts]);
+///  3. else what the stored segments add up to.
+///
+/// It used to be the stored sum first and the strip only when the map had
+/// nothing on the channel. A map that had drifted from the strip (a photo
+/// trace's estimated LED count, a segment appended by Segment Setup or
+/// Trace) then lit and marked the wrong lights, and every save wrote the
+/// drift back as confirmed features. See [mappedLengthOfChannel] for the sum
+/// the notice compares against.
 int channelLengthForMarking(
   RooflineConfiguration config,
   int channelIndex, {
   int? liveLength,
 }) {
-  final mapped = config
-      .segmentsForChannel(channelIndex)
-      .fold<int>(0, (sum, s) => sum + s.pixelCount);
-  if (mapped > 0) return mapped;
-  return liveLength ?? 0;
+  if (liveLength != null && liveLength > 0) return liveLength;
+  final recorded = config.channelPixelCounts[channelIndex];
+  if (recorded != null && recorded > 0) return recorded;
+  return mappedLengthOfChannel(config, channelIndex);
+}
+
+/// What the stored segments on [channelIndex] add up to.
+int mappedLengthOfChannel(RooflineConfiguration config, int channelIndex) =>
+    config
+        .segmentsForChannel(channelIndex)
+        .fold<int>(0, (sum, s) => sum + s.pixelCount);
+
+// ── Placing and removing marks ──────────────────────────────────────────────
+
+/// [marks] with [mark] placed. One light carries at most one mark, so:
+///
+///  * the same mark already there → the SAME list comes back (placing a mark
+///    twice changes nothing);
+///  * a run split on a light that already has a corner or peak → unchanged
+///    (the feature already splits the run);
+///  * any other mark on that light → replaced (the customer changed their
+///    mind about what the light is sitting on).
+List<CaptureMark> placeMark(List<CaptureMark> marks, CaptureMark mark) {
+  final at = marks.indexWhere((m) => m.pixel == mark.pixel);
+  if (at < 0) {
+    return [...marks, mark]..sort((a, b) => a.pixel.compareTo(b.pixel));
+  }
+  final there = marks[at];
+  if (_sameMark(there, mark)) return marks;
+  if (mark.kind == MarkKind.runBoundary && there.kind != MarkKind.runBoundary) {
+    return marks;
+  }
+  final out = [...marks];
+  out[at] = mark;
+  return out;
+}
+
+bool _sameMark(CaptureMark a, CaptureMark b) =>
+    a.pixel == b.pixel &&
+    a.kind == b.kind &&
+    a.width == b.width &&
+    a.slopeLength == b.slopeLength &&
+    a.customType == b.customType &&
+    a.customRole == b.customRole;
+
+/// The channel-local range `[start, end)` the compiler gives [m]'s feature. A
+/// run split covers nothing — it only cuts the run it falls in.
+({int start, int end}) markFeatureRange(CaptureMark m, int pixelCount) {
+  final p = m.pixel.clamp(0, pixelCount - 1);
+  switch (m.kind) {
+    case MarkKind.runBoundary:
+      return (start: p, end: p);
+    case MarkKind.corner:
+    case MarkKind.custom:
+      final w = m.width < 1 ? 1 : m.width;
+      return (start: p, end: (p + w).clamp(0, pixelCount));
+    case MarkKind.peak:
+      final l = m.slopeLength < 1 ? 1 : m.slopeLength;
+      return (
+        start: (p - l).clamp(0, pixelCount - 1),
+        end: (p + l).clamp(0, pixelCount - 1) + 1,
+      );
+  }
+}
+
+/// Removing one mark so a section merges back into the lights around it.
+class SectionRemoval {
+  const SectionRemoval({
+    required this.mark,
+    required this.marksAfter,
+    required this.sectionsAfter,
+  });
+
+  /// The mark that goes.
+  final CaptureMark mark;
+
+  /// The channel's marks without it.
+  final List<CaptureMark> marksAfter;
+
+  /// What the channel compiles to without it.
+  final List<RooflineSegment> sectionsAfter;
+}
+
+/// How to delete [section] from a channel: which single mark to remove so
+/// its lights merge into the neighbouring section. Null when no one mark does
+/// that — [sectionRemovalBlocker] says why.
+///
+///  * a corner, peak or other feature → the mark that made it; its lights
+///    join the run around it;
+///  * a run that starts at a run split → that split; the run joins the run
+///    before it;
+///  * a run that ends at a run split → that split; the run joins the run
+///    after it.
+///
+/// Decided by compiling the marks without each candidate and checking the
+/// section is gone, so it stays right if the compiler's rules change.
+SectionRemoval? planSectionRemoval({
+  required int channelIndex,
+  required int pixelCount,
+  required List<CaptureMark> marks,
+  required RooflineSegment section,
+}) {
+  if (pixelCount <= 0 || marks.isEmpty) return null;
+  final start = section.startPixel;
+  final end = section.startPixel + section.pixelCount;
+  final isRun = section.type == SegmentType.run && section.architecturalRole == null;
+
+  final candidates = <int>[];
+  for (var i = 0; i < marks.length; i++) {
+    final m = marks[i];
+    if (isRun) {
+      if (m.kind == MarkKind.runBoundary && (m.pixel == start || m.pixel == end)) {
+        candidates.add(i);
+      }
+    } else if (m.kind != MarkKind.runBoundary) {
+      final r = markFeatureRange(m, pixelCount);
+      if (start >= r.start && start < r.end) candidates.add(i);
+    }
+  }
+  // Merging left (the split at the run's start) before merging right.
+  if (isRun) {
+    candidates.sort((a, b) {
+      final aLeft = marks[a].pixel == start ? 0 : 1;
+      final bLeft = marks[b].pixel == start ? 0 : 1;
+      return aLeft.compareTo(bLeft);
+    });
+  }
+
+  for (final i in candidates) {
+    final after = [...marks]..removeAt(i);
+    final compiled = compileMarksToChannelSegments(
+      channelIndex: channelIndex,
+      pixelCount: pixelCount,
+      marks: after,
+    );
+    final stillThere = compiled.any((s) =>
+        s.startPixel == start &&
+        s.pixelCount == section.pixelCount &&
+        s.type == section.type &&
+        s.architecturalRole == section.architecturalRole);
+    if (!stillThere) {
+      return SectionRemoval(
+          mark: marks[i], marksAfter: after, sectionsAfter: compiled);
+    }
+  }
+  return null;
+}
+
+/// Why [section] cannot be merged away by removing one mark. Null when it can.
+String? sectionRemovalBlocker({
+  required int channelIndex,
+  required int pixelCount,
+  required List<CaptureMark> marks,
+  required RooflineSegment section,
+}) {
+  if (marks.isEmpty) return 'This channel is already one straight run.';
+  final plan = planSectionRemoval(
+    channelIndex: channelIndex,
+    pixelCount: pixelCount,
+    marks: marks,
+    section: section,
+  );
+  if (plan != null) return null;
+  final isRun = section.type == SegmentType.run && section.architecturalRole == null;
+  if (isRun) {
+    return 'This run sits between marked features. Remove the corner or peak '
+        'next to it to merge them.';
+  }
+  return 'This section comes from the saved map. Save the channel once to '
+      'rebuild it, then remove it.';
+}
+
+/// What "Start over" on a channel removes, for its confirmation.
+({int corners, int peaks, int splits, int other}) marksSummary(
+    List<CaptureMark> marks) {
+  var corners = 0, peaks = 0, splits = 0, other = 0;
+  for (final m in marks) {
+    switch (m.kind) {
+      case MarkKind.corner:
+        corners++;
+      case MarkKind.peak:
+        peaks++;
+      case MarkKind.runBoundary:
+        splits++;
+      case MarkKind.custom:
+        other++;
+    }
+  }
+  return (corners: corners, peaks: peaks, splits: splits, other: other);
 }

@@ -48,6 +48,8 @@ import 'package:nexgen_command/features/favorites/favorite_apply.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
 import 'package:nexgen_command/features/dashboard/widgets/feature_button.dart';
 import 'package:nexgen_command/features/game_day/game_day_entry_button.dart';
+import 'package:nexgen_command/features/game_day/served_game_day.dart'
+    show gameDayRunTagProvider;
 import 'package:nexgen_command/shared/controller_targeting.dart';
 import 'package:nexgen_command/shared/explicit_selection.dart';
 import 'package:nexgen_command/shared/write_result.dart';
@@ -1448,6 +1450,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       final timeline = ref.watch(todayTimelineProvider);
       final timeFormat = ref.watch(timeFormatPreferenceProvider);
       final scopeLabeller = ref.watch(timelineScopeLabellerProvider);
+      // +114 — "server" / "phone" on a Game Day row.
+      final runnerTag = ref.watch(gameDayRunTagProvider);
       final today = DateTime.now();
 
       if (timeline.isEmpty) {
@@ -1506,6 +1510,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             onMoreTap: openDay,
             scopeLabelFor: scopeLabeller.scopeFor,
             controllerLabelFor: scopeLabeller.controllerFor,
+            runnerTagFor: (e) => e.dated == null ? null : runnerTag(e.dated!),
           ),
         ],
       );

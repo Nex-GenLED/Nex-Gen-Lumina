@@ -18,6 +18,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app_providers.dart';
 import '../../models/roofline_segment.dart';
 import '../game_day/game_day_design_write.dart';
+import '../game_day/game_day_server_status_provider.dart'
+    show gameDayServerStatusProvider, gameDayServerStatusSyncProvider;
 import '../design/roofline_config_providers.dart';
 import '../neighborhood/services/channel_participation_resolver.dart';
 import '../neighborhood/services/path1_game_day_snapshot.dart';
@@ -28,6 +30,7 @@ import '../schedule/calendar_providers.dart';
 import '../schedule/schedule_priority_resolver.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
+import '../sports_alerts/models/game_state.dart' show GameStatus;
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
@@ -57,6 +60,41 @@ final _gameScheduleProvider = Provider<GameScheduleService>((ref) {
   final svc = GameScheduleService();
   ref.onDispose(svc.dispose);
   return svc;
+});
+
+/// +114 — is a FOLLOWED team's game in progress, or starting within its lead
+/// time plus an hour? Used by the on-connect ladder repair's "never during a
+/// live game" guard (base_ladder_repair.dart). Returns a short reason, or null.
+///
+/// ONE SIGNAL AMONG SEVERAL, NEVER THE ONLY GUARD. ESPN failures surface here
+/// as "no game" (both lookups swallow errors), so a dead feed cannot be told
+/// from a quiet night. The calendar windows, the live sessions and (once read)
+/// the server status are checked beside it; this one exists because a game
+/// already under way at a cold open has no autopilot session yet.
+final followedGameLiveReasonProvider =
+    Provider<Future<String?> Function()>((ref) {
+  return () async {
+    final configs = ref.read(enabledAutopilotConfigsProvider);
+    final espn = ref.read(_espnApiProvider);
+    final schedule = ref.read(_gameScheduleProvider);
+    for (final c in configs) {
+      try {
+        final g = await espn.fetchTeamGame(c.sport, c.espnTeamId);
+        if (g != null &&
+            (g.status == GameStatus.inProgress ||
+                g.status == GameStatus.halftime)) {
+          return '${c.teamName} game in progress';
+        }
+        if (await schedule.hasGameSoon(c.espnTeamId, c.sport,
+            minutes: c.effectiveLeadTimeMinutes + 60)) {
+          return '${c.teamName} game starts soon';
+        }
+      } catch (_) {
+        // One team's lookup failing must not hide another's live game.
+      }
+    }
+    return null;
+  };
 });
 
 /// The core autopilot service instance.
@@ -104,6 +142,12 @@ final gameDayAutopilotServiceProvider =
       throw StateError('WLED apply returned false (device write failed)');
     }
   };
+
+  // +114 (D3) — server-run teams are observed, never applied or resumed.
+  // Read per decision; loading/error/stale all read as "none served", which
+  // is the 112 behaviour.
+  svc.onGetServedTeams = () =>
+      ref.read(gameDayServerStatusSyncProvider).servedTeamsAt(DateTime.now());
 
   svc.onApplyFailure = (design, error, stack) {
     debugPrint('[GameDayAutopilot] APPLY FAILED for "${design.designName}": '
@@ -613,6 +657,20 @@ bool shouldClearGameDayEntry({
   return true;
 }
 
+/// +114 — how long Game Day evaluation waits for `gameday_server` at launch.
+const Duration kServedStatusLaunchWait = Duration(minutes: 3);
+
+/// PURE. Should this evaluation pass be skipped because the server status has
+/// not loaded yet? Yes inside the launch window (a pass now would read every
+/// team as phone-run and apply a served team's design over the server's);
+/// never after it (a status that never arrives must not silence the phone).
+@visibleForTesting
+bool deferEvaluateForServedStatus({
+  required bool statusLoaded,
+  required Duration sinceBuild,
+}) =>
+    !statusLoaded && sinceBuild < kServedStatusLaunchWait;
+
 class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   Timer? _evaluationTimer;
   Timer? _refreshTimer;
@@ -667,9 +725,26 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     return const {};
   }
 
+  /// When this notifier was built — the start of the launch window below.
+  final DateTime _builtAt = DateTime.now();
+
   Future<void> _evaluate() async {
     final configs = ref.read(enabledAutopilotConfigsProvider);
     if (configs.isEmpty) return;
+
+    // +114 (observe mode): an evaluation that runs before the server status
+    // has loaded would read every team as phone-run and put a served team's
+    // design on the wire over the server's. Skip passes until it loads — but
+    // only for the launch window, so a status that never arrives cannot
+    // silence the phone (it then runs exactly as 112).
+    if (deferEvaluateForServedStatus(
+      statusLoaded: ref.read(gameDayServerStatusProvider).hasValue,
+      sinceBuild: DateTime.now().difference(_builtAt),
+    )) {
+      debugPrint('[GameDayAutopilot] evaluate deferred — Game Day server '
+          'status still loading');
+      return;
+    }
 
     final service = ref.read(gameDayAutopilotServiceProvider);
     await service.evaluateConfigs(configs);

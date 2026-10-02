@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/schedule/base_ladder_repair_feature_flag
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart'
     show ClockInfoSource;
+import 'package:nexgen_command/features/wled/base_look.dart';
 import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
@@ -449,6 +450,13 @@ class ScheduleSyncService {
   /// split that diagnosed this defect: every lease and pattern preset on the
   /// bench rig was healthy (`s0:on s1:on`) while all four ON ladder slots were
   /// damaged.
+  ///
+  /// +114: every LIT segment also carries the base look (`base_look.dart`) —
+  /// Lumina Blue, Solid, slots 2 and 3 black. Naming `on` alone left colour and
+  /// effect to be captured from whatever the house was showing at save time,
+  /// which is how a ladder saved during a black scene stores a lit-but-black
+  /// base layer. A segment the scope excludes stays `{id, on:false}` and
+  /// carries no look: it is dark, so there is nothing to show.
   static Map<String, dynamic> buildNglOnPresetState(
           int bri, Map<String, dynamic>? liveState,
           {List<int>? channels}) =>
@@ -562,6 +570,14 @@ class ScheduleSyncService {
         // wrong-range stomp) — the builders do not emit them, but a stored
         // preset saved with `sb:true` carries them and must not fail on that.
         if (f.key == 'start' || f.key == 'stop') continue;
+        // +114 — the BASE LOOK is written, never asserted. Every ladder preset
+        // on the installed fleet predates it and holds a captured colour, so
+        // comparing it would re-save the ladder on every controller at the
+        // next sync (a visible flash per house, from an unrelated edit). `col`
+        // is also a List, and `!=` on two lists is identity — it would never
+        // be satisfied at all. A DARK ladder is the on-connect repair's job,
+        // under its own guards (base_ladder_repair.dart). See base_look.dart.
+        if (kBaseLookSegmentKeys.contains(f.key)) continue;
         if (got[f.key] != f.value) return false;
       }
     }
@@ -2187,26 +2203,32 @@ class ScheduleSyncService {
   /// not an option a timer-fired preset can express. v1 semantics, stated
   /// plainly in the editor: a channel-scoped event DARKENS the channels it
   /// excludes.
+  ///
+  /// +114 — every segment named `on:true` also carries the base look
+  /// ([baseLookSegmentFields]); see [buildNglOnPresetState].
   static List<Map<String, dynamic>> _fullStripOnSegments(
       Map<String, dynamic>? liveState, {
     List<int>? channels,
   }) {
+    Map<String, dynamic> lit(Map<String, dynamic> idPart) =>
+        <String, dynamic>{...idPart, 'on': true, ...baseLookSegmentFields()};
+
     final seg = liveState?['seg'];
     if (seg is List && seg.isNotEmpty) {
       final out = <Map<String, dynamic>>[];
       for (var i = 0; i < seg.length; i++) {
         final s = seg[i];
         final id = (s is Map && s['id'] is int) ? s['id'] as int : i;
-        out.add({'id': id, 'on': channels == null || channels.contains(id)});
+        out.add(channels == null || channels.contains(id)
+            ? lit({'id': id})
+            : <String, dynamic>{'id': id, 'on': false});
       }
       return out;
     }
     if (channels != null) {
-      return [for (final id in channels) {'id': id, 'on': true}];
+      return [for (final id in channels) lit({'id': id})];
     }
-    return [
-      {'on': true}
-    ];
+    return [lit(const <String, dynamic>{})];
   }
 
   /// Apply a channel scope to a caller-built `seg` array — the third caller of

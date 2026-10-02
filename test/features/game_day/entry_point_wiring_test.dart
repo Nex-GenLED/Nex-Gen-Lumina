@@ -525,6 +525,14 @@ void main() {
         // Scroll it clear of the dock band first: the dock is above the page
         // in z-order, so a row left under it would hand the tap to the dock.
         final alerts = find.text('Alerts');
+        // +114: the "who runs Game Day" banner now sits above the cards, so
+        // on the smallest phone at 1.3x the row starts below the built area
+        // of the lazy list. Scroll until it exists, then pin as before.
+        for (var i = 0; i < 8 && alerts.evaluate().isEmpty; i++) {
+          await tester.drag(
+              find.byType(CustomScrollView), const Offset(0, -120));
+          await _settle(tester, 2);
+        }
         expect(alerts, findsOneWidget);
         await tester.ensureVisible(alerts);
         await _settle(tester, 3);

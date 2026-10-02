@@ -22,6 +22,18 @@ Map<String, dynamic> def({
       if (seg != null) 'seg': seg,
     };
 
+/// +114 — a lit ladder segment carries the base look (base_look.dart).
+Map<String, dynamic> litSeg([int? id]) => {
+      if (id != null) 'id': id,
+      'on': true,
+      'fx': 0,
+      'col': [
+        [0, 212, 255, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ],
+    };
+
 Map<String, dynamic> liveState(List<int> segIds, {bool on = true}) =>
     <String, dynamic>{
       'on': on,
@@ -35,10 +47,7 @@ void main() {
       expect(s['on'], isTrue);
       expect(s['bri'], 200);
       expect(s['ib'], isTrue, reason: 'ib persists root on/bri into the preset');
-      expect(s['seg'], [
-        {'id': 0, 'on': true},
-        {'id': 1, 'on': true},
-      ]);
+      expect(s['seg'], [litSeg(0), litSeg(1)]);
     });
 
     test('THE DEFECT: seg is never omitted, so psave cannot capture ambient '
@@ -67,9 +76,7 @@ void main() {
 
     test('degrades to a single on-segment when live state is unavailable', () {
       final s = ScheduleSyncService.buildNglOnPresetState(153, null);
-      expect(s['seg'], [
-        {'on': true}
-      ]);
+      expect(s['seg'], [litSeg()]);
     });
   });
 

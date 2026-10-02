@@ -14,7 +14,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart';
@@ -55,70 +54,30 @@ void main() {
       svc = WledService('http://$kBenchIp');
     });
 
-    test('(3a→3b) healer repairs presets 1/3/4/5 to assert root on', () async {
-      // ── 3a PRE-STATE ────────────────────────────────────────────────────
+    // +114: healer step (e) — the unguarded on-connect psave of presets
+    // 1/3/4/5 that (3a)/(3e) used to pin — was REMOVED. Ladder repair is now
+    // the guarded one-time BaseLadderRepairRunner (base_ladder_repair.dart),
+    // pinned by test/features/wled/base_ladder_repair_test.dart. What a live
+    // run can still prove here is the negative: a healer connect leaves every
+    // ladder body exactly as it found it.
+    test('(3a) +114: the healer itself writes NO ladder preset', () async {
       final pre = await _presets(svc);
       expect(pre, isNotEmpty, reason: 'controller unreachable or un-synced');
-      final preBroken = <int>[];
-      for (final e in ScheduleSyncService.kOnPresetSpecs.entries) {
-        final def = pre[e.key];
-        if (def == null) continue;
-        if (!ScheduleSyncService.isNglOnPresetSatisfied(def, e.value.name)) {
-          preBroken.add(e.key);
-        }
-        // ignore: avoid_print
-        print('PRE  preset ${e.key} (${e.value.name}): '
-            'root on=${def['on'] ?? 'ABSENT'}');
-      }
-      // ignore: avoid_print
-      print('PRE  broken: $preBroken');
-
-      // ── 3b RUN THE REAL HEALER ──────────────────────────────────────────
       final healer = ControllerDefaultsHealer(
         repo: svc,
         isLan: true,
         controllerIp: kBenchIp,
         ctx: _ctx(),
-        // Gamma is exercised by its own path; keep this run surgical.
         gammaAction: (_) async =>
             const WledConfigPushResult(success: true, noChange: true),
       );
       final report = await healer.run();
       // ignore: avoid_print
-      print('HEAL report: $report  onPresetsHealed=${report.onPresetsHealed}');
-
-      expect(report.onPresetsHealed.toSet(), preBroken.toSet(),
-          reason: 'healer must repair exactly the broken presets');
-
-      // ── POST-STATE ──────────────────────────────────────────────────────
+      print('HEAL report: $report');
       final post = await _presets(svc);
-      for (final e in ScheduleSyncService.kOnPresetSpecs.entries) {
-        final def = post[e.key];
-        if (def == null) continue;
-        // ignore: avoid_print
-        print('POST preset ${e.key} (${e.value.name}): '
-            'root on=${def['on'] ?? 'ABSENT'} bri=${def['bri'] ?? 'ABSENT'}');
-        expect(def['on'], isTrue,
-            reason: 'preset ${e.key} must assert ROOT master power');
-        expect(def.containsKey('ib'), isFalse,
-            reason: 'ib is a request flag and must never be stored');
+      for (final id in const [1, 2, 3, 4, 5]) {
+        expect(post[id], pre[id], reason: 'preset $id must be untouched');
       }
-    }, timeout: const Timeout(Duration(minutes: 2)), skip: !kRunHw);
-
-    test('(3e) second healer run is a NO-OP (idempotent)', () async {
-      final healer = ControllerDefaultsHealer(
-        repo: svc,
-        isLan: true,
-        controllerIp: kBenchIp,
-        ctx: _ctx(),
-        gammaAction: (_) async =>
-            const WledConfigPushResult(success: true, noChange: true),
-      );
-      final report = await healer.run();
-      // ignore: avoid_print
-      print('2nd run: $report  onPresetsHealed=${report.onPresetsHealed}');
-      expect(report.onPresetsHealed, isEmpty,
-          reason: 'healthy presets must receive ZERO writes (readback-gated)');
     }, timeout: const Timeout(Duration(minutes: 2)), skip: !kRunHw);
 
     test('(3c) FUNCTIONAL: master OFF → load preset 1 → strip powers on',

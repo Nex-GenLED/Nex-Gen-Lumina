@@ -143,7 +143,11 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           OutlinedButton.icon(
-                            onPressed: () => context.push(AppRoutes.segmentSetup),
+                            // +113 (owner decision 2026-10-01): a customer
+                            // marks corners, peaks and runs in the walkthrough;
+                            // Segment Setup is the installer's editor and is
+                            // locked to installer mode.
+                            onPressed: _openWalkthrough,
                             icon: const Icon(Icons.roofing, size: 18),
                             label: const Text('Roofline setup'),
                             style: OutlinedButton.styleFrom(
@@ -184,8 +188,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
                                   if (lastError != null && !isClarifying)
                                     _StudioErrorPanel(
                                       result: lastError,
-                                      onRooflineSetup: () =>
-                                          context.push(AppRoutes.segmentSetup),
+                                      onRooflineSetup: _openWalkthrough,
                                       onOpenManual: _openManual,
                                       onStartOver: _startOver,
                                     ),

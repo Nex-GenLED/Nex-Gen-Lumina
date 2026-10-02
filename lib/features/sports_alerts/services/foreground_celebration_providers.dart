@@ -106,9 +106,14 @@ final liveCelebrationTeamsProvider = Provider<List<CelebrationTeam>>((ref) {
 
 /// Pure derivation (unit-tested): a team celebrates iff it is in a liveGame
 /// phase in EITHER Game Day phase machine AND its Game Day config is enabled
-/// with `scoreCelebrationEnabled`. Sensitivity is [AlertSensitivity.allEvents]
-/// — celebrate every score the per-sport diff engine emits (it already
-/// throttles high-frequency leagues: NBA/NCAA-MB emit clutch only).
+/// with `scoreCelebrationEnabled`. Sensitivity is the team's OWN
+/// `alertSensitivity` — the Game Day screen's "Alert Sensitivity" picker.
+///
+/// +114: this used to be forced to [AlertSensitivity.allEvents], so the picker
+/// was a no-op on the only celebration path that runs (plan §0). A config that
+/// never set it reads its stored default, `majorOnly`, so a field goal no
+/// longer flashes a house whose owner never chose "every score". A win is
+/// outside the filter and always celebrates (score_monitor_service.dart).
 ///
 /// ── WHY TWO SOURCES (#54 union — delete deliberately, do not resurrect) ──────
 /// The app has TWO Game Day phase machines with two separate enums:
@@ -168,7 +173,7 @@ List<CelebrationTeam> computeLiveCelebrationTeams({
         CelebrationTeam(
           teamSlug: cfg.teamSlug,
           sport: cfg.sport,
-          sensitivity: AlertSensitivity.allEvents,
+          sensitivity: cfg.alertSensitivity,
           // The Game Day screen's celebration picker. The coordinator receives
           // ONLY this object, so a choice that stops here never reaches the
           // lights — which is how the picker came to be a no-op on this path.
