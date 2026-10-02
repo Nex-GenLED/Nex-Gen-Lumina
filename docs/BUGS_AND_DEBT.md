@@ -4059,7 +4059,8 @@ commit — merging `main` into this tree will collide with the untracked copies.
     in `game_day_server_status.dart` and exclude those slugs in `computeLiveCelebrationTeams`.
 
 - [ ] **#146 — SERVER PRE-FLIGHT P4 CANNOT SEE A LIT-BUT-BLACK LADDER**
-  - Status: **OPEN — server decision** · Severity: **P2** · Evidence: **verified-by-source**
+  - Status: **OPEN — owner: the ESPN slate (functions) branch, decided 2026-10-02; not the app
+    branch** · Severity: **P2** · Evidence: **verified-by-source**
   - P4 (`gameDayPreflight.checkLadder`, `fix/gameday-server-ab`) reads
     `base_ladder_asserts_segments`, which is true for a ladder whose segments are all named on but
     coloured black (`healer_ladder_restore_publish_test.dart` pins exactly that). +114 publishes
@@ -4092,8 +4093,8 @@ commit — merging `main` into this tree will collide with the untracked copies.
     controller-doc record (`base_ladder_repair`) is the cross-phone history for support.
 
 - [ ] **#150 — SERVER P7 TREATS BUILD 113 AS "RETRACTS LEASES"; THE RETRACTION SHIPS IN 114**
-  - Status: **OPEN — one-line functions change** · Severity: **P3** · Evidence:
-    **verified-by-source**
+  - Status: **OPEN — one-line functions change; owner: the ESPN slate (functions) branch,
+    decided 2026-10-02** · Severity: **P3** · Evidence: **verified-by-source**
   - `gameDayPreflight.MIN_SERVED_APP_BUILD = 113` (`fix/gameday-server-ab`) was written when step
     C was expected to be build 113. Build 113 is the roofline build (`fix/113-roofline-segments`);
     the served-lease skip and retraction are in 114. P7 is informational (`lease_hygiene_unknown`,
