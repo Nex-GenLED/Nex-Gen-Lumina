@@ -19,7 +19,7 @@ import '../../app_providers.dart';
 import '../../models/roofline_segment.dart';
 import '../game_day/game_day_design_write.dart';
 import '../game_day/game_day_server_status_provider.dart'
-    show gameDayServerStatusSyncProvider;
+    show gameDayServerStatusProvider, gameDayServerStatusSyncProvider;
 import '../design/roofline_config_providers.dart';
 import '../neighborhood/services/channel_participation_resolver.dart';
 import '../neighborhood/services/path1_game_day_snapshot.dart';
@@ -657,6 +657,20 @@ bool shouldClearGameDayEntry({
   return true;
 }
 
+/// +114 — how long Game Day evaluation waits for `gameday_server` at launch.
+const Duration kServedStatusLaunchWait = Duration(minutes: 3);
+
+/// PURE. Should this evaluation pass be skipped because the server status has
+/// not loaded yet? Yes inside the launch window (a pass now would read every
+/// team as phone-run and apply a served team's design over the server's);
+/// never after it (a status that never arrives must not silence the phone).
+@visibleForTesting
+bool deferEvaluateForServedStatus({
+  required bool statusLoaded,
+  required Duration sinceBuild,
+}) =>
+    !statusLoaded && sinceBuild < kServedStatusLaunchWait;
+
 class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
   Timer? _evaluationTimer;
   Timer? _refreshTimer;
@@ -711,9 +725,26 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
     return const {};
   }
 
+  /// When this notifier was built — the start of the launch window below.
+  final DateTime _builtAt = DateTime.now();
+
   Future<void> _evaluate() async {
     final configs = ref.read(enabledAutopilotConfigsProvider);
     if (configs.isEmpty) return;
+
+    // +114 (observe mode): an evaluation that runs before the server status
+    // has loaded would read every team as phone-run and put a served team's
+    // design on the wire over the server's. Skip passes until it loads — but
+    // only for the launch window, so a status that never arrives cannot
+    // silence the phone (it then runs exactly as 112).
+    if (deferEvaluateForServedStatus(
+      statusLoaded: ref.read(gameDayServerStatusProvider).hasValue,
+      sinceBuild: DateTime.now().difference(_builtAt),
+    )) {
+      debugPrint('[GameDayAutopilot] evaluate deferred — Game Day server '
+          'status still loading');
+      return;
+    }
 
     final service = ref.read(gameDayAutopilotServiceProvider);
     await service.evaluateConfigs(configs);

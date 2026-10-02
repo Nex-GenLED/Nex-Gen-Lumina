@@ -9,6 +9,8 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart'
+    show deferEvaluateForServedStatus, kServedStatusLaunchWait;
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_service.dart';
 import 'package:nexgen_command/features/sports_alerts/models/game_state.dart';
 import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
@@ -247,5 +249,29 @@ void main() {
     final design = h.svc.selectDesign(_chiefs);
     await h.svc.forceActivate(_chiefs, design);
     expect(h.applied, hasLength(1));
+  });
+
+  group('launch window — evaluation waits for the server status', () {
+    test('status not loaded, inside the window → skip the pass', () {
+      expect(
+          deferEvaluateForServedStatus(
+              statusLoaded: false, sinceBuild: const Duration(seconds: 5)),
+          isTrue);
+    });
+
+    test('status loaded → evaluate at once', () {
+      expect(
+          deferEvaluateForServedStatus(
+              statusLoaded: true, sinceBuild: const Duration(seconds: 5)),
+          isFalse);
+    });
+
+    test('never loads → the phone evaluates after the window (never silenced)',
+        () {
+      expect(
+          deferEvaluateForServedStatus(
+              statusLoaded: false, sinceBuild: kServedStatusLaunchWait),
+          isFalse);
+    });
   });
 }
