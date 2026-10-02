@@ -206,7 +206,7 @@ class SharedPrefsLadderRepairStore implements LadderRepairStore {
   Future<bool> markRan(String controllerId, Map<String, Object?> record) async {
     try {
       final p = await SharedPreferences.getInstance();
-      return p.setString(ladderRepairMarkerKey(controllerId), jsonEncode({
+      return await p.setString(ladderRepairMarkerKey(controllerId), jsonEncode({
         ...record,
         'at': DateTime.now().toIso8601String(),
       }));

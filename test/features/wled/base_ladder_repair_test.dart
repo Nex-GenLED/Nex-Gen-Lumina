@@ -25,6 +25,7 @@ import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
+import 'package:nexgen_command/utils/sun_utils.dart';
 
 // A Friday afternoon, well clear of every timer below unless a test moves it.
 final DateTime _now = DateTime(2026, 10, 2, 13, 0);
@@ -357,8 +358,11 @@ void main() {
           'timer_near');
     });
 
-    test('a solar row near today\'s sunset refuses', () {
-      final sunset = DateTime(2026, 10, 2, 18, 59); // KC ~18:59 CDT
+    test('a solar row near sunset refuses; hours away it does not', () {
+      // Anchored on the computed sunset itself, not on a clock-face hour or a
+      // day number: KC sunset is ~00:00 UTC, so under TZ=UTC0 (Codemagic) the
+      // local day boundary sits right next to it.
+      final sunset = SunUtils.sunsetLocal(39.1, -94.6, DateTime(2026, 10, 2))!;
       final row = BaseBoundaryRow(
         index: 0,
         kind: kBoundaryKindSunset,
@@ -368,10 +372,12 @@ void main() {
         macro: 1,
         role: 'system_on',
       );
-      final fires = timerFiresAround(row, sunset, latitude: 39.1, longitude: -94.6);
-      final today = fires.where((f) => f.day == 2).single;
-      expect(gate(now: today.add(const Duration(minutes: 4)), rows: [row]).code,
+      expect(gate(now: sunset.add(const Duration(minutes: 4)), rows: [row]).code,
           'timer_near');
+      expect(
+          gate(now: sunset.subtract(const Duration(hours: 3)), rows: [row])
+              .allowed,
+          isTrue);
     });
 
     test('a solar row on a controller with 0,0 coordinates cannot fire — '
