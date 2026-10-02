@@ -5,7 +5,6 @@
 // the RESOLVED participation, reaches the publisher on the one write, and rides
 // the outcome so the on-connect repair acts on exactly what was published.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
