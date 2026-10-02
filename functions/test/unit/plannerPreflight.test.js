@@ -92,7 +92,7 @@ describe("an account that passes every check", () => {
   test("start minted; gameday_server served; scorecard entry; P6 probe 1 in the same tick", async () => {
     const f = world();
     f.put(`users/${UID}/debug_errors/d1`, {
-      context: "routing_decisions", app_version: "2.5.10+113", timestamp: f.ts(T0 - H),
+      context: "routing_decisions", app_version: "2.5.10+114", timestamp: f.ts(T0 - H),
     });
     const r = await tickAt(f, T0);
     expect(r.startsPlanned).toBe(1);

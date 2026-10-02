@@ -13,11 +13,17 @@
 // Run from the repo root after `npm --prefix functions run build`. Credentials
 // come from ADC (gcloud auth application-default login). Writes nothing.
 // Prints uids you passed in; it never lists accounts on its own.
+//
+// P4b (#146, fix/gameday-espn-slate): the ladder-lights check follows
+// config/gameday_planner.preflight_ladder_lit exactly as the planner reads it.
+// LADDER_LIT=on|strict|off overrides it, to preview a mode BEFORE flipping it:
+//   LADDER_LIT=on node scripts/_gameday_preflight_dryrun.js <uid>
 
 const path = require('path');
 const fn = path.join(__dirname, '..', 'functions');
 const admin = require(path.join(fn, 'node_modules', 'firebase-admin'));
-const { evaluatePreflight, p6HoldsAccount } = require(path.join(fn, 'lib', 'gameDayPreflight'));
+const { evaluatePreflight, p6HoldsAccount, ladderLitModeFrom, ladderDarkChannels } =
+  require(path.join(fn, 'lib', 'gameDayPreflight'));
 const { evaluateAccountReadiness } = require(path.join(fn, 'lib', 'gameDayGate'));
 
 admin.initializeApp({
@@ -26,7 +32,14 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-async function dryRun(uid, nowMs) {
+async function ladderLitMode() {
+  const forced = process.env.LADDER_LIT;
+  if (forced === 'on' || forced === 'strict' || forced === 'off') return { mode: forced, source: 'env' };
+  const cfg = await db.collection('config').doc('gameday_planner').get();
+  return { mode: ladderLitModeFrom(cfg.exists ? cfg.data() : undefined), source: 'config' };
+}
+
+async function dryRun(uid, nowMs, lit) {
   const user = await db.collection('users').doc(uid).get();
   if (!user.exists) return { uid, error: 'no user doc' };
   const controllers = await db.collection('users').doc(uid).collection('controllers').get();
@@ -55,6 +68,7 @@ async function dryRun(uid, nowMs) {
     p6Unreachable: sessions.docs.some((s) => p6HoldsAccount(s.data(), nowMs)),
     appVersion: appDoc ? appDoc.get('app_version') : null,
     nowMs,
+    ladderLit: lit.mode,
   });
   return {
     uid,
@@ -66,6 +80,9 @@ async function dryRun(uid, nowMs) {
       gate: gate.blocking.length ? gate.blocking : 'armed',
       heartbeatAgeS: bs.exists && bs.updateTime ? Math.round((nowMs - bs.updateTime.toMillis()) / 1000) : null,
       ladder: controller ? controller.base_ladder_asserts_segments : undefined,
+      ladderLitMode: `${lit.mode} (${lit.source})`,
+      ladderRestoreLit: controller ? controller.base_ladder_restore_lit : undefined,
+      ladderDarkChannels: ladderDarkChannels(controller),
       participation: controller ? controller.participating_channels : undefined,
       appVersion: appDoc ? appDoc.get('app_version') : null,
     },
@@ -79,8 +96,9 @@ async function dryRun(uid, nowMs) {
     process.exit(2);
   }
   const nowMs = Date.now();
+  const lit = await ladderLitMode();
   for (const uid of uids) {
-    const r = await dryRun(uid, nowMs);
+    const r = await dryRun(uid, nowMs, lit);
     console.log(JSON.stringify(r));
   }
   process.exit(0);

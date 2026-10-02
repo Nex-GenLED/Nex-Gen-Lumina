@@ -20,7 +20,7 @@ const goodInputs = (over = {}) => ({
   controller: goodController(),
   gate: { armed: true },
   p6Unreachable: false,
-  appVersion: "2.5.10+113",
+  appVersion: "2.5.10+114",
   nowMs: NOW,
   ...over,
 });

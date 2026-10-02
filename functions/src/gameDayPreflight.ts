@@ -32,12 +32,17 @@
  *                        participating_channels_device_ids non-empty.
  *   P4 base ladder       base_ladder_asserts_segments === true. Stricter than
  *                        the gate (which treats absent as advisory).
+ *   P4b ladder lights    (#146, flag `preflight_ladder_lit`, default OFF)
+ *                        base_ladder_restore_lit must not be false. P4 passes
+ *                        a ladder whose segments are all named on but black;
+ *                        the +114 app measures whether each ON preset actually
+ *                        lights. See checkLadderLit.
  *   P5 gate              the readiness gate is armed (gameday_gate_blocking
  *                        empty).
  *   P6 reachable         a getInfo probe when the start is minted; two
  *                        consecutive failures 5 min apart skip that event's
  *                        start. See decideP6.
- *   P7 app build ≥ 113   INFORMATIONAL ONLY (`lease_hygiene_unknown`). Never
+ *   P7 app build ≥ 114   INFORMATIONAL ONLY (`lease_hygiene_unknown`). Never
  *                        a skip.
  */
 
@@ -62,8 +67,12 @@ export const P6_RETRY_GAP_MS = 5 * 60_000;
  * that delays the thing it protects is worse than no check.
  */
 export const P6_MIN_LEAD_MS = 3 * 60_000;
-/** P7: the first app build that retracts a served account's lease (step C). */
-export const MIN_SERVED_APP_BUILD = 113;
+/**
+ * P7: the first app build that retracts a served account's lease (step C).
+ * 114, not 113 (#150): step C shipped as build +114 (fix/114-gameday-app); +113
+ * is the roofline build and has no lease retraction.
+ */
+export const MIN_SERVED_APP_BUILD = 114;
 
 export type PreflightReason =
   | "preflight_no_bridge"
@@ -71,10 +80,13 @@ export type PreflightReason =
   | "preflight_no_participation"
   | "preflight_ladder_unknown"
   | "preflight_ladder_bad"
+  | "preflight_ladder_dark"
   | "preflight_gated"
   | "preflight_controller_unreachable";
 
 export const INFO_LEASE_HYGIENE_UNKNOWN = "lease_hygiene_unknown";
+/** P4b, mode "on": the controller has not published `base_ladder_restore_lit` yet. */
+export const INFO_LADDER_LIT_UNKNOWN = "ladder_lit_unknown";
 
 /**
  * `config/gameday_planner.preflight_mode`.
@@ -97,6 +109,28 @@ export function preflightModeFrom(data: Record<string, unknown> | undefined): Pr
  */
 export function publishServerStatusFrom(data: Record<string, unknown> | undefined): boolean {
   return data?.publish_server_status !== false;
+}
+
+/**
+ * `config/gameday_planner.preflight_ladder_lit` — P4b (#146). Default OFF.
+ *   absent / anything else  "off"     P4 as before; P4b is not evaluated.
+ *   true                    "on"      `base_ladder_restore_lit: false` skips
+ *                                     (`preflight_ladder_dark`); ABSENT is
+ *                                     unknown and only informational
+ *                                     (`ladder_lit_unknown`) — the +114 app
+ *                                     rollout, while most controllers have not
+ *                                     published the field.
+ *   "strict"                "strict"  as "on", and absent also skips
+ *                                     (`preflight_ladder_unknown`) — once the
+ *                                     fleet has reported.
+ * Only those two exact values arm it: a typo leaves P4 as it was.
+ */
+export type LadderLitMode = "off" | "on" | "strict";
+export function ladderLitModeFrom(data: Record<string, unknown> | undefined): LadderLitMode {
+  const v = data?.preflight_ladder_lit;
+  if (v === true) return "on";
+  if (v === "strict") return "strict";
+  return "off";
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +182,31 @@ export function checkLadder(controller: Record<string, unknown> | null): Preflig
   return v === false ? "preflight_ladder_bad" : "preflight_ladder_unknown";
 }
 
+/**
+ * P4b (#146). `base_ladder_asserts_segments` (P4) is true for a ladder whose
+ * segments are all named on and coloured black — the app's own test pins that
+ * shape — so an end restore to it leaves the house dark. The +114 app publishes
+ * `base_ladder_restore_lit` (every ON preset lights every participating bus,
+ * presets 1 and 2 present) and `base_ladder_dark_channels` beside it.
+ */
+export function checkLadderLit(
+  controller: Record<string, unknown> | null,
+  mode: LadderLitMode
+): { reason: PreflightReason | null; info: string | null } {
+  if (mode === "off") return { reason: null, info: null };
+  const v = controller?.base_ladder_restore_lit;
+  if (v === true) return { reason: null, info: null };
+  if (v === false) return { reason: "preflight_ladder_dark", info: null };
+  return mode === "strict"
+    ? { reason: "preflight_ladder_unknown", info: null }
+    : { reason: null, info: INFO_LADDER_LIT_UNKNOWN };
+}
+
+/** The published `base_ladder_dark_channels`, for the plan-log row. `[]` when absent. */
+export function ladderDarkChannels(controller: Record<string, unknown> | null): number[] {
+  return asIntArray(controller?.base_ladder_dark_channels) ?? [];
+}
+
 /** P5. */
 export function checkGate(gate: { armed: boolean }): PreflightReason | null {
   return gate.armed ? null : "preflight_gated";
@@ -175,6 +234,8 @@ export interface PreflightInputs {
   p6Unreachable: boolean;
   appVersion: unknown;
   nowMs: number;
+  /** P4b (#146). Absent = "off": the pre-flight exactly as A+B shipped it. */
+  ladderLit?: LadderLitMode;
 }
 
 export interface PreflightVerdict {
@@ -195,9 +256,14 @@ export function evaluatePreflight(i: PreflightInputs): PreflightVerdict {
   push(checkBridgeFresh(i.bridgeStatusUpdateMs, i.nowMs));
   push(checkParticipation(i.controller, i.nowMs));
   push(checkLadder(i.controller));
+  const lit = checkLadderLit(i.controller, i.ladderLit ?? "off");
+  // "strict" + absent names `preflight_ladder_unknown`, which P4 may already
+  // have named for an absent asserts_segments: one reason, once.
+  if (lit.reason !== null && !reasons.includes(lit.reason)) reasons.push(lit.reason);
   push(checkGate(i.gate));
   if (i.p6Unreachable) reasons.push("preflight_controller_unreachable");
   const info: string[] = [];
+  if (lit.info !== null) info.push(lit.info);
   const p7 = checkAppBuild(i.appVersion);
   if (p7 !== null) info.push(p7);
   return { ok: reasons.length === 0, reasons, info };
