@@ -104,8 +104,12 @@ List<Override> _overrides(
   UserService? userService,
   UserModel? profile,
   RecordingWledRepository? repo,
+  // +113: Segment Setup is installer-only; its tests run as an installer.
+  bool installerActive = false,
 }) =>
     [
+      if (installerActive)
+        installerModeActiveProvider.overrideWith((ref) => _ActiveInstaller(ref)),
       effectiveUserUidProvider.overrideWith((ref) => kTestUid),
       controllersStreamProvider
           .overrideWith((ref) => Stream.value(controllers)),
@@ -203,7 +207,7 @@ void main() {
       await seedPixelMap(fs, twoChannelRoofline(controllerId: 'ctrl-b'),
           controllerId: 'ctrl-b');
       await tester.pumpWidget(_hosted(const SegmentSetupScreen(),
-          _overrides(fs, controllers: [_front, _back])));
+          _overrides(fs, controllers: [_front, _back], installerActive: true)));
       await _open(tester);
       await tester.pumpAndSettle();
 
@@ -218,7 +222,8 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('delete-ch0_corner')));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      // +113: the dialog offers merge-or-remove; this is the remove path.
+      await tester.tap(find.byKey(const ValueKey('delete-remove-lights')));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Save Configuration'));
       await tester.pumpAndSettle();
@@ -304,18 +309,53 @@ void main() {
   // ── Row 72 ───────────────────────────────────────────────────────────────
   group('row 72 — Segment Setup delete does not save everything else', () {
     testWidgets(
-        'Delete marks the screen unsaved; nothing is written until Save',
-        (tester) async {
+        '+113: "Merge into" gives the deleted segment\'s lights to its '
+        'neighbour, so the channel keeps its light count', (tester) async {
       final fs = FakeFirebaseFirestore();
       await seedPixelMap(fs, twoChannelRoofline());
-      await tester
-          .pumpWidget(_hosted(const SegmentSetupScreen(), _overrides(fs)));
+      final before = await _stored(fs);
+      final ch0Before = before
+          .where((s) => s.channelIndex == 0)
+          .fold<int>(0, (a, s) => a + s.pixelCount);
+      final corner = before.firstWhere((s) => s.id == 'ch0_corner');
+      final run = before.firstWhere((s) => s.id == 'ch0_run');
+
+      await tester.pumpWidget(_hosted(
+          const SegmentSetupScreen(), _overrides(fs, installerActive: true)));
       await _open(tester);
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const ValueKey('delete-ch0_corner')));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      expect(find.textContaining('can join "${run.name}"'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('delete-merge')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Save Configuration'));
+      await tester.pumpAndSettle();
+
+      final after = await _stored(fs);
+      final ch0After = after.where((s) => s.channelIndex == 0).toList();
+      expect(ch0After.map((s) => s.id), isNot(contains('ch0_corner')));
+      expect(ch0After.fold<int>(0, (a, s) => a + s.pixelCount), ch0Before,
+          reason: 'merging keeps every light on the channel');
+      expect(ch0After.firstWhere((s) => s.id == 'ch0_run').pixelCount,
+          run.pixelCount + corner.pixelCount);
+    });
+
+    testWidgets(
+        'Delete marks the screen unsaved; nothing is written until Save',
+        (tester) async {
+      final fs = FakeFirebaseFirestore();
+      await seedPixelMap(fs, twoChannelRoofline());
+      await tester.pumpWidget(_hosted(
+          const SegmentSetupScreen(), _overrides(fs, installerActive: true)));
+      await _open(tester);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('delete-ch0_corner')));
+      await tester.pumpAndSettle();
+      // +113: the dialog offers merge-or-remove; this is the remove path.
+      await tester.tap(find.byKey(const ValueKey('delete-remove-lights')));
       await tester.pumpAndSettle();
 
       expect((await _stored(fs)).map((s) => s.id), contains('ch0_corner'),

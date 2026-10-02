@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/roofline_feature_marking.dart';
 import 'package:nexgen_command/features/design/roofline_segmentation.dart';
 import 'package:nexgen_command/features/design/roofline_target_bar.dart';
+import 'package:nexgen_command/features/design/roofline_walkthrough_widgets.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_logic.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
@@ -56,6 +57,9 @@ class _RooflineFeatureWalkthroughScreenState
   String? _loadProblem;
   RooflineConfiguration? _config;
   final Map<int, List<CaptureMark>> _marks = {};
+
+  /// Per channel, the mark lists before each change this visit, for Undo.
+  final Map<int, List<List<CaptureMark>>> _history = {};
   final Set<int> _savedChannels = {};
   int? _channel;
   int _cursor = 0;
@@ -90,6 +94,7 @@ class _RooflineFeatureWalkthroughScreenState
       _loadProblem = notifier.loadProblem;
       _config = config;
       _marks.clear();
+      _history.clear();
       _savedChannels.clear();
       final channels = config?.allChannelIndices ?? const <int>[];
       for (final ch in channels) {
@@ -214,29 +219,102 @@ class _RooflineFeatureWalkthroughScreenState
     _spotlight();
   }
 
-  void _addMark(MarkKind kind) {
-    final ch = _channel;
-    if (ch == null) return;
-    final existing = _channelMarks;
-    if (existing.any((m) => m.pixel == _cursor && m.kind == kind)) return;
+  /// Replaces the channel's marks, remembering the previous list for Undo.
+  void _setMarks(int ch, List<CaptureMark> marks) {
     setState(() {
-      _marks[ch] = [
-        ...existing,
-        CaptureMark(pixel: _cursor, kind: kind),
-      ]..sort((a, b) => a.pixel.compareTo(b.pixel));
+      (_history[ch] ??= []).add(_channelMarks);
+      _marks[ch] = marks;
       _savedChannels.remove(ch);
     });
     _spotlight();
   }
 
+  /// Places a mark at the cursor. One light carries one mark, so the same
+  /// mark twice changes nothing ([placeMark]).
+  void _addMark(MarkKind kind) {
+    final ch = _channel;
+    if (ch == null) return;
+    final placed = placeMark(_channelMarks, CaptureMark(pixel: _cursor, kind: kind));
+    if (identical(placed, _channelMarks)) return;
+    _setMarks(ch, placed);
+  }
+
   void _removeMark(int index) {
     final ch = _channel;
     if (ch == null) return;
+    _setMarks(ch, [..._channelMarks]..removeAt(index));
+  }
+
+  bool get _canUndo => (_history[_channel]?.isNotEmpty ?? false);
+
+  void _undo() {
+    final ch = _channel;
+    final stack = _history[ch];
+    if (ch == null || stack == null || stack.isEmpty) return;
     setState(() {
-      _marks[ch] = [..._channelMarks]..removeAt(index);
+      _marks[ch] = stack.removeLast();
       _savedChannels.remove(ch);
     });
     _spotlight();
+  }
+
+  /// Deletes a compiled section by removing the mark that made it, so its
+  /// lights merge into the neighbouring section.
+  void _mergeSection(RooflineSegment section) {
+    final ch = _channel;
+    if (ch == null) return;
+    final plan = planSectionRemoval(
+      channelIndex: ch,
+      pixelCount: _length(ch),
+      marks: _channelMarks,
+      section: section,
+    );
+    if (plan == null) return;
+    _setMarks(ch, plan.marksAfter);
+  }
+
+  /// Whether "Start over" has anything to do on the current channel.
+  bool get _canStartOver {
+    final ch = _channel;
+    final config = _config;
+    if (ch == null || config == null) return false;
+    return _channelMarks.isNotEmpty || config.segmentsForChannel(ch).length > 1;
+  }
+
+  Future<void> _startOver() async {
+    final ch = _channel;
+    if (ch == null) return;
+    final len = _length(ch);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: NexGenPalette.gunmetal90,
+        title: Text('Start over on channel ${ch + 1}?',
+            style: const TextStyle(color: Colors.white)),
+        content: Text(
+          startOverDescription(
+            channelNumber: ch + 1,
+            lights: len,
+            marks: marksSummary(_channelMarks),
+          ),
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('walkthrough-start-over-confirm'),
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Start over'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    _setMarks(ch, const []);
   }
 
   Future<void> _selectChannel(int ch) async {
@@ -420,6 +498,7 @@ class _RooflineFeatureWalkthroughScreenState
         : compileMarksToChannelSegments(
             channelIndex: ch, pixelCount: len, marks: marks);
     final saved = _savedChannels.contains(ch);
+    final mapped = _config == null ? 0 : mappedLengthOfChannel(_config!, ch);
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
@@ -441,6 +520,9 @@ class _RooflineFeatureWalkthroughScreenState
             key: const ValueKey('walkthrough-cursor'),
             style: const TextStyle(color: NexGenPalette.textMedium),
           ),
+          if (len > 0 && mapped > 0 && mapped != len)
+            ChannelLengthNotice(
+                channelNumber: ch + 1, mapped: mapped, strip: len),
           if (len > 1)
             Slider(
               value: _cursor.toDouble().clamp(0, (len - 1).toDouble()),
@@ -496,8 +578,17 @@ class _RooflineFeatureWalkthroughScreenState
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          WalkthroughMarkActions(
+            onUndo: _canUndo && !_saving ? _undo : null,
+            onStartOver: _canStartOver && !_saving ? _startOver : null,
+            disabledReason: len <= 0
+                ? null
+                : 'No marks on this channel yet — it is one straight run.',
+          ),
           if (marks.isNotEmpty) ...[
             const SizedBox(height: 12),
+            const Text('Your marks', style: TextStyle(color: Colors.white)),
             for (var i = 0; i < marks.length; i++)
               // A ListTile paints its ink on the nearest Material; inside this
               // coloured card that Material is behind the card, so Flutter
@@ -520,12 +611,35 @@ class _RooflineFeatureWalkthroughScreenState
               ),
           ],
           const SizedBox(height: 8),
-          Text(
-            preview.isEmpty
-                ? ''
-                : 'This channel will have: ${_summary(preview)}',
-            style: const TextStyle(color: NexGenPalette.textMedium),
-          ),
+          if (preview.isNotEmpty) ...[
+            Text(
+              'This channel will have: ${_summary(preview)}',
+              style: const TextStyle(color: NexGenPalette.textMedium),
+            ),
+            // Every section with its own delete: the section's lights merge
+            // back into the section next to it. A section that no single
+            // mark removal can merge says why on its row instead of showing
+            // a grey button.
+            for (final f in preview)
+              Builder(builder: (context) {
+                final blocker = sectionRemovalBlocker(
+                  channelIndex: ch,
+                  pixelCount: len,
+                  marks: marks,
+                  section: f,
+                );
+                return RooflineSectionRow(
+                  key: ValueKey('walkthrough-section-${f.startPixel}'),
+                  label: _sectionLabel(f),
+                  lights: _lightsLabel(f),
+                  blocker: blocker,
+                  onMerge: blocker == null && !_saving
+                      ? () => _mergeSection(f)
+                      : null,
+                  onTap: () => _moveCursor(f.startPixel),
+                );
+              }),
+          ],
           const SizedBox(height: 12),
           FilledButton(
             key: const ValueKey('walkthrough-save-channel'),
@@ -558,6 +672,30 @@ class _RooflineFeatureWalkthroughScreenState
         return 'Feature';
     }
   }
+
+  static String _sectionLabel(RooflineSegment f) {
+    final kind = featureKindOf(f);
+    final base = switch (kind) {
+      RooflineFeatureKind.run => 'Run',
+      RooflineFeatureKind.corner => 'Corner',
+      RooflineFeatureKind.peak => switch (f.direction) {
+          SegmentDirection.upward => 'Peak, up slope',
+          SegmentDirection.downward => 'Peak, down slope',
+          _ => 'Peak',
+        },
+      RooflineFeatureKind.column => 'Column',
+      RooflineFeatureKind.connector => 'Connector',
+    };
+    // Runs are auto-numbered by the compiler ("Run 2"); keep that.
+    return kind == RooflineFeatureKind.run && f.name.startsWith('Run')
+        ? f.name
+        : base;
+  }
+
+  /// 1-indexed for the customer; stored values stay 0-based.
+  static String _lightsLabel(RooflineSegment f) => f.pixelCount == 1
+      ? 'light ${f.startPixel + 1}'
+      : 'lights ${f.startPixel + 1}–${f.startPixel + f.pixelCount}';
 
   static String _summary(List<RooflineSegment> features) {
     final counts = <String, int>{};

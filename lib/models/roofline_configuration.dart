@@ -424,6 +424,80 @@ class RooflineConfiguration {
     return copyWith(segments: newSegments).recalculateStartPixels();
   }
 
+  /// The segment on the same channel that would absorb [segmentId]'s lights
+  /// in [removeSegmentMerging]: the one before it, else the one after. Null
+  /// when the segment is alone on its channel (or unknown).
+  RooflineSegment? mergeNeighborOf(String segmentId) {
+    final idx = segments.indexWhere((s) => s.id == segmentId);
+    if (idx < 0) return null;
+    final ch = segments[idx].channelIndex;
+    for (var i = idx - 1; i >= 0; i--) {
+      if (segments[i].channelIndex == ch) return segments[i];
+    }
+    for (var i = idx + 1; i < segments.length; i++) {
+      if (segments[i].channelIndex == ch) return segments[i];
+    }
+    return null;
+  }
+
+  /// Remove a segment and give its lights to the neighbouring segment on its
+  /// channel (the one before it, else the one after), so the channel keeps
+  /// every light it had. Anchors and photo outline move with the lights.
+  /// Returns `this` unchanged when the segment has no neighbour on its
+  /// channel (use [removeSegment] to drop it with its lights).
+  ///
+  /// Only the FIRST segment with [segmentId] is removed — a map that carries
+  /// a duplicated id loses one copy, not both.
+  RooflineConfiguration removeSegmentMerging(String segmentId) {
+    final idx = segments.indexWhere((s) => s.id == segmentId);
+    if (idx < 0) return this;
+    final gone = segments[idx];
+    int? prev;
+    int? next;
+    for (var i = idx - 1; i >= 0 && prev == null; i--) {
+      if (segments[i].channelIndex == gone.channelIndex) prev = i;
+    }
+    for (var i = idx + 1; i < segments.length && next == null; i++) {
+      if (segments[i].channelIndex == gone.channelIndex) next = i;
+    }
+    final into = prev ?? next;
+    if (into == null) return this;
+
+    final n = segments[into];
+    final RooflineSegment merged;
+    if (prev != null) {
+      merged = n.copyWith(
+        pixelCount: n.pixelCount + gone.pixelCount,
+        points: _joinOutlines(n.points, gone.points),
+        anchorPixels: [
+          ...n.anchorPixels,
+          for (final a in gone.anchorPixels) a + n.pixelCount,
+        ]..sort(),
+      );
+    } else {
+      merged = n.copyWith(
+        pixelCount: n.pixelCount + gone.pixelCount,
+        points: _joinOutlines(gone.points, n.points),
+        anchorPixels: [
+          ...gone.anchorPixels,
+          for (final a in n.anchorPixels) a + gone.pixelCount,
+        ]..sort(),
+      );
+    }
+    final out = <RooflineSegment>[
+      for (var i = 0; i < segments.length; i++)
+        if (i == into) merged else if (i != idx) segments[i],
+    ];
+    return copyWith(segments: out).recalculateStartPixels();
+  }
+
+  static List<Offset> _joinOutlines(List<Offset> first, List<Offset> second) {
+    if (first.isEmpty) return second;
+    if (second.isEmpty) return first;
+    final skipFirst = second.first == first.last;
+    return [...first, ...(skipFirst ? second.skip(1) : second)];
+  }
+
   /// Reorder segments (move from oldIndex to newIndex) and recalculate start pixels
   RooflineConfiguration reorderSegments(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= segments.length) return this;

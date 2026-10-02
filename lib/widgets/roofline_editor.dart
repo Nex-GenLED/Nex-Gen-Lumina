@@ -28,6 +28,13 @@ class RooflineEditor extends StatefulWidget {
   /// Legacy callback for single-path mode (still supported for backward compat)
   final void Function(RooflineMask mask)? onChanged;
 
+  /// Fires with the active (selected) segment index whenever it changes,
+  /// including once after the first frame. The screen's toolbar used to read
+  /// the index off this widget's state during its own build, which is null
+  /// on the first frame and never refreshed by a selection — so Delete and
+  /// Undo stayed grey until something else rebuilt the screen (+113).
+  final ValueChanged<int?>? onActiveSegmentChanged;
+
   const RooflineEditor({
     super.key,
     required this.imageProvider,
@@ -35,6 +42,7 @@ class RooflineEditor extends StatefulWidget {
     this.initialSegments,
     this.onSegmentsChanged,
     this.onChanged,
+    this.onActiveSegmentChanged,
   });
 
   @override
@@ -78,7 +86,13 @@ class RooflineEditorState extends State<RooflineEditor> {
       ];
       _activeSegmentIndex = 0;
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _notifyActive();
+    });
   }
+
+  void _notifyActive() =>
+      widget.onActiveSegmentChanged?.call(_activeSegmentIndex);
 
   @override
   void didUpdateWidget(RooflineEditor oldWidget) {
@@ -159,6 +173,7 @@ class RooflineEditorState extends State<RooflineEditor> {
       _activeSegmentIndex = null;
     });
     _notifyChange();
+    _notifyActive();
   }
 
   /// Undo the last point on the active segment.
@@ -204,6 +219,7 @@ class RooflineEditorState extends State<RooflineEditor> {
       _activeSegmentIndex = _segments.length - 1;
     });
     _notifyChange();
+    _notifyActive();
     return _segments.length - 1;
   }
 
@@ -211,6 +227,7 @@ class RooflineEditorState extends State<RooflineEditor> {
   void selectSegment(int index) {
     if (index >= 0 && index < _segments.length) {
       setState(() => _activeSegmentIndex = index);
+      _notifyActive();
     }
   }
 
@@ -226,6 +243,7 @@ class RooflineEditorState extends State<RooflineEditor> {
       }
     });
     _notifyChange();
+    _notifyActive();
   }
 
   /// Update metadata for a segment.
@@ -253,6 +271,7 @@ class RooflineEditorState extends State<RooflineEditor> {
       }
     });
     _notifyChange();
+    _notifyActive();
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────
@@ -279,6 +298,7 @@ class RooflineEditorState extends State<RooflineEditor> {
     final hitIndex = _hitTestSegment(normalized);
     if (hitIndex != null && hitIndex != _activeSegmentIndex) {
       setState(() => _activeSegmentIndex = hitIndex);
+      _notifyActive();
       return;
     }
 
