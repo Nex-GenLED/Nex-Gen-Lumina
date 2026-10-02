@@ -1,0 +1,2393 @@
+{
+ "generatedFrom": "d2e0f6e",
+ "seed": {
+  "bridge_registry/BR_SYNTH_1": {
+   "pairedUid": "u_alpha",
+   "status": "paired"
+  },
+  "bridge_registry/BR_SYNTH_3": {
+   "pairedUid": "u_charlie",
+   "status": "paired"
+  },
+  "bridge_registry/BR_SYNTH_4": {
+   "pairedUid": "u_delta",
+   "status": "paired"
+  },
+  "users/u_alpha": {
+   "game_day_team_priority": [
+    "nfl_alpha",
+    "ncaa_falcon"
+   ],
+   "gameday_gate_blocking": [],
+   "latitude": 39,
+   "longitude": -95,
+   "owner_id": "u_alpha"
+  },
+  "users/u_alpha/bridge_status/current": {
+   "uptime": 1000,
+   "version": "1.2"
+  },
+  "users/u_alpha/controllers/ctrl_u_alpha": {
+   "base_ladder_asserts_segments": true,
+   "ip": "192.0.2.11",
+   "participating_channels": [
+    0,
+    1
+   ],
+   "participating_channels_at": {
+    "__ts": 1791643800000
+   },
+   "participating_channels_device_ids": [
+    0,
+    1
+   ]
+  },
+  "users/u_alpha/game_day_autopilot/ncaa_falcon": {
+   "brightness": 200,
+   "design_mode": "fallback",
+   "design_variety": "rotating",
+   "effect_id": 52,
+   "enabled": true,
+   "espn_team_id": "801",
+   "intensity": 128,
+   "primary_color": 4279383126,
+   "secondary_color": 4284826401,
+   "skip_day_games": true,
+   "speed": 160,
+   "sport": "ncaaFB",
+   "team_name": "Falcon College",
+   "team_slug": "ncaa_falcon"
+  },
+  "users/u_alpha/game_day_autopilot/nfl_alpha": {
+   "brightness": 200,
+   "design_mode": "fallback",
+   "design_variety": "rotating",
+   "effect_id": 52,
+   "enabled": true,
+   "espn_team_id": "901",
+   "intensity": 128,
+   "primary_color": 4279383126,
+   "secondary_color": 4284826401,
+   "skip_day_games": true,
+   "speed": 160,
+   "sport": "nfl",
+   "team_name": "Alpha Team",
+   "team_slug": "nfl_alpha"
+  },
+  "users/u_bravo": {
+   "game_day_team_priority": [
+    "nfl_alpha",
+    "mlb_mariner"
+   ],
+   "gameday_gate_blocking": [],
+   "latitude": 39,
+   "longitude": -95,
+   "owner_id": "u_bravo"
+  },
+  "users/u_bravo/controllers/ctrl_u_bravo": {
+   "base_ladder_asserts_segments": true,
+   "ip": "192.0.2.12",
+   "participating_channels": [
+    0,
+    1
+   ],
+   "participating_channels_at": {
+    "__ts": 1791643800000
+   },
+   "participating_channels_device_ids": [
+    0,
+    1
+   ]
+  },
+  "users/u_bravo/game_day_autopilot/mlb_mariner": {
+   "brightness": 200,
+   "design_mode": "fallback",
+   "design_variety": "rotating",
+   "effect_id": 52,
+   "enabled": true,
+   "espn_team_id": "701",
+   "intensity": 128,
+   "primary_color": 4279383126,
+   "secondary_color": 4284826401,
+   "skip_day_games": true,
+   "speed": 160,
+   "sport": "mlb",
+   "team_name": "Mariner Club",
+   "team_slug": "mlb_mariner"
+  },
+  "users/u_bravo/game_day_autopilot/nfl_alpha": {
+   "brightness": 200,
+   "design_mode": "fallback",
+   "design_variety": "rotating",
+   "effect_id": 52,
+   "enabled": true,
+   "espn_team_id": "901",
+   "intensity": 128,
+   "primary_color": 4279383126,
+   "secondary_color": 4284826401,
+   "skip_day_games": true,
+   "speed": 160,
+   "sport": "nfl",
+   "team_name": "Alpha Team",
+   "team_slug": "nfl_alpha"
+  },
+  "users/u_charlie": {
+   "game_day_team_priority": [
+    "ncaa_gator"
+   ],
+   "gameday_gate_blocking": [],
+   "latitude": 39,
+   "longitude": -95,
+   "owner_id": "u_charlie"
+  },
+  "users/u_charlie/bridge_status/current": {
+   "uptime": 1000,
+   "version": "1.2"
+  },
+  "users/u_charlie/controllers/ctrl_u_charlie": {
+   "base_ladder_asserts_segments": true,
+   "ip": "192.0.2.13",
+   "participating_channels": [
+    0,
+    1
+   ],
+   "participating_channels_at": {
+    "__ts": 1791643800000
+   },
+   "participating_channels_device_ids": [
+    0,
+    1
+   ]
+  },
+  "users/u_charlie/game_day_autopilot/ncaa_gator": {
+   "brightness": 200,
+   "design_mode": "fallback",
+   "design_variety": "rotating",
+   "effect_id": 52,
+   "enabled": true,
+   "espn_team_id": "802",
+   "intensity": 128,
+   "primary_color": 4279383126,
+   "secondary_color": 4284826401,
+   "skip_day_games": true,
+   "speed": 160,
+   "sport": "ncaaFB",
+   "team_name": "Gator College",
+   "team_slug": "ncaa_gator"
+  },
+  "users/u_delta": {
+   "game_day_team_priority": [
+    "mlb_mariner"
+   ],
+   "gameday_gate_blocking": [],
+   "latitude": 39,
+   "longitude": -95,
+   "owner_id": "u_delta"
+  },
+  "users/u_delta/bridge_status/current": {
+   "uptime": 1000,
+   "version": "1.2"
+  },
+  "users/u_delta/controllers/ctrl_u_delta": {
+   "base_ladder_asserts_segments": true,
+   "ip": "192.0.2.14",
+   "participating_channels": [
+    0,
+    1
+   ],
+   "participating_channels_at": {
+    "__ts": 1791643800000
+   },
+   "participating_channels_device_ids": [
+    0,
+    1
+   ]
+  },
+  "users/u_delta/game_day_autopilot/mlb_mariner": {
+   "brightness": 200,
+   "design_mode": "fallback",
+   "design_variety": "rotating",
+   "effect_id": 52,
+   "enabled": true,
+   "espn_team_id": "701",
+   "intensity": 128,
+   "primary_color": 4279383126,
+   "secondary_color": 4284826401,
+   "skip_day_games": true,
+   "speed": 160,
+   "sport": "mlb",
+   "team_name": "Mariner Club",
+   "team_slug": "mlb_mariner"
+  }
+ },
+ "ticks": {
+  "T1": {
+   "fetches": [
+    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+   ],
+   "stats": {
+    "usersScanned": 4,
+    "configsEnabled": 6,
+    "startsPlanned": 5,
+    "endsPlanned": 0,
+    "handoffsPlanned": 0,
+    "hardCapsPlanned": 0,
+    "skipped": {
+     "no_game": 1
+    },
+    "endSkipped": {
+     "end:no_start": 5
+    },
+    "preflightSkips": 0,
+    "preflightObserved": 0,
+    "p6Probes": 2,
+    "serverStatusWrites": 4,
+    "espnErrors": 0,
+    "errors": 0
+   },
+   "logRows": [
+    {
+     "uid": "u_alpha",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "plan_start",
+     "fireAt": "2026-10-10T23:45:00.000Z",
+     "channels": [
+      0,
+      1
+     ],
+     "bytes": 189,
+     "partitioned": true
+    },
+    {
+     "uid": "u_alpha",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_alpha",
+     "teamSlug": "ncaa_falcon",
+     "eventId": "gd_ncaa_falcon_9300201",
+     "action": "plan_start",
+     "fireAt": "2026-10-10T23:00:00.000Z",
+     "channels": [
+      0,
+      1
+     ],
+     "bytes": 189,
+     "partitioned": true
+    },
+    {
+     "uid": "u_alpha",
+     "teamSlug": "ncaa_falcon",
+     "eventId": "gd_ncaa_falcon_9300201",
+     "action": "preflight_probe_deferred",
+     "reason": "in_flight"
+    },
+    {
+     "uid": "u_alpha",
+     "teamSlug": "ncaa_falcon",
+     "eventId": "gd_ncaa_falcon_9300201",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "plan_start",
+     "fireAt": "2026-10-10T23:45:00.000Z",
+     "channels": [
+      0,
+      1
+     ],
+     "bytes": 189,
+     "partitioned": true,
+     "scopedOut": true
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "mlb_mariner",
+     "eventId": "gd_mlb_mariner_9300101",
+     "action": "plan_start",
+     "fireAt": "2026-10-10T22:35:00.000Z",
+     "channels": [
+      0,
+      1
+     ],
+     "bytes": 189,
+     "partitioned": true,
+     "scopedOut": true
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "mlb_mariner",
+     "eventId": "gd_mlb_mariner_9300101",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_charlie",
+     "teamSlug": "ncaa_gator",
+     "action": "skip",
+     "reason": "no_game"
+    },
+    {
+     "uid": "u_delta",
+     "teamSlug": "mlb_mariner",
+     "eventId": "gd_mlb_mariner_9300101",
+     "action": "plan_start",
+     "fireAt": "2026-10-10T22:35:00.000Z",
+     "channels": [
+      0,
+      1
+     ],
+     "bytes": 189,
+     "partitioned": true
+    },
+    {
+     "uid": "u_delta",
+     "teamSlug": "mlb_mariner",
+     "eventId": "gd_mlb_mariner_9300101",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    }
+   ],
+   "changed": {
+    "gameday_plan_log/2026-10-10": {
+     "lastSummary": {
+      "at": {
+       "__ts": 1791654600000
+      },
+      "configsEnabled": 6,
+      "endSkipped": {
+       "end:no_start": 5
+      },
+      "endsPlanned": 0,
+      "errors": 0,
+      "espnErrors": 0,
+      "handoffsPlanned": 0,
+      "hardCapsPlanned": 0,
+      "p6Probes": 2,
+      "preflightObserved": 0,
+      "preflightSkips": 0,
+      "serverStatusWrites": 4,
+      "skipped": {
+       "no_game": 1
+      },
+      "startsPlanned": 5,
+      "usersScanned": 4
+     },
+     "rows": [
+      {
+       "action": "plan_start",
+       "bytes": 189,
+       "channels": [
+        0,
+        1
+       ],
+       "eventId": "gd_nfl_alpha_9300001",
+       "fireAt": "2026-10-10T23:45:00.000Z",
+       "partitioned": true,
+       "teamSlug": "nfl_alpha",
+       "uid": "u_alpha"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_alpha"
+      },
+      {
+       "action": "plan_start",
+       "bytes": 189,
+       "channels": [
+        0,
+        1
+       ],
+       "eventId": "gd_ncaa_falcon_9300201",
+       "fireAt": "2026-10-10T23:00:00.000Z",
+       "partitioned": true,
+       "teamSlug": "ncaa_falcon",
+       "uid": "u_alpha"
+      },
+      {
+       "action": "preflight_probe_deferred",
+       "eventId": "gd_ncaa_falcon_9300201",
+       "reason": "in_flight",
+       "teamSlug": "ncaa_falcon",
+       "uid": "u_alpha"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_ncaa_falcon_9300201",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "ncaa_falcon",
+       "uid": "u_alpha"
+      },
+      {
+       "action": "plan_start",
+       "bytes": 189,
+       "channels": [
+        0,
+        1
+       ],
+       "eventId": "gd_nfl_alpha_9300001",
+       "fireAt": "2026-10-10T23:45:00.000Z",
+       "partitioned": true,
+       "scopedOut": true,
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "plan_start",
+       "bytes": 189,
+       "channels": [
+        0,
+        1
+       ],
+       "eventId": "gd_mlb_mariner_9300101",
+       "fireAt": "2026-10-10T22:35:00.000Z",
+       "partitioned": true,
+       "scopedOut": true,
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "ncaa_gator",
+       "uid": "u_charlie"
+      },
+      {
+       "action": "plan_start",
+       "bytes": 189,
+       "channels": [
+        0,
+        1
+       ],
+       "eventId": "gd_mlb_mariner_9300101",
+       "fireAt": "2026-10-10T22:35:00.000Z",
+       "partitioned": true,
+       "teamSlug": "mlb_mariner",
+       "uid": "u_delta"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_delta"
+      }
+     ],
+     "ticks": [
+      {
+       "at": "2026-10-10T17:50:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 5
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 2,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 4,
+       "skipped": {
+        "no_game": 1
+       },
+       "startsPlanned": 5,
+       "usersScanned": 4
+      }
+     ],
+     "updatedAt": {
+      "__ts": 1791654600000
+     },
+     "writeJobs": true,
+     "writeJobsScope": [
+      "u_alpha",
+      "u_charlie",
+      "u_delta"
+     ]
+    },
+    "gameday_scorecard/2026-10-10": {
+     "date": "2026-10-10",
+     "updated_at": {
+      "__ts": 1791654600000
+     }
+    },
+    "gameday_scorecard/2026-10-10/entries/u_alpha_gd_ncaa_falcon_9300201": {
+     "app_foreground_during_game": null,
+     "bridge_fw": "1.2",
+     "celebrations": null,
+     "controllers_fired": 0,
+     "controllers_total": 1,
+     "end": null,
+     "event_id": "gd_ncaa_falcon_9300201",
+     "game_start": {
+      "__ts": 1791675000000
+     },
+     "lease_residue_rows": null,
+     "preflight_info": [
+      "lease_hygiene_unknown"
+     ],
+     "preflight_mode": "enforce",
+     "preflight_ok": true,
+     "preflight_reasons": [],
+     "reasserts": {
+      "completed": 0,
+      "planned": 0,
+      "user_override": 0
+     },
+     "served": true,
+     "sport": "ncaaFB",
+     "start": {
+      "attempts": 0,
+      "fire_at": {
+       "__ts": 1791673200000
+      },
+      "job_id": "gd_ncaa_falcon_9300201_start",
+      "retry_until": {
+       "__ts": 1791675000000
+      },
+      "state": "scheduled"
+     },
+     "stuck_executing_count": 0,
+     "team_slug": "ncaa_falcon",
+     "uid": "u_alpha",
+     "updated_at": {
+      "__ts": 1791654600000
+     }
+    },
+    "gameday_scorecard/2026-10-10/entries/u_alpha_gd_nfl_alpha_9300001": {
+     "app_foreground_during_game": null,
+     "bridge_fw": "1.2",
+     "celebrations": null,
+     "controllers_fired": 0,
+     "controllers_total": 1,
+     "end": null,
+     "event_id": "gd_nfl_alpha_9300001",
+     "game_start": {
+      "__ts": 1791677700000
+     },
+     "lease_residue_rows": null,
+     "preflight_info": [
+      "lease_hygiene_unknown"
+     ],
+     "preflight_mode": "enforce",
+     "preflight_ok": true,
+     "preflight_reasons": [],
+     "reasserts": {
+      "completed": 0,
+      "planned": 0,
+      "user_override": 0
+     },
+     "served": true,
+     "sport": "nfl",
+     "start": {
+      "attempts": 0,
+      "fire_at": {
+       "__ts": 1791675900000
+      },
+      "job_id": "gd_nfl_alpha_9300001_start",
+      "retry_until": {
+       "__ts": 1791677700000
+      },
+      "state": "scheduled"
+     },
+     "stuck_executing_count": 0,
+     "team_slug": "nfl_alpha",
+     "uid": "u_alpha",
+     "updated_at": {
+      "__ts": 1791654600000
+     }
+    },
+    "gameday_scorecard/2026-10-10/entries/u_delta_gd_mlb_mariner_9300101": {
+     "app_foreground_during_game": null,
+     "bridge_fw": "1.2",
+     "celebrations": null,
+     "controllers_fired": 0,
+     "controllers_total": 1,
+     "end": null,
+     "event_id": "gd_mlb_mariner_9300101",
+     "game_start": {
+      "__ts": 1791673500000
+     },
+     "lease_residue_rows": null,
+     "preflight_info": [
+      "lease_hygiene_unknown"
+     ],
+     "preflight_mode": "enforce",
+     "preflight_ok": true,
+     "preflight_reasons": [],
+     "reasserts": {
+      "completed": 0,
+      "planned": 0,
+      "user_override": 0
+     },
+     "served": true,
+     "sport": "mlb",
+     "start": {
+      "attempts": 0,
+      "fire_at": {
+       "__ts": 1791671700000
+      },
+      "job_id": "gd_mlb_mariner_9300101_start",
+      "retry_until": {
+       "__ts": 1791673500000
+      },
+      "state": "scheduled"
+     },
+     "stuck_executing_count": 0,
+     "team_slug": "mlb_mariner",
+     "uid": "u_delta",
+     "updated_at": {
+      "__ts": 1791654600000
+     }
+    },
+    "users/u_alpha": {
+     "game_day_team_priority": [
+      "nfl_alpha",
+      "ncaa_falcon"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791654600000
+      },
+      "next_fire": {
+       "event_id": "gd_ncaa_falcon_9300201",
+       "fire_at": {
+        "__ts": 1791673200000
+       },
+       "seq": "start",
+       "team_slug": "ncaa_falcon"
+      },
+      "preflight": {
+       "at": {
+        "__ts": 1791654600000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "nfl_alpha",
+       "ncaa_falcon"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_alpha"
+    },
+    "users/u_alpha/commands/fire_gdpre_ctrl_u_alpha_1791654600": {
+     "controllerId": "ctrl_u_alpha",
+     "controllerIp": "192.0.2.11",
+     "createdAt": {
+      "__ts": 1791654600000
+     },
+     "expiresAt": {
+      "__ts": 1791654690000
+     },
+     "payload": "{}",
+     "source": "gameday_preflight",
+     "status": "pending",
+     "type": "getInfo",
+     "webhookUrl": null
+    },
+    "users/u_alpha/fire_jobs/gd_ncaa_falcon_9300201_start": {
+     "controllerId": "ctrl_u_alpha",
+     "createdAt": {
+      "__ts": 1791654600000
+     },
+     "eventId": "gd_ncaa_falcon_9300201",
+     "fireAt": {
+      "__ts": 1791673200000
+     },
+     "payload": "{\"on\":true,\"bri\":200,\"seg\":[{\"id\":0,\"on\":true,\"fx\":52,\"sx\":160,\"ix\":128,\"col\":[[18,52,86,0],[101,67,33,0]]},{\"id\":1,\"on\":true,\"fx\":52,\"sx\":160,\"ix\":128,\"col\":[[18,52,86,0],[101,67,33,0]]}]}",
+     "retryUntil": {
+      "__ts": 1791675000000
+     },
+     "seq": "start",
+     "source": "game_day",
+     "state": "scheduled",
+     "type": "applyJson"
+    },
+    "users/u_alpha/fire_jobs/gd_nfl_alpha_9300001_start": {
+     "controllerId": "ctrl_u_alpha",
+     "createdAt": {
+      "__ts": 1791654600000
+     },
+     "eventId": "gd_nfl_alpha_9300001",
+     "fireAt": {
+      "__ts": 1791675900000
+     },
+     "payload": "{\"on\":true,\"bri\":200,\"seg\":[{\"id\":0,\"on\":true,\"fx\":52,\"sx\":160,\"ix\":128,\"col\":[[18,52,86,0],[101,67,33,0]]},{\"id\":1,\"on\":true,\"fx\":52,\"sx\":160,\"ix\":128,\"col\":[[18,52,86,0],[101,67,33,0]]}]}",
+     "retryUntil": {
+      "__ts": 1791677700000
+     },
+     "seq": "start",
+     "source": "game_day",
+     "state": "scheduled",
+     "type": "applyJson"
+    },
+    "users/u_alpha/game_day_sessions/gd_ncaa_falcon_9300201": {
+     "consecutiveFinalPolls": 0,
+     "finalSeenAtMs": null,
+     "gameStartMs": 1791675000000,
+     "scorecard_key": "2026-10-10",
+     "sport": "ncaaFB",
+     "startPlannedAt": {
+      "__ts": 1791654600000
+     },
+     "teamSlug": "ncaa_falcon"
+    },
+    "users/u_alpha/game_day_sessions/gd_nfl_alpha_9300001": {
+     "consecutiveFinalPolls": 0,
+     "finalSeenAtMs": null,
+     "gameStartMs": 1791677700000,
+     "preflight_p6": {
+      "probes": [
+       {
+        "commandId": "fire_gdpre_ctrl_u_alpha_1791654600",
+        "writtenAtMs": 1791654600000
+       }
+      ],
+      "verdict": "pending"
+     },
+     "scorecard_key": "2026-10-10",
+     "sport": "nfl",
+     "startPlannedAt": {
+      "__ts": 1791654600000
+     },
+     "teamSlug": "nfl_alpha"
+    },
+    "users/u_bravo": {
+     "game_day_team_priority": [
+      "nfl_alpha",
+      "mlb_mariner"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791654600000
+      },
+      "next_fire": null,
+      "preflight": null,
+      "served": false,
+      "teams": []
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_bravo"
+    },
+    "users/u_charlie": {
+     "game_day_team_priority": [
+      "ncaa_gator"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791654600000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791654600000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "ncaa_gator"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_charlie"
+    },
+    "users/u_delta": {
+     "game_day_team_priority": [
+      "mlb_mariner"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791654600000
+      },
+      "next_fire": {
+       "event_id": "gd_mlb_mariner_9300101",
+       "fire_at": {
+        "__ts": 1791671700000
+       },
+       "seq": "start",
+       "team_slug": "mlb_mariner"
+      },
+      "preflight": {
+       "at": {
+        "__ts": 1791654600000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "mlb_mariner"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_delta"
+    },
+    "users/u_delta/commands/fire_gdpre_ctrl_u_delta_1791654600": {
+     "controllerId": "ctrl_u_delta",
+     "controllerIp": "192.0.2.14",
+     "createdAt": {
+      "__ts": 1791654600000
+     },
+     "expiresAt": {
+      "__ts": 1791654690000
+     },
+     "payload": "{}",
+     "source": "gameday_preflight",
+     "status": "pending",
+     "type": "getInfo",
+     "webhookUrl": null
+    },
+    "users/u_delta/fire_jobs/gd_mlb_mariner_9300101_start": {
+     "controllerId": "ctrl_u_delta",
+     "createdAt": {
+      "__ts": 1791654600000
+     },
+     "eventId": "gd_mlb_mariner_9300101",
+     "fireAt": {
+      "__ts": 1791671700000
+     },
+     "payload": "{\"on\":true,\"bri\":200,\"seg\":[{\"id\":0,\"on\":true,\"fx\":52,\"sx\":160,\"ix\":128,\"col\":[[18,52,86,0],[101,67,33,0]]},{\"id\":1,\"on\":true,\"fx\":52,\"sx\":160,\"ix\":128,\"col\":[[18,52,86,0],[101,67,33,0]]}]}",
+     "retryUntil": {
+      "__ts": 1791673500000
+     },
+     "seq": "start",
+     "source": "game_day",
+     "state": "scheduled",
+     "type": "applyJson"
+    },
+    "users/u_delta/game_day_sessions/gd_mlb_mariner_9300101": {
+     "consecutiveFinalPolls": 0,
+     "finalSeenAtMs": null,
+     "gameStartMs": 1791673500000,
+     "preflight_p6": {
+      "probes": [
+       {
+        "commandId": "fire_gdpre_ctrl_u_delta_1791654600",
+        "writtenAtMs": 1791654600000
+       }
+      ],
+      "verdict": "pending"
+     },
+     "scorecard_key": "2026-10-10",
+     "sport": "mlb",
+     "startPlannedAt": {
+      "__ts": 1791654600000
+     },
+     "teamSlug": "mlb_mariner"
+    }
+   },
+   "removed": []
+  },
+  "T2": {
+   "fetches": [
+    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+   ],
+   "stats": {
+    "usersScanned": 4,
+    "configsEnabled": 6,
+    "startsPlanned": 0,
+    "endsPlanned": 0,
+    "handoffsPlanned": 0,
+    "hardCapsPlanned": 0,
+    "skipped": {
+     "start_already_planned": 3,
+     "start_time_passed": 2,
+     "no_game": 1
+    },
+    "endSkipped": {
+     "end:no_start": 2
+    },
+    "preflightSkips": 0,
+    "preflightObserved": 0,
+    "p6Probes": 0,
+    "serverStatusWrites": 3,
+    "espnErrors": 0,
+    "errors": 0
+   },
+   "logRows": [
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "start_time_passed",
+     "fireAt": "2026-10-10T23:45:00.000Z"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "mlb_mariner",
+     "eventId": "gd_mlb_mariner_9300101",
+     "action": "skip",
+     "reason": "start_time_passed",
+     "fireAt": "2026-10-10T22:35:00.000Z"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "mlb_mariner",
+     "eventId": "gd_mlb_mariner_9300101",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_charlie",
+     "teamSlug": "ncaa_gator",
+     "action": "skip",
+     "reason": "no_game"
+    }
+   ],
+   "changed": {
+    "gameday_plan_log/2026-10-11": {
+     "lastSummary": {
+      "at": {
+       "__ts": 1791678600000
+      },
+      "configsEnabled": 6,
+      "endSkipped": {
+       "end:no_start": 2
+      },
+      "endsPlanned": 0,
+      "errors": 0,
+      "espnErrors": 0,
+      "handoffsPlanned": 0,
+      "hardCapsPlanned": 0,
+      "p6Probes": 0,
+      "preflightObserved": 0,
+      "preflightSkips": 0,
+      "serverStatusWrites": 3,
+      "skipped": {
+       "no_game": 1,
+       "start_already_planned": 3,
+       "start_time_passed": 2
+      },
+      "startsPlanned": 0,
+      "usersScanned": 4
+     },
+     "rows": [
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "fireAt": "2026-10-10T23:45:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "fireAt": "2026-10-10T22:35:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "ncaa_gator",
+       "uid": "u_charlie"
+      }
+     ],
+     "ticks": [
+      {
+       "at": "2026-10-11T00:30:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 2
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 1,
+        "start_already_planned": 3,
+        "start_time_passed": 2
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      }
+     ],
+     "updatedAt": {
+      "__ts": 1791678600000
+     },
+     "writeJobs": true,
+     "writeJobsScope": [
+      "u_alpha",
+      "u_charlie",
+      "u_delta"
+     ]
+    },
+    "users/u_alpha": {
+     "game_day_team_priority": [
+      "nfl_alpha",
+      "ncaa_falcon"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791678600000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791678600000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "nfl_alpha",
+       "ncaa_falcon"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_alpha"
+    },
+    "users/u_charlie": {
+     "game_day_team_priority": [
+      "ncaa_gator"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791678600000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791678600000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "ncaa_gator"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_charlie"
+    },
+    "users/u_delta": {
+     "game_day_team_priority": [
+      "mlb_mariner"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791678600000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791678600000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "mlb_mariner"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_delta"
+    }
+   },
+   "removed": []
+  },
+  "T3": {
+   "fetches": [
+    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+   ],
+   "stats": {
+    "usersScanned": 4,
+    "configsEnabled": 6,
+    "startsPlanned": 0,
+    "endsPlanned": 0,
+    "handoffsPlanned": 0,
+    "hardCapsPlanned": 0,
+    "skipped": {
+     "start_already_planned": 2,
+     "start_time_passed": 1,
+     "no_game": 3
+    },
+    "endSkipped": {
+     "end:awaiting_confirmation": 1,
+     "end:no_start": 1
+    },
+    "preflightSkips": 0,
+    "preflightObserved": 0,
+    "p6Probes": 0,
+    "serverStatusWrites": 3,
+    "espnErrors": 0,
+    "errors": 0
+   },
+   "logRows": [
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "start_time_passed",
+     "fireAt": "2026-10-10T23:45:00.000Z"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "mlb_mariner",
+     "action": "skip",
+     "reason": "no_game"
+    },
+    {
+     "uid": "u_charlie",
+     "teamSlug": "ncaa_gator",
+     "action": "skip",
+     "reason": "no_game"
+    },
+    {
+     "uid": "u_delta",
+     "teamSlug": "mlb_mariner",
+     "action": "skip",
+     "reason": "no_game"
+    }
+   ],
+   "changed": {
+    "gameday_plan_log/2026-10-11": {
+     "lastSummary": {
+      "at": {
+       "__ts": 1791689400000
+      },
+      "configsEnabled": 6,
+      "endSkipped": {
+       "end:awaiting_confirmation": 1,
+       "end:no_start": 1
+      },
+      "endsPlanned": 0,
+      "errors": 0,
+      "espnErrors": 0,
+      "handoffsPlanned": 0,
+      "hardCapsPlanned": 0,
+      "p6Probes": 0,
+      "preflightObserved": 0,
+      "preflightSkips": 0,
+      "serverStatusWrites": 3,
+      "skipped": {
+       "no_game": 3,
+       "start_already_planned": 2,
+       "start_time_passed": 1
+      },
+      "startsPlanned": 0,
+      "usersScanned": 4
+     },
+     "rows": [
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "fireAt": "2026-10-10T23:45:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "fireAt": "2026-10-10T22:35:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "ncaa_gator",
+       "uid": "u_charlie"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_delta"
+      }
+     ],
+     "ticks": [
+      {
+       "at": "2026-10-11T00:30:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 2
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 1,
+        "start_already_planned": 3,
+        "start_time_passed": 2
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      },
+      {
+       "at": "2026-10-11T03:30:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:awaiting_confirmation": 1,
+        "end:no_start": 1
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 3,
+        "start_already_planned": 2,
+        "start_time_passed": 1
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      }
+     ],
+     "updatedAt": {
+      "__ts": 1791689400000
+     },
+     "writeJobs": true,
+     "writeJobsScope": [
+      "u_alpha",
+      "u_charlie",
+      "u_delta"
+     ]
+    },
+    "users/u_alpha": {
+     "game_day_team_priority": [
+      "nfl_alpha",
+      "ncaa_falcon"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791689400000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791689400000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "nfl_alpha",
+       "ncaa_falcon"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_alpha"
+    },
+    "users/u_alpha/game_day_sessions/gd_ncaa_falcon_9300201": {
+     "consecutiveFinalPolls": 1,
+     "finalSeenAtMs": 1791689400000,
+     "gameStartMs": 1791675000000,
+     "scorecard_key": "2026-10-10",
+     "sport": "ncaaFB",
+     "startPlannedAt": {
+      "__ts": 1791654600000
+     },
+     "teamSlug": "ncaa_falcon"
+    },
+    "users/u_charlie": {
+     "game_day_team_priority": [
+      "ncaa_gator"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791689400000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791689400000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "ncaa_gator"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_charlie"
+    },
+    "users/u_delta": {
+     "game_day_team_priority": [
+      "mlb_mariner"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791689400000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791689400000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "mlb_mariner"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_delta"
+    }
+   },
+   "removed": []
+  },
+  "T4": {
+   "fetches": [
+    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+   ],
+   "stats": {
+    "usersScanned": 4,
+    "configsEnabled": 6,
+    "startsPlanned": 0,
+    "endsPlanned": 0,
+    "handoffsPlanned": 0,
+    "hardCapsPlanned": 0,
+    "skipped": {
+     "start_already_planned": 2,
+     "start_time_passed": 1,
+     "no_game": 3
+    },
+    "endSkipped": {
+     "end:not_owner": 1,
+     "end:no_start": 1
+    },
+    "preflightSkips": 0,
+    "preflightObserved": 0,
+    "p6Probes": 0,
+    "serverStatusWrites": 3,
+    "espnErrors": 0,
+    "errors": 0
+   },
+   "logRows": [
+    {
+     "uid": "u_alpha",
+     "teamSlug": "ncaa_falcon",
+     "eventId": "gd_ncaa_falcon_9300201",
+     "action": "skip",
+     "reason": "end_suppressed_not_owner",
+     "owner": "nfl_alpha"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "start_time_passed",
+     "fireAt": "2026-10-10T23:45:00.000Z"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "mlb_mariner",
+     "action": "skip",
+     "reason": "no_game"
+    },
+    {
+     "uid": "u_charlie",
+     "teamSlug": "ncaa_gator",
+     "action": "skip",
+     "reason": "no_game"
+    },
+    {
+     "uid": "u_delta",
+     "teamSlug": "mlb_mariner",
+     "action": "skip",
+     "reason": "no_game"
+    }
+   ],
+   "changed": {
+    "gameday_plan_log/2026-10-11": {
+     "lastSummary": {
+      "at": {
+       "__ts": 1791689700000
+      },
+      "configsEnabled": 6,
+      "endSkipped": {
+       "end:no_start": 1,
+       "end:not_owner": 1
+      },
+      "endsPlanned": 0,
+      "errors": 0,
+      "espnErrors": 0,
+      "handoffsPlanned": 0,
+      "hardCapsPlanned": 0,
+      "p6Probes": 0,
+      "preflightObserved": 0,
+      "preflightSkips": 0,
+      "serverStatusWrites": 3,
+      "skipped": {
+       "no_game": 3,
+       "start_already_planned": 2,
+       "start_time_passed": 1
+      },
+      "startsPlanned": 0,
+      "usersScanned": 4
+     },
+     "rows": [
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "fireAt": "2026-10-10T23:45:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "fireAt": "2026-10-10T22:35:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "ncaa_gator",
+       "uid": "u_charlie"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_delta"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_ncaa_falcon_9300201",
+       "owner": "nfl_alpha",
+       "reason": "end_suppressed_not_owner",
+       "teamSlug": "ncaa_falcon",
+       "uid": "u_alpha"
+      }
+     ],
+     "ticks": [
+      {
+       "at": "2026-10-11T00:30:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 2
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 1,
+        "start_already_planned": 3,
+        "start_time_passed": 2
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      },
+      {
+       "at": "2026-10-11T03:30:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:awaiting_confirmation": 1,
+        "end:no_start": 1
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 3,
+        "start_already_planned": 2,
+        "start_time_passed": 1
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      },
+      {
+       "at": "2026-10-11T03:35:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 1,
+        "end:not_owner": 1
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 3,
+        "start_already_planned": 2,
+        "start_time_passed": 1
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      }
+     ],
+     "updatedAt": {
+      "__ts": 1791689700000
+     },
+     "writeJobs": true,
+     "writeJobsScope": [
+      "u_alpha",
+      "u_charlie",
+      "u_delta"
+     ]
+    },
+    "gameday_scorecard/2026-10-10": {
+     "date": "2026-10-10",
+     "updated_at": {
+      "__ts": 1791689700000
+     }
+    },
+    "gameday_scorecard/2026-10-10/entries/u_alpha_gd_ncaa_falcon_9300201": {
+     "app_foreground_during_game": null,
+     "bridge_fw": "1.2",
+     "celebrations": null,
+     "controllers_fired": 0,
+     "controllers_total": 1,
+     "end": {
+      "owner": "nfl_alpha",
+      "reason": "not_owner",
+      "state": "suppressed"
+     },
+     "event_id": "gd_ncaa_falcon_9300201",
+     "game_start": {
+      "__ts": 1791675000000
+     },
+     "lease_residue_rows": null,
+     "preflight_info": [
+      "lease_hygiene_unknown"
+     ],
+     "preflight_mode": "enforce",
+     "preflight_ok": true,
+     "preflight_reasons": [],
+     "reasserts": {
+      "completed": 0,
+      "planned": 0,
+      "user_override": 0
+     },
+     "served": true,
+     "sport": "ncaaFB",
+     "start": {
+      "attempts": 0,
+      "fire_at": {
+       "__ts": 1791673200000
+      },
+      "job_id": "gd_ncaa_falcon_9300201_start",
+      "retry_until": {
+       "__ts": 1791675000000
+      },
+      "state": "scheduled"
+     },
+     "stuck_executing_count": 0,
+     "team_slug": "ncaa_falcon",
+     "uid": "u_alpha",
+     "updated_at": {
+      "__ts": 1791689700000
+     }
+    },
+    "users/u_alpha": {
+     "game_day_team_priority": [
+      "nfl_alpha",
+      "ncaa_falcon"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791689700000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791689700000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "nfl_alpha",
+       "ncaa_falcon"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_alpha"
+    },
+    "users/u_alpha/game_day_sessions/gd_ncaa_falcon_9300201": {
+     "consecutiveFinalPolls": 2,
+     "endFiredAt": {
+      "__ts": 1791689700000
+     },
+     "endOutcome": "not_owner",
+     "endYieldedTo": "gd_nfl_alpha_9300001",
+     "finalSeenAtMs": 1791689400000,
+     "gameStartMs": 1791675000000,
+     "scorecard_key": "2026-10-10",
+     "sport": "ncaaFB",
+     "startPlannedAt": {
+      "__ts": 1791654600000
+     },
+     "teamSlug": "ncaa_falcon"
+    },
+    "users/u_charlie": {
+     "game_day_team_priority": [
+      "ncaa_gator"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791689700000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791689700000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "ncaa_gator"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_charlie"
+    },
+    "users/u_delta": {
+     "game_day_team_priority": [
+      "mlb_mariner"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791689700000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791689700000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "mlb_mariner"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_delta"
+    }
+   },
+   "removed": []
+  },
+  "T5": {
+   "fetches": [
+    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+   ],
+   "stats": {
+    "usersScanned": 4,
+    "configsEnabled": 6,
+    "startsPlanned": 0,
+    "endsPlanned": 1,
+    "handoffsPlanned": 0,
+    "hardCapsPlanned": 1,
+    "skipped": {
+     "start_already_planned": 2,
+     "start_time_passed": 1,
+     "no_game": 3
+    },
+    "endSkipped": {
+     "end:no_start": 1
+    },
+    "preflightSkips": 0,
+    "preflightObserved": 0,
+    "p6Probes": 0,
+    "serverStatusWrites": 3,
+    "espnErrors": 0,
+    "errors": 0
+   },
+   "logRows": [
+    {
+     "uid": "u_alpha",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "plan_end",
+     "fireAt": "2026-10-11T04:50:00.000Z",
+     "reason": "hard_cap"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "start_time_passed",
+     "fireAt": "2026-10-10T23:45:00.000Z"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "nfl_alpha",
+     "eventId": "gd_nfl_alpha_9300001",
+     "action": "skip",
+     "reason": "end_skipped_no_start"
+    },
+    {
+     "uid": "u_bravo",
+     "teamSlug": "mlb_mariner",
+     "action": "skip",
+     "reason": "no_game"
+    },
+    {
+     "uid": "u_charlie",
+     "teamSlug": "ncaa_gator",
+     "action": "skip",
+     "reason": "no_game"
+    },
+    {
+     "uid": "u_delta",
+     "teamSlug": "mlb_mariner",
+     "action": "skip",
+     "reason": "no_game"
+    }
+   ],
+   "changed": {
+    "gameday_plan_log/2026-10-11": {
+     "lastSummary": {
+      "at": {
+       "__ts": 1791694200000
+      },
+      "configsEnabled": 6,
+      "endSkipped": {
+       "end:no_start": 1
+      },
+      "endsPlanned": 1,
+      "errors": 0,
+      "espnErrors": 0,
+      "handoffsPlanned": 0,
+      "hardCapsPlanned": 1,
+      "p6Probes": 0,
+      "preflightObserved": 0,
+      "preflightSkips": 0,
+      "serverStatusWrites": 3,
+      "skipped": {
+       "no_game": 3,
+       "start_already_planned": 2,
+       "start_time_passed": 1
+      },
+      "startsPlanned": 0,
+      "usersScanned": 4
+     },
+     "rows": [
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "fireAt": "2026-10-10T23:45:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_nfl_alpha_9300001",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "fireAt": "2026-10-10T22:35:00.000Z",
+       "reason": "start_time_passed",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_mlb_mariner_9300101",
+       "reason": "end_skipped_no_start",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "ncaa_gator",
+       "uid": "u_charlie"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_bravo"
+      },
+      {
+       "action": "skip",
+       "reason": "no_game",
+       "teamSlug": "mlb_mariner",
+       "uid": "u_delta"
+      },
+      {
+       "action": "skip",
+       "eventId": "gd_ncaa_falcon_9300201",
+       "owner": "nfl_alpha",
+       "reason": "end_suppressed_not_owner",
+       "teamSlug": "ncaa_falcon",
+       "uid": "u_alpha"
+      },
+      {
+       "action": "plan_end",
+       "eventId": "gd_nfl_alpha_9300001",
+       "fireAt": "2026-10-11T04:50:00.000Z",
+       "reason": "hard_cap",
+       "teamSlug": "nfl_alpha",
+       "uid": "u_alpha"
+      }
+     ],
+     "ticks": [
+      {
+       "at": "2026-10-11T00:30:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 2
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 1,
+        "start_already_planned": 3,
+        "start_time_passed": 2
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      },
+      {
+       "at": "2026-10-11T03:30:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:awaiting_confirmation": 1,
+        "end:no_start": 1
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 3,
+        "start_already_planned": 2,
+        "start_time_passed": 1
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      },
+      {
+       "at": "2026-10-11T03:35:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 1,
+        "end:not_owner": 1
+       },
+       "endsPlanned": 0,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 0,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 3,
+        "start_already_planned": 2,
+        "start_time_passed": 1
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      },
+      {
+       "at": "2026-10-11T04:50:00.000Z",
+       "configsEnabled": 6,
+       "endSkipped": {
+        "end:no_start": 1
+       },
+       "endsPlanned": 1,
+       "errors": 0,
+       "espnErrors": 0,
+       "handoffsPlanned": 0,
+       "hardCapsPlanned": 1,
+       "p6Probes": 0,
+       "preflightObserved": 0,
+       "preflightSkips": 0,
+       "serverStatusWrites": 3,
+       "skipped": {
+        "no_game": 3,
+        "start_already_planned": 2,
+        "start_time_passed": 1
+       },
+       "startsPlanned": 0,
+       "usersScanned": 4
+      }
+     ],
+     "updatedAt": {
+      "__ts": 1791694200000
+     },
+     "writeJobs": true,
+     "writeJobsScope": [
+      "u_alpha",
+      "u_charlie",
+      "u_delta"
+     ]
+    },
+    "gameday_scorecard/2026-10-10": {
+     "date": "2026-10-10",
+     "updated_at": {
+      "__ts": 1791694200000
+     }
+    },
+    "gameday_scorecard/2026-10-10/entries/u_alpha_gd_nfl_alpha_9300001": {
+     "app_foreground_during_game": null,
+     "bridge_fw": "1.2",
+     "celebrations": null,
+     "controllers_fired": 0,
+     "controllers_total": 1,
+     "end": {
+      "attempts": 0,
+      "espn_final_seen_at": null,
+      "fire_at": {
+       "__ts": 1791694200000
+      },
+      "job_id": "gd_nfl_alpha_9300001_end",
+      "reason": "hard_cap",
+      "retry_until": {
+       "__ts": 1791695100000
+      },
+      "state": "scheduled"
+     },
+     "event_id": "gd_nfl_alpha_9300001",
+     "game_start": {
+      "__ts": 1791677700000
+     },
+     "lease_residue_rows": null,
+     "preflight_info": [
+      "lease_hygiene_unknown"
+     ],
+     "preflight_mode": "enforce",
+     "preflight_ok": true,
+     "preflight_reasons": [],
+     "reasserts": {
+      "completed": 0,
+      "planned": 0,
+      "user_override": 0
+     },
+     "served": true,
+     "sport": "nfl",
+     "start": {
+      "attempts": 0,
+      "fire_at": {
+       "__ts": 1791675900000
+      },
+      "job_id": "gd_nfl_alpha_9300001_start",
+      "retry_until": {
+       "__ts": 1791677700000
+      },
+      "state": "scheduled"
+     },
+     "stuck_executing_count": 0,
+     "team_slug": "nfl_alpha",
+     "uid": "u_alpha",
+     "updated_at": {
+      "__ts": 1791694200000
+     }
+    },
+    "users/u_alpha": {
+     "game_day_team_priority": [
+      "nfl_alpha",
+      "ncaa_falcon"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791694200000
+      },
+      "next_fire": {
+       "event_id": "gd_nfl_alpha_9300001",
+       "fire_at": {
+        "__ts": 1791694200000
+       },
+       "seq": "end",
+       "team_slug": "nfl_alpha"
+      },
+      "preflight": {
+       "at": {
+        "__ts": 1791694200000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "nfl_alpha",
+       "ncaa_falcon"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_alpha"
+    },
+    "users/u_alpha/fire_jobs/gd_nfl_alpha_9300001_end": {
+     "controllerId": "ctrl_u_alpha",
+     "createdAt": {
+      "__ts": 1791694200000
+     },
+     "eventId": "gd_nfl_alpha_9300001",
+     "fireAt": {
+      "__ts": 1791694200000
+     },
+     "payload": "{\"ps\":1}",
+     "retryUntil": {
+      "__ts": 1791695100000
+     },
+     "seq": "end",
+     "source": "game_day",
+     "state": "scheduled",
+     "type": "applyJson"
+    },
+    "users/u_alpha/game_day_sessions/gd_nfl_alpha_9300001": {
+     "consecutiveFinalPolls": 0,
+     "endFiredAt": {
+      "__ts": 1791694200000
+     },
+     "finalSeenAtMs": null,
+     "gameStartMs": 1791677700000,
+     "preflight_p6": {
+      "probes": [
+       {
+        "commandId": "fire_gdpre_ctrl_u_alpha_1791654600",
+        "writtenAtMs": 1791654600000
+       }
+      ],
+      "verdict": "pending"
+     },
+     "scorecard_key": "2026-10-10",
+     "sport": "nfl",
+     "startPlannedAt": {
+      "__ts": 1791654600000
+     },
+     "teamSlug": "nfl_alpha"
+    },
+    "users/u_charlie": {
+     "game_day_team_priority": [
+      "ncaa_gator"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791694200000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791694200000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "ncaa_gator"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_charlie"
+    },
+    "users/u_delta": {
+     "game_day_team_priority": [
+      "mlb_mariner"
+     ],
+     "gameday_gate_blocking": [],
+     "gameday_server": {
+      "checked_at": {
+       "__ts": 1791694200000
+      },
+      "next_fire": null,
+      "preflight": {
+       "at": {
+        "__ts": 1791694200000
+       },
+       "info": [
+        "lease_hygiene_unknown"
+       ],
+       "mode": "enforce",
+       "ok": true,
+       "reasons": []
+      },
+      "served": true,
+      "teams": [
+       "mlb_mariner"
+      ]
+     },
+     "latitude": 39,
+     "longitude": -95,
+     "owner_id": "u_delta"
+    }
+   },
+   "removed": []
+  }
+ }
+}

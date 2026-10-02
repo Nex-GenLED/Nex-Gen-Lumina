@@ -18,12 +18,21 @@
 // payload bytes, same keys — plus exactly the one additive field A2 defines
 // (`retryUntil`). If a later change alters a byte of either payload or adds a
 // field, this fails and says which.
+//
+// ESPN SLATE FIX (2026-10-02). Both tests run twice: with every ESPN flag off,
+// and with all three ON (`espn_college_slate`, `track_started_by_id`,
+// `status_aware_cap`). For a normal NFL game the bytes must not move: the
+// default scoreboard still finds it, tracking by id finds the same game, and
+// the status-aware cap never comes into play for a game that finals.
 
 jest.mock("../../lib/espnClient", () => ({
   fetchTeamGame: jest.fn(async () => null),
+  fetchEventById: jest.fn(async () => ({ kind: "error" })),
+  fetchCollegeSlateGame: jest.fn(async () => ({ game: null, onSlate: false, complete: false })),
+  fetchCollegeTeamDivision: jest.fn(async () => ({ kind: "error" })),
 }));
 
-const { fetchTeamGame } = require("../../lib/espnClient");
+const { fetchTeamGame, fetchEventById } = require("../../lib/espnClient");
 const { makeFakeFirestore } = require("./support/fakeFirestore");
 const { runPlannerTick } = require("../../lib/planGameDayFires");
 
@@ -49,6 +58,10 @@ const ESPN_TEAM = "5";
 const GAME = "9100001";
 const EVENT = `gd_${TEAM}_${GAME}`;
 const ARMED = { forcePolicy: { enabled: true, allowlist: [UID] } };
+const ESPN_FLAG_SETS = [
+  ["every ESPN flag off", {}],
+  ["every ESPN flag on", { espnCollegeSlate: true, trackStartedById: true, statusAwareCap: true }],
+];
 
 function benchWorld(now) {
   const f = makeFakeFirestore({ now });
@@ -89,30 +102,38 @@ function benchWorld(now) {
 }
 
 function espn(state) {
-  fetchTeamGame.mockImplementation(async (_sport, id) =>
-    id === ESPN_TEAM
-      ? {
-          gameId: GAME,
-          startMs: KICKOFF_MS,
-          homeTeamId: ESPN_TEAM,
-          awayTeamId: "0",
-          isFinal: state === "final",
-          isInProgress: state === "live",
-          statusName: state === "final" ? "STATUS_FINAL" : state === "live" ? "STATUS_IN_PROGRESS" : "STATUS_SCHEDULED",
-        }
-      : null
-  );
+  const game = {
+    gameId: GAME,
+    startMs: KICKOFF_MS,
+    homeTeamId: ESPN_TEAM,
+    awayTeamId: "0",
+    isFinal: state === "final",
+    isInProgress: state === "live",
+    statusName: state === "final" ? "STATUS_FINAL" : state === "live" ? "STATUS_IN_PROGRESS" : "STATUS_SCHEDULED",
+  };
+  fetchTeamGame.mockImplementation(async (_sport, id) => (id === ESPN_TEAM ? game : null));
+  // Tracking by id (flag on) reads the same game the scoreboard does.
+  fetchEventById.mockImplementation(async (_sport, id) => (id === GAME ? { kind: "found", game } : { kind: "absent" }));
 }
 
 const read = async (f, path) => (await f.db.doc(path).get()).data();
+let flags = {};
 const tickAt = async (f, ms) => {
   f.setNow(ms);
   // The bridge heartbeats every 30 s; keep its status fresh at every tick.
   f.put(`users/${UID}/bridge_status/current`, { uptime: 1000, version: "1.2" });
-  return runPlannerTick(f.db, ms, ARMED);
+  return runPlannerTick(f.db, ms, { ...ARMED, forceFlags: flags });
 };
 
-beforeEach(() => fetchTeamGame.mockReset());
+beforeEach(() => {
+  fetchTeamGame.mockReset();
+  fetchEventById.mockReset();
+});
+
+describe.each(ESPN_FLAG_SETS)("%s", (_label, flagSet) => {
+beforeEach(() => {
+  flags = flagSet;
+});
 
 test("the start job is byte-identical to tonight's, plus only retryUntil", async () => {
   espn("scheduled");
@@ -166,4 +187,17 @@ test("the end job after two ESPN finals is byte-identical too, plus only retryUn
   });
   expect(end.fireAt.toMillis()).toBe(endTick);
   expect(end.retryUntil.toMillis()).toBe(endTick + 15 * 60_000);
+});
+});
+
+test("the flags-on pass really followed the game by id once its start existed", async () => {
+  flags = ESPN_FLAG_SETS[1][1];
+  espn("scheduled");
+  const f = benchWorld(PLANNER_TICK_MS);
+  await tickAt(f, PLANNER_TICK_MS);
+  expect(fetchEventById).not.toHaveBeenCalled(); // nothing was started before this tick
+  f.patch(`users/${UID}/fire_jobs/${EVENT}_start`, { state: "completed", outcome: "completed" });
+  espn("live");
+  await tickAt(f, Date.parse("2026-10-02T01:00:00Z"));
+  expect(fetchEventById).toHaveBeenCalledWith("nfl", GAME, expect.any(Map));
 });

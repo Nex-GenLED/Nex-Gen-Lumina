@@ -35,6 +35,22 @@
  *        scope COLLECTION, single-field `in` → automatic index (as the probe)
  *   7. users/{uid}/fire_jobs .where("state","==","scheduled")      (B2 next_fire)
  *        scope COLLECTION, single-field equality → automatic index
+ *   ESPN slate fix (2026-10-02), only with `track_started_by_id` on:
+ *   8. users/{uid}/game_day_sessions .where("gameStartMs",">=",now − 12 h)
+ *        scope COLLECTION, single-field range → automatic index. One query per
+ *        account with an enabled config and a controller, per tick.
+ *
+ * ─── ESPN FLAGS (config/gameday_planner, each default OFF) ──────────────────
+ *   espn_college_slate   college football from the dated FBS slate, not the
+ *                        featured list (espnClient.fetchCollegeSlateGame)
+ *   track_started_by_id  a started, not-ended session follows its own game by
+ *                        id (espnClient.fetchEventById) until its end fires
+ *   status_aware_cap     the hard cap is held while ESPN says the game is on,
+ *                        up to the sport's ceiling (gameDayPlanning)
+ * Only exactly `true` turns one on. With all three off the planner makes the
+ * same decisions and the same writes it made before them; the one difference
+ * is the per-tick URL cache (fewer identical ESPN requests) and the
+ * `espnFetches` count it reports in the tick summary.
  *
  * **NO collection-group query is used anywhere in this file.** That is a
  * deliberate constraint, not a coincidence: iterating users and then reading
@@ -69,6 +85,7 @@ import {
   teamSlugFromEventId,
 } from "./fireJobs";
 import {
+  LadderLitMode,
   NextFire,
   PreflightMode,
   PreflightVerdict,
@@ -79,6 +96,8 @@ import {
   ServerStatusCore,
   decideP6,
   evaluatePreflight,
+  ladderDarkChannels,
+  ladderLitModeFrom,
   p6HoldsAccount,
   p6RecordFrom,
   preflightModeFrom,
@@ -102,8 +121,18 @@ import {
   savedDesignUsable,
   baseRestorePayload,
   toRgbwSlots,
+  capBoundMs,
+  capCeilingMs,
+  espnReportsLive,
 } from "./gameDayPlanning";
-import { fetchTeamGame, EspnGame } from "./espnClient";
+import {
+  EspnCache,
+  EspnGame,
+  fetchCollegeSlateGame,
+  fetchCollegeTeamDivision,
+  fetchEventById,
+  fetchTeamGame,
+} from "./espnClient";
 import {
   TeamRow,
   TeamWindow,
@@ -188,6 +217,12 @@ interface PlanStats {
   /** B2. users/{uid}.gameday_server writes this tick. */
   serverStatusWrites: number;
   espnErrors: number;
+  /**
+   * Distinct ESPN URLs requested this tick — one request each, whatever the
+   * number of accounts and teams that read it (the per-tick URL cache). The
+   * production read-back for the rate question.
+   */
+  espnFetches: number;
   errors: number;
 }
 
@@ -255,6 +290,32 @@ export function writesJobsFor(policy: WriteJobsPolicy, uid: string): boolean {
   return policy.allowlist.includes(uid);
 }
 
+/** The three ESPN slate-fix flags. See the file header. */
+export interface EspnFlags {
+  espnCollegeSlate: boolean;
+  trackStartedById: boolean;
+  statusAwareCap: boolean;
+}
+
+export const ESPN_FLAGS_OFF: EspnFlags = {
+  espnCollegeSlate: false,
+  trackStartedById: false,
+  statusAwareCap: false,
+};
+
+/**
+ * PURE. Each flag is on only when its field is exactly `true`. Absent, `false`,
+ * `"true"`, `1` — off. A deploy therefore changes nothing until the owner
+ * writes the field, and a malformed write disarms rather than arms.
+ */
+export function espnFlagsFrom(data: Record<string, unknown> | undefined): EspnFlags {
+  return {
+    espnCollegeSlate: data?.espn_college_slate === true,
+    trackStartedById: data?.track_started_by_id === true,
+    statusAwareCap: data?.status_aware_cap === true,
+  };
+}
+
 /** Everything the planner reads from `config/gameday_planner`, once per tick. */
 export interface PlannerFlags {
   policy: WriteJobsPolicy;
@@ -262,13 +323,18 @@ export interface PlannerFlags {
   publishServerStatus: boolean;
   /** B1 — enforce (default) or observe. */
   preflightMode: PreflightMode;
+  /** The ESPN slate fix. All default off. */
+  espn: EspnFlags;
+  /** P4b (#146), `preflight_ladder_lit`. Default off. */
+  ladderLit: LadderLitMode;
 }
 
 /**
  * Read the flags. Defaults: write-jobs OFF (log-only until deliberately on),
- * publish ON, pre-flight ENFORCE. A read failure keeps log-only AND stops the
- * status publish for that tick: a transient error must not flip every account
- * to `served:false` — the app's staleness window covers a longer outage.
+ * publish ON, pre-flight ENFORCE, every ESPN flag and P4b OFF. A read failure
+ * keeps log-only AND stops the status publish for that tick: a transient error
+ * must not flip every account to `served:false` — the app's staleness window
+ * covers a longer outage.
  */
 async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerFlags> {
   try {
@@ -278,11 +344,84 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       policy: d.exists ? writeJobsPolicyFrom(data) : WRITE_JOBS_OFF,
       publishServerStatus: publishServerStatusFrom(data),
       preflightMode: preflightModeFrom(data),
+      espn: espnFlagsFrom(data),
+      ladderLit: ladderLitModeFrom(data),
     };
   } catch (err) {
     logger.warn("planGameDayFires: flag read failed; staying LOG-ONLY", err);
-    return { policy: WRITE_JOBS_OFF, publishServerStatus: false, preflightMode: "enforce" };
+    return {
+      policy: WRITE_JOBS_OFF,
+      publishServerStatus: false,
+      preflightMode: "enforce",
+      espn: ESPN_FLAGS_OFF,
+      ladderLit: "off",
+    };
   }
+}
+
+/**
+ * How far back a session's `gameStartMs` may lie and still be tracked by id.
+ * Longer than any sport's cap ceiling (gameDayPlanning.CAP_CEILING_MS, 7 h at
+ * most), so a tracked game stays in view until its end or its cap fires; a
+ * session older than this is left to the scoreboard path, as before.
+ */
+export const TRACK_LOOKBACK_MS = 12 * 3600_000;
+
+/** A started, not-ended session the planner follows by its ESPN id. */
+export interface TrackedSession {
+  eventId: string;
+  gameId: string;
+  gameStartMs: number;
+}
+
+/**
+ * PURE. From the sessions query (#8), the session each enabled team should
+ * follow: `startPlannedAt` set (this system started it, or handed the house to
+ * it), `endFiredAt` unset, `gameStartMs` known, and an id of the form
+ * `gd_<slug>_<gameId>` for an enabled slug. Two open sessions for one team
+ * (a doubleheader) → the earlier game, which ends first.
+ */
+export function openSessionsByTeam(
+  sessions: Array<{ id: string; data: Record<string, unknown> }>,
+  enabledSlugs: string[]
+): Map<string, TrackedSession> {
+  const out = new Map<string, TrackedSession>();
+  for (const s of sessions) {
+    const d = s.data;
+    if (d.startPlannedAt === null || d.startPlannedAt === undefined) continue;
+    if (d.endFiredAt !== null && d.endFiredAt !== undefined) continue;
+    if (typeof d.gameStartMs !== "number") continue;
+    for (const slug of enabledSlugs) {
+      const prefix = `gd_${slug}_`;
+      if (!s.id.startsWith(prefix)) continue;
+      const gameId = s.id.slice(prefix.length);
+      // A longer slug sharing this prefix (nfl_a vs nfl_a_b) leaves an
+      // underscore in the remainder; ESPN game ids are digits.
+      if (gameId.length === 0 || gameId.includes("_")) continue;
+      const prior = out.get(slug);
+      if (
+        prior === undefined ||
+        d.gameStartMs < prior.gameStartMs ||
+        (d.gameStartMs === prior.gameStartMs && s.id < prior.eventId)
+      ) {
+        out.set(slug, { eventId: s.id, gameId, gameStartMs: d.gameStartMs });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * How a config's game was found this tick. `via` is "default" for every read
+ * the planner made before the ESPN flags existed.
+ */
+interface ResolvedGame {
+  game: EspnGame | null;
+  via: "default" | "college_slate" | "tracked";
+  /** Tracked, and ESPN's single-game endpoint answered 404 — the game is gone. */
+  silent?: boolean;
+  /** College slate read in full, the id never on it, and ESPN says it is not FBS. */
+  notOnSlate?: string;
 }
 
 /**
@@ -369,7 +508,7 @@ function scorecardSkeleton(): Record<string, unknown> {
     // G (server celebrations) is not built.
     celebrations: null,
     stuck_executing_count: 0,
-    // C (app build 113) owns these; null = not measured, never "zero".
+    // C (app build 114, #150) owns these; null = not measured, never "zero".
     lease_residue_rows: null,
     app_foreground_during_game: null,
   };
@@ -631,8 +770,19 @@ export async function runPlannerTick(
     onlyUid?: string;
     forceWriteJobs?: boolean;
     forcePolicy?: WriteJobsPolicy;
-    /** Overrides for the B1/B2 flags when the policy is forced (tests, bench). */
-    forceFlags?: { publishServerStatus?: boolean; preflightMode?: PreflightMode };
+    /**
+     * Overrides for the B1/B2 flags, the ESPN flags and P4b when the policy is
+     * forced (tests, bench). Each ESPN flag and P4b defaults OFF, as in
+     * production with the field absent.
+     */
+    forceFlags?: {
+      publishServerStatus?: boolean;
+      preflightMode?: PreflightMode;
+      espnCollegeSlate?: boolean;
+      trackStartedById?: boolean;
+      statusAwareCap?: boolean;
+      ladderLit?: LadderLitMode;
+    };
   } = {}
 ): Promise<PlanStats & { logRows: Array<Record<string, unknown>> }> {
   // Policy, not a boolean: `write_jobs` can be armed globally or scoped to a
@@ -648,6 +798,12 @@ export async function runPlannerTick(
           opts.forcePolicy ?? { enabled: opts.forceWriteJobs === true, allowlist: null },
         publishServerStatus: opts.forceFlags?.publishServerStatus ?? true,
         preflightMode: opts.forceFlags?.preflightMode ?? "enforce",
+        espn: {
+          espnCollegeSlate: opts.forceFlags?.espnCollegeSlate === true,
+          trackStartedById: opts.forceFlags?.trackStartedById === true,
+          statusAwareCap: opts.forceFlags?.statusAwareCap === true,
+        },
+        ladderLit: opts.forceFlags?.ladderLit ?? "off",
       }
     : await readPlannerFlags(db);
   const policy: WriteJobsPolicy = flags.policy;
@@ -665,6 +821,7 @@ export async function runPlannerTick(
     p6Probes: 0,
     serverStatusWrites: 0,
     espnErrors: 0,
+    espnFetches: 0,
     errors: 0,
   };
   const logRows: Array<Record<string, unknown>> = [];
@@ -675,6 +832,13 @@ export async function runPlannerTick(
 
   const users = await db.collection("users").get(); // scope COLLECTION, no index
   const gameCache = new Map<string, EspnGame | null>();
+  // ONE request per ESPN URL per tick, shared by every account and team (the
+  // default scoreboard was fetched once per distinct sport/team before).
+  const espnCache: EspnCache = new Map();
+  // Flagged reads, cached at the same tick level: the college pick per team id,
+  // the single-game lookup per sport/game.
+  const collegeCache = new Map<string, ResolvedGame>();
+  const trackedCache = new Map<string, ResolvedGame | null>();
 
   for (const u of users.docs) {
     const uid = u.id;
@@ -803,7 +967,7 @@ export async function runPlannerTick(
       const key = `${sport}/${espnTeamId}`;
       if (!gameCache.has(key)) {
         try {
-          gameCache.set(key, await fetchTeamGame(sport, espnTeamId));
+          gameCache.set(key, await fetchTeamGame(sport, espnTeamId, espnCache));
         } catch (err) {
           gameCache.set(key, null);
           stats.espnErrors++;
@@ -811,6 +975,99 @@ export async function runPlannerTick(
         }
       }
       return gameCache.get(key) ?? null;
+    };
+
+    // ── track_started_by_id: this account's started, not-ended sessions ──
+    // Read once per account per tick (query #8), only with the flag on and a
+    // controller to fire into (without one no config reaches ESPN at all). A
+    // failed read tracks nothing this tick: every team falls back to the
+    // scoreboard, which is the pre-flag behaviour.
+    let tracked = new Map<string, TrackedSession>();
+    if (flags.espn.trackStartedById && controller) {
+      try {
+        const open = await db
+          .collection("users").doc(uid).collection(SESSION_COLLECTION)
+          .where("gameStartMs", ">=", nowMs - TRACK_LOOKBACK_MS) // COLLECTION scope → automatic index
+          .get();
+        tracked = openSessionsByTeam(
+          open.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
+          configs.docs.map((d) => d.id)
+        );
+      } catch (err) {
+        logger.warn(`planGameDayFires: tracked-session read failed for ${uid}; scoreboard only`, err);
+      }
+    }
+
+    // A started game, followed by id. Cached per sport/game across accounts.
+    // ESPN 404 = the game is gone ("silent"): the session's own kickoff stands
+    // in, nothing is final, and the cap decides. Any other failure answers
+    // null and the caller falls back to the scoreboard — tracking only ever
+    // adds information.
+    const trackedGame = async (sport: string, t: TrackedSession): Promise<ResolvedGame | null> => {
+      const key = `${sport}/${t.gameId}`;
+      if (!trackedCache.has(key)) {
+        const r = await fetchEventById(sport, t.gameId, espnCache);
+        if (r.kind === "found") {
+          trackedCache.set(key, { game: r.game, via: "tracked" });
+        } else if (r.kind === "absent") {
+          trackedCache.set(key, {
+            game: {
+              gameId: t.gameId, startMs: t.gameStartMs,
+              isFinal: false, isInProgress: false, statusName: "", statusState: "",
+              homeTeamId: "", awayTeamId: "",
+            },
+            via: "tracked",
+            silent: true,
+          });
+        } else {
+          stats.espnErrors++;
+          trackedCache.set(key, null);
+        }
+      }
+      return trackedCache.get(key) ?? null;
+    };
+
+    // espn_college_slate: the dated FBS slate and the deterministic pick. A
+    // final stays pickable until the latest instant its end could fire (the
+    // football ceiling), so a long game's final is never dropped mid-count.
+    const collegeGame = async (espnTeamId: string): Promise<ResolvedGame> => {
+      const cached = collegeCache.get(espnTeamId);
+      if (cached) return cached;
+      let r: ResolvedGame = { game: null, via: "college_slate" };
+      try {
+        const slate = await fetchCollegeSlateGame(
+          espnTeamId, nowMs, espnCache, (g) => capCeilingMs(g.startMs, "ncaaFB")
+        );
+        if (slate.game) {
+          r = { game: slate.game, via: "college_slate" };
+        } else if (!slate.onSlate && slate.complete && espnTeamId) {
+          // Never on three full days of the FBS slate. A bye week looks the
+          // same, so ask ESPN whether this id is an FBS team at all; only a
+          // definite "no" (FCS / unknown id) is named. An error claims nothing.
+          const div = await fetchCollegeTeamDivision(espnTeamId, espnCache);
+          if (div.kind === "unknown_team") r = { ...r, notOnSlate: "unknown_team" };
+          if (div.kind === "not_fbs") r = { ...r, notOnSlate: `not_fbs:${div.group}` };
+        }
+      } catch (err) {
+        stats.espnErrors++;
+        logger.warn(`planGameDayFires: ESPN college slate failed for ${espnTeamId}`, err);
+      }
+      collegeCache.set(espnTeamId, r);
+      return r;
+    };
+
+    // The one entry point for "which game is this config's, this tick". With
+    // every ESPN flag off it is exactly `gameFor`.
+    const resolveGame = async (
+      sport: string, espnTeamId: string, teamSlug: string
+    ): Promise<ResolvedGame> => {
+      const t = tracked.get(teamSlug);
+      if (t) {
+        const r = await trackedGame(sport, t);
+        if (r) return r;
+      }
+      if (sport === "ncaaFB" && flags.espn.espnCollegeSlate) return collegeGame(espnTeamId);
+      return { game: await gameFor(sport, espnTeamId), via: "default" };
     };
 
     // Pre-pass: every enabled team's window and session, so each START and
@@ -832,7 +1089,7 @@ export async function runPlannerTick(
         const d = orderedDocs[order];
         const c = d.data();
         const sport = String(c.sport ?? "");
-        const game = await gameFor(sport, String(c.espn_team_id ?? ""));
+        const game = (await resolveGame(sport, String(c.espn_team_id ?? ""), d.id)).game;
         if (!game) continue;
         const eventId = eventIdFor(d.id, game.gameId);
         const session = (await sessionRef(db, uid, eventId).get()).data() ?? {};
@@ -863,7 +1120,16 @@ export async function runPlannerTick(
           // when the profile carries one (else the fleet's UTC−5).
           windowStartMs: windowStartFor(c, game.startMs, offsetHoursAt),
           gameStartMs: game.startMs,
-          windowEndMs: windowEndMs(game.startMs, sport),
+          // status_aware_cap: the window closes when the cap fires, which a
+          // live game holds up to its ceiling — so a held game keeps the house
+          // (a lower team defers, nothing restores base under it). Off: the
+          // shipped bound.
+          windowEndMs: flags.espn.statusAwareCap
+            ? capBoundMs({
+                gameStartMs: game.startMs, sport,
+                statusAware: true, espnLive: espnReportsLive(game),
+              })
+            : windowEndMs(game.startMs, sport),
           statusName: game.statusName,
           eligible: !daylightOnly,
           startPlanned:
@@ -894,6 +1160,7 @@ export async function runPlannerTick(
         p6Unreachable: [...sessionByEvent.values()].some((s) => p6HoldsAccount(s, nowMs)),
         appVersion: facts.appVersion,
         nowMs,
+        ladderLit: flags.ladderLit,
       });
     }
     const preflightBlocks =
@@ -908,6 +1175,19 @@ export async function runPlannerTick(
         uid, action: "preflight_skip", reasons: preflight.reasons,
         ...(flags.preflightMode === "observe" ? { observeOnly: true } : {}),
       });
+      // #146: name the buses the ladder leaves dark, so the row says what to
+      // fix (the app's on-connect repair, or a schedule re-sync). Constant for
+      // a given controller state, so it dedupes like the row above.
+      if (preflight.reasons.includes("preflight_ladder_dark")) {
+        logRows.push({
+          uid, action: "preflight_ladder_dark",
+          controllerId: controller ? controller.id : null,
+          base_ladder_dark_channels: ladderDarkChannels(
+            controller ? (controller.data() as Record<string, unknown>) : null
+          ),
+          ...(flags.preflightMode === "observe" ? { observeOnly: true } : {}),
+        });
+      }
       if (preflightBlocks) stats.preflightSkips++;
       else stats.preflightObserved++;
     }
@@ -961,8 +1241,22 @@ export async function runPlannerTick(
           continue;
         }
 
-        // ── ESPN, cached per (sport, team) across users ──────────────────
-        const game = await gameFor(sport, espnTeamId);
+        // ── ESPN, cached per URL (and per sport/team, per game) across users ─
+        const resolved = await resolveGame(sport, espnTeamId, teamSlug);
+        const game = resolved.game;
+        if (!game && resolved.notOnSlate !== undefined) {
+          // espn_college_slate (decision 3): three full days of the FBS slate
+          // without this id, and ESPN says the id is not an FBS team (FCS, or
+          // unknown to ESPN). It can never appear, so it is NAMED rather than
+          // read as `no_game` forever. Its own START bucket, in place of
+          // no_game, so the reconciliation still holds. Deduped per day.
+          bump(stats.skipped, "team_not_on_slate");
+          logRows.push({
+            uid, teamSlug, action: "skip", reason: "team_not_on_slate",
+            sport, espnTeamId, slate: "fbs", detail: resolved.notOnSlate,
+          });
+          continue;
+        }
         if (!game) {
           bump(stats.skipped, "no_game");
           // The biggest bucket (11 of 19 on 2026-08-11) and still bounded: one
@@ -1288,7 +1582,28 @@ export async function runPlannerTick(
           },
           sport,
           nowMs,
+          // status_aware_cap: hold the cap while ESPN says the game is on. A
+          // silent (gone) game reports nothing, so its cap fires at the bound.
+          ...(flags.espn.statusAwareCap
+            ? { cap: { statusAware: true, espnLive: espnReportsLive(game) } }
+            : {}),
         });
+
+        if (decision.reason === "cap_held_live") {
+          // Legible, and bounded: ESPN's status name is the only varying
+          // field, so a held game adds a row per status it passes through
+          // (in progress, delayed, halftime …), not one per tick.
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: "cap_held_live",
+            espnStatus: game.statusName,
+            ceilingAt: new Date(
+              capCeilingMs(
+                typeof session.gameStartMs === "number" ? session.gameStartMs : game.startMs,
+                sport
+              )
+            ).toISOString(),
+          });
+        }
 
         // #66: every stale session the guard catches is free evidence. Counted
         // and logged as its own reason so "the guard is holding" is observable
@@ -1440,6 +1755,11 @@ export async function runPlannerTick(
             fireAt: new Date(nowMs).toISOString(), reason: decision.reason,
             ...(handoff ? { handoffTo: handoff.to.teamSlug } : {}),
             ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
+            // Only the flagged paths add these, so a flags-off row is unchanged.
+            ...(resolved.via === "tracked" ? { espnVia: "tracked" } : {}),
+            ...(flags.espn.statusAwareCap && decision.reason.startsWith("hard_cap")
+              ? { capStatus: resolved.silent ? "silent" : game.statusName }
+              : {}),
           });
           if (writeJobs) {
             // S4: the end fire returns the house to BASE, not to off — a
@@ -1560,7 +1880,9 @@ export async function runPlannerTick(
             }
           }
           stats.endsPlanned++;
-          if (decision.reason === "hard_cap") stats.hardCapsPlanned++;
+          if (decision.reason === "hard_cap" || decision.reason === "hard_cap_ceiling") {
+            stats.hardCapsPlanned++;
+          }
         } else if (decision.reason !== "not_final" && decision.reason !== "already_fired") {
           // endSkipped, NOT skipped: this config has already been counted once
           // in the START dimension and counting it again there would break
@@ -1659,6 +1981,7 @@ export async function runPlannerTick(
   // guarantees an artifact on a genuinely row-less tick.
   //
   // The summary is additive: per-row detail is still appended when rows exist.
+  stats.espnFetches = espnCache.size;
   const day = new Date(nowMs).toISOString().slice(0, 10);
   const summary = {
     at: admin.firestore.FieldValue.serverTimestamp(),
@@ -1681,6 +2004,8 @@ export async function runPlannerTick(
     p6Probes: stats.p6Probes,
     serverStatusWrites: stats.serverStatusWrites,
     espnErrors: stats.espnErrors,
+    // Distinct ESPN URLs requested — one request each (the per-tick cache).
+    espnFetches: stats.espnFetches,
     errors: stats.errors,
   };
   await db
