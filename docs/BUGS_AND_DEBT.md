@@ -2651,6 +2651,67 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `docs/guides-2026-09/06-admin-guide.md` also still states `write_jobs: false` (plan §5).
   - **Fix shape:** update the admin guide's planner table when A+B is deployed.
 
+- [ ] **#156 — The +114 app shows the generic pre-flight sentence for `preflight_ladder_dark`**
+  - Status: **OPEN — filed 2026-10-02 from `fix/gameday-espn-slate`** · Severity: **P3** ·
+    Evidence: **verified-by-source**
+  - `preflightReasonCopy` (`lib/features/game_day/game_day_server_status.dart` on
+    `fix/114-gameday-app`) maps the seven A+B pre-flight reasons. The new P4b reason (#146,
+    flag `preflight_ladder_lit`) falls to the default "A setup step for server-run Game Day is
+    incomplete." Only reachable once the owner turns the flag on.
+  - **Fix shape:** `PreflightReason.ladderDark = 'preflight_ladder_dark'`, sharing the
+    `ladderBad` copy ("Your everyday lighting settings need repairing. Opening the app at home
+    repairs them."). One case and one test, next app build.
+
+- [ ] **#157 — The ESPN slate flags (and `preflight_ladder_lit`) are fleet-wide, not per
+  account**
+  - Status: **OPEN — decision owed** · Severity: **P3** · Evidence: **verified-by-source**
+  - `espn_college_slate`, `track_started_by_id`, `status_aware_cap` and `preflight_ladder_lit`
+    are single values in `config/gameday_planner`. Flipping one for a bench rehearsal changes
+    planning for every account: jobs only for allowlisted accounts, plan-log rows for all.
+    Once the friendlies are allowlisted (plan step D, from 10-11), a bench-only rehearsal is
+    no longer bench-only.
+  - **Decision:** rehearse while the allowlist is the bench alone, or give each flag a scoped
+    form (`true` or a uid list, the `uid_allowlist` pattern) — `espnFlagsFrom` plus the
+    per-account read in `runPlannerTick`, and tests.
+  - The admin-guide gap (#142) now also covers these four keys.
+
+- [ ] **#158 — A START is minted for a game ESPN already reports postponed or cancelled**
+  - Status: **OPEN — pre-existing since S5; found 2026-10-02** · Severity: **P2** · Evidence:
+    **verified-by-source**
+  - The START block of `planGameDayFires.ts` mints for any game the lookup returns inside the
+    6 h horizon and reads no status there. `DEAD_STATUSES` (`gameDayHierarchy.ts`) only keeps
+    such a game out of the hierarchy. A game postponed before its fire time still lights the
+    house at fireAt, and the cap restores base at kickoff + estimate + 60 min. The college
+    pick keeps postponed games as its last tier, for parity with the default scoreboard, so
+    the slate fix neither adds nor removes this.
+  - **Fix shape:** skip with a named START reason (`game_postponed`) when the status is
+    postponed, cancelled or suspended. **Decision:** should a start already minted be withdrawn
+    (state `skipped`, the P6 transaction) when ESPN reports postponed before its fireAt?
+
+- [ ] **#159 — An ESPN outage keeps a tracked game's cap from firing, the ceiling included**
+  - Status: **OPEN — residual of the slate fix** · Severity: **P3** · Evidence:
+    **verified-by-source**
+  - With `track_started_by_id` on, a single-game ERROR (5xx, timeout, network) falls back to
+    the scoreboard, because tracking only ever adds information. If the game is also missing
+    from the scoreboard, or ESPN is down entirely, the config reads `no_game`, the end path is
+    not reached, and neither the bound nor the ceiling fires until ESPN answers. The pre-flag
+    planner behaves the same on an ESPN error.
+  - **Fix shape:** for a tracked session with no game this tick, evaluate the cap from the
+    session alone once now > ceiling (`hard_cap_ceiling`, `capStatus: "espn_unavailable"`).
+    **Decision:** an outage at the ceiling would then end a game ESPN might still call live.
+
+- [ ] **#160 — The app catalog lacks at least one FBS program (ESPN id 2641)**
+  - Status: **OPEN — app catalog** · Severity: **P3** · Evidence: **verified-by-source**
+  - The server reads the config's `espn_team_id` and keeps no catalog. The app's `addTeam`
+    refuses a slug that is not in `kTeamColors`. `team_colors.dart` on `fix/114-gameday-app`
+    has no entry with `espnTeamId: '2641'`, an FBS program (ESPN's team document reads group
+    80, checked 2026-10-02). FCS programs are absent by decision: FBS only (owner,
+    2026-10-02).
+  - **Fix shape:** list FBS ids from ESPN (`teams/{id}` → `groups.parent.id == "80"`), diff
+    them against the catalog, and add the missing entries with curated LED colours, as the
+    team-colour work did. Server side: with `espn_college_slate` on, a config whose id is not
+    FBS is now named `team_not_on_slate`.
+
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
   - Status: OPEN (filed 2026-08-19) · Severity: **P2 — UX, installer-facing**
