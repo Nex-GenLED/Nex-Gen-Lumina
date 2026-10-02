@@ -341,7 +341,13 @@ final ladderRepairCoordinatorProvider = Provider<LadderRepairConsider>((ref) {
               ladderRestore: v,
             );
       },
-      stillConnected: () => identical(ref.read(wledRepositoryProvider), svc),
+      // Same LAN endpoint, not the same instance: wledRepositoryProvider
+      // builds a fresh WledService for the SAME controller on connectivity /
+      // profile rebuilds, and that is not a reason to defer.
+      stillConnected: () {
+        final cur = ref.read(wledRepositoryProvider);
+        return cur is WledService && cur.baseUrl == svc.baseUrl;
+      },
       pausePolling: () {
         try {
           ref.read(wledStateProvider.notifier).pausePolling();
