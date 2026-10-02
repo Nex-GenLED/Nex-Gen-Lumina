@@ -13,6 +13,18 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 
+/// +114 — a lit ladder segment carries the base look (base_look.dart).
+Map<String, dynamic> litSeg([int? id]) => {
+      if (id != null) 'id': id,
+      'on': true,
+      'fx': 0,
+      'col': [
+        [0, 212, 255, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ],
+    };
+
 /// The bench rig's real layout: 2 segments, [0,128) and [128,290).
 Map<String, dynamic> benchLive() => {
       'on': true,
@@ -32,16 +44,16 @@ Map<String, dynamic> fourChannelLive() => {
 
 void main() {
   group('channels == null is byte-identical to pre-D2', () {
-    test('ON ladder on the bench rig layout', () {
+    // +114 changed this shape ON PURPOSE: every lit segment now names the base
+    // look, so the bench layout's captured colour ([0,70,135]) no longer leaks
+    // into the ladder. Still no bounds, still every live segment named.
+    test('ON ladder on the bench rig layout (base look, +114)', () {
       final state = ScheduleSyncService.buildNglOnPresetState(200, benchLive());
       expect(state, {
         'on': true,
         'bri': 200,
         'ib': true,
-        'seg': [
-          {'id': 0, 'on': true},
-          {'id': 1, 'on': true},
-        ],
+        'seg': [litSeg(0), litSeg(1)],
       });
     });
 
@@ -59,7 +71,7 @@ void main() {
 
     test('degraded (no live state) fallbacks are unchanged', () {
       expect(ScheduleSyncService.buildNglOnPresetState(200, null)['seg'],
-          [{'on': true}]);
+          [litSeg()]);
       expect(ScheduleSyncService.buildNglOffPresetState(null)['seg'],
           [{'on': false}]);
     });
@@ -86,10 +98,10 @@ void main() {
           channels: const [1]);
       expect(state['seg'], [
         {'id': 0, 'on': false},
-        {'id': 1, 'on': true},
+        litSeg(1),
         {'id': 2, 'on': false},
         {'id': 3, 'on': false},
-      ]);
+      ], reason: 'a darkened channel carries no look — nothing to show');
       // Root master still asserted: the event IS taking the house over.
       expect(state['on'], true);
       expect(state['ib'], true);
@@ -107,7 +119,7 @@ void main() {
     test('degraded state with a scope names the requested ids', () {
       final state = ScheduleSyncService.buildNglOnPresetState(200, null,
           channels: const [2]);
-      expect(state['seg'], [{'id': 2, 'on': true}]);
+      expect(state['seg'], [litSeg(2)]);
     });
   });
 
