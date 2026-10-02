@@ -18,6 +18,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app_providers.dart';
 import '../../models/roofline_segment.dart';
 import '../game_day/game_day_design_write.dart';
+import '../game_day/game_day_server_status_provider.dart'
+    show gameDayServerStatusSyncProvider;
 import '../design/roofline_config_providers.dart';
 import '../neighborhood/services/channel_participation_resolver.dart';
 import '../neighborhood/services/path1_game_day_snapshot.dart';
@@ -140,6 +142,12 @@ final gameDayAutopilotServiceProvider =
       throw StateError('WLED apply returned false (device write failed)');
     }
   };
+
+  // +114 (D3) — server-run teams are observed, never applied or resumed.
+  // Read per decision; loading/error/stale all read as "none served", which
+  // is the 112 behaviour.
+  svc.onGetServedTeams = () =>
+      ref.read(gameDayServerStatusSyncProvider).servedTeamsAt(DateTime.now());
 
   svc.onApplyFailure = (design, error, stack) {
     debugPrint('[GameDayAutopilot] APPLY FAILED for "${design.designName}": '
