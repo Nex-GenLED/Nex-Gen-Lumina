@@ -922,4 +922,26 @@ void main() {
       expect(extractLuminaPreview(_designWled), isNotNull);
     });
   });
+  // #163 — the reply card names the channels the write REPORTED, never an
+  // assumed "all".
+  group('the channels a look was sent to', () {
+    test('a write that reports channels puts them on the posted preview',
+        () async {
+      final rig = _Rig(LuminaSurface.sheet);
+      rig.services.applyResult =
+          const WriteResult.success(channels: [0, 1, 2], message: 'All 3 channels');
+      await rig.handle(LuminaCommandResult(
+          responseText: 'Royal blue it is.', wledPayload: _designWled));
+      final posted = rig.thread.assistantMessages.single;
+      expect(posted.preview?.appliedTo, 'All 3 channels');
+    });
+
+    test('a write that reports no channels claims nothing', () async {
+      final rig = _Rig(LuminaSurface.sheet);
+      rig.services.applyResult = const WriteResult.success();
+      await rig.handle(LuminaCommandResult(
+          responseText: 'Royal blue it is.', wledPayload: _designWled));
+      expect(rig.thread.assistantMessages.single.preview?.appliedTo, isNull);
+    });
+  });
 }

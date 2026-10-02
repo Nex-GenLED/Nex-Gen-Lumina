@@ -59,6 +59,12 @@ class LuminaPatternPreview {
   final int? intensity;
   final int? paletteId;
 
+  /// The channels this look was SENT to, as the reply card names them ("All 3
+  /// channels"), set from the apply's result (#163). Null until a write
+  /// reports them — the card then says nothing about channels rather than
+  /// claim all of them.
+  final String? appliedTo;
+
   const LuminaPatternPreview({
     this.patternName,
     required this.colors,
@@ -70,7 +76,23 @@ class LuminaPatternPreview {
     this.speed,
     this.intensity,
     this.paletteId,
+    this.appliedTo,
   });
+
+  /// This preview, naming the channels the look was sent to.
+  LuminaPatternPreview withAppliedTo(String? appliedTo) => LuminaPatternPreview(
+        patternName: patternName,
+        colors: colors,
+        colorNames: colorNames,
+        effectId: effectId,
+        effectName: effectName,
+        direction: direction,
+        isStatic: isStatic,
+        speed: speed,
+        intensity: intensity,
+        paletteId: paletteId,
+        appliedTo: appliedTo,
+      );
 }
 
 /// Immutable state snapshot for the Lumina sheet.

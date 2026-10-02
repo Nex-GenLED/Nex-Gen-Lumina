@@ -425,7 +425,7 @@ class LuminaSmartScheduler {
         'bri': 255,
         'seg': [
           {
-            'id': 0,
+            // No `id` (#163): one look for the house, fanned out per channel.
             'on': true,
             'bri': 255,
             'col': segColors,

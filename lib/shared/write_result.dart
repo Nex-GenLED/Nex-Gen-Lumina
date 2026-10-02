@@ -53,7 +53,13 @@ class WriteResult {
   /// failure snackbar for the same write.
   final bool reported;
 
-  const WriteResult.success({this.message})
+  /// On success, the channel ids the write stated a look for, when the writer
+  /// knows them — so the reply can name what was actually sent rather than
+  /// claim "all". Null on failure, and for a write that has no channels (a
+  /// master power or brightness change) or does not report them.
+  final List<int>? channels;
+
+  const WriteResult.success({this.message, this.channels})
       : ok = true,
         failure = null,
         error = null,
@@ -65,7 +71,8 @@ class WriteResult {
     this.error,
     this.reported = false,
   })  : ok = false,
-        failure = kind;
+        failure = kind,
+        channels = null;
 
   /// Nothing was sent, and [reason] says why in the customer's words.
   const WriteResult.blocked(String reason)
@@ -73,7 +80,8 @@ class WriteResult {
         failure = WriteFailureKind.blocked,
         message = reason,
         error = null,
-        reported = false;
+        reported = false,
+        channels = null;
 
   /// Adapts the `Future<bool>` contract most repositories still speak.
   /// `false` carries no cause, so the failure is [WriteFailureKind.unreachable]
@@ -95,7 +103,7 @@ class WriteResult {
   bool get wasBlocked => failure == WriteFailureKind.blocked;
 
   WriteResult copyWith({String? message, bool? reported}) => ok
-      ? WriteResult.success(message: message ?? this.message)
+      ? WriteResult.success(message: message ?? this.message, channels: channels)
       : WriteResult.failed(
           failure!,
           message: message ?? this.message,

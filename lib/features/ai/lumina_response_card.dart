@@ -206,11 +206,22 @@ class _LuminaResponseCardState extends ConsumerState<LuminaResponseCard> {
               value: EffectInfo.speedLabel(s.speed!),
               changed: changed.contains('speed'),
             ),
-          ParameterSummaryRow(
-            label: 'Zone',
-            value: s.zone.name,
-            changed: changed.contains('zone'),
-          ),
+          // #163: never the "All Zones" default — that row claimed every
+          // channel while a segment-0 payload lit one. Shown only when it is
+          // TRUE: the channels the apply reported, or a zone the customer
+          // picked in the adjustment panel.
+          if (s.appliedTo != null)
+            ParameterSummaryRow(
+              label: 'Sent to',
+              value: s.appliedTo!,
+              changed: false,
+            )
+          else if (s.zone.name != ZoneInfo.allZones.name)
+            ParameterSummaryRow(
+              label: 'Zone',
+              value: s.zone.name,
+              changed: changed.contains('zone'),
+            ),
         ],
       ),
     );

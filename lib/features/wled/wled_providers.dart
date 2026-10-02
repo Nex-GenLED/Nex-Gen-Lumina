@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/ai/lumina_channel_apply.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/schedule/schedule_enforcement.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
@@ -2026,6 +2027,63 @@ class WledNotifier extends Notifier<WledStateModel> {
     if (ref.read(wledRepositoryProvider) == null) return _blockedResult();
     final ok = await applyPayloadWithLabel(outgoing, labelHint: labelHint);
     return ok ? const WriteResult.success() : _failedWrite(null);
+  }
+
+  /// The apply for a Lumina AI reply (#163): ONE look for the house, sent as
+  /// one fully stated segment to EVERY participating channel.
+  ///
+  /// Whatever shape the builder or the cloud model produced for a single
+  /// look — a segment pinned to `id: 0`, a bare segment object, one id-less
+  /// segment — it reaches every channel of the census that takes part in
+  /// shows, the same set a design apply targets. The Home channel bar's
+  /// selection does not narrow it: nothing in the chat shows that selection,
+  /// and the reply names the channels the look went to.
+  ///
+  /// Display metadata never rides to the controller. A payload that is not a
+  /// single look — a power or brightness change (no `seg`), or a scene that
+  /// states each channel itself — goes through [applyToDeviceResult] as
+  /// before.
+  ///
+  /// A success carries the channel ids it stated in [WriteResult.channels]
+  /// and, as its message, the line that names them ("All 3 channels").
+  Future<WriteResult> applyLuminaDesign(Map<String, dynamic> payload) async {
+    final device = luminaDevicePayload(payload);
+    final template = luminaSingleLookTemplate(device);
+    if (template == null) {
+      return applyToDeviceResult(device, labelHint: null);
+    }
+
+    // Waits only while a channel source is still being read.
+    await resolveEffectiveChannelIds(ref.read);
+    if (_disposed) return const WriteResult.failed(WriteFailureKind.error);
+
+    var targets = ref.read(applyChannelCensusProvider).ids.toSet();
+    final participating = ref.read(participatingChannelIdsProvider);
+    if (participating != null) {
+      targets = targets.intersection(participating.toSet());
+    }
+    final ids = targets.toList()..sort();
+    if (ids.isEmpty) {
+      debugPrint('applyLuminaDesign: skip (no participating channels)');
+      return _blockedResult();
+    }
+    if (ref.read(wledRepositoryProvider) == null) return _blockedResult();
+
+    final outgoing = luminaPayloadForChannels(device, template, ids);
+    final ok = await applyPayloadWithLabel(outgoing, labelHint: null);
+    if (!ok) return _failedWrite(null);
+
+    final known = ref.read(deviceChannelsProvider);
+    final census = [
+      for (final id in ref.read(applyChannelCensusProvider).ids)
+        known.where((c) => c.id == id).firstOrNull ??
+            DeviceChannel(
+                id: id, name: 'Channel ${id + 1}', start: 0, stop: 0, gpioPin: 0),
+    ];
+    return WriteResult.success(
+      channels: ids,
+      message: luminaChannelsLabel(ids, census),
+    );
   }
 
   // ── Write-and-report ────────────────────────────────────────────────────

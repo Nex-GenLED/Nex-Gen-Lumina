@@ -967,7 +967,8 @@ class LuminaBrain {
       'bri': 255,
       'seg': [
         {
-          'id': 0,
+          // No `id` (#163): ONE look for the house. An id here read as
+          // "segment 0 specifically" to every consumer, so only channel 1 lit.
           'on': true,
           'bri': 255,
           'col': segCol.isEmpty ? [[255, 255, 255, 0]] : segCol,
@@ -1026,7 +1027,8 @@ class LuminaBrain {
       'bri': 255,
       'seg': [
         {
-          'id': 0,
+          // No `id` (#163): ONE look for the house. An id here read as
+          // "segment 0 specifically" to every consumer, so only channel 1 lit.
           'on': true,
           'bri': 255,
           'col': segCol.isEmpty

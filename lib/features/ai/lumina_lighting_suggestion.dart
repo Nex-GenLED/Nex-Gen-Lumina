@@ -77,8 +77,13 @@ class LuminaLightingSuggestion {
   /// Speed 0.0–1.0 (null for static effects).
   final double? speed;
 
-  /// Target zone.
+  /// Target zone (commercial zone chips in the adjustment panel). The default,
+  /// [ZoneInfo.allZones], is a choice of target, not a report of what was sent.
   final ZoneInfo zone;
+
+  /// What the look was actually sent to ("All 3 channels"), from the apply's
+  /// result (#163). Null when no write has reported it.
+  final String? appliedTo;
 
   /// AI confidence in this suggestion (0.0–1.0).
   final double confidence;
@@ -98,6 +103,7 @@ class LuminaLightingSuggestion {
     this.brightness = 1.0,
     this.speed,
     this.zone = const ZoneInfo(name: 'All Zones'),
+    this.appliedTo,
     this.confidence = 0.9,
     this.changedParams = const {},
     this.wledPayload,
@@ -129,6 +135,7 @@ class LuminaLightingSuggestion {
       brightness: brightness ?? this.brightness,
       speed: speed ?? this.speed,
       zone: zone ?? this.zone,
+      appliedTo: appliedTo,
       confidence: confidence,
       changedParams: changes,
       wledPayload: wledPayload,
@@ -175,6 +182,7 @@ class LuminaLightingSuggestion {
       ),
       brightness: brightness,
       speed: normalizedSpeed,
+      appliedTo: preview.appliedTo,
       confidence: confidence,
       wledPayload: wledPayload,
     );

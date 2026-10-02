@@ -252,9 +252,8 @@ class AdjustmentStateNotifier extends Notifier<AdjustmentState?> {
         return WriteResult.blocked(
             applyBlockedReason(ref.read) ?? kApplyBlockedFallback);
       }
-      return ref
-          .read(wledStateProvider.notifier)
-          .applyToDeviceResult(payload, labelHint: null);
+      // #163: "All Zones" is the house — every participating channel.
+      return ref.read(wledStateProvider.notifier).applyLuminaDesign(payload);
     }
 
     // Prefer the registered record for this address (it carries the id the
