@@ -142,6 +142,12 @@ export interface FireJobDoc {
   state?: unknown;
   commandId?: unknown;
   attempts?: unknown;
+  /**
+   * A2 — the last instant this job may still be dispatched, across retries.
+   * Absent on legacy jobs (and on any job type that must never retry), which
+   * keep the fixed MAX_FIRE_LATENESS_MS window and are never rescheduled.
+   */
+  retryUntil?: TimestampLike | null;
 }
 
 export interface DispatchDecision {
@@ -246,7 +252,13 @@ export function decideDispatch(args: {
     return { dispatch: false, reason: "not_yet_due", terminal: false };
   }
 
-  if (nowMs - fireAtMs > maxLateness) {
+  // A2: a job carrying a retry budget may be dispatched until `retryUntil`,
+  // so a transient block (in-flight guard) or a rescheduled attempt is not
+  // abandoned at 90 s. A job without one keeps the fixed window, unchanged.
+  const retryUntilMs = toMillisOrNull(job.retryUntil);
+  const tooLate =
+    retryUntilMs !== null ? nowMs > retryUntilMs : nowMs - fireAtMs > maxLateness;
+  if (tooLate) {
     return {
       dispatch: false,
       reason: `too_late:${Math.round((nowMs - fireAtMs) / 1000)}s`,
@@ -452,6 +464,179 @@ export function buildFireCommand(args: {
       eventId: args.eventId,
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// A2 — retry budget (2026-10-02)
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT. A fire had exactly one chance: a 90 s dispatch window and a 90 s
+// pickup grace. A bridge that rebooted across the fire minute, a WLED that was
+// mid-request, or a stuck claim (A1) meant the start or end simply did not
+// happen — a dark house for the game, or team colours held overnight.
+//
+// THE SHAPE. Start and end jobs carry `retryUntil`. When the reconcile reads a
+// RETRYABLE outcome and the budget allows another attempt, the job goes back to
+// `scheduled` with a later `fireAt`. Because the command id is
+// fireJobDocId(jobId, fireAt seconds), every attempt gets its own deterministic
+// id — a retried dispatcher invocation still collides on .create() exactly as
+// before. Start and end payloads are absolute state loads (`seg[...]` or
+// `{ps:N}`), so a second delivery is harmless.
+
+/** `toMillis()` of a Timestamp-like, or null. */
+export function toMillisOrNull(t: unknown): number | null {
+  const v = t as { toMillis?: () => number } | null | undefined;
+  return v && typeof v.toMillis === "function" ? v.toMillis() : null;
+}
+
+/**
+ * Wait before attempt N+1, indexed by N = dispatches already made (1-based).
+ * 30 / 60 / 120 s, then every 300 s until the budget runs out.
+ */
+export const RETRY_BACKOFF_MS: readonly number[] = [30_000, 60_000, 120_000, 300_000];
+
+/** A start may still land this long after kickoff (plan §3.1 A2). */
+export const START_RETRY_AFTER_KICKOFF_MS = 15 * 60_000;
+
+/** An end retries for this long after its first fireAt. */
+export const END_RETRY_WINDOW_MS = 15 * 60_000;
+
+/**
+ * Only these sequence steps retry. Celebrations (S5b, not built) must NEVER be
+ * retried — a celebration a minute late is a non-event, not a recovery — and a
+ * new seq has to opt in here deliberately.
+ */
+export const RETRYABLE_SEQS: readonly string[] = ["start", "end"];
+
+/**
+ * The start's budget: `min(fireAt + lead, gameStart + 15 min)`, never shorter
+ * than the pre-A2 single window (fireAt + MAX_FIRE_LATENESS_MS).
+ *
+ * STATED PLAINLY: for a lead-based start, fireAt + lead IS gameStart, so the
+ * min is gameStart — retries stop at kickoff and a start never lands after it.
+ * The plan's "a late start lands after kickoff, bounded at +15 min" is only
+ * reachable when the fire time is NOT kickoff − lead, i.e. an
+ * `on_time_override` (B4). Implemented literally as specified; widening to
+ * kickoff + 15 is a one-line change here.
+ */
+export function startRetryUntilMs(args: {
+  fireAtMs: number;
+  leadMs: number;
+  gameStartMs: number;
+}): number {
+  const budget = Math.min(
+    args.fireAtMs + args.leadMs,
+    args.gameStartMs + START_RETRY_AFTER_KICKOFF_MS
+  );
+  return Math.max(budget, args.fireAtMs + MAX_FIRE_LATENESS_MS);
+}
+
+/** The end's budget: 15 minutes after it was first due. */
+export function endRetryUntilMs(fireAtMs: number): number {
+  return fireAtMs + END_RETRY_WINDOW_MS;
+}
+
+/** What a terminal command means for a fire, and whether trying again can help. */
+export interface FireOutcome {
+  /** A stable label: completed, expired, stuck_executing, http_transport, … */
+  outcome: string;
+  retryable: boolean;
+}
+
+/** `no_bridge_paired`, from executeWledCommand's fail-fast (relayEligibility). */
+const NO_BRIDGE_PAIRED = "no_bridge_paired";
+/** The sweeper's wording when no bridge is paired (relayEligibility). */
+const EXPIRED_NO_BRIDGE_PREFIX = "Command expired: no bridge is paired";
+
+/**
+ * Classify a terminal command. PURE.
+ *
+ * RETRYABLE — the condition is plausibly gone a minute later:
+ *   expired            the bridge did not pick it up (offline, rebooting)
+ *   stuck_executing    the bridge claimed it and died (A1)
+ *   http_transport     "ERROR: HTTP -N": the bridge could not reach WLED
+ *                      (connection refused / read timeout)
+ *   http_5xx           WLED answered 5xx — 503 is WLED's "JSON buffer busy"
+ *
+ * NEVER RETRIED — repeating the same command cannot change the answer:
+ *   no_bridge_paired   no bridge on the account (fail-fast, or the sweeper's
+ *                      no-bridge wording on an expiry)
+ *   http_4xx           WLED rejected the request itself
+ *   no_controller_ip / failed_other / timeout / anything unrecognised
+ */
+export function classifyFireOutcome(status: unknown, error: unknown): FireOutcome {
+  const err = typeof error === "string" ? error : "";
+  switch (status) {
+    case "completed":
+      return { outcome: "completed", retryable: false };
+    case "expired":
+      if (err.startsWith(EXPIRED_NO_BRIDGE_PREFIX)) {
+        return { outcome: NO_BRIDGE_PAIRED, retryable: false };
+      }
+      return { outcome: "expired", retryable: true };
+    case "failed": {
+      if (err === NO_BRIDGE_PAIRED) return { outcome: NO_BRIDGE_PAIRED, retryable: false };
+      if (err.startsWith("stuck_executing")) return { outcome: "stuck_executing", retryable: true };
+      const m = /^ERROR: HTTP (-?\d+)/.exec(err);
+      if (m) {
+        const code = Number(m[1]);
+        if (code <= 0) return { outcome: "http_transport", retryable: true };
+        if (code >= 500) return { outcome: "http_5xx", retryable: true };
+        if (code >= 400) return { outcome: "http_4xx", retryable: false };
+        return { outcome: `http_${code}`, retryable: false };
+      }
+      if (err === "No controller IP specified") {
+        return { outcome: "no_controller_ip", retryable: false };
+      }
+      return { outcome: "failed_other", retryable: false };
+    }
+    case "timeout":
+      return { outcome: "timeout", retryable: false };
+    default:
+      return { outcome: String(status), retryable: false };
+  }
+}
+
+export interface RetryDecision {
+  retry: boolean;
+  reason: string;
+  /** Set when `retry` is true. */
+  nextFireAtMs?: number;
+  /** The attempt number the reschedule will become. */
+  attempt?: number;
+}
+
+/**
+ * Should a job whose command just reached [outcome] be tried again? PURE.
+ *
+ * `job.attempts` is the number of DISPATCHES already made (the dispatcher
+ * increments it on each dispatch); the backoff before the next attempt is
+ * RETRY_BACKOFF_MS[attempts − 1], capped at the last entry. The next attempt
+ * must start no later than `retryUntil`, or there is no retry.
+ */
+export function decideRetry(args: {
+  job: { seq?: unknown; attempts?: unknown; retryUntil?: unknown };
+  outcome: FireOutcome;
+  nowMs: number;
+}): RetryDecision {
+  const { job, outcome, nowMs } = args;
+  if (typeof job.seq !== "string" || !RETRYABLE_SEQS.includes(job.seq)) {
+    return { retry: false, reason: "seq_not_retryable" };
+  }
+  if (!outcome.retryable) {
+    return { retry: false, reason: `not_retryable:${outcome.outcome}` };
+  }
+  const retryUntilMs = toMillisOrNull(job.retryUntil);
+  if (retryUntilMs === null) return { retry: false, reason: "no_retry_budget" };
+
+  const attempts =
+    typeof job.attempts === "number" && Number.isFinite(job.attempts) && job.attempts >= 1
+      ? Math.floor(job.attempts)
+      : 1;
+  const backoff = RETRY_BACKOFF_MS[Math.min(attempts - 1, RETRY_BACKOFF_MS.length - 1)];
+  const next = nowMs + backoff;
+  if (next > retryUntilMs) return { retry: false, reason: "retry_budget_exhausted" };
+  return { retry: true, reason: "retry", nextFireAtMs: next, attempt: attempts + 1 };
 }
 
 // ---------------------------------------------------------------------------

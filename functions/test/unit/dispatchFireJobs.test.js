@@ -27,6 +27,9 @@ const START_PAYLOAD = '{"on":true,"bri":200,"seg":[{"id":0,"on":true,"fx":52,"sx
 function world({ job = {}, commands = {}, now = NOW } = {}) {
   const f = makeFakeFirestore({ now });
   f.put(`users/${UID}`, { owner_id: UID });
+  // A paired bridge, so an unpicked command expires with the bridge-OFFLINE
+  // wording (retryable) rather than the no-bridge wording (never retried).
+  f.put("bridge_registry/BR_TEST_01", { pairedUid: UID, status: "paired" });
   f.put(`users/${UID}/controllers/${CTRL}`, { ip: "192.0.2.10" });
   f.put(`users/${UID}/game_day_autopilot/${TEAM}`, { enabled: true, sport: "nfl" });
   f.put(JOB(`${EVENT}_start`), {
@@ -140,5 +143,160 @@ describe("A1/A3: the in-flight guard and stuck claims", () => {
     expect(job.outcome).toBe("completed");
     expect(job.commandError).toBe("");
     expect(job.latencyMs).toBe(1951);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A2 — retry budget, driven tick by tick through the real dispatcher AND the
+// real sweeper (the sweeper is what turns a missed pickup into `expired`).
+// ---------------------------------------------------------------------------
+describe("A2: retries", () => {
+  const { runSweepTick } = require("../../lib/sweepExpiredCommands");
+  const BUDGET = { retryUntil: { toMillis: () => NOW + 30 * M } };
+  const at = async (f, ms, fn) => { f.setNow(ms); return fn(ms); };
+  const job = (f) => read(f, JOB(`${EVENT}_start`));
+
+  test("expired → rescheduled → completed on attempt 2, each attempt with its own deterministic id", async () => {
+    const f = world({ job: BUDGET });
+
+    await at(f, NOW, (t) => tick(f, t));
+    const first = await job(f);
+    expect(first.state).toBe("dispatched");
+    expect(first.attempts).toBe(1);
+
+    // The bridge is offline: nobody picks the command up; the sweeper expires it.
+    await at(f, NOW + 150 * S, (t) => runSweepTick(f.db, t));
+    expect((await read(f, CMD(first.commandId))).status).toBe("expired");
+
+    const r2 = await at(f, NOW + 180 * S, (t) => tick(f, t));
+    expect(r2.retried).toBe(1);
+    expect(r2.retriedBy).toEqual({ expired: 1 });
+    const resched = await job(f);
+    expect(resched.state).toBe("scheduled");
+    expect(resched.fireAt.toMillis()).toBe(NOW + 210 * S); // +30 s backoff
+    expect(resched.firstFireAt.toMillis()).toBe(NOW - 10 * S);
+    expect(resched.lastOutcome).toBe("expired");
+    expect(resched.lastCommandId).toBe(first.commandId);
+    expect(resched.retries).toBe(1);
+
+    await at(f, NOW + 240 * S, (t) => tick(f, t));
+    const second = await job(f);
+    expect(second.state).toBe("dispatched");
+    expect(second.attempts).toBe(2);
+    expect(second.commandId).not.toBe(first.commandId);
+    expect(second.commandId).toBe(fireJobDocId(`${EVENT}_start`, Math.floor((NOW + 210 * S) / 1000)));
+    expect((await read(f, CMD(second.commandId))).payload).toBe(START_PAYLOAD);
+
+    // The bridge is back.
+    f.patch(CMD(second.commandId), { status: "completed", completedAt: f.ts(NOW + 245 * S) });
+    await at(f, NOW + 300 * S, (t) => tick(f, t));
+    const done = await job(f);
+    expect(done.state).toBe("completed");
+    expect(done.outcome).toBe("completed");
+    expect(done.attempts).toBe(2);
+  });
+
+  test("a stuck claim (A1) is retried the same way", async () => {
+    const f = world({ job: BUDGET });
+    await at(f, NOW, (t) => tick(f, t));
+    const first = await job(f);
+    f.patch(CMD(first.commandId), { status: "executing" }); // claimed, then the bridge dies
+
+    await at(f, NOW + 190 * S, (t) => runSweepTick(f.db, t));
+    expect((await read(f, CMD(first.commandId))).error).toBe("stuck_executing");
+
+    const r = await at(f, NOW + 200 * S, (t) => tick(f, t));
+    expect(r.retriedBy).toEqual({ stuck_executing: 1 });
+    expect((await job(f)).state).toBe("scheduled");
+  });
+
+  test("HTTP -1 (bridge could not reach WLED) is retried; HTTP 404 is not", async () => {
+    for (const [error, retried] of [["ERROR: HTTP -1", true], ["ERROR: HTTP 404", false]]) {
+      const f = world({ job: BUDGET });
+      await at(f, NOW, (t) => tick(f, t));
+      const first = await job(f);
+      f.patch(CMD(first.commandId), { status: "failed", error, completedAt: f.ts(NOW + 3 * S) });
+      await at(f, NOW + 60 * S, (t) => tick(f, t));
+      const j = await job(f);
+      expect(j.state).toBe(retried ? "scheduled" : "failed");
+      if (!retried) {
+        expect(j.outcomeClass).toBe("http_4xx");
+        expect(j.retryVerdict).toBeUndefined(); // never retryable, so no verdict
+      }
+    }
+  });
+
+  test("an expiry on an account with NO paired bridge is never retried", async () => {
+    const f = world({ job: BUDGET });
+    f.store.delete("bridge_registry/BR_TEST_01");
+    await at(f, NOW, (t) => tick(f, t));
+    await at(f, NOW + 150 * S, (t) => runSweepTick(f.db, t));
+    await at(f, NOW + 180 * S, (t) => tick(f, t));
+    const j = await job(f);
+    expect(j.state).toBe("expired");
+    expect(j.outcomeClass).toBe("no_bridge_paired");
+  });
+
+  test("no_bridge_paired is NEVER retried", async () => {
+    const f = world({ job: BUDGET });
+    await at(f, NOW, (t) => tick(f, t));
+    const first = await job(f);
+    f.patch(CMD(first.commandId), { status: "failed", error: "no_bridge_paired", completedAt: f.ts(NOW + S) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+    const j = await job(f);
+    expect(j.state).toBe("failed");
+    expect(j.outcomeClass).toBe("no_bridge_paired");
+  });
+
+  test("the budget is honoured: no retry once the next attempt would land after retryUntil", async () => {
+    const f = world({ job: { retryUntil: { toMillis: () => NOW + 60 * S } } });
+    await at(f, NOW, (t) => tick(f, t));
+    await at(f, NOW + 150 * S, (t) => runSweepTick(f.db, t));
+    await at(f, NOW + 180 * S, (t) => tick(f, t));
+    const j = await job(f);
+    expect(j.state).toBe("expired");
+    expect(j.retryVerdict).toBe("retry_budget_exhausted");
+  });
+
+  test("a legacy job with no retryUntil behaves exactly as before: one chance", async () => {
+    const f = world();
+    await at(f, NOW, (t) => tick(f, t));
+    await at(f, NOW + 150 * S, (t) => runSweepTick(f.db, t));
+    await at(f, NOW + 180 * S, (t) => tick(f, t));
+    const j = await job(f);
+    expect(j.state).toBe("expired");
+    expect(j.retryVerdict).toBe("no_retry_budget");
+  });
+
+  test("the reschedule is transactional: a job cancelled mid-reconcile stays cancelled", async () => {
+    const f = world({ job: BUDGET });
+    await at(f, NOW, (t) => tick(f, t));
+    await at(f, NOW + 150 * S, (t) => runSweepTick(f.db, t));
+    const db = {
+      ...f.db,
+      runTransaction: async (fn) => {
+        // A teardown (#98) lands between the reconcile's read and its write.
+        f.patch(JOB(`${EVENT}_start`), { state: "cancelled", cancelled_reason: "team_deleted" });
+        return f.db.runTransaction(fn);
+      },
+    };
+    f.setNow(NOW + 180 * S);
+    const r = await runDispatchTick(db, NOW + 180 * S);
+    expect(r.retried).toBe(0);
+    expect((await job(f)).state).toBe("cancelled");
+  });
+
+  test("an in-flight block inside the budget waits instead of dying at 90 s", async () => {
+    const f = world({
+      job: { ...BUDGET, fireAt: { toMillis: () => NOW - 5 * M } },
+      commands: { busy: appCmd("executing", 20 * S) },
+    });
+    const r = await tick(f);
+    expect(r.skippedTransient).toEqual({ in_flight: 1 });
+    expect((await job(f)).state).toBe("scheduled"); // pre-A2 this was skipped too_late
+
+    f.patch(CMD("busy"), { status: "completed", completedAt: f.ts(NOW + 5 * S) });
+    await at(f, NOW + 60 * S, (t) => tick(f, t));
+    expect((await job(f)).state).toBe("dispatched");
   });
 });

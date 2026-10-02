@@ -41,7 +41,9 @@ import {
   appendSamples,
   buildFireCommand,
   checkTeamConfigGate,
+  classifyFireOutcome,
   decideDispatch,
+  decideRetry,
   jobStateForCommandStatus,
   rollup,
 } from "./fireJobs";
@@ -78,6 +80,9 @@ interface TickStats {
   dispatched: number;
   /** A3: stuck `executing` docs this tick terminated before firing past them. */
   stuckCleared: number;
+  /** A2: jobs put back to `scheduled` for another attempt, and why. */
+  retried: number;
+  retriedBy: Record<string, number>;
   skippedTransient: Record<string, number>;
   skippedTerminal: Record<string, number>;
   errors: number;
@@ -108,6 +113,8 @@ export async function runDispatchTick(
       expired: 0,
       dispatched: 0,
       stuckCleared: 0,
+      retried: 0,
+      retriedBy: {},
       skippedTransient: {},
       skippedTerminal: {},
       errors: 0,
@@ -212,13 +219,58 @@ export async function runDispatchTick(
           cmdStatus === "failed" && isStuckExecutingError(cmdError)
             ? "stuck_executing"
             : String(cmdStatus);
+        const cls = classifyFireOutcome(cmdStatus, cmdError);
+
+        // ── A2: retry, when the outcome is transient and the budget allows ──
+        const retry = decideRetry({
+          job: {
+            seq: jobSnap.get("seq"),
+            attempts: jobSnap.get("attempts"),
+            retryUntil: jobSnap.get("retryUntil"),
+          },
+          outcome: cls,
+          nowMs,
+        });
+        if (retry.retry && retry.nextFireAtMs !== undefined) {
+          const nextFireAtMs = retry.nextFireAtMs;
+          // Transactional, and only if the job is STILL dispatched on THIS
+          // command: an overlapping invocation that already rescheduled it, or a
+          // teardown that cancelled it, wins. The original fireAt is kept once,
+          // so the scorecard measures latency from when the fire was first due.
+          const rescheduled = await db.runTransaction(async (tx) => {
+            const fresh = await tx.get(jobSnap.ref);
+            if (fresh.get("state") !== "dispatched" || fresh.get("commandId") !== commandId) {
+              return false;
+            }
+            tx.update(jobSnap.ref, {
+              state: "scheduled",
+              fireAt: admin.firestore.Timestamp.fromMillis(nextFireAtMs),
+              firstFireAt: fresh.get("firstFireAt") ?? fresh.get("fireAt"),
+              lastOutcome: cls.outcome,
+              lastCommandId: commandId,
+              lastCommandError: cmdError.slice(0, 300),
+              retries: admin.firestore.FieldValue.increment(1),
+              rescheduledAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            return true;
+          });
+          if (rescheduled) {
+            stats.retried++;
+            bump(stats.retriedBy, cls.outcome);
+          }
+          continue;
+        }
 
         await jobSnap.ref.update({
           state: nextState,
           outcome,
+          outcomeClass: cls.outcome,
           commandError: cmdError.slice(0, 300),
           latencyMs,
           reconciledAt: admin.firestore.FieldValue.serverTimestamp(),
+          // A retryable outcome that ran out of budget says so, so "it failed"
+          // and "it failed after every retry" are distinguishable.
+          ...(cls.retryable ? { retryVerdict: retry.reason } : {}),
         });
 
         stats.reconciled++;
@@ -278,6 +330,8 @@ export async function runDispatchTick(
           state: jobSnap.get("state"),
           commandId: jobSnap.get("commandId"),
           attempts: jobSnap.get("attempts"),
+          // A2: the per-job lateness bound. Absent → the fixed 90 s window.
+          retryUntil: jobSnap.get("retryUntil"),
         };
 
         const decision = decideDispatch({ job, nowMs });
@@ -482,6 +536,7 @@ export async function runDispatchTick(
             tooLate: admin.firestore.FieldValue.increment(stats.skippedTerminal.too_late ?? 0),
             unsafe: admin.firestore.FieldValue.increment(stats.skippedTerminal.unsafe ?? 0),
             stuckCleared: admin.firestore.FieldValue.increment(stats.stuckCleared),
+            retried: admin.firestore.FieldValue.increment(stats.retried),
             errors: admin.firestore.FieldValue.increment(stats.errors),
             e2eSamples: e2e,
             writeHopSamples: hop,
@@ -499,6 +554,7 @@ export async function runDispatchTick(
     const quiet =
       stats.dispatched === 0 &&
       stats.reconciled === 0 &&
+      stats.retried === 0 &&
       Object.keys(stats.skippedTransient).length === 0 &&
       Object.keys(stats.skippedTerminal).length === 0;
     if (!quiet || stats.errors > 0) {

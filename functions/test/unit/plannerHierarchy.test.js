@@ -566,7 +566,9 @@ describe("a single team plans exactly as before", () => {
     const end = f.job(`${CH}_end`);
     expect(payloadOf(end)).toEqual({ ps: BASE_ON_PRESET });
     expect(end.handoffTo).toBeUndefined();
-    expect(Object.keys(end).sort()).toEqual(["controllerId", "createdAt", "eventId", "fireAt", "payload", "seq", "source", "state", "type"]);
+    // A2 (2026-10-02) adds exactly ONE field, `retryUntil`; every other key and
+    // the payload are as before.
+    expect(Object.keys(end).sort()).toEqual(["controllerId", "createdAt", "eventId", "fireAt", "payload", "retryUntil", "seq", "source", "state", "type"]);
     const planEnd = rows(r, (x) => x.action === "plan_end")[0];
     expect(Object.keys(planEnd).sort()).toEqual(["action", "eventId", "fireAt", "reason", "teamSlug", "uid"]);
     expect(f.session(CH).startJobId).toBeUndefined();
@@ -941,4 +943,40 @@ test("fake Firestore: create() collides on an existing path with code 6", async 
   await ref.create({ a: 1 });
   await expect(ref.create({ a: 2 })).rejects.toMatchObject({ code: 6 });
   expect(admin.firestore.FieldValue.serverTimestamp()).toBeDefined();
+});
+
+// ---------------------------------------------------------------------------
+// A2 (2026-10-02) — every start and end the planner writes carries its budget
+// ---------------------------------------------------------------------------
+describe("A2: the planner stamps a retry budget on start and end jobs", () => {
+  const CH = ev("nfl_chiefs", "401");
+
+  test("start: lead 30 → retryUntil is kickoff (fireAt + lead == kickoff)", async () => {
+    const f = makeDb(seed({ configs: { nfl_chiefs: {} } }));
+    games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    await tick(f.db, at(13));
+    const job = f.job(`${CH}_start`);
+    expect(job.fireAt.toMillis()).toBe(at(17, 30));
+    expect(job.retryUntil.toMillis()).toBe(at(18));
+  });
+
+  test("start: lead override 45 → fires 17:15, retries until kickoff", async () => {
+    const f = makeDb(seed({ configs: { nfl_chiefs: { lead_time_minutes_override: 45 } } }));
+    games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    await tick(f.db, at(13));
+    expect(f.job(`${CH}_start`).retryUntil.toMillis()).toBe(at(18));
+  });
+
+  test("end: retryUntil is 15 minutes after the end was first due", async () => {
+    const f = makeDb(seed({ configs: { nfl_chiefs: {} } }));
+    const g = games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    await tick(f.db, at(13));
+    f.dispatched(`${CH}_start`);
+    g.final("nfl_chiefs");
+    await tick(f.db, at(21, 30));
+    await tick(f.db, at(21, 35));
+    const end = f.job(`${CH}_end`);
+    expect(end.fireAt.toMillis()).toBe(at(21, 35));
+    expect(end.retryUntil.toMillis()).toBe(at(21, 50));
+  });
 });

@@ -50,7 +50,12 @@ import {
   GateBlockingReason,
   GateVerdict,
 } from "./gameDayGate";
-import { assertPayloadIsFireSafe, FIRE_JOBS_COLLECTION } from "./fireJobs";
+import {
+  assertPayloadIsFireSafe,
+  endRetryUntilMs,
+  FIRE_JOBS_COLLECTION,
+  startRetryUntilMs,
+} from "./fireJobs";
 import {
   PLAN_HORIZON_MS,
   argbToRgb,
@@ -86,7 +91,8 @@ import {
  *
  * Two requirements pull in opposite directions and 5 satisfies both:
  *   - A start job must EXIST before the dispatcher needs it. The dispatcher
- *     ticks每 minute and refuses a job more than 90 s late (MAX_FIRE_LATENESS),
+ *     ticks every minute and (before A2's retry budget) refused a job more
+ *     than 90 s late (MAX_FIRE_LATENESS),
  *     so the planner must write a job comfortably before its fireAt. A 5-minute
  *     cadence with a 6-hour horizon means every start is planned hours early.
  *   - The END signal needs two consecutive polls. At 5 minutes that confirms a
@@ -707,6 +713,17 @@ export async function runPlannerTick(
                     state: "scheduled",
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     source: "game_day",
+                    // A2: the dispatcher may retry a transient failure until
+                    // this instant (fireJobs.startRetryUntilMs). The ONLY field
+                    // added to the start job; payload and every other field
+                    // are unchanged.
+                    retryUntil: admin.firestore.Timestamp.fromMillis(
+                      startRetryUntilMs({
+                        fireAtMs: startFireAt,
+                        leadMs: leadMinutesFor(c) * 60_000,
+                        gameStartMs: game.startMs,
+                      })
+                    ),
                   })
                   .catch((e) => {
                     if (e.code !== 6 && e.code !== "already-exists") throw e;
@@ -938,6 +955,8 @@ export async function runPlannerTick(
                 state: "scheduled",
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 source: "game_day",
+                // A2: an end retries for 15 min (fireJobs.endRetryUntilMs).
+                retryUntil: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs)),
                 // Audit: an `end` whose payload is a design rather than a
                 // preset load must say which team it lit.
                 ...(handoff

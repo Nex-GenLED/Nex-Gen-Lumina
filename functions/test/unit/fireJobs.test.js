@@ -350,3 +350,133 @@ describe("appendSamples", () => {
     expect(out[0]).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A2 (2026-10-02) — retry budget
+// ---------------------------------------------------------------------------
+describe("A2: retry budget", () => {
+  const F = require("../../lib/fireJobs");
+  const { EXPIRED_NO_BRIDGE_TEXT, EXPIRED_BRIDGE_OFFLINE_TEXT, NO_BRIDGE_PAIRED_ERROR } =
+    require("../../lib/relayEligibility");
+  const tsA = (ms) => ({ toMillis: () => ms });
+  const T = 1_790_000_000_000;
+  const MIN = 60_000;
+
+  describe("classifyFireOutcome — retryable vs never", () => {
+    const cases = [
+      ["completed", "", "completed", false],
+      ["expired", EXPIRED_BRIDGE_OFFLINE_TEXT, "expired", true],
+      ["expired", EXPIRED_NO_BRIDGE_TEXT, "no_bridge_paired", false],
+      ["failed", NO_BRIDGE_PAIRED_ERROR, "no_bridge_paired", false],
+      ["failed", "stuck_executing", "stuck_executing", true],
+      ["failed", "ERROR: HTTP -1", "http_transport", true],
+      ["failed", "ERROR: HTTP -11", "http_transport", true],
+      ["failed", "ERROR: HTTP 503", "http_5xx", true],
+      ["failed", "ERROR: HTTP 500", "http_5xx", true],
+      ["failed", "ERROR: HTTP 400", "http_4xx", false],
+      ["failed", "ERROR: HTTP 404", "http_4xx", false],
+      ["failed", "No controller IP specified", "no_controller_ip", false],
+      ["failed", "ERROR: Unsupported method", "failed_other", false],
+      ["failed", "", "failed_other", false],
+      ["timeout", "", "timeout", false],
+    ];
+    test.each(cases)("%s / %j → %s (retryable=%s)", (status, error, outcome, retryable) => {
+      expect(F.classifyFireOutcome(status, error)).toEqual({ outcome, retryable });
+    });
+
+    test("the no-bridge expiry prefix tracks the sweeper's real text (no drift)", () => {
+      expect(F.classifyFireOutcome("expired", EXPIRED_NO_BRIDGE_TEXT).outcome).toBe("no_bridge_paired");
+    });
+  });
+
+  describe("decideRetry", () => {
+    const job = (over = {}) => ({ seq: "start", attempts: 1, retryUntil: tsA(T + 30 * MIN), ...over });
+    const RETRY = { outcome: "expired", retryable: true };
+
+    test("backoff is 30 / 60 / 120 / 300 / 300 s by dispatches made", () => {
+      const waits = [1, 2, 3, 4, 5, 9].map((attempts) =>
+        F.decideRetry({ job: job({ attempts }), outcome: RETRY, nowMs: T }).nextFireAtMs - T
+      );
+      expect(waits).toEqual([30_000, 60_000, 120_000, 300_000, 300_000, 300_000]);
+      expect(F.decideRetry({ job: job({ attempts: 2 }), outcome: RETRY, nowMs: T }).attempt).toBe(3);
+    });
+
+    test("never past retryUntil", () => {
+      const r = F.decideRetry({ job: job({ attempts: 4, retryUntil: tsA(T + 299_000) }), outcome: RETRY, nowMs: T });
+      expect(r).toEqual({ retry: false, reason: "retry_budget_exhausted" });
+      const ok = F.decideRetry({ job: job({ attempts: 4, retryUntil: tsA(T + 300_000) }), outcome: RETRY, nowMs: T });
+      expect(ok.retry).toBe(true);
+    });
+
+    test("a non-retryable outcome is never retried, whatever the budget", () => {
+      for (const o of ["no_bridge_paired", "http_4xx", "timeout", "failed_other"]) {
+        const r = F.decideRetry({ job: job(), outcome: { outcome: o, retryable: false }, nowMs: T });
+        expect(r).toEqual({ retry: false, reason: `not_retryable:${o}` });
+      }
+    });
+
+    test("a legacy job with no retryUntil never retries", () => {
+      expect(F.decideRetry({ job: job({ retryUntil: undefined }), outcome: RETRY, nowMs: T }))
+        .toEqual({ retry: false, reason: "no_retry_budget" });
+    });
+
+    test("only start and end retry — celebrations and anything new must opt in", () => {
+      for (const seq of ["celebration", "cel", "revert", "reassert", "ping", undefined]) {
+        expect(F.decideRetry({ job: job({ seq }), outcome: RETRY, nowMs: T }).retry).toBe(false);
+      }
+      expect(F.decideRetry({ job: job({ seq: "end" }), outcome: RETRY, nowMs: T }).retry).toBe(true);
+    });
+
+    test("an unreadable attempts count is treated as the first", () => {
+      const r = F.decideRetry({ job: job({ attempts: undefined }), outcome: RETRY, nowMs: T });
+      expect(r.nextFireAtMs - T).toBe(30_000);
+    });
+  });
+
+  describe("budgets", () => {
+    test("start: min(fireAt + lead, kickoff + 15 min) — which IS kickoff for a lead-based start", () => {
+      const kickoff = T + 30 * MIN;
+      expect(F.startRetryUntilMs({ fireAtMs: T, leadMs: 30 * MIN, gameStartMs: kickoff })).toBe(kickoff);
+    });
+
+    test("start with an on-time override: the lead bound applies before kickoff + 15", () => {
+      // on-time 17:00 for a 19:15 game, lead 30 → retry until 17:30.
+      const fireAt = T;
+      const kickoff = T + 135 * MIN;
+      expect(F.startRetryUntilMs({ fireAtMs: fireAt, leadMs: 30 * MIN, gameStartMs: kickoff })).toBe(fireAt + 30 * MIN);
+    });
+
+    test("start: never shorter than the pre-A2 single window", () => {
+      expect(F.startRetryUntilMs({ fireAtMs: T, leadMs: 0, gameStartMs: T })).toBe(T + F.MAX_FIRE_LATENESS_MS);
+      // An on-time AFTER kickoff + 15 would otherwise be born too late.
+      expect(F.startRetryUntilMs({ fireAtMs: T, leadMs: 30 * MIN, gameStartMs: T - 60 * MIN }))
+        .toBe(T + F.MAX_FIRE_LATENESS_MS);
+    });
+
+    test("end: 15 minutes after first due", () => {
+      expect(F.endRetryUntilMs(T)).toBe(T + 15 * MIN);
+    });
+  });
+
+  describe("decideDispatch honours retryUntil", () => {
+    const base = {
+      state: "scheduled",
+      type: "applyJson",
+      payload: '{"ps":1}',
+      controllerId: "c1",
+    };
+    test("inside the budget a job 10 minutes late is still due", () => {
+      const d = F.decideDispatch({ job: { ...base, fireAt: tsA(T - 10 * MIN), retryUntil: tsA(T + MIN) }, nowMs: T });
+      expect(d).toEqual({ dispatch: true, reason: "due", terminal: false });
+    });
+    test("past the budget it is too_late and terminal", () => {
+      const d = F.decideDispatch({ job: { ...base, fireAt: tsA(T - 10 * MIN), retryUntil: tsA(T - 1) }, nowMs: T });
+      expect(d.terminal).toBe(true);
+      expect(d.reason).toMatch(/^too_late:/);
+    });
+    test("without a budget the fixed 90 s window still applies (unchanged)", () => {
+      expect(F.decideDispatch({ job: { ...base, fireAt: tsA(T - 91_000) }, nowMs: T }).reason).toMatch(/^too_late:/);
+      expect(F.decideDispatch({ job: { ...base, fireAt: tsA(T - 89_000) }, nowMs: T }).dispatch).toBe(true);
+    });
+  });
+});
