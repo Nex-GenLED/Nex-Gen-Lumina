@@ -156,6 +156,46 @@ goes on a NEW bump + tag (never rewrite a public tag).
 
 ## Operational flags
 
+### +114 — build-114 tagged 2026-10-02 (Codemagic build number: pending) — roofline (+113), Game Day/ladder (+114) and the design-card fix (+115 bug 2) in ONE build
+
+| item | value |
+|---|---|
+| Tag | `build-114` = `18ac60b` (the `--no-ff` merge of `fix/114-gameday-app` @ `a1e7d74` into `release/store-submission-consolidated`; the bump 2.5.10+114 rides on the branch as `f582a25`; this row lands after, outside the tag) |
+| Base | `a35e30e` (= `build-112` + its ledger row) |
+| One build, three packages | **+113 roofline**: `3d2c1bd`, `fb975c1` from `fix/113-roofline-segments`, merged into the branch as `7ff431b`. Its bump `db05af1` (2.5.10+113) was DROPPED, so **113 is never built or shipped**: no iOS build 113, no Android versionCode 113. **+114 Game Day step C + ladder correctness**: `be7199f`..`3f82e10`. **+115 bug 2 (design card) and the multi-channel audit**: `845f2de`, `1057421` from `fix/115-multichannel-and-design-card`, merged into the branch as `a1e7d74`. 115 carries no bump, so there is no 115 version either. |
+| Contents — roofline (+113) | Sections merge/delete. Unique section ids `ch{n}_at{start}`. Live Trace delete. Strip-first channel length (#133, a behaviour change). Walkthrough sections list with merge-delete, Undo and Start over. Segment Setup gets a channel picker and merge-delete. Clean-up with backup: `segments_backup*` on the pixelMap channel doc, carried forward by `savePixelMap`. `scripts/pixelmap_cleanup_dry_run.js` is read-only without `--confirm` and was never run (`3d2c1bd`). Segment Setup is installer-only; Design Studio "Roofline setup" opens the walkthrough (`fb975c1`). Debt #130–#133 done, #134–#137 filed. |
+| Contents — Game Day + ladder (+114) | Base look Lumina Blue/Solid, written but never asserted (`be7199f`). Healer publishes `base_ladder_restore_lit` / `base_ladder_dark_channels` (`82821d3`). One-time guarded on-connect ladder repair; healer step (e) removed (`38b5397`, hardened in `62a1c76`, `de1eda6`). **The repair writes only on an explicit `connect_repair:"repair"`; otherwise it is a dry run**, and the restore is exact, including OFF (`f3054cf`). The dry-run review record is written once per result, not per connect (`3f82e10`). Repair banner (`cd679c8`). `gameday_server` reader (`dd13a3d`). Served-lease skip + LAN retraction (`a7df640`; tri-state launch fix `eae2ef9`). Engine observe mode (`5e97b10`; launch window `bdc3eff`). Server/Phone/Blocked banner, badge and timeline tag (`7583b00`). alert_sensitivity honoured (`3e721b8`). §5 in-app copy (`e1e72a4`). Debt #143–#150 (`8828dad`; owner notes `85f6b8b`). Bump (`f582a25`). Golden + UTC-safe tests (`6b09c71`, `fb76bb3`). |
+| Contents — design card (+115) | **Bug 2 / #152 DONE (`845f2de`):** the Static setup chips (Blocks / Alternating) and the "LEDs per color" row now follow the design card's own state, not the previewed effect. Previewing Chase or Glitter no longer removes them, and tapping a chip returns to Static. Blocks hides the grouping row (fx 83 + pal 5 ignores `grp`); Alternating shows it. The wire is unchanged. Also: a multi-channel segment contract test pinning every app Game Day path on a three-channel controller. Debt #151 (server start payload; a note for the Game Day/functions window, not applied), #153, #154 (lease fallback names no channel) and #155 filed, plus two audits (`1057421`). |
+| Gates on `18ac60b` | Carried from the gated branch tip: `git diff --stat fix/114-gameday-app 18ac60b` is EMPTY and both trees are `fb58067`, so the `a1e7d74` results in the next row are the tag's results. PII scan of every added line and commit message `a35e30e..18ac60b` clean. |
+| Branch gates (`a1e7d74`, 2026-10-02, after `flutter clean`) | local 3.41.2: analyze 0 / 12 / 355 · 5,075 pass / 37 skip / 0 fail — 3.47.5 `TZ=UTC0`: 0 / 12 / 360 · 5,075 / 37 / 0, lock + yaml restored · test sets 113 roofline 65, 114 Game Day/lease/ladder 228, 115 design card 56 = 349 together, 0 fail · `functions/` `9002c3a` == base · PII scan of `a35e30e..a1e7d74` clean · each package pair shares only `docs/BUGS_AND_DEBT.md` |
+| Branch gates (`7ff431b`, before 115, 2026-10-02, after `flutter clean`) | local 3.41.2: analyze 0 / 12 / 355 · 5,019 pass / 37 skip / 0 fail — 3.47.5 `TZ=UTC0`: 0 / 12 / 360 · 5,019 / 37 / 0, lock + yaml restored · combined roofline + Game Day/lease/ladder set 293 / 0 · PII `a35e30e..7ff431b` clean · branch pushed (branch only) |
+| Functions | No deploy from this build: the `functions/` tree is `9002c3a`, byte-identical to `a35e30e`. Server steps A+B were deployed separately on 2026-10-02 (the planner publishes `users/{uid}.gameday_server`; only allowlisted accounts are served). Every account the server does not serve reads "not served", which means 112's Game Day behaviour plus the ladder fixes. Server follow-ups: #146/#150 (ESPN slate branch), #151 (Game Day/functions window). |
+| Config | None needed at release. `config/base_ladder_repair.connect_repair`: only the exact value `"repair"` writes presets. Absent, unreadable or any other value is a dry run (review record only, once per result). `"off"` and `enabled:false` both mean off. State at tag: the document is ABSENT (read-only check 2026-10-02 19:19Z), so every 114 phone runs the repair as a dry run. |
+| Check-run | GitHub check-run `110998457058` "iOS Release" on `18ac60b`: completed / **success** 2026-10-02 19:16:12Z → 19:37:25Z (21 min; opened as `110990784860`, which stays `in_progress` — the result arrived under the new id, as with +109 and +112). Every step OK: Preparing build machine 0:22 · Fetching app sources 0:06 · Installing SDKs 0:54 · keychain/signing 0:05 · **Test and analyze (build gate) 13:05** · Set build number 0:00 · Install CocoaPods 0:17 · Build IPA 4:18 · Dump signed entitlements 0:01 · **Publishing 1:55** · Cleaning up 0:01. |
+| iOS build number | pending |
+| Android | NOT built (#125). 113 was never built; the next Android artifact must be ≥ versionCode 114. |
+| Rollback | below |
+
+**Rollback: what persists if build 114 is expired and testers go back to 112.** Nothing needs cleaning up; 112 either reads or ignores everything below.
+1. **Roofline section ids.** Channels marked with the 113 walkthrough keep ids `ch{n}_at{start}`, which 112 reads as ordinary segment ids. Re-marking a channel on 112 brings back 112's id scheme and its duplicate-id bug (#131) for that channel.
+2. **`segments_backup`, `segments_backup_at`, `segments_backup_reason`** exist on a pixelMap channel doc only where someone ran Segment Setup's clean-up on 114; the fleet script was never run. 112 never reads them, and 112's full save of that channel DROPS them. If a backup is needed, restore it before any 112 save by copying `segments_backup` back over `segments`.
+3. **Segment Setup** is installer-only on 114. On 112, any signed-in user can open it again, with its channel-0 default (#132).
+4. **Ladder repair records stay as history; 112 never reads them.**
+   - On the controller doc `users/{uid}/controllers/{id}`:
+     - `base_ladder_repair`: dry-run review records (`state:"dry_run"`, plan, gate, dark channels). Repair records exist only where `connect_repair:"repair"` was set: `started` with `backup_json`, then `repaired` / `partial` / `failed`, with `restore`.
+     - `base_ladder_restore_lit` and `base_ladder_dark_channels`, with their `_at`, `_source`, `_publish_count` and `_previous` stamps.
+   - In the phone's local storage: the backup and one-time marker (`base_ladder_backup.v1.<id>`, `base_ladder_connect_repair.v1.<id>`), unused by 112.
+5. **Presets.** In dry run, nothing was rewritten. Where a repair ran, the presets stay in Lumina Blue: a lit ladder that 112 accepts without re-saving. The old bodies are in `backup_json`. Presets that 114's schedule sync created were made in Lumina Blue, and 112 keeps them.
+6. **Design card (+115).** Nothing is stored: #152 is display-only and the wire is byte-identical. On 112, previewing another effect hides the Static setup chips again, and the grouping row shows under Blocks.
+7. **Game Day.**
+   - A lease that 114 retracted for a served night is re-armed by 112 only when its sweep promotes that night again (home Wi-Fi, app open, inside 48 h). The server still fires served nights.
+   - 112 goes back to `allEvents`, so there are more celebrations.
+   - 112 shows the old gate banner, and its healer step (e) returns.
+   - `gameday_server` is server-owned and untouched.
+
+**Tester text (return to 112):**
+> Build 114 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install 2.5.10 (112). Your schedules, teams, designs and roofline stay. A few things go back to how they were: Segment Setup opens for everyone again, the Blocks / Alternating choice on a design card disappears again while you preview another effect, Game Day no longer says whether it runs from our servers or this phone, and score celebrations go back to celebrating every score. If you see anything wrong after switching, tell us the date and time.
+
 ### +112 — build-112 tagged 2026-10-01 (Codemagic build number: pending)
 
 | item | value |
