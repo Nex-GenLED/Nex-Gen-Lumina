@@ -170,3 +170,56 @@ describe("controllerIpsFrom", () => {
     expect(controllerIpsFrom([])).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A1 (2026-10-02) — stuck `executing`
+// ---------------------------------------------------------------------------
+describe("A1: stuck executing", () => {
+  const {
+    STUCK_EXECUTING_AFTER_MS,
+    STUCK_EXECUTING_ERROR,
+    commandAgeMs,
+    isStuckExecuting,
+    isStuckExecutingError,
+  } = require("../../lib/commandSafety");
+  const { FIRE_GRACE_MS } = require("../../lib/fireJobs");
+
+  test("the threshold is 180 s and sits above every other budget it must outlast", () => {
+    expect(STUCK_EXECUTING_AFTER_MS).toBe(180_000);
+    // An app-written command: the app's watchdog gave up at 45 s, and the
+    // default TTL governs pending, not executing.
+    expect(STUCK_EXECUTING_AFTER_MS).toBeGreaterThan(DEFAULT_COMMAND_TTL_MS);
+    // A fire command's pickup grace.
+    expect(STUCK_EXECUTING_AFTER_MS).toBeGreaterThan(FIRE_GRACE_MS);
+    // The sweeper's own query floor.
+    expect(STUCK_EXECUTING_AFTER_MS).toBeGreaterThan(MIN_SWEEPABLE_AGE_MS);
+  });
+
+  test("commandAgeMs reads createdAt and is null when unreadable", () => {
+    expect(commandAgeMs({ createdAt: ts(T0 - 5_000) }, T0)).toBe(5_000);
+    expect(commandAgeMs({}, T0)).toBeNull();
+    expect(commandAgeMs({ createdAt: null }, T0)).toBeNull();
+  });
+
+  test("only `executing` can be stuck", () => {
+    const old = ts(T0 - 10 * STUCK_EXECUTING_AFTER_MS);
+    expect(isStuckExecuting({ status: "executing", createdAt: old }, T0)).toBe(true);
+    for (const status of ["pending", "completed", "failed", "expired", "timeout", undefined]) {
+      expect(isStuckExecuting({ status, createdAt: old }, T0)).toBe(false);
+    }
+  });
+
+  test("strictly older than the threshold; an unreadable age is never stuck", () => {
+    expect(isStuckExecuting({ status: "executing", createdAt: ts(T0 - STUCK_EXECUTING_AFTER_MS) }, T0)).toBe(false);
+    expect(isStuckExecuting({ status: "executing", createdAt: ts(T0 - STUCK_EXECUTING_AFTER_MS - 1) }, T0)).toBe(true);
+    expect(isStuckExecuting({ status: "executing" }, T0)).toBe(false);
+  });
+
+  test("isStuckExecutingError matches the exact token and any text that starts with it", () => {
+    expect(STUCK_EXECUTING_ERROR).toBe("stuck_executing");
+    expect(isStuckExecutingError("stuck_executing")).toBe(true);
+    expect(isStuckExecutingError("stuck_executing: bridge claimed this command")).toBe(true);
+    expect(isStuckExecutingError("ERROR: HTTP -1")).toBe(false);
+    expect(isStuckExecutingError(undefined)).toBe(false);
+  });
+});

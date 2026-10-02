@@ -37,6 +37,8 @@
  * needs nobody: reachability, version, and fire outcomes.
  */
 
+import { isStuckExecuting, isStuckExecutingError } from "./commandSafety";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -328,7 +330,17 @@ export function classifyProbe(
     case OUTCOME_COMPLETED:
       return { outcome: "completed", latencyMs, error, success: true, blame: "none" };
     case OUTCOME_FAILED:
-      return { outcome: "failed", latencyMs, error, success: false, blame: "controller" };
+      // A1: a probe the SERVER terminated because the bridge claimed it and
+      // never reported is a bridge fault, not a controller one. Without this the
+      // stuck-executing sweeper would turn every bridge reboot mid-probe into a
+      // "controller unreachable" alert.
+      return {
+        outcome: "failed",
+        latencyMs,
+        error,
+        success: false,
+        blame: isStuckExecutingError(doc.error) ? "bridge" : "controller",
+      };
     case OUTCOME_EXPIRED:
       return { outcome: "expired", latencyMs, error, success: false, blame: "bridge" };
     case OUTCOME_TIMEOUT:
@@ -622,14 +634,32 @@ export function darkForMs(
  * and must never be the command that pushes a customer's brightness drag into
  * that tail. Skipping a probe costs one day of one controller's telemetry;
  * competing with customer traffic costs the customer.
+ *
+ * A1 AGE CAP (2026-10-02) — `executing` ONLY. Before this the guard had no age
+ * limit, and nothing ever terminated an `executing` doc, so one bridge reboot
+ * mid-command blocked that controller's fires and probes until the 7-day
+ * retention sweep. An `executing` doc older than STUCK_EXECUTING_AFTER_MS is
+ * abandoned (the bridge never re-polls `executing`), so it no longer blocks.
+ *
+ * `pending` is deliberately NOT age-capped. A pending doc stays pickable by the
+ * bridge until the sweeper flips it to `expired` (the bridge checks no expiry),
+ * and the bridge's poll is unordered — ignoring an aged pending doc would let a
+ * new fire and an old app command run in either order, which is the exact
+ * inversion the guard exists to prevent. The sweeper bounds that wait to about
+ * a minute past expiry, and the fire-job retry budget covers it.
+ *
+ * `nowMs` is REQUIRED so no caller can silently fall back to the uncapped
+ * behaviour. A doc whose age is unreadable still counts (never on a guess).
  */
 export function hasInFlightCommand(
-  pending: Array<{ controllerId?: unknown; status?: unknown }>,
-  controllerId: string
+  pending: Array<{ controllerId?: unknown; status?: unknown; createdAt?: TimestampLike | null }>,
+  controllerId: string,
+  nowMs: number
 ): boolean {
   return pending.some((c) => {
     const s = typeof c.status === "string" ? c.status : "";
     if (s !== "pending" && s !== "executing") return false;
+    if (isStuckExecuting(c, nowMs)) return false;
     const cid = typeof c.controllerId === "string" ? c.controllerId : "";
     return cid === "" || cid === controllerId;
   });

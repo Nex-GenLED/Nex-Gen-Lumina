@@ -84,7 +84,11 @@ export async function probeOneController(args: {
   controllerId: string;
   controllerIp: string | null;
   totalControllersForUser: number;
-  pendingCommands: Array<{ controllerId?: unknown; status?: unknown }>;
+  pendingCommands: Array<{
+    controllerId?: unknown;
+    status?: unknown;
+    createdAt?: admin.firestore.Timestamp | null;
+  }>;
   nowMs: number;
   /**
    * Relay eligibility inputs, decided once per user by the caller. Default
@@ -121,7 +125,8 @@ export async function probeOneController(args: {
   if (!due.probe) return { written: false, reason: due.reason };
 
   // ── One-in-flight-per-controller (audit/COMMAND_SAFETY.md §3.4) ──────────
-  if (hasInFlightCommand(pendingCommands, controllerId)) {
+  // A1: age-capped for `executing` — an abandoned claim no longer blocks.
+  if (hasInFlightCommand(pendingCommands, controllerId, nowMs)) {
     return { written: false, reason: "in_flight" };
   }
 
@@ -231,7 +236,11 @@ export const probeControllerHealth = onSchedule(
 
       // One read per user, reused for every controller. `in` on a single field
       // uses the single-field auto-index — no composite index required.
-      let pendingCommands: Array<{ controllerId?: unknown; status?: unknown }> = [];
+      let pendingCommands: Array<{
+        controllerId?: unknown;
+        status?: unknown;
+        createdAt?: admin.firestore.Timestamp | null;
+      }> = [];
       try {
         const snap = await db
           .collection("users")
@@ -239,9 +248,11 @@ export const probeControllerHealth = onSchedule(
           .collection("commands")
           .where("status", "in", ["pending", "executing"])
           .get();
-        pendingCommands = snap.docs.map(
-          (d) => d.data() as { controllerId?: unknown; status?: unknown }
-        );
+        pendingCommands = snap.docs.map((d) => ({
+          controllerId: d.get("controllerId"),
+          status: d.get("status"),
+          createdAt: d.get("createdAt") ?? null,
+        }));
       } catch (err) {
         // Fail CLOSED on the guard: if we cannot prove the queue is clear, do
         // not add to it. A missed probe is cheap; competing with a customer's

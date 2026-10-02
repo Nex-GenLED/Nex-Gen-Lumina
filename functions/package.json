@@ -4,7 +4,7 @@
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
-    "test": "jest",
+    "test": "tsc && jest",
     "test:unit": "tsc && jest",
     "test:emulator": "jest --config jest.emulator.config.js --runInBand",
     "serve": "npm run build && firebase emulators:start --only functions",

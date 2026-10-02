@@ -100,6 +100,69 @@ export const DEFAULT_COMMAND_TTL_MS = 120_000;
  */
 export const MIN_SWEEPABLE_AGE_MS = 60_000;
 
+/**
+ * A1 (2026-10-02) — how long a command may sit in `executing` before the
+ * server treats it as abandoned.
+ *
+ * THE DEFECT. The bridge flips a command to `executing` immediately before its
+ * own WLED request and PATCHes `completed`/`failed` straight after
+ * (esp32-bridge/src/main.cpp executeCommand). If the bridge reboots, loses
+ * Wi-Fi, or its PATCH fails in that window, the doc stays `executing` FOREVER:
+ * the bridge's poll only reads `pending`, the sweeper only touched `pending`,
+ * and the one-in-flight guard counted `executing` with no age limit. One
+ * customer bridge carried eleven such docs, and every one of them blocked that
+ * controller's scheduled fires until the 7-day retention sweep.
+ *
+ * WHY 180 s. A healthy bridge spends one WLED request (WLED_HTTP_TIMEOUT_MS,
+ * 10 s) plus one Firestore PATCH (TLS client timeout 15 s; the worst completion
+ * measured under load is ~45 s) on a claimed command — the claim is per
+ * command, not per poll batch, so queue depth does not stretch it. 180 s is
+ * ~4x that worst case, so a slow-but-alive bridge is never declared stuck, and
+ * it is 4x the app's own 45 s watchdog, so an app-written command was given up
+ * by the app long before the server touches it.
+ *
+ * Measured from `createdAt`: the fielded bridge writes no claim timestamp.
+ */
+export const STUCK_EXECUTING_AFTER_MS = 180_000;
+
+/**
+ * The `error` a stuck command is terminated with. Matched by PREFIX
+ * ([isStuckExecutingError]) so a longer explanatory text written by another
+ * sweeper of the same condition classifies identically.
+ */
+export const STUCK_EXECUTING_ERROR = "stuck_executing";
+
+/** Age of a command at [nowMs], from `createdAt`. Null when unreadable. */
+export function commandAgeMs(
+  doc: { createdAt?: { toMillis(): number } | null },
+  nowMs: number
+): number | null {
+  const c = doc.createdAt;
+  if (!c || typeof c.toMillis !== "function") return null;
+  return nowMs - c.toMillis();
+}
+
+/**
+ * True when [doc] is `executing` and older than the stuck threshold.
+ *
+ * An unreadable age returns false — never terminate on a guess (the same rule
+ * [effectiveExpiryMs] follows for `pending`).
+ */
+export function isStuckExecuting(
+  doc: { status?: unknown; createdAt?: { toMillis(): number } | null },
+  nowMs: number,
+  thresholdMs: number = STUCK_EXECUTING_AFTER_MS
+): boolean {
+  if (doc.status !== STATUS_EXECUTING) return false;
+  const age = commandAgeMs(doc, nowMs);
+  return age !== null && age > thresholdMs;
+}
+
+/** True when a command's `error` records a stuck-executing termination. */
+export function isStuckExecutingError(error: unknown): boolean {
+  return typeof error === "string" && error.startsWith(STUCK_EXECUTING_ERROR);
+}
+
 /** Minimal shape the expiry predicates need. Both fields may be absent. */
 export interface CommandTimestamps {
   createdAt?: { toMillis(): number } | null;

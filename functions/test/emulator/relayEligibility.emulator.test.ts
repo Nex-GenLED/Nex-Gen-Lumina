@@ -25,6 +25,9 @@ import {
   hasPairedBridge,
 } from "../../src/relayEligibility";
 import { probeOneController } from "../../src/probeControllerHealth";
+import { runSweepTick } from "../../src/sweepExpiredCommands";
+import { markStuckExecuting } from "../../src/commandHygiene";
+import { STUCK_EXECUTING_AFTER_MS } from "../../src/commandSafety";
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) {
   throw new Error("FIRESTORE_EMULATOR_HOST is unset — refusing to run against production");
@@ -181,5 +184,77 @@ describe("probeOneController — no doomed probe for unpaired / excluded account
   test("default (no eligibility args) is the legacy behaviour: probe", async () => {
     const res = await probeOneController({ ...base() });
     expect(res.written).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A1 (2026-10-02) — the stuck-executing sweep, against real Firestore semantics
+// ---------------------------------------------------------------------------
+// The unit suite proves the decisions on an in-memory fake. These prove the two
+// properties only Firestore itself can: that the collection-group query on
+// `executing` returns what the sweeper expects, and that a `lastUpdateTime`
+// precondition really refuses a write after a concurrent update ("completed
+// wins"). NOTE: the emulator does not enforce composite indexes, so index
+// presence is proven by firestore.indexes.json review, not here.
+describe("A1: sweepExpiredCommands stuck-executing pass (emulator)", () => {
+  const nowMs = Date.now();
+  const at = (agoMs: number) => admin.firestore.Timestamp.fromMillis(nowMs - agoMs);
+
+  test("an executing doc older than 180 s becomes failed/stuck_executing; a young one is untouched", async () => {
+    await db.doc("bridge_registry/AA00000000C1").set({ pairedUid: "u1", status: "paired" });
+    await db.doc("users/u1/commands/stuck").set({
+      type: "applyJson", status: "executing", controllerId: "c1",
+      createdAt: at(STUCK_EXECUTING_AFTER_MS + 60_000),
+    });
+    await db.doc("users/u1/commands/young").set({
+      type: "applyJson", status: "executing", controllerId: "c1",
+      createdAt: at(30_000),
+    });
+
+    const stats = await runSweepTick(db, nowMs);
+
+    const stuck = (await db.doc("users/u1/commands/stuck").get()).data()!;
+    expect(stuck.status).toBe("failed");
+    expect(stuck.error).toBe("stuck_executing");
+    expect(stuck.stuckSweptAt).toBeDefined();
+    expect(stuck.completedAt).toBeUndefined();
+    expect((await db.doc("users/u1/commands/young").get()).get("status")).toBe("executing");
+    expect(stats.stuck).toBe(1);
+    expect(stats.stuckQueryFailed).toBe(false);
+  });
+
+  test("COMPLETED WINS: a write guarded on a stale read is refused by Firestore", async () => {
+    const ref = db.doc("users/u1/commands/race");
+    await ref.set({ status: "executing", createdAt: at(10 * 60_000), controllerId: "c1" });
+    const seen = await ref.get(); // the sweeper's read
+
+    // The bridge's PATCH lands after that read.
+    await ref.update({ status: "completed", completedAt: admin.firestore.Timestamp.now() });
+
+    expect(await markStuckExecuting(ref, seen.updateTime)).toBe("raced");
+    const after = (await ref.get()).data()!;
+    expect(after.status).toBe("completed");
+    expect(after.error).toBeUndefined();
+  });
+
+  test("a guarded write on a FRESH read succeeds", async () => {
+    const ref = db.doc("users/u1/commands/fresh");
+    await ref.set({ status: "executing", createdAt: at(10 * 60_000), controllerId: "c1" });
+    const seen = await ref.get();
+    expect(await markStuckExecuting(ref, seen.updateTime)).toBe("written");
+    expect((await ref.get()).get("error")).toBe("stuck_executing");
+  });
+
+  test("the pending pass is unchanged: past-TTL pending → expired with the paired wording", async () => {
+    await db.doc("bridge_registry/AA00000000C2").set({ pairedUid: "u2", status: "paired" });
+    await db.doc("users/u2/commands/p").set({
+      type: "applyJson", status: "pending", controllerId: "c1",
+      createdAt: at(10 * 60_000),
+    });
+    const stats = await runSweepTick(db, nowMs);
+    const p = (await db.doc("users/u2/commands/p").get()).data()!;
+    expect(p.status).toBe("expired");
+    expect(p.error).toMatch(/bridge offline or unreachable/);
+    expect(stats.expired).toBeGreaterThanOrEqual(1);
   });
 });

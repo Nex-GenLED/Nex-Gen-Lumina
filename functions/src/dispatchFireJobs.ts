@@ -28,7 +28,8 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { logger } from "firebase-functions";
 import * as admin from "firebase-admin";
-import { fireJobDocId } from "./commandSafety";
+import { fireJobDocId, isStuckExecuting, isStuckExecutingError } from "./commandSafety";
+import { markStuckExecuting } from "./commandHygiene";
 // hasInFlightCommand lives in controllerHealth because that is where it is
 // tested and where it got its first caller (S6). It is a command-layer concern
 // shared by both schedulers, not a health-specific one — imported rather than
@@ -60,12 +61,23 @@ const toMs = (t: unknown): number | null => {
   return v && typeof v.toMillis === "function" ? v.toMillis() : null;
 };
 
+/** One in-flight command as the guard sees it, plus what A3 needs to clear it. */
+interface InFlightDoc {
+  controllerId?: unknown;
+  status?: unknown;
+  createdAt?: admin.firestore.Timestamp | null;
+  ref?: admin.firestore.DocumentReference;
+  updateTime?: admin.firestore.Timestamp;
+}
+
 interface TickStats {
   reconciled: number;
   completed: number;
   failed: number;
   expired: number;
   dispatched: number;
+  /** A3: stuck `executing` docs this tick terminated before firing past them. */
+  stuckCleared: number;
   skippedTransient: Record<string, number>;
   skippedTerminal: Record<string, number>;
   errors: number;
@@ -95,6 +107,7 @@ export async function runDispatchTick(
       failed: 0,
       expired: 0,
       dispatched: 0,
+      stuckCleared: 0,
       skippedTransient: {},
       skippedTerminal: {},
       errors: 0,
@@ -177,7 +190,8 @@ export async function runDispatchTick(
           continue;
         }
 
-        const nextState = jobStateForCommandStatus(cmd.get("status"));
+        const cmdStatus = cmd.get("status");
+        const nextState = jobStateForCommandStatus(cmdStatus);
         if (nextState === null) continue; // still pending/executing — leave it
 
         const createdMs = toMs(cmd.get("createdAt"));
@@ -188,10 +202,21 @@ export async function runDispatchTick(
             : null;
         if (latencyMs !== null && nextState === "completed") e2eSamples.push(latencyMs);
 
+        // A1: a command the server terminated as stuck is named as such, so the
+        // retry path and the scorecard can tell "the bridge died mid-command"
+        // from "WLED refused it". A `completed` doc reports no error even if a
+        // stuck termination's text survived the bridge's later PATCH (its
+        // update mask carries no `error` on success).
+        const cmdError = cmdStatus === "completed" ? "" : String(cmd.get("error") ?? "");
+        const outcome =
+          cmdStatus === "failed" && isStuckExecutingError(cmdError)
+            ? "stuck_executing"
+            : String(cmdStatus);
+
         await jobSnap.ref.update({
           state: nextState,
-          outcome: String(cmd.get("status")),
-          commandError: String(cmd.get("error") ?? "").slice(0, 300),
+          outcome,
+          commandError: cmdError.slice(0, 300),
           latencyMs,
           reconciledAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -235,10 +260,7 @@ export async function runDispatchTick(
     }
 
     // One in-flight read per user per tick, shared across that user's jobs.
-    const pendingByUid = new Map<
-      string,
-      Array<{ controllerId?: unknown; status?: unknown }>
-    >();
+    const pendingByUid = new Map<string, InFlightDoc[]>();
 
     for (const jobSnap of dueSnap.docs) {
       const uid = jobSnap.ref.parent.parent?.id;
@@ -327,7 +349,13 @@ export async function runDispatchTick(
               .get();
             pendingByUid.set(
               uid,
-              snap.docs.map((d) => d.data() as { controllerId?: unknown; status?: unknown })
+              snap.docs.map((d) => ({
+                controllerId: d.get("controllerId"),
+                status: d.get("status"),
+                createdAt: d.get("createdAt") ?? null,
+                ref: d.ref,
+                updateTime: d.updateTime,
+              }))
             );
           } catch (err) {
             // FAIL CLOSED. If we cannot prove the queue is clear, do not add to
@@ -337,7 +365,26 @@ export async function runDispatchTick(
           }
         }
         const pending = pendingByUid.get(uid)!;
-        if (hasInFlightCommand(pending, controllerId)) {
+
+        // ── A3: at most ONE non-terminal command per controller ──────────
+        // The guard below ignores an `executing` doc older than the stuck
+        // threshold (A1). Terminate it HERE, before firing past it, rather than
+        // waiting up to a minute for the sweeper: the invariant "a controller
+        // never has more than one non-terminal server command" then holds at
+        // every instant, not merely within a sweeper tick. Same guarded write as
+        // the sweeper — if the bridge reports first, its state stands.
+        for (const d of pending) {
+          if (!d.ref || !isStuckExecuting(d, nowMs)) continue;
+          const cid = typeof d.controllerId === "string" ? d.controllerId : "";
+          if (cid !== "" && cid !== controllerId) continue;
+          const res = await markStuckExecuting(d.ref, d.updateTime);
+          if (res === "written") stats.stuckCleared++;
+          // Either way it is no longer this tick's concern.
+          d.status = res === "written" ? "failed" : d.status;
+          d.ref = undefined;
+        }
+
+        if (hasInFlightCommand(pending, controllerId, nowMs)) {
           // TRANSIENT — leave `scheduled`, retry next tick until too-late.
           bump(stats.skippedTransient, "in_flight");
           continue;
@@ -397,7 +444,11 @@ export async function runDispatchTick(
         });
 
         // Block any further job for this controller on this same tick.
-        pending.push({ controllerId, status: "pending" });
+        pending.push({
+          controllerId,
+          status: "pending",
+          createdAt: admin.firestore.Timestamp.fromMillis(nowMs),
+        });
 
         stats.dispatched++;
       } catch (err) {
@@ -430,6 +481,7 @@ export async function runDispatchTick(
             ),
             tooLate: admin.firestore.FieldValue.increment(stats.skippedTerminal.too_late ?? 0),
             unsafe: admin.firestore.FieldValue.increment(stats.skippedTerminal.unsafe ?? 0),
+            stuckCleared: admin.firestore.FieldValue.increment(stats.stuckCleared),
             errors: admin.firestore.FieldValue.increment(stats.errors),
             e2eSamples: e2e,
             writeHopSamples: hop,

@@ -94,6 +94,24 @@ describe("classifyProbe", () => {
     expect(c.blame).toBe("bridge");
   });
 
+  test("A1: failed/stuck_executing → blame BRIDGE, not controller", () => {
+    // The server terminated it because the bridge claimed it and never
+    // reported. Blaming the controller would page "controller unreachable" for
+    // every bridge reboot mid-probe.
+    const c = classifyProbe({ status: "failed", error: "stuck_executing" });
+    expect(c.outcome).toBe("failed");
+    expect(c.success).toBe(false);
+    expect(c.blame).toBe("bridge");
+  });
+
+  test("A1: a longer stuck text from another sweeper classifies the same (prefix match)", () => {
+    const c = classifyProbe({
+      status: "failed",
+      error: "stuck_executing: bridge claimed this command and never reported (> 90s)",
+    });
+    expect(c.blame).toBe("bridge");
+  });
+
   test("expired and failed are NOT collapsed — the S2 distinction survives", () => {
     // Collapsing them destroys the only fleet-visible way to tell "customer's
     // bridge is down" from "customer's controller is down".
@@ -574,24 +592,24 @@ describe("resolveProbeTarget", () => {
 
 describe("hasInFlightCommand", () => {
   test("blocks on a pending command for the same controller", () => {
-    expect(hasInFlightCommand([{ status: "pending", controllerId: "c1" }], "c1")).toBe(true);
+    expect(hasInFlightCommand([{ status: "pending", controllerId: "c1" }], "c1", T0)).toBe(true);
   });
 
   test("blocks on an EXECUTING command too", () => {
-    expect(hasInFlightCommand([{ status: "executing", controllerId: "c1" }], "c1")).toBe(true);
+    expect(hasInFlightCommand([{ status: "executing", controllerId: "c1" }], "c1", T0)).toBe(true);
   });
 
   test("blocks on a command with NO controllerId (bridge_health_service shape)", () => {
     // Writes no controllerId at all and targets the paired controller.
-    expect(hasInFlightCommand([{ status: "pending" }], "c1")).toBe(true);
+    expect(hasInFlightCommand([{ status: "pending" }], "c1", T0)).toBe(true);
   });
 
   test("blocks on controllerId:'' (bridge_setup_screen shape)", () => {
-    expect(hasInFlightCommand([{ status: "pending", controllerId: "" }], "c1")).toBe(true);
+    expect(hasInFlightCommand([{ status: "pending", controllerId: "" }], "c1", T0)).toBe(true);
   });
 
   test("does NOT block on a different controller", () => {
-    expect(hasInFlightCommand([{ status: "pending", controllerId: "c2" }], "c1")).toBe(false);
+    expect(hasInFlightCommand([{ status: "pending", controllerId: "c2" }], "c1", T0)).toBe(false);
   });
 
   test("terminal statuses never block", () => {
@@ -599,11 +617,59 @@ describe("hasInFlightCommand", () => {
       status,
       controllerId: "c1",
     }));
-    expect(hasInFlightCommand(terminal, "c1")).toBe(false);
+    expect(hasInFlightCommand(terminal, "c1", T0)).toBe(false);
   });
 
   test("empty queue never blocks", () => {
-    expect(hasInFlightCommand([], "c1")).toBe(false);
+    expect(hasInFlightCommand([], "c1", T0)).toBe(false);
+  });
+
+  // ── A1 age cap (2026-10-02) ────────────────────────────────────────────
+  describe("A1: an abandoned executing claim stops blocking", () => {
+    const { STUCK_EXECUTING_AFTER_MS } = require("../../lib/commandSafety");
+
+    test("executing older than the stuck threshold does NOT block", () => {
+      const q = [{ status: "executing", controllerId: "c1", createdAt: ts(T0 - STUCK_EXECUTING_AFTER_MS - 1) }];
+      expect(hasInFlightCommand(q, "c1", T0)).toBe(false);
+    });
+
+    test("executing exactly AT the threshold still blocks (strictly older only)", () => {
+      const q = [{ status: "executing", controllerId: "c1", createdAt: ts(T0 - STUCK_EXECUTING_AFTER_MS) }];
+      expect(hasInFlightCommand(q, "c1", T0)).toBe(true);
+    });
+
+    test("a young executing claim blocks", () => {
+      const q = [{ status: "executing", controllerId: "c1", createdAt: ts(T0 - 30_000) }];
+      expect(hasInFlightCommand(q, "c1", T0)).toBe(true);
+    });
+
+    test("an AGED PENDING doc still blocks — the bridge can still pick it up, unordered", () => {
+      // Ignoring it would let a new fire and an old app command run in either
+      // order. The sweeper owns pending; the guard waits for it.
+      const q = [{ status: "pending", controllerId: "c1", createdAt: ts(T0 - 10 * STUCK_EXECUTING_AFTER_MS) }];
+      expect(hasInFlightCommand(q, "c1", T0)).toBe(true);
+    });
+
+    test("executing with an unreadable age still blocks — never on a guess", () => {
+      expect(hasInFlightCommand([{ status: "executing", controllerId: "c1" }], "c1", T0)).toBe(true);
+    });
+
+    test("a stuck doc beside a live one: the live one still blocks", () => {
+      const q = [
+        { status: "executing", controllerId: "c1", createdAt: ts(T0 - 600_000) },
+        { status: "pending", controllerId: "c1", createdAt: ts(T0 - 5_000) },
+      ];
+      expect(hasInFlightCommand(q, "c1", T0)).toBe(true);
+    });
+
+    test("the 11-stuck-docs shape: none of them blocks a fire any more", () => {
+      const q = Array.from({ length: 11 }, (_, i) => ({
+        status: "executing",
+        controllerId: "c1",
+        createdAt: ts(T0 - (i + 1) * DAY),
+      }));
+      expect(hasInFlightCommand(q, "c1", T0)).toBe(false);
+    });
   });
 });
 
