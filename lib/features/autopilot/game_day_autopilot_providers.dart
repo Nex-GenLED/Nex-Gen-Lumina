@@ -28,6 +28,7 @@ import '../schedule/calendar_providers.dart';
 import '../schedule/schedule_priority_resolver.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/data/team_colors.dart';
+import '../sports_alerts/models/game_state.dart' show GameStatus;
 import '../sports_alerts/models/score_alert_config.dart';
 import '../sports_alerts/services/espn_api_service.dart';
 import '../sports_alerts/services/game_schedule_service.dart';
@@ -57,6 +58,41 @@ final _gameScheduleProvider = Provider<GameScheduleService>((ref) {
   final svc = GameScheduleService();
   ref.onDispose(svc.dispose);
   return svc;
+});
+
+/// +114 — is a FOLLOWED team's game in progress, or starting within its lead
+/// time plus an hour? Used by the on-connect ladder repair's "never during a
+/// live game" guard (base_ladder_repair.dart). Returns a short reason, or null.
+///
+/// ONE SIGNAL AMONG SEVERAL, NEVER THE ONLY GUARD. ESPN failures surface here
+/// as "no game" (both lookups swallow errors), so a dead feed cannot be told
+/// from a quiet night. The calendar windows, the live sessions and (once read)
+/// the server status are checked beside it; this one exists because a game
+/// already under way at a cold open has no autopilot session yet.
+final followedGameLiveReasonProvider =
+    Provider<Future<String?> Function()>((ref) {
+  return () async {
+    final configs = ref.read(enabledAutopilotConfigsProvider);
+    final espn = ref.read(_espnApiProvider);
+    final schedule = ref.read(_gameScheduleProvider);
+    for (final c in configs) {
+      try {
+        final g = await espn.fetchTeamGame(c.sport, c.espnTeamId);
+        if (g != null &&
+            (g.status == GameStatus.inProgress ||
+                g.status == GameStatus.halftime)) {
+          return '${c.teamName} game in progress';
+        }
+        if (await schedule.hasGameSoon(c.espnTeamId, c.sport,
+            minutes: c.effectiveLeadTimeMinutes + 60)) {
+          return '${c.teamName} game starts soon';
+        }
+      } catch (_) {
+        // One team's lookup failing must not hide another's live game.
+      }
+    }
+    return null;
+  };
 });
 
 /// The core autopilot service instance.

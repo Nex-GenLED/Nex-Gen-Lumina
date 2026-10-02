@@ -80,6 +80,28 @@ bool _extractEnabled(DocumentSnapshot<Map<String, dynamic>> snap) {
   return true;
 }
 
+/// +114 — the whole `config/base_ladder_repair` document, for the on-connect
+/// ladder repair's MODE (`connect_repair`: repair | dry_run | off), which lives
+/// beside the kill switch. Emits null for every degraded state (missing doc,
+/// read error, 403); `ladderRepairModeFrom(null)` is `repair`, the same
+/// fail-open default as [baseLadderRepairEnabledProvider], and `enabled:false`
+/// still stops it. See base_ladder_repair.dart for why fail-open is right for a
+/// repair that only rewrites presets that do not light.
+final baseLadderRepairConfigProvider =
+    StreamProvider<Map<String, dynamic>?>((ref) async* {
+  try {
+    await for (final snap in FirebaseFirestore.instance
+        .collection(kBaseLadderRepairFlagCollection)
+        .doc(kBaseLadderRepairFlagDocId)
+        .snapshots()) {
+      yield snap.exists ? snap.data() : null;
+    }
+  } catch (e) {
+    debugPrint('BaseLadderRepair: config stream error — $e (mode defaults)');
+    yield null;
+  }
+});
+
 /// Synchronous read for call sites that can't await the stream (schedule sync).
 /// Defaults to `true` during the loading window and on any error.
 final baseLadderRepairEnabledSyncProvider = Provider<bool>((ref) {

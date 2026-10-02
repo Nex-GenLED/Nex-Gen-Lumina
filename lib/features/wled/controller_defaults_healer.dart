@@ -16,8 +16,11 @@
 // never reboot — the audioreactive disable takes effect on the controller's
 // next loop() iteration (see audioreactive_health.dart for the firmware proof).
 //
-// ORDER: (a) ntp-host → (b) tz → (c) coords → (d) audioreactive → (e) ON-preset
-// master power → (f) GAMMA → (g) reboot. Gamma is deliberately the LAST cfg
+// ORDER: (a) ntp-host → (b) tz → (c) coords → (d) audioreactive → (f) GAMMA →
+// (g) reboot. Step (e), the ON-preset master-power heal, was REMOVED in +114:
+// it psaved ladder slots on every connect with no Game Day, timer or backup
+// guard. The guarded one-time ladder repair (base_ladder_repair.dart) replaces
+// it, chained after the facts publish by [controllerDefaultsHealerProvider]. Gamma is deliberately the LAST cfg
 // write: on WLED 0.15.1 a cfg POST omitting `light.gc` wipes colour gamma
 // (audit/GAMMA_BUG.md), so a gamma heal placed before any other cfg write gets
 // undone by it. normalizeWledCfgPayload makes that structurally impossible now;
@@ -78,7 +81,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
 import 'package:nexgen_command/features/schedule/geometry_gate.dart';
-import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/channel_participation_resolver.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
@@ -88,6 +90,8 @@ import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart';
+import 'package:nexgen_command/features/wled/base_ladder_repair_providers.dart'
+    show ladderRepairCoordinatorProvider;
 import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
 import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -114,11 +118,6 @@ const int kWledNoActivePreset = -1;
 
 /// WLED `cfg.def.ps` when no boot preset is configured.
 const int kWledNoBootPreset = 0;
-
-/// Settle between consecutive `psave` flash writes during the ON-preset heal.
-/// Mirrors the schedule-sync post-psave settle: back-to-back saves can return
-/// 2xx without persisting (bench-observed 2026-07-30, vid 2507300).
-const Duration kPresetHealSettle = Duration(milliseconds: 900);
 
 int? _asInt(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
 
@@ -377,10 +376,6 @@ class ControllerHealReport {
   /// reboot — the controller suspends the FFT task on its next loop().
   bool audioReactiveHealed = false;
 
-  /// System ON preset slots (1/3/4/5) repaired to assert ROOT master power.
-  /// Empty on a healthy controller — the heal is readback-gated.
-  final List<int> onPresetsHealed = [];
-
   /// The live segment layout disagreed with the controller's own buses and was
   /// re-provisioned on connect (+80). Bounds only — `rev` restoration is +81.
   bool geometryReprovisioned = false;
@@ -420,8 +415,7 @@ class ControllerHealReport {
       coordsHealed ||
       gammaHealed ||
       audioReactiveHealed ||
-      geometryReprovisioned ||
-      onPresetsHealed.isNotEmpty;
+      geometryReprovisioned;
 
   @override
   String toString() {
@@ -432,7 +426,6 @@ class ControllerHealReport {
       if (gammaHealed) 'gamma',
       if (audioReactiveHealed) 'audioreactive',
       if (geometryReprovisioned) 'geometry',
-      if (onPresetsHealed.isNotEmpty) 'on-presets${onPresetsHealed.join('/')}',
       if (rebooted) 'reboot',
       if (rebootDeferred) 'reboot-deferred',
       if (factsPublishDispatched) 'facts-publish',
@@ -615,9 +608,10 @@ class ControllerDefaultsHealer {
     //
     // WHY THIS STEP EXISTS AT ALL. Before +80 the ONLY code that could repair a
     // collapsed segment layout was the geometry gate, and every one of its call
-    // sites sits INSIDE a preset-save path — `_healOnPresetMasterPower` reaches
-    // it only after `if (broken.isEmpty) return;`, and ScheduleSync reaches it
-    // only when a preset actually needs writing. So the repair machinery existed
+    // sites sits INSIDE a preset-save path — `_healOnPresetMasterPower` (step
+    // (e), removed in +114) reached it only after `if (broken.isEmpty)
+    // return;`, and ScheduleSync reaches it only when a preset actually needs
+    // writing. So the repair machinery existed
     // and had NO TRIGGER of its own: a controller that booted with its segments
     // collapsed but its presets healthy stayed collapsed indefinitely, and did
     // — for ~30 minutes on the bench, with the app connected the whole time,
@@ -627,11 +621,11 @@ class ControllerDefaultsHealer {
     // The gate was always a GUARD ON PSAVE ("don't bake collapsed geometry into
     // the base layer"), never a HEALER OF GEOMETRY. This is the healer.
     //
-    // ORDERED BEFORE (e) DELIBERATELY. The preset heal psaves, and psave
-    // captures LIVE geometry whatever the inline state says. Repairing the
-    // shape first means the gate at (e) has less to refuse and any psave that
-    // does run captures the correct layout — the two mechanisms compose instead
-    // of racing.
+    // ORDERED BEFORE ANY PRESET WRITE DELIBERATELY. The ladder repair (chained
+    // after this run, +114) psaves, and psave captures LIVE geometry whatever
+    // the inline state says. Repairing the shape first means its geometry gate
+    // has less to refuse and any psave that does run captures the correct
+    // layout — the two mechanisms compose instead of racing.
     //
     // BOUNDS ONLY for +80. `rev` is also in the controller's own bus config and
     // restoring it is legitimate (see #+81), but adding it to SegmentShape
@@ -643,13 +637,10 @@ class ControllerDefaultsHealer {
       await _healSegmentGeometry(geometrySource, report);
     }
 
-    // (e) ON-preset master power — repair presets 1/3/4/5 that store segments
-    // only (no root `on`), so a fired ON-timer powers the strip instead of
-    // loading a design into a dark master. See _healOnPresetMasterPower.
-    final presetSource = repo;
-    if (presetSource is WledService) {
-      await _healOnPresetMasterPower(presetSource, report);
-    }
+    // (e) REMOVED in +114 — see the header. Ladder presets are no longer
+    // written by the healer on connect; base_ladder_repair.dart repairs a
+    // ladder that does not light, once, under Game Day / timer / clock guards,
+    // with a backup and a restore of the live look.
 
     // (f) gamma — DELIBERATELY LAST of the cfg writes, and before the reboot.
     //
@@ -938,32 +929,6 @@ class ControllerDefaultsHealer {
     return outcome;
   }
 
-  /// Repairs system ON presets (1/3/4/5) that do not assert ROOT master power.
-  ///
-  /// WHY THIS BELONGS HERE AND NOT ONLY IN SCHEDULE SYNC: the sync-side
-  /// predicate fix ([ScheduleSyncService.isNglOnPresetSatisfied]) only heals on
-  /// the next schedule sync. A customer who never edits a schedule would stay
-  /// broken indefinitely — their ON-timers keep firing DARK. Healing on CONNECT
-  /// repairs the installed fleet without requiring any user action.
-  ///
-  /// HEAL-ONLY-BROKEN, readback-gated — matching this class's stated policy and
-  /// the gamma heal's precedent: a healthy controller costs ONE GET
-  /// (/presets.json) and ZERO writes.
-  ///
-  /// NO PERSISTED "already healed" MARKER — deliberate. A marker would make
-  /// this run once per controller and then stop, but a preset can be clobbered
-  /// later by any psave path, and this codebase already has a documented
-  /// device-side revert phenomenon (gamma). A marker would suppress exactly the
-  /// re-heal such a revert needs, and would desync from device truth. The
-  /// readback IS the gate: it is cheaper than a marker, cannot go stale, and
-  /// re-heals automatically if a preset regresses. (The gamma heal in this same
-  /// class made the same choice for the same reason.)
-  ///
-  /// ABSENT presets are NOT created here: schedule sync owns creating them, and
-  /// inventing a preset from a healer would mask an un-synced controller.
-  ///
-  /// `ib` is never asserted — it is a psave REQUEST flag, never stored back.
-
   /// The controller's expected segment shape, from its own hardware buses.
   /// Empty when unreadable — the gate then saves ungated rather than blocking
   /// every heal on a controller whose layout we could not read.
@@ -1051,132 +1016,6 @@ class ControllerDefaultsHealer {
     } catch (e) {
       debugPrint('[Healer] segment re-provision failed: $e');
       return false;
-    }
-  }
-
-  Future<void> _healOnPresetMasterPower(
-    WledService svc,
-    ControllerHealReport report,
-  ) async {
-    // Two passes: heal, re-read, heal anything that did not land. A `psave` is
-    // a FLASH write; back-to-back saves on this firmware can return 2xx and
-    // still not persist — bench-observed 2026-07-30 (vid 2507300): preset 4
-    // reported ok=true and read back with no root `on`. Trusting the 2xx alone
-    // would report a heal that never happened.
-    for (var pass = 0; pass < 2; pass++) {
-      Map<int, Map<String, dynamic>> presets;
-      try {
-        // Tri-state: an UNREADABLE read is not an un-synced controller. The old
-        // `presets.isEmpty` return could not tell them apart, so a corrupt
-        // presets.json made the healer silently inert (P1-52).
-        final read = await svc.readPresets();
-        if (!read.isKnown) {
-          report.log.add('on-preset heal SKIPPED — presets.json unreadable '
-              '(${read.reason}); cannot tell a broken preset from a missing one');
-          return;
-        }
-        presets = read.presets;
-      } catch (e) {
-        report.log.add('on-preset master-power: readPresets failed: $e');
-        return;
-      }
-      if (presets.isEmpty) return; // genuinely un-synced — sync creates them
-
-      // Live segment layout for the heal payload. Without it onPresetHealState
-      // omits `seg` and the psave captures AMBIENT segment state — the exact
-      // defect this heal is supposed to repair (audit/BASE_LADDER.md). A null
-      // here degrades to a single-segment fallback, never to ambient capture.
-      Map<String, dynamic>? liveState;
-      try {
-        liveState = await svc.getState();
-      } catch (e) {
-        report.log.add('on-preset heal: getState failed ($e); seg fallback');
-        liveState = null;
-      }
-
-      final broken = <int>[];
-      for (final entry in ScheduleSyncService.kOnPresetSpecs.entries) {
-        final def = presets[entry.key];
-        if (def == null) continue; // sync creates it; not ours to invent
-        if (!ScheduleSyncService.isNglOnPresetSatisfied(def, entry.value.name)) {
-          broken.add(entry.key);
-        }
-      }
-      if (broken.isEmpty) {
-        // Pass 0 → already healthy (zero writes). Pass 1 → the heal verified.
-        return;
-      }
-      if (pass == 1) {
-        report.log.add('on-preset heal: retrying $broken (first pass did not '
-            'persist)');
-      }
-
-      // GEOMETRY GATE (#76 layer 4). This loop psaves ladder slots on every
-      // connect, and psave captures LIVE segment geometry whatever the inline
-      // state says — so a heal taken while the layout is collapsed or drifted
-      // bakes that error into the base layer, where it reloads every night.
-      // Derived from the controller's OWN buses, not the app's model: the gate
-      // defends the installation against the app, so its expectation must not
-      // come from the app's beliefs about the installation. One extra GET, and
-      // only on the broken path.
-      final expectedShape = await _expectedShapeFor(svc);
-
-      for (final id in broken) {
-        final spec = ScheduleSyncService.kOnPresetSpecs[id]!;
-        try {
-          final outcome = await gatedPresetSave(
-            presetId: id,
-            presetName: spec.name,
-            expected: expectedShape,
-            read: () async =>
-                segmentShapeFromState(await svc.getState()),
-            reprovision: (want) => _reprovisionSegments(svc, want),
-            label: 'on-preset heal',
-            save: () async {
-              await svc.savePreset(
-                presetId: id,
-                state:
-                    ScheduleSyncService.onPresetHealState(spec.bri, liveState),
-                presetName: spec.name,
-              );
-              return true;
-            },
-          );
-          if (!outcome.saved) {
-            report.log.add(outcome.message ?? 'on-preset $id not saved');
-            continue;
-          }
-          if (!report.onPresetsHealed.contains(id)) {
-            report.onPresetsHealed.add(id);
-          }
-        } catch (e) {
-          report.log.add('on-preset $id heal threw: $e');
-        }
-        // Settle between flash writes so the next psave is not issued while
-        // the controller is still committing the previous one.
-        await Future<void>.delayed(kPresetHealSettle);
-      }
-    }
-
-    // Final readback — report only what ACTUALLY landed, so a heal that
-    // silently failed is not reported as success.
-    try {
-      final after = await svc.fetchPresets();
-      report.onPresetsHealed.removeWhere((id) {
-        final def = after[id];
-        final spec = ScheduleSyncService.kOnPresetSpecs[id];
-        if (def == null || spec == null) return true;
-        final landed =
-            ScheduleSyncService.isNglOnPresetSatisfied(def, spec.name);
-        if (!landed) {
-          report.log.add('on-preset $id heal did NOT persist after 2 passes '
-              '— next connect retries');
-        }
-        return !landed;
-      });
-    } catch (_) {
-      // Verification unavailable — leave the optimistic list; next connect
-      // re-evaluates from device truth anyway.
     }
   }
 
@@ -1541,6 +1380,25 @@ final controllerDefaultsHealerProvider =
     if (report.anyHealed || report.rebooted) {
       debugPrint('[Healer] $report on ${ip ?? "(unknown)"}'
           '${report.log.isEmpty ? '' : ' — ${report.log.join('; ')}'}');
+    }
+
+    // +114 item 1c — the guarded one-time ladder repair, considered once this
+    // connect's publish has measured the ladder. LAN only by construction (a
+    // WledService), unawaited (it may wait up to two minutes for Game Day
+    // state to load), and never fatal.
+    final publish = report.factsPublish;
+    final controllerId = ref.read(selectedControllerIdProvider);
+    if (repo is WledService &&
+        publish != null &&
+        controllerId != null &&
+        controllerId.isNotEmpty) {
+      final consider = ref.read(ladderRepairCoordinatorProvider);
+      unawaited(publish
+          .then((outcome) =>
+              consider(outcome: outcome, svc: repo, controllerId: controllerId))
+          .then<void>((_) {}, onError: (Object e) {
+        debugPrint('[Healer] ladder repair consideration failed: $e');
+      }));
     }
     return report;
   };
