@@ -2442,7 +2442,104 @@ commit — merging `main` into this tree will collide with the untracked copies.
     (`tierForEntry`), `lib/features/schedule/calendar_entry_editor.dart` (`_saveThisGameOnly`).
     Related: **#61** (lease manager), Policy B.
 
+- [ ] **`MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02.md`** (2026-10-02 @ `a35e30e`, branch
+  `fix/115-multichannel-and-design-card`) — every Game Day apply path's segment array for a
+  three-bus controller (executed, not read), why identical settings render differently per segment
+  (WLED v0.15.1 source), options (a)–(d′), the server note for the Game Day window and a bench
+  plan → **#151**, **#154**, **#155**; the renderer class is **#77**.
+- [x] **`DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02.md`** (2026-10-02 @ `a35e30e`) — the
+  design card's Static setup chips and grouping row were gated on the previewed effect, and the
+  row showed under Blocks; fixed on the same branch → **#152**; the >129-px Blocks band re-filed
+  as **#153**.
+
 ## P2 — hardening & platform
+
+- [ ] **#151 — THE SERVER GAME DAY START PAYLOAD STATES ONLY fx / sx / ix / col[0..1]: pal, grp, spc,
+  frz, segment bri and col[2] are INHERITED per segment**
+  - Status: **OPEN — filed 2026-10-02 from `fix/115-multichannel-and-design-card`; a server change
+    for the next Game Day functions window (exact change in
+    `audit/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02.md` §4.1); NOT applied** · Severity: **P2 —
+    quality; P1 for a frozen or re-grouped channel** · Evidence: **verified-by-source**
+    (`functions/src/gameDayPlanning.ts:171-194`; compiled module run read-only) +
+    **verified-by-test** for the app side (`test/features/game_day/multichannel_seg_array_contract_test.dart`)
+  - `buildFullPartitionSegArray` / `buildParticipatingSegArray` emit `{id, on, fx, sx, ix, col×2}`.
+    Every app path emits `{… pal, grp, spc, bri, frz:false, col×3}` through the chokepoint. The
+    bridge POSTs the body verbatim. So a server fire renders per channel with whatever `pal`, `grp`,
+    `spc`, `frz`, segment `bri` and `col[2]` each segment last had: a frozen channel ignores the
+    fire; a channel left at `grp 3` runs 3-px pixels; the default fx 52 colours its reverse wave
+    from `col[2]` (`FX_fcn.cpp:1173`, pal 0), so slot 3's leftover decides a wave per channel.
+  - The 2026-10-02 field report (identical fx/sx/ix/col read back on a 3-bus controller) is
+    consistent with this AND with the renderer-level **#77** class — one effect instance per
+    segment, scaled to each segment's length (audit §2) — which no payload can fix.
+  - **Fix shape:** audit §4.1 — state `pal` (0 unless palette-reading), `grp:1`, `spc:0`,
+    `bri:255`, `frz:false`, three colour slots; `frz:false` on exclusion markers too; a TS golden
+    against the Dart contract test. Related **#77**, **#67**, **#155**.
+  - Files: `functions/src/gameDayPlanning.ts`, `functions/src/planGameDayFires.ts`.
+
+- [x] **#152 — DESIGN CARD: THE STATIC SETUP (BLOCKS | ALTERNATING) AND THE GROUPING ROW WERE GATED ON
+  THE PREVIEWED EFFECT, AND THE ROW SHOWED UNDER BLOCKS**
+  - Status: **DONE 845f2de on `fix/115-multichannel-and-design-card` (2026-10-02), NOT merged** ·
+    Severity: **P2 — UX, customer-facing** · Evidence: **reported** (live use 2026-10-02) +
+    **verified-by-source** (`colorway_effect_selector.dart:1397-1400, 2350` @ `a35e30e`)
+  - (a) "LEDs per color" rendered under Blocks, where fx 83 + pal 5 lays the palette out
+    positionally and ignores `grp`. (b) Previewing Chase removed the whole card and Glitter removed
+    the chips; the Solid tile is not listed under a motion filter, so the only way back was to
+    close the card. Visibility read `selectorEffectIdProvider`, never controller state; the layout
+    and grouping VALUES were never touched by a preview.
+  - Fix: `staticSetupControls` (pure, `solid_palette_blocks.dart`) decides the card from the
+    PALETTE and the chip; chips stay (unselected, with a hint) while another effect plays and
+    tapping one returns to Static; Blocks hides the row, Alternating shows it; spacing and the dot
+    row only for the selected effect. Wire unchanged. Tests: `static_setup_controls_test.dart`
+    (decider), `design_card_static_setup_test.dart` (card + a11y 1.0 / 1.75 / 2.0 Bold). Audit:
+    `audit/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02.md`.
+  - Files: `lib/features/wled/colorway_effect_selector.dart`, `lib/features/wled/solid_palette_blocks.dart`.
+
+- [ ] **#153 — fx 83 BLOCKS LIGHTS ONLY `1 + sx` VIRTUAL PIXELS: a segment longer than 129 LEDs shows
+  col[1] past px 129 at the default sx 128**
+  - Status: **OPEN — filed 2026-10-02 (bench fact from 2026-09-22, re-filed as debt)** · Severity:
+    **P3** · Evidence: **verified-by-bench** (bench ch 1, 162 LEDs: red 54 / white 54 / blue 21 /
+    white 33) + **verified-by-source** (`FX.cpp:2849-2865` v0.15.1)
+  - `mode_static_pattern` draws `1+sx` lit then `1+ix` unlit VIRTUAL pixels. With `grp 1` and
+    `sx 128` the lit band is 129 px; beyond it `SEGCOLOR(1)`. `grp > 1` multiplies the band
+    (grp 2 → 258 px), which is why an Alternating-then-Blocks session never shows it. Not a UI bug:
+    **#152** hides the grouping control under Blocks and leaves the wire byte-identical.
+  - **Fix shape (decision owed):** pin `sx:255` (256 virtual px lit), or `sx:255, ix:0`, for
+    Blocks in `solidLayoutFields`, OR send Blocks as `grp:2`. Either changes every stored Blocks
+    design's wire → bench on the spare controller first; `solidPaletteBlockIndex` already ignores grp.
+  - Files: `lib/features/wled/solid_palette_blocks.dart`, `lib/features/design/design_models.dart`.
+
+- [ ] **#154 — A DATED-NIGHT LEASE'S FALLBACK LOOK NAMES NO CHANNEL: on a multi-channel controller it
+  lights channel 1 only and the psave captures the rest as they were**
+  - Status: **OPEN — filed 2026-10-02 from the multi-channel audit; NOT fixed on this branch (the
+    file is in the +114 branch's footprint, and the 10-04 lease is already armed in this shape)** ·
+    Severity: **P2 — a Game Day night with no server coverage IS this path** · Evidence:
+    **verified-by-test** (`multichannel_seg_array_contract_test.dart`, lease group) +
+    **verified-by-source** (`calendar_entry_lease_manager.dart:1134-1193`, `wled_payload_utils.dart:508-525`)
+  - `_synthesizeWledPayload` (no carried payload) returns ONE id-less `{fx:0, col:[C]}` segment;
+    the manager never channel-filters it, and `ensurePsaveClearsFreeze` adds `{id, frz:false}`
+    markers only when NO segments were supplied. WLED applies an id-less seg to `mainseg`; the
+    psave captures the other channels as they are at arming ("ambient capture", 10-01 lease prep).
+    A +112 carried payload is per-channel already and is not affected.
+  - **Fix shape:** `applyChannelFilter(payload, participatingOrDeviceChannelIds, deviceChannels)` on
+    the fallback before `savePreset`, mirroring `applyGameDayConfigToDevice` (pre-enumerate the
+    census; `{id, on:false}` for excluded channels), plus a `synthesizeWledPayloadForTest`
+    assertion for three channels. Bench on the spare controller with a 4-segment layout before it
+    reaches a home. Related **#129**, **#123**.
+  - Files: `lib/features/schedule/calendar_entry_lease_manager.dart`.
+
+- [ ] **#155 — THE TWO FOREGROUND GAME DAY BUILDERS DISAGREE ON `pal` FOR PALETTE-READING EFFECTS, AND
+  NEITHER MATCHES EXPLORE**
+  - Status: **OPEN — filed 2026-10-02** · Severity: **P3** · Evidence: **verified-by-source**
+  - `game_day_apply.dart:81` pins `'pal': 0`; `game_day_autopilot_service.dart:1208` uses
+    `setColorsPaletteFor(fx)` (5 for a palette-reading effect); the tuner's `buildSelectorPayload`
+    uses `paletteForEffect(fx)` (5 for colour-reading effects, 4 for palette-reading). For the
+    default fx 52 the two Game Day paths agree (0) but Explore sends 5 — a positional gradient of
+    the team colours rather than the direct `col` read — so "the same design" from Explore and from
+    Game Day are different pictures (audit §3).
+  - **Fix shape:** one `gameDayPaletteFor(fx)` in `game_day_apply.dart` used by both builders, with
+    a test that the three agree for every catalog effect; decide whether Game Day follows Explore —
+    the server note (**#151**) must then carry the same rule.
+  - Files: `lib/features/game_day/game_day_apply.dart`, `lib/features/autopilot/game_day_autopilot_service.dart`.
 
 - [x] **#122 — "NEXT THREE NIGHTS" IS NOT A MULTI-NIGHT REQUEST (smoke F3): the compound detector
   matches "days" only**
