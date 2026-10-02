@@ -18,6 +18,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart';
+import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
 import 'package:nexgen_command/features/wled/controller_facts_writer.dart';
 import 'package:nexgen_command/features/wled/participation_denormalizer.dart';
 
@@ -192,10 +193,22 @@ class FactsPublishOutcome {
   /// family deduped, or the write was refused/failed — both normal.
   final bool wrote;
 
+  /// +114 — what the ladder produces when it fires, measured from the same
+  /// `/presets.json` read as R2. Null = not measured. Carried here so the
+  /// on-connect ladder repair acts on the verdict that was published, not a
+  /// second interpretation of it.
+  final LadderRestoreVerdict? ladderRestore;
+
+  /// The participating buses [ladderRestore] was measured against. Null when
+  /// participation did not resolve (and then [ladderRestore] is null too).
+  final List<int>? participating;
+
   const FactsPublishOutcome({
     required this.participation,
     required this.baseBoundariesOffered,
     required this.wrote,
+    this.ladderRestore,
+    this.participating,
   });
 
   /// The participation clause — the SAME string mirrored to Firestore as
@@ -209,7 +222,17 @@ class FactsPublishOutcome {
     final b = baseBoundariesOffered
         ? 'base_boundaries=offered'
         : 'base_boundaries=SKIPPED(timer table unreadable)';
-    return '$p $b wrote=$wrote';
+    return '$p $b ${_ladderClause()} wrote=$wrote';
+  }
+
+  String _ladderClause() {
+    final v = ladderRestore;
+    if (v == null) return 'ladder_restore=unmeasured';
+    if (v.restoreLit) return 'ladder_restore=lit';
+    final why = v.badPresetIds.isNotEmpty
+        ? 'bad ${v.badPresetIds}'
+        : 'missing ${v.missingPresetIds}';
+    return 'ladder_restore=NOT_LIT($why)';
   }
 
   @override
@@ -271,6 +294,9 @@ abstract class ControllerFactsPublisher {
     /// R2 (W4). Tri-state: true verified good, false verified BAD, null not
     /// measured. Null contributes nothing — see [prepareBaseLadderFacts].
     bool? ladderAssertsSegments,
+    /// +114. `base_ladder_restore_lit` + `base_ladder_dark_channels`. Null
+    /// contributes nothing — see [prepareLadderRestoreFacts].
+    LadderRestoreVerdict? ladderRestore,
   });
 }
 
@@ -288,6 +314,7 @@ class FirestoreControllerFactsPublisher extends ControllerFactsPublisher {
     required String source,
     String? participationDisposition,
     bool? ladderAssertsSegments,
+    LadderRestoreVerdict? ladderRestore,
   }) async {
     final id = controllerId;
     if (id == null || id.isEmpty) return false;
@@ -315,6 +342,12 @@ class FirestoreControllerFactsPublisher extends ControllerFactsPublisher {
         prepareBaseLadderFacts(
           controllerId: id,
           verdict: ladderAssertsSegments,
+          source: source,
+        ),
+        // +114. Same write, own dedup (by value: restore_lit + dark list).
+        prepareLadderRestoreFacts(
+          controllerId: id,
+          verdict: ladderRestore,
           source: source,
         ),
         // Last, so it merges into whatever write the fact families already

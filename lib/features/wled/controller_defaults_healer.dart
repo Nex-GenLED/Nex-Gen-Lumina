@@ -88,6 +88,7 @@ import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart';
+import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
 import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -861,6 +862,10 @@ class ControllerDefaultsHealer {
     // `false`, because `false` moves the account into log-only server-side.
     // A failed HTTP GET must never do that.
     bool? ladderVerdict;
+    // +114 (item 1b): what the ladder PRODUCES, from the same read. Needs the
+    // participating set as well as the bus list, so it is null whenever
+    // participation did not resolve — unmeasured, never false.
+    LadderRestoreVerdict? restoreVerdict;
     try {
       final busIds = hw == null
           ? const <int>[]
@@ -884,6 +889,14 @@ class ControllerDefaultsHealer {
               presets: read.presets,
               deviceChannelIds: busIds,
             );
+            final participating = input?.resolved;
+            if (participating != null) {
+              restoreVerdict = evaluateLadderRestore(
+                presets: read.presets,
+                participating: participating,
+                deviceChannelIds: busIds,
+              );
+            }
             break;
           default:
             ladderVerdict = null;
@@ -898,6 +911,7 @@ class ControllerDefaultsHealer {
     try {
       wrote = await publisher.publishDeviceFacts(
         ladderAssertsSegments: ladderVerdict,
+        ladderRestore: restoreVerdict,
         controllerId: controllerId,
         participation: input,
         baseBoundaries: rows,
@@ -917,6 +931,8 @@ class ControllerDefaultsHealer {
       participation: disposition,
       baseBoundariesOffered: rows != null,
       wrote: wrote,
+      ladderRestore: restoreVerdict,
+      participating: restoreVerdict == null ? null : input?.resolved,
     );
     debugPrint('[Healer] facts-publish $controllerId: ${outcome.describe()}');
     return outcome;

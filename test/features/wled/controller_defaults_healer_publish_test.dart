@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
+import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
 import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
@@ -91,6 +92,9 @@ class _RecordingPublisher extends ControllerFactsPublisher {
   /// Recorded so a healer that stops measuring it fails loudly here.
   final List<bool?> ladderVerdicts = [];
 
+  /// +114: the restore-lit verdict handed over on each attempt.
+  final List<LadderRestoreVerdict?> ladderRestores = [];
+
   @override
   Future<bool> publishDeviceFacts({
     required String? controllerId,
@@ -100,7 +104,9 @@ class _RecordingPublisher extends ControllerFactsPublisher {
     required String source,
     String? participationDisposition,
     bool? ladderAssertsSegments,
+    LadderRestoreVerdict? ladderRestore,
   }) async {
+    ladderRestores.add(ladderRestore);
     calls.add((participation: participation?.resolved, rows: baseBoundaries));
     dispositions.add(participationDisposition);
     ladderVerdicts.add(ladderAssertsSegments);
@@ -142,6 +148,7 @@ class _ThrowingPublisher extends ControllerFactsPublisher {
     required String source,
     String? participationDisposition,
     bool? ladderAssertsSegments,
+    LadderRestoreVerdict? ladderRestore,
   }) {
     throw StateError('firestore unavailable');
   }
