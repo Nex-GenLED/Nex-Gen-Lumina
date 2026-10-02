@@ -21,8 +21,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart'
     show enabledAutopilotConfigsProvider;
+import 'package:nexgen_command/features/game_day/game_day_run_mode.dart';
 import 'package:nexgen_command/features/game_day/game_day_server_status.dart';
 import 'package:nexgen_command/features/game_day/game_day_server_status_provider.dart';
+import 'package:nexgen_command/features/game_day/gate_status.dart';
+import 'package:nexgen_command/features/game_day/gate_status_provider.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 
 /// PURE. The team slug a personal Game Day calendar entry belongs to, or null.
@@ -63,4 +66,27 @@ final servedGameDayEntryTestProvider = Provider<ServedGameDayEntryTest>((ref) {
       if (c.teamName.isNotEmpty) c.teamName: c.teamSlug,
   };
   return (entry, now) => isServedGameDayEntry(entry, status, nameToSlug, now);
+});
+
+/// +114 — the day-timeline tag for a Game Day row: `server`, `phone` or
+/// `setup needed`; null for a row that is not Game Day. A crew row, or a row
+/// whose team cannot be recovered, is `phone` — the phone runs it.
+final gameDayRunTagProvider =
+    Provider<String? Function(CalendarEntry entry)>((ref) {
+  final status = ref.watch(gameDayServerStatusSyncProvider);
+  final gate =
+      ref.watch(gateStatusProvider).valueOrNull ?? GateStatus.unknown;
+  final clock = ref.watch(gameDayNowProvider);
+  final configs = ref.watch(enabledAutopilotConfigsProvider);
+  final nameToSlug = <String, String>{
+    for (final c in configs)
+      if (c.teamName.isNotEmpty) c.teamName: c.teamSlug,
+  };
+  return (entry) {
+    if (!entry.holdsGameDay) return null;
+    final slug = gameDayEntryTeamSlug(entry, nameToSlug);
+    if (slug == null) return runModeTag(GameDayRunMode.phone);
+    return runModeTag(gameDayRunModeFor(
+        status: status, gate: gate, now: clock(), teamSlug: slug));
+  };
 });

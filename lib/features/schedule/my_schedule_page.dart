@@ -17,6 +17,8 @@ import 'package:nexgen_command/features/schedule/calendar_entry_editor.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/day_timeline.dart';
 import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
+import 'package:nexgen_command/features/game_day/served_game_day.dart'
+    show gameDayRunTagProvider;
 import 'package:nexgen_command/features/schedule/widgets/ladder_repair_banner.dart';
 import 'package:nexgen_command/features/schedule/widgets/channel_scope_picker.dart';
 import 'package:nexgen_command/features/schedule/widgets/timer_slot_meter.dart';
@@ -1616,11 +1618,14 @@ class _DayHeroCard extends ConsumerWidget {
                       const SizedBox(height: 2),
                       Builder(builder: (_) {
                         final lab = ref.watch(timelineScopeLabellerProvider);
+                        final runnerTag = ref.watch(gameDayRunTagProvider);
                         return DayTimelineList(
                           timeline: day,
                           timeFormat: timeFormat,
                           scopeLabelFor: lab.scopeFor,
                           controllerLabelFor: lab.controllerFor,
+                          runnerTagFor: (e) =>
+                              e.dated == null ? null : runnerTag(e.dated!),
                         );
                       }),
                     ],

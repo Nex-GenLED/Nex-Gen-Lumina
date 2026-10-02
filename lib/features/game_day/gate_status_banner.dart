@@ -1,195 +1,196 @@
-// The customer-facing half of the readiness gate.
+// The Game Day screen's "who runs this" banner — three states (+114, plan §3.4).
 //
-// Eight of the ten live Game Day accounts are held in log-only, and until now
-// every one of them saw a UI that looked armed. This banner is the difference
-// between "Game Day is on" and "Game Day is on and will fire tonight" — the
-// second is a promise, and for those accounts it was not true.
+//   Server   "Game Day runs from our servers" + the next fire and the last one.
+//   Phone    "Game Day runs from this phone" + why, when an allowlisted home
+//            was held back by pre-flight (or the server stopped checking in).
+//   Blocked  the readiness gate's own headline and reasons — shown only for a
+//            home on the server path, the one case the gate changes anything.
 //
-// TONE. It says the feature IS on, because it is; what is missing is the
-// precondition. "Game Day is off" would be a lie in the other direction and
-// would invite the customer to turn on something already on.
+// WHAT IT REPLACED. The W2 banner showed the gate to every account and, once
+// an account graduated, said "Your lights will fire for upcoming games." For a
+// home the server does not run that was a promise about a path that would not
+// fire (plan §5), and for a gated phone-run home "not firing yet" was wrong the
+// other way — the phone fires regardless of the gate. The states and their
+// words live in game_day_run_mode.dart; this file only lays them out.
 //
-// ARMED RENDERS NOTHING, except once. A permanent green "you're all set" is
-// noise on every visit; a one-time acknowledgement when the account graduates
-// is the news. See [_GraduationMemory].
+// ALWAYS VISIBLE once the account has a team: which path runs a home is the
+// one thing a dealer needs to see on game day ("Server" screenshot), so it is
+// not hidden behind an acknowledgement.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nexgen_command/app_colors.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart'
+    show enabledAutopilotConfigsProvider;
+import 'package:nexgen_command/utils/time_format.dart';
+import 'game_day_run_mode.dart';
+import 'game_day_server_status_provider.dart';
 import 'gate_status.dart';
 import 'gate_status_provider.dart';
 
-/// Remembers whether this device has already told the customer they graduated,
-/// so "you're set" is said once rather than on every rebuild.
-///
-/// Device-local on purpose: it is a UI acknowledgement, not account state, and
-/// writing it to Firestore would put a cosmetic flag on the critical path.
-class _GraduationMemory {
-  static const _key = 'gameday_gate_was_blocked';
-
-  static Future<bool> wasBlocked() async {
-    try {
-      return (await SharedPreferences.getInstance()).getBool(_key) ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<void> setBlocked(bool v) async {
-    try {
-      await (await SharedPreferences.getInstance()).setBool(_key, v);
-    } catch (_) {
-      /* cosmetic — never worth failing a screen build */
-    }
-  }
-}
-
-/// Shows the gate verdict, or nothing when there is nothing to say.
-class GateStatusBanner extends ConsumerStatefulWidget {
-  /// Invoked by the one-tap fix when the block is a missing schedule.
-  final VoidCallback? onCreateSchedule;
-
-  const GateStatusBanner({super.key, this.onCreateSchedule});
+/// Shows who runs this home's Game Day. Renders nothing for an account with no
+/// Game Day teams that the server does not serve.
+class GameDayRunBanner extends ConsumerWidget {
+  const GameDayRunBanner({super.key});
 
   @override
-  ConsumerState<GateStatusBanner> createState() => _GateStatusBannerState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(gameDayServerStatusSyncProvider);
+    final gate =
+        ref.watch(gateStatusProvider).valueOrNull ?? GateStatus.unknown;
+    final now = ref.watch(gameDayNowProvider)();
+    final configs = ref.watch(enabledAutopilotConfigsProvider);
+    final names = {for (final c in configs) c.teamSlug: c.teamName};
 
-class _GateStatusBannerState extends ConsumerState<GateStatusBanner> {
-  bool _showGraduated = false;
-
-  Future<void> _reconcile(GateStatus status) async {
-    final wasBlocked = await _GraduationMemory.wasBlocked();
-    if (!status.armed) {
-      if (wasBlocked) return;
-      await _GraduationMemory.setBlocked(true);
-      return;
+    final mode = gameDayRunModeFor(status: status, gate: gate, now: now);
+    if (configs.isEmpty && mode == GameDayRunMode.phone) {
+      return const SizedBox.shrink();
     }
-    // Armed now. If this device saw it blocked before, that is a graduation:
-    // say so once, then forget, so it never repeats.
-    if (wasBlocked) {
-      await _GraduationMemory.setBlocked(false);
-      if (mounted) setState(() => _showGraduated = true);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final async = ref.watch(gateStatusProvider);
-    final status = async.value ?? GateStatus.unknown;
-
-    // Fire-and-forget; never blocks the build.
-    _reconcile(status);
-
-    if (status.armed) {
-      return _showGraduated
-          ? _Banner(
-              icon: Icons.check_circle_outline,
-              tint: Colors.green,
-              title: 'Game Day is ready',
-              lines: const ['Your lights will fire for upcoming games.'],
-              onDismiss: () => setState(() => _showGraduated = false),
-            )
-          : const SizedBox.shrink();
-    }
-
-    return _Banner(
-      icon: Icons.pending_outlined,
-      tint: NexGenPalette.cyan,
-      title: status.headline,
-      lines: status.reasons,
-      // No action button. R1 was the only reason with a one-tap fix; the two
-      // that remain (`no_facts`, `ladder_bad`) are not things a button can do.
-      actionLabel: null,
-      onAction: null,
+    final copy = gameDayRunCopy(
+      mode: mode,
+      status: status,
+      gate: gate,
+      now: now,
+      teamName: (slug) => names[slug] ?? slug,
+      enabledTeamSlugs: [for (final c in configs) c.teamSlug],
+      timeFormat: ref.watch(timeFormatPreferenceProvider),
     );
+    return GameDayRunBannerView(mode: mode, copy: copy);
   }
 }
 
-class _Banner extends StatelessWidget {
-  final IconData icon;
-  final Color tint;
-  final String title;
-  final List<String> lines;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-  final VoidCallback? onDismiss;
+/// The layout, split out so it can be laid out at large text sizes without
+/// providers.
+class GameDayRunBannerView extends StatelessWidget {
+  final GameDayRunMode mode;
+  final GameDayRunCopy copy;
 
-  const _Banner({
-    required this.icon,
-    required this.tint,
-    required this.title,
-    required this.lines,
-    this.actionLabel,
-    this.onAction,
-    this.onDismiss,
+  const GameDayRunBannerView({
+    super.key,
+    required this.mode,
+    required this.copy,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: tint.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: tint.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: tint),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: tint,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
+    final (IconData icon, Color tint) = switch (mode) {
+      GameDayRunMode.server => (Icons.cloud_done_outlined, NexGenPalette.cyan),
+      GameDayRunMode.phone => (Icons.phone_iphone, NexGenPalette.textMedium),
+      GameDayRunMode.blocked => (Icons.pending_outlined, NexGenPalette.amber),
+    };
+    return Semantics(
+      container: true,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: tint.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: tint.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, size: 18, color: tint),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    copy.title,
+                    style: TextStyle(
+                      color: mode == GameDayRunMode.phone
+                          ? NexGenPalette.textHigh
+                          : tint,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
-              ),
-              if (onDismiss != null)
-                InkWell(
-                  onTap: onDismiss,
-                  child: Icon(Icons.close,
-                      size: 16, color: NexGenPalette.textMedium),
+              ],
+            ),
+            for (final l in copy.lines) ...[
+              const SizedBox(height: 6),
+              Text(
+                l,
+                style: const TextStyle(
+                  color: NexGenPalette.textMedium,
+                  fontSize: 13,
+                  height: 1.35,
                 ),
+              ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A team card's game-status chip. Live and final are reports of fact; only
+/// the UPCOMING text says who will run it (server / phone / setup needed).
+class GameDayStatusBadge extends StatelessWidget {
+  final bool isLive;
+  final bool isFinal;
+  final String liveText;
+  final String finalText;
+  final GameDayRunMode mode;
+
+  const GameDayStatusBadge({
+    super.key,
+    required this.isLive,
+    required this.isFinal,
+    required this.liveText,
+    required this.finalText,
+    required this.mode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = isFinal || (!isLive && mode == GameDayRunMode.blocked);
+    final Color tint = isLive
+        ? Colors.green
+        : muted
+            ? NexGenPalette.textMedium
+            : NexGenPalette.cyan;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: isLive ? 0.2 : 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tint.withValues(alpha: isLive ? 0.4 : 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isLive) ...[
+            Container(
+              width: 6,
+              height: 6,
+              decoration: const BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            isLive
+                ? liveText
+                : isFinal
+                    ? finalText
+                    : upcomingBadgeLabel(mode),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: tint,
+            ),
           ),
-          for (final l in lines) ...[
-            const SizedBox(height: 6),
-            Text(
-              l,
-              style: const TextStyle(
-                color: NexGenPalette.textMedium,
-                fontSize: 13,
-                height: 1.35,
-              ),
-            ),
-          ],
-          if (actionLabel != null && onAction != null) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: onAction,
-                style: TextButton.styleFrom(
-                  backgroundColor: tint.withValues(alpha: 0.16),
-                  foregroundColor: tint,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-                child: Text(actionLabel!),
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
 }
+

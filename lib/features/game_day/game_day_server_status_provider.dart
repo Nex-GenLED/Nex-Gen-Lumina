@@ -6,8 +6,6 @@
 // direction (the phone runs Game Day as build 112 did). See
 // game_day_server_status.dart for why the parser only errs that way.
 
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,10 +41,11 @@ final gameDayServerStatusSyncProvider = Provider<GameDayServerStatus>((ref) {
       GameDayServerStatus.notServed;
 });
 
-/// A minute tick, so a served flag whose heartbeat stops ages out on screen
-/// without waiting for a snapshot that will never come.
-final gameDayStatusClockProvider = StreamProvider<DateTime>((ref) async* {
-  yield DateTime.now();
-  yield* Stream<DateTime>.periodic(
-      const Duration(minutes: 1), (_) => DateTime.now());
-});
+/// The clock the Game Day surfaces read "now" from, at build or call time.
+///
+/// A plain function, deliberately NOT a periodic stream: a timer-backed
+/// provider outlives widget-test trees, and the surfaces already rebuild on
+/// every status snapshot (every planner tick while served) and on every visit
+/// to the screen. Decisions (lease, engine) read the time at decision time
+/// anyway. Overridden in tests to pin the date.
+final gameDayNowProvider = Provider<DateTime Function()>((ref) => DateTime.now);
