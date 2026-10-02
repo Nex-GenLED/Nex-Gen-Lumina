@@ -281,21 +281,10 @@ class NotificationsService {
     }
   }
 
-  /// GAME_DAY_ALERT — team game today, Game Day mode activating.
-  static Future<void> showGameDayAlert(
-      String teamName, String gameTime, String leadTime) async {
-    try {
-      await _plugin.show(
-        6003,
-        'Game Day Alert',
-        '$teamName game today at $gameTime \u2014 Game Day mode activating at $leadTime.',
-        _commercialDetails,
-        payload: 'commercial:${AppRoutes.dashboard}',
-      );
-    } catch (e) {
-      debugPrint('Commercial notification failed: $e');
-    }
-  }
+  // GAME_DAY_ALERT (6003) — REMOVED in +114 (plan §5). It announced that Game
+  // Day would switch on at a lead time, for every home, and had no callers;
+  // when a reminder returns it should be driven by gameday_server.next_fire,
+  // which knows whether anything will actually switch on.
 
   /// CORPORATE_PUSH_RECEIVED — org has updated your schedule.
   static Future<void> showCorporatePushReceived(String orgName) async {

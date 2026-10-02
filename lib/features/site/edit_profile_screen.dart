@@ -1470,7 +1470,9 @@ class _AutopilotCard extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Lumina will automatically schedule patterns for your favorite holidays, team game days, and seasonal events while respecting your HOA quiet hours and color restrictions.',
+                        // +114 (plan §5): Lumina adds them to the calendar;
+                        // what fires them, and when, is per home.
+                        'Lumina will add your favorite holidays, team game days and seasonal events to your calendar, respecting your HOA quiet hours and color restrictions.',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),

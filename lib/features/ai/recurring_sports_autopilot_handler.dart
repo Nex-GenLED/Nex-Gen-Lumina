@@ -1,3 +1,5 @@
+import 'package:nexgen_command/features/game_day/game_day_server_status_provider.dart'
+    show gameDayServerStatusSyncProvider;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -76,9 +78,19 @@ Future<void> handleRecurringSportsAutopilot({
   // so the user knows automation is on (and through when, if bounded).
   final boundPhrase =
       intent.untilDate != null ? ' through ${_formatBound(intent.untilDate!)}' : '';
+  // +114 (plan §5): say who will actually run it. A home our servers serve
+  // gets the closed-app promise; every other home is told the truth about
+  // the phone path.
+  final servedHome = ref
+      .read(gameDayServerStatusSyncProvider)
+      .servedAt(DateTime.now());
+  final how = servedHome
+      ? "I'll set your lights for every game. Our servers run Game Day for "
+          'your home, so the app can stay closed.'
+      : "I'll put your lights on for every game while the app is open at "
+          'home.';
   final confirmation =
-      '✓ Game Day Autopilot is on for ${team.teamName}$boundPhrase — '
-      "I'll set your lights for every game automatically.";
+      '✓ Game Day Autopilot is on for ${team.teamName}$boundPhrase — $how';
 
   final prose = result.responseText.trim();
   post(prose.isEmpty ? confirmation : '$prose\n\n$confirmation');

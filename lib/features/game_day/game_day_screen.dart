@@ -232,11 +232,14 @@ class GameDayScreen extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 12),
+          // +114 (plan §5): no claim about WHO fires the start and end —
+          // that differs per home and the banner above says which. Live
+          // scoring is phone-side for everyone until the server runs it.
           Text(
-            'Set up your teams, choose a design, and let your lights '
-            'automatically come alive on game day. Turn on live scoring '
-            'to celebrate every point, or keep it simple with a static '
-            'team design.',
+            'Set up your teams and choose a look for game day. Once a team '
+            'is added, this screen shows whether our servers or this phone '
+            'runs it. Live scoring celebrates your team\'s scores while the '
+            'app is on screen.',
             style: TextStyle(
               fontSize: 14,
               color: NexGenPalette.textMedium,

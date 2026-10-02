@@ -118,9 +118,13 @@ Future<bool> _showNoBaseLayerDialog(
           // Plain terms, and only what is true. We do not say "your lights WILL
           // stay on" — we cannot see the controller, and we do not say the
           // house has no schedule at all, only that we don't have one saved.
+          // +114 (plan §5): the lease turns a house ON with the app closed
+          // but has no OFF row; going back to normal is the app's job unless
+          // our servers run this home's Game Day.
           Text(
-            'Game Day turns your lights on for a game and turns them back off '
-            'when it ends.',
+            'Game Day turns your lights on for a game. Going back to normal '
+            'afterwards happens when the app is open at home, or on its own '
+            'if our servers run Game Day for your home.',
             style: TextStyle(fontSize: 14, height: 1.4),
           ),
           SizedBox(height: 12),

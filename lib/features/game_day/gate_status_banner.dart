@@ -7,9 +7,9 @@
 //            home on the server path, the one case the gate changes anything.
 //
 // WHAT IT REPLACED. The W2 banner showed the gate to every account and, once
-// an account graduated, said "Your lights will fire for upcoming games." For a
-// home the server does not run that was a promise about a path that would not
-// fire (plan §5), and for a gated phone-run home "not firing yet" was wrong the
+// an account graduated, promised that upcoming games would fire. For a home
+// the server does not run that was a promise about a path that would not fire
+// (plan §5), and for a gated phone-run home "not firing yet" was wrong the
 // other way — the phone fires regardless of the gate. The states and their
 // words live in game_day_run_mode.dart; this file only lays them out.
 //
