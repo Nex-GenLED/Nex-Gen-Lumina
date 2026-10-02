@@ -133,6 +133,9 @@ class BackgroundLearningService {
     // back to seasonal/preferred-white defaults — safe for the first release.
     final repo = ref.read(autopilotEventRepositoryProvider);
     final calEntries = ref.read(calendarScheduleProvider);
+    // #166: read before the await — the widget behind [ref] may be gone when
+    // the regeneration returns.
+    final settings = ref.read(autopilotSettingsServiceProvider);
     final result = await repo.runWeeklyRegeneration(
       uid: uid,
       profile: profile,
@@ -158,14 +161,15 @@ class BackgroundLearningService {
         // AutopilotNotificationService already handles this — pass through.
         // scheduleWeeklyBrief is on the notification service; trigger via
         // the existing settings service to avoid circular imports.
-        await ref.read(autopilotSettingsServiceProvider).scheduleWeeklyBriefForEvents(profile, result.events);
+        await settings.scheduleWeeklyBriefForEvents(profile, result.events);
       } catch (e) {
         debugPrint('⚠️ Weekly brief notification failed: $e');
       }
     }
   }
 
-  /// Run daily maintenance - habit analysis and auto-favorites update
+  /// Run daily maintenance - habit analysis and suggestions (auto-favorites
+  /// were removed, #164).
   Future<void> runDailyMaintenance({bool force = false}) async {
     // Prevent duplicate runs
     if (_isRunning) {

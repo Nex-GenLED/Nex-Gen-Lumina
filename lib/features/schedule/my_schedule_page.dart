@@ -208,6 +208,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
         (previous, next) async {
       if (next == null) return;
       if (next.completer.isCompleted) return;
+      // #166: captured before the dialog — this page can be torn down while
+      // it is open (a Game Day enable fills the slots and fires this from
+      // another tab), and the page's `ref` then throws.
+      final pendingCtl = ref.read(pendingEvictionRequestProvider.notifier);
       ScheduleItem? choice;
       try {
         choice = await showEvictionPicker(
@@ -224,9 +228,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
       }
       // Clear after resolving so subsequent noFreeSlots requests can
       // re-trigger the listener.
-      if (ref.read(pendingEvictionRequestProvider) == next) {
-        ref.read(pendingEvictionRequestProvider.notifier).state = null;
-      }
+      if (pendingCtl.state == next) pendingCtl.state = null;
     });
 
     // Auto-sync now lives in SchedulesNotifier — every mutation triggers
