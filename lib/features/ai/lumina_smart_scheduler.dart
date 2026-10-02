@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:nexgen_command/data/holiday_seasons.dart';
@@ -142,15 +143,12 @@ class LuminaSmartScheduler {
     0,   // Solid     — bold color
   ];
 
-  static const Map<int, String> _effectNames = {
-    0: 'Solid',
-    2: 'Breathe',
-    12: 'Theater Chase',
-    41: 'Running',
-    43: 'Twinkle',
-    52: 'Fireworks',
-    63: 'Candle',
-    65: 'Fire',
+  /// The controller's own names for the rotation's effects (#167): the
+  /// catalog, not a local table that named a different effect for 12, 41,
+  /// 43, 52, 63 and 65.
+  static final Map<int, String> _effectNames = {
+    for (final id in const [0, 2, 12, 41, 43, 52, 63, 65])
+      id: WledEffectsCatalog.getName(id),
   };
 
   /// Visual category groups — effects within the same group look similar,
@@ -597,19 +595,11 @@ class LuminaSmartScheduler {
     return names[(date.weekday - 1).clamp(0, 6)];
   }
 
-  static String _moodLabel(int effectId) {
-    const labels = {
-      0: 'Solid',
-      2: 'Breathe',
-      12: 'Chase',
-      41: 'Running',
-      43: 'Sparkle',
-      52: 'Fireworks',
-      63: 'Candle',
-      65: 'Fire',
-    };
-    return labels[effectId] ?? 'Dynamic';
-  }
+  /// The word a night's name carries for its effect: the catalog's name
+  /// (#167 — 12 was "Chase" and 43 "Sparkle" while the controller plays Fade
+  /// and Rain).
+  static String _moodLabel(int effectId) =>
+      WledEffectsCatalog.getById(effectId)?.name ?? 'Dynamic';
 
   /// Strips city/state prefixes from full team names for short branded display.
   /// "Kansas City Royals" → "Royals", "Christmas" → "Christmas"

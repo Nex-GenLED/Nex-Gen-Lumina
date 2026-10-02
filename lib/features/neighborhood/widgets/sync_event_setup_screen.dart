@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme.dart';
@@ -850,18 +851,13 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
     int currentId,
     ValueChanged<int> onChanged,
   ) {
-    // Simplified effect picker — shows common effects
-    const effects = {
-      0: 'Solid',
-      2: 'Breathe',
-      9: 'Chase',
-      11: 'Rainbow',
-      38: 'Chase Rainbow',
-      44: 'Colorful',
-      63: 'Pride',
-      65: 'Running',
-      88: 'Fireworks',
-      101: 'Twinkle',
+    // Simplified effect picker — shows common effects. Each is named by the
+    // controller's own catalog (#167: this list used to call 9 "Chase", 11
+    // "Rainbow", 65 "Running", 88 "Fireworks" and 101 "Twinkle" — the
+    // effects that play are Rainbow, Scan Dual, Palette, Candle, Pacifica).
+    final effects = {
+      for (final id in const [0, 2, 9, 11, 38, 44, 63, 65, 88, 101])
+        id: WledEffectsCatalog.getName(id),
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

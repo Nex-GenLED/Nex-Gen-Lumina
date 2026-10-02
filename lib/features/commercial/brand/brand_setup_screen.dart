@@ -37,11 +37,15 @@ const _kCuratedCustomDesignEffects = <(int, String)>[
   (0, 'Solid'),
   (2, 'Breathe'),
   (12, 'Fade'),
-  (13, 'Glitter'),
+  // #167: each label is what the id PLAYS on WLED 0.15.1. These read
+  // "Glitter", "Twinkle" and "Twinkle Cat" for Theater, Two Dots and
+  // Colortwinkles. Whether to change the ids to the intended effects instead
+  // (87 Glitter, 17 Twinkle, 81 Twinklecat) is an owner decision (#168).
+  (13, 'Theater'),
   (15, 'Running'),
   (28, 'Chase'),
-  (50, 'Twinkle'),
-  (74, 'Twinkle Cat'),
+  (50, 'Two Dots'),
+  (74, 'Colortwinkles'),
 ];
 
 /// Mood vocabulary for custom designs. Mirrors the values

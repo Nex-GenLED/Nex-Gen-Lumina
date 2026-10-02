@@ -375,12 +375,14 @@ class GameDayAutopilotConfig {
   /// Curated short names for game-day-relevant effects; any other id uses
   /// the catalog's name so a saved design never reads as a bare "Custom".
   static String _effectShortName(int effectId) {
+    // #167: a short name must still BE the effect ("Running" for Running
+    // Dual, "Pattern" for Solid Pattern). 38, 39, 43 and 46 used to read
+    // Fire, Fireworks, Chase and Lightning for Aurora, Stream, Rain and
+    // Gradient; they now take the catalog's name.
     const names = {
       0: 'Solid', 2: 'Breathe', 12: 'Fade',
-      28: 'Chase', 38: 'Fire', 39: 'Fireworks',
-      17: 'Twinkle', 20: 'Sparkle', 41: 'Lighthouse',
-      43: 'Chase', 46: 'Lightning', 52: 'Running',
-      80: 'Twinklefox', 83: 'Pattern', 87: 'Glitter',
+      28: 'Chase', 17: 'Twinkle', 20: 'Sparkle', 41: 'Lighthouse',
+      52: 'Running', 80: 'Twinklefox', 83: 'Pattern', 87: 'Glitter',
     };
     return names[effectId] ?? WledEffectsCatalog.getName(effectId);
   }

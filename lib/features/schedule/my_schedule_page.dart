@@ -7,6 +7,7 @@
 //   • Lumina AI wired to calendarScheduleProvider — changes now actually apply
 //   • Pending changes preview with Apply / Discard before committing
 
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
@@ -1755,19 +1756,10 @@ double _extractNormalized(Map<String, dynamic>? payload, String key) {
   return 0.5;
 }
 
-/// Map a WLED effect ID to its human-readable name.
-String _wledEffectName(int id) {
-  const names = {
-    0: 'Solid', 2: 'Breathe', 12: 'Fade', 13: 'Theater Chase',
-    15: 'Running', 17: 'Twinkle', 20: 'Sparkle', 28: 'Chase',
-    37: 'Candle', 38: 'Fire', 39: 'Fireworks', 41: 'Running Dual',
-    43: 'Tricolor Chase', 46: 'Lightning', 49: 'Fairy',
-    52: 'Fireworks Starburst', 76: 'Meteor', 79: 'Ripple',
-    80: 'Twinklefox', 87: 'Glitter', 95: 'Flow',
-    9: 'Rainbow', 10: 'Rainbow Cycle',
-  };
-  return names[id] ?? 'Effect $id';
-}
+/// Map a WLED effect ID to its human-readable name: the controller's own
+/// (#167 — the local table named a different effect for 37, 38, 39, 41, 43,
+/// 46, 52, 95 and 10).
+String _wledEffectName(int id) => WledEffectsCatalog.getName(id);
 
 /// Bottom sheet showing full schedule detail for a card.
 /// Phase B2 — the DAY sheet: every schedule on a date, each one openable.
