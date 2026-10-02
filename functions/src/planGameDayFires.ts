@@ -127,6 +127,7 @@ import {
   capCeilingMs,
   espnReportsLive,
   CAP_RELEASE_STATUS_NAMES,
+  gameDayPaletteFor,
   FlagScope,
   flagOnFor,
   flagScopeFrom,
@@ -353,6 +354,12 @@ export interface PlannerFlags {
   espn: EspnFlags;
   /** P4b (#146), `preflight_ladder_lit`. Default off. */
   ladderLit: LadderLitSetting;
+  /**
+   * `payload_full_state` (true or a uid list; default off): the start and
+   * hand-off payloads state every segment field the app's Game Day paths do
+   * (gameDayPlanning, "Full segment state").
+   */
+  payloadFullState: FlagScope | null;
 }
 
 /** A forced P4b mode (tests, bench) in the production field's terms. */
@@ -368,7 +375,7 @@ function forcedLadderLit(v: LadderLitMode | string[] | undefined): LadderLitSett
  * take. Logged so it is seen; never armed.
  */
 function warnMalformedFlags(data: Record<string, unknown> | undefined): void {
-  for (const key of ["espn_college_slate", "track_started_by_id", "status_aware_cap"]) {
+  for (const key of ["espn_college_slate", "track_started_by_id", "status_aware_cap", "payload_full_state"]) {
     const v = data?.[key];
     if (v !== undefined && v !== false && flagScopeFrom(v) === null) {
       logger.warn(`planGameDayFires: config/gameday_planner.${key} is malformed (want true or [uid, …]); OFF. Value: ${JSON.stringify(v)}`);
@@ -398,6 +405,7 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       preflightMode: preflightModeFrom(data),
       espn: espnFlagsFrom(data),
       ladderLit: ladderLitSettingFrom(data),
+      payloadFullState: flagScopeFrom(data?.payload_full_state),
     };
   } catch (err) {
     logger.warn("planGameDayFires: flag read failed; staying LOG-ONLY", err);
@@ -407,6 +415,7 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       preflightMode: "enforce",
       espn: ESPN_FLAGS_OFF,
       ladderLit: null,
+      payloadFullState: null,
     };
   }
 }
@@ -589,6 +598,12 @@ export function buildGameDayPayload(args: {
    * customer actually has.
    */
   deviceChannelIds?: number[] | null;
+  /**
+   * `payload_full_state`: every participating segment states pal grp spc bri
+   * frz and three colour slots; an excluded one adds frz:false. A saved design
+   * is unaffected (it carries its own shape). Absent/false = the shipped shape.
+   */
+  fullState?: boolean;
 }): { payload: string; partitioned: boolean } | { refuse: string } {
   const c = args.config;
 
@@ -619,11 +634,13 @@ export function buildGameDayPayload(args: {
   const secondary =
     typeof c.secondary_color === "number" ? c.secondary_color : 0xffffffff;
 
+  const effectId = typeof c.effect_id === "number" ? c.effect_id : 0;
   const look = {
-    effectId: typeof c.effect_id === "number" ? c.effect_id : 0,
+    effectId,
     speed: typeof c.speed === "number" ? c.speed : 128,
     intensity: typeof c.intensity === "number" ? c.intensity : 128,
     colorSlots: toRgbwSlots([argbToRgb(primary), argbToRgb(secondary)]),
+    ...(args.fullState === true ? { fullState: { palette: gameDayPaletteFor(effectId) } } : {}),
   };
 
   // #67 — assert the full partition when the device set is known, so an
@@ -842,6 +859,7 @@ export async function runPlannerTick(
       trackStartedById?: boolean | string[];
       statusAwareCap?: boolean | string[];
       ladderLit?: LadderLitMode | string[];
+      payloadFullState?: boolean | string[];
     };
   } = {}
 ): Promise<PlanStats & { logRows: Array<Record<string, unknown>> }> {
@@ -864,6 +882,7 @@ export async function runPlannerTick(
           statusAwareCap: flagScopeFrom(opts.forceFlags?.statusAwareCap),
         },
         ladderLit: forcedLadderLit(opts.forceFlags?.ladderLit),
+        payloadFullState: flagScopeFrom(opts.forceFlags?.payloadFullState),
       }
     : await readPlannerFlags(db);
   const policy: WriteJobsPolicy = flags.policy;
@@ -910,6 +929,7 @@ export async function runPlannerTick(
     // #157: each ESPN flag is fleet-wide (`true`) or a uid list; resolved per
     // account. With every field absent all three are false here.
     const espnOn = espnFlagsFor(flags.espn, uid);
+    const fullStateOn = flagOnFor(flags.payloadFullState, uid);
     if (opts.onlyUid && uid !== opts.onlyUid) continue;
     const udata = u.data() || {};
 
@@ -1312,6 +1332,7 @@ export async function runPlannerTick(
               config: c,
               participatingChannels: pv.channels,
               deviceChannelIds: pv.deviceChannelIds,
+              fullState: fullStateOn,
             }))
           ) {
             servableTeams.push(teamSlug);
@@ -1484,6 +1505,7 @@ export async function runPlannerTick(
             // #67 — the device's own channel set, so the payload can name
             // every channel and darken the excluded ones.
             deviceChannelIds: part.deviceChannelIds,
+            fullState: fullStateOn,
           });
           if ("refuse" in built) {
             bump(stats.skipped, `payload:${built.refuse.split(":")[0]}`);
@@ -1861,6 +1883,7 @@ export async function runPlannerTick(
               config: configByEvent.get(winner.eventId) ?? {},
               participatingChannels: part.channels,
               deviceChannelIds: part.deviceChannelIds,
+              fullState: fullStateOn,
             });
             if ("refuse" in built) {
               // The survivor cannot be lit by this path (e.g. a per-pixel

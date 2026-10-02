@@ -161,15 +161,111 @@ export function buildParticipatingSegArray(args: {
   speed: number;
   intensity: number;
   colorSlots: ColorSlot[];
+  /** `payload_full_state`: state every look field. Absent = the shipped shape. */
+  fullState?: FullSegmentState;
 }): Array<Record<string, unknown>> {
-  return args.participatingChannelIds.map((ch) => ({
+  return args.participatingChannelIds.map((ch) =>
+    args.fullState
+      ? fullStateSegment(ch, args, args.fullState)
+      : {
+          id: ch,
+          on: true,
+          fx: args.effectId,
+          sx: args.speed,
+          ix: args.intensity,
+          col: args.colorSlots,
+        }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Full segment state — flag `payload_full_state` (default off)
+// ---------------------------------------------------------------------------
+//
+// audit/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02.md §1.1 / §4.1
+// (fix/115-multichannel-and-design-card). The shipped start payload states fx,
+// sx, ix and two colours, so each segment INHERITS pal, grp, spc, frz, its own
+// bri and col[2] from whatever ran last — and fx 52 reads col[2] (its reverse
+// wave) and pal. Two channels last left in different designs therefore render
+// the same server fire differently, a frozen channel ignores it, and a channel
+// left at grp 3 renders 3-px virtual pixels. Every app Game Day path states
+// these on the wire. With the flag on, the server states them too.
+
+/** The app's wire default for a segment's own brightness (kSegDefaultBri). */
+export const SEG_DEFAULT_BRI = 255;
+
+/**
+ * Effects whose colours come from a PALETTE rather than `col[]` — the app's
+ * `WledEffectsCatalog.overridesUserColors` (colorBehavior generatesOwnColors /
+ * usesPalette), mirrored from lib/features/wled/wled_effects_catalog.dart at
+ * fix/115-multichannel-and-design-card 1057421 (180 catalogued effects, these
+ * 120 override). An id not in the app catalog is not here, as in the app.
+ * Mirrored like ESPN_PATH: if the app catalog changes, change this with it.
+ */
+export const PALETTE_READING_EFFECT_IDS: ReadonlySet<number> = new Set([
+  4, 5, 7, 8, 9, 14, 19, 24, 26, 29, 30, 32, 33, 34, 35, 36, 38, 39, 42, 43, 45,
+  61, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 79, 80, 81, 88, 89, 90,
+  92, 93, 94, 97, 99, 101, 104, 105, 106, 107, 108, 109, 110, 114, 115, 116, 117,
+  118, 119, 120, 121, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134,
+  135, 136, 137, 138, 139, 140, 141, 143, 144, 145, 146, 147, 148, 149, 150, 152,
+  153, 154, 155, 156, 157, 158, 159, 160, 162, 163, 164, 165, 166, 167, 168, 172,
+  173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186,
+]);
+
+/**
+ * The app's `kColorsOnlyVerifiedEffects`: palette-reading effects bench-verified
+ * to render only the segment's own colours under pal 5 (Juggle, the Fireworks
+ * family). Its wire guard leaves pal 5 on these and rewrites it to 4 on every
+ * other palette-reading effect.
+ */
+export const COLORS_ONLY_VERIFIED_EFFECT_IDS: ReadonlySet<number> = new Set([64, 42, 90, 89]);
+
+/**
+ * The `pal` an app Game Day fire puts ON THE WIRE for effect `id`:
+ * `WledEffectsCatalog.setColorsPaletteFor` (0 for a colour-reading effect, 5
+ * for a palette-reading one), then `normalizeWledPayload`'s guard (5 → 4 for a
+ * palette-reading effect outside the verified set). The default fx 52 and all
+ * six TeamDesignCatalog looks (52, 0, 28, 2, 12, 0 grp 3) are colour-reading:
+ * 0. Light-it-Up-Now hardcodes 0 for every effect (the app's own palette
+ * disagreement, filed on the 115 branch); the engine rule is followed here.
+ */
+export function gameDayPaletteFor(effectId: number): number {
+  if (!PALETTE_READING_EFFECT_IDS.has(effectId)) return 0;
+  return COLORS_ONLY_VERIFIED_EFFECT_IDS.has(effectId) ? 5 : 4;
+}
+
+export interface FullSegmentState {
+  palette: number;
+}
+
+/** Keys a Game Day fire never sends: install geometry (#76). */
+export const SEGMENT_GEOMETRY_KEYS: readonly string[] = ["start", "stop", "len", "rev", "mi", "of", "startY", "stopY"];
+
+/**
+ * One participating segment, every look field stated — the app wire's set
+ * (the 115 branch's multichannel contract test pins it): fx sx ix pal grp spc
+ * bri frz:false and THREE colour slots (the third padded black, as the app's
+ * normalizeWledPayload pads). Never geometry.
+ */
+function fullStateSegment(
+  ch: number,
+  look: { effectId: number; speed: number; intensity: number; colorSlots: ColorSlot[] },
+  full: FullSegmentState
+): Record<string, unknown> {
+  const black: ColorSlot = [0, 0, 0, 0];
+  return {
     id: ch,
     on: true,
-    fx: args.effectId,
-    sx: args.speed,
-    ix: args.intensity,
-    col: args.colorSlots,
-  }));
+    fx: look.effectId,
+    sx: look.speed,
+    ix: look.intensity,
+    pal: full.palette,
+    grp: 1,
+    spc: 0,
+    bri: SEG_DEFAULT_BRI,
+    frz: false,
+    col: [...look.colorSlots, black, black, black].slice(0, 3),
+  };
 }
 
 /**
@@ -209,19 +305,30 @@ export function buildFullPartitionSegArray(args: {
   speed: number;
   intensity: number;
   colorSlots: ColorSlot[];
+  /**
+   * `payload_full_state`: participating segments state every look field, and
+   * an excluded one is `{id, on:false, frz:false}` — still look-preserving
+   * (#67), but a frozen excluded channel now goes dark too (audit §4.1).
+   * Absent = the shipped shape.
+   */
+  fullState?: FullSegmentState;
 }): Array<Record<string, unknown>> {
   const participating = new Set(args.participatingChannelIds);
   return args.deviceChannelIds.map((ch) =>
     participating.has(ch)
-      ? {
-          id: ch,
-          on: true,
-          fx: args.effectId,
-          sx: args.speed,
-          ix: args.intensity,
-          col: args.colorSlots,
-        }
-      : { id: ch, on: false }
+      ? args.fullState
+        ? fullStateSegment(ch, args, args.fullState)
+        : {
+            id: ch,
+            on: true,
+            fx: args.effectId,
+            sx: args.speed,
+            ix: args.intensity,
+            col: args.colorSlots,
+          }
+      : args.fullState
+        ? { id: ch, on: false, frz: false }
+        : { id: ch, on: false }
   );
 }
 

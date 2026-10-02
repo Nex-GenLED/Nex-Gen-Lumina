@@ -61,6 +61,9 @@ const ARMED = { forcePolicy: { enabled: true, allowlist: [UID] } };
 const ESPN_FLAG_SETS = [
   ["every ESPN flag off", {}],
   ["every ESPN flag on", { espnCollegeSlate: true, trackStartedById: true, statusAwareCap: true }],
+  // payload_full_state OFF must leave the captured bytes alone (it is the one
+  // flag that changes a payload when on — by design, so not run "on" here).
+  ["payload_full_state explicitly off", { payloadFullState: false }],
 ];
 
 function benchWorld(now) {
