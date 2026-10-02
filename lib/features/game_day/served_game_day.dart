@@ -20,7 +20,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart'
-    show enabledAutopilotConfigsProvider;
+    show enabledAutopilotConfigsProvider, gameDayAutopilotConfigsProvider;
 import 'package:nexgen_command/features/game_day/game_day_run_mode.dart';
 import 'package:nexgen_command/features/game_day/game_day_server_status.dart';
 import 'package:nexgen_command/features/game_day/game_day_server_status_provider.dart';
@@ -53,19 +53,47 @@ bool isServedGameDayEntry(
   return slug != null && status.servesTeamAt(slug, now);
 }
 
-/// `(entry, now) → served?`, bound to the live server status and the account's
-/// enabled configs. Indirected so the lease manager and the timeline can be
-/// tested without Firestore.
-typedef ServedGameDayEntryTest = bool Function(CalendarEntry entry, DateTime now);
+/// The lease path's answer for one entry. UNKNOWN is its own value on purpose:
+/// in the first seconds after launch neither the user document nor the team
+/// list has arrived, and reading that as "not served" would let the lease
+/// psave a served night — which APPLIES the solid team colour to the house at
+/// once — only for the next sweep to retract it. On every app open.
+enum ServedVerdict { served, notServed, unknown }
+
+/// `(entry, now) → verdict`, bound to the live server status and the
+/// account's configs. Indirected so the lease manager can be tested without
+/// Firestore.
+typedef ServedGameDayEntryTest = ServedVerdict Function(
+    CalendarEntry entry, DateTime now);
 
 final servedGameDayEntryTestProvider = Provider<ServedGameDayEntryTest>((ref) {
-  final status = ref.watch(gameDayServerStatusSyncProvider);
-  final configs = ref.watch(enabledAutopilotConfigsProvider);
+  final statusAsync = ref.watch(gameDayServerStatusProvider);
+  final configsAsync = ref.watch(gameDayAutopilotConfigsProvider);
+  final status = statusAsync.valueOrNull ?? GameDayServerStatus.notServed;
+  final configs = configsAsync.valueOrNull ?? const [];
+  // Loading = no value yet. An error is an answer (not served): the stream
+  // maps its own errors to not-served data, and a configs error leaves no team
+  // to map — waiting on either would only delay the 112 behaviour.
+  final statusKnown = statusAsync.hasValue || statusAsync.hasError;
+  final configsKnown = configsAsync.hasValue || configsAsync.hasError;
   final nameToSlug = <String, String>{
     for (final c in configs)
-      if (c.teamName.isNotEmpty) c.teamName: c.teamSlug,
+      if (c.enabled && c.teamName.isNotEmpty) c.teamName: c.teamSlug,
   };
-  return (entry, now) => isServedGameDayEntry(entry, status, nameToSlug, now);
+  return (entry, now) {
+    // Only a personal Game Day row can be served; everything else is decided
+    // without waiting on anything.
+    if (entry.sourceTag != CalendarEntrySourceTag.gameDay) {
+      return ServedVerdict.notServed;
+    }
+    if (!statusKnown) return ServedVerdict.unknown;
+    if (!status.servedAt(now)) return ServedVerdict.notServed;
+    // Served account: the team must be mapped to say which.
+    if (!configsKnown) return ServedVerdict.unknown;
+    return isServedGameDayEntry(entry, status, nameToSlug, now)
+        ? ServedVerdict.served
+        : ServedVerdict.notServed;
+  };
 });
 
 /// +114 — the day-timeline tag for a Game Day row: `server`, `phone` or

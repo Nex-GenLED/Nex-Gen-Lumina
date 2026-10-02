@@ -27,7 +27,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 final DateTime _now = DateTime(2026, 10, 10, 12, 0); // Saturday noon
 
 final _repoSwitch = StateProvider<WledRepository?>((_) => null);
-final _served = StateProvider<bool>((_) => false);
+final _served = StateProvider<ServedVerdict>((_) => ServedVerdict.notServed);
 final _entries = StateProvider<List<CalendarEntry>>((_) => const []);
 
 /// Sunday's game, inside the 48 h window from [_now].
@@ -69,8 +69,10 @@ void main() {
       // The served decision itself is pinned in served_game_day_test.dart;
       // here it is a switch: served iff tagged game_day and the switch is on.
       servedGameDayEntryTestProvider.overrideWith((ref) {
-        final on = ref.watch(_served);
-        return (e, _) => on && e.sourceTag == CalendarEntrySourceTag.gameDay;
+        final v = ref.watch(_served);
+        return (e, _) => e.sourceTag == CalendarEntrySourceTag.gameDay
+            ? v
+            : ServedVerdict.notServed;
       }),
     ]);
     addTearDown(c.dispose);
@@ -120,7 +122,7 @@ void main() {
       () async {
     final h = harness();
     final svc = lan(h.c);
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.initialize();
 
     final r = await h.m.handleEntryCreated(_gameDay());
@@ -148,7 +150,7 @@ void main() {
       () async {
     final h = harness();
     lan(h.c);
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.initialize();
 
     final r = await h.m.handleEntryCreated(
@@ -160,7 +162,7 @@ void main() {
   test('holiday handling unchanged', () async {
     final h = harness();
     lan(h.c);
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.initialize();
     final r = await h.m
         .handleEntryCreated(_gameDay(type: CalendarEntryType.holiday));
@@ -170,7 +172,7 @@ void main() {
   test('the sweep does not promote a served night', () async {
     final h = harness(entries: [_gameDay()]);
     final svc = lan(h.c);
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.initialize();
     await h.m.sweepExpiredLeases();
     expect(h.m.activeLeases, isEmpty);
@@ -186,7 +188,7 @@ void main() {
     expect(leaseMacros(svc), [armed.presetId]);
     final savesBefore = svc.lastSimulatedPresetSave;
 
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     svc.lastSimulatedConfigPayload = null;
     await h.m.sweepExpiredLeases();
 
@@ -205,7 +207,7 @@ void main() {
     expect(h.m.activeLeases, hasLength(1));
 
     bridge(h.c, h.fs);
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.sweepExpiredLeases();
 
     expect(h.m.activeLeases, hasLength(1),
@@ -218,7 +220,7 @@ void main() {
     final svc = lan(h.c);
     await h.m.initialize();
     svc.simulateApplyConfigReturns = false;
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.sweepExpiredLeases();
     expect(h.m.activeLeases, hasLength(1));
   });
@@ -230,7 +232,7 @@ void main() {
     await h.m.initialize();
     expect(h.m.activeLeases, hasLength(1));
 
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     final r = await h.m.handleEntryCreated(_gameDay());
 
     expect(r.outcome, LeaseOutcome.servedByServer);
@@ -242,15 +244,61 @@ void main() {
       'night again', () async {
     final h = harness(entries: [_gameDay()]);
     final svc = lan(h.c);
-    h.c.read(_served.notifier).state = true;
+    h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.initialize();
     expect(h.m.activeLeases, isEmpty);
 
-    h.c.read(_served.notifier).state = false;
+    h.c.read(_served.notifier).state = ServedVerdict.notServed;
     await h.m.sweepExpiredLeases();
 
     expect(h.m.activeLeases, hasLength(1));
     expect(svc.lastSimulatedPresetSave, isNotNull);
+  });
+
+  test('LAUNCH RACE: status still loading → the lease WAITS; it resolves to '
+      'served → no save, no cfg (no flash-then-retract)', () async {
+    final h = harness();
+    final svc = lan(h.c);
+    await h.m.initialize();
+    h.c.read(_served.notifier).state = ServedVerdict.unknown;
+    h.m.servedStatusWait = const Duration(seconds: 5);
+
+    final pending = h.m.handleEntryCreated(_gameDay());
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    expect(svc.lastSimulatedPresetSave, isNull, reason: 'still waiting');
+    h.c.read(_served.notifier).state = ServedVerdict.served;
+    final r = await pending;
+
+    expect(r.outcome, LeaseOutcome.servedByServer);
+    expect(svc.lastSimulatedPresetSave, isNull);
+    expect(svc.lastSimulatedConfigPayload, isNull);
+  });
+
+  test('LAUNCH RACE: still unknown after the bound → 112 behaviour (leased)',
+      () async {
+    final h = harness();
+    final svc = lan(h.c);
+    await h.m.initialize();
+    h.c.read(_served.notifier).state = ServedVerdict.unknown;
+    h.m.servedStatusWait = const Duration(milliseconds: 300);
+
+    final r = await h.m.handleEntryCreated(_gameDay());
+
+    expect(r.outcome, LeaseOutcome.leased);
+    expect(svc.lastSimulatedPresetSave, isNotNull);
+  });
+
+  test('the retraction pass never waits: an unknown night is left armed for '
+      'the next sweep', () async {
+    final h = harness(entries: [_gameDay()]);
+    lan(h.c);
+    await h.m.initialize();
+    expect(h.m.activeLeases, hasLength(1));
+    h.c.read(_served.notifier).state = ServedVerdict.unknown;
+    final sw = Stopwatch()..start();
+    await h.m.sweepExpiredLeases();
+    expect(sw.elapsed, lessThan(const Duration(seconds: 2)));
+    expect(h.m.activeLeases, hasLength(1));
   });
 
   test('a served check that throws reads as NOT served (phone path)', () async {
@@ -264,8 +312,8 @@ void main() {
       calendarLeaseSchedulesProvider.overrideWithValue(const []),
       calendarLeaseScheduleUpdaterProvider.overrideWith((_) => (_) async {}),
       calendarLeaseScheduleSyncTriggerProvider.overrideWith((_) => () async {}),
-      servedGameDayEntryTestProvider
-          .overrideWith((_) => (_, __) => throw StateError('boom')),
+      servedGameDayEntryTestProvider.overrideWith(
+          (_) => (_, __) => throw StateError('boom')),
     ]);
     addTearDown(c.dispose);
     final m = c.read(calendarEntryLeaseManagerProvider)..nowProvider = () => _now;

@@ -4,12 +4,19 @@
 // sets the gd_<slug> id the plan assumed); the team comes from the note through
 // the account's configs. A row whose team cannot be recovered is NOT served.
 
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/features/game_day/game_day_server_status.dart';
+import 'package:nexgen_command/features/game_day/game_day_server_status_provider.dart';
 import 'package:nexgen_command/features/game_day/served_game_day.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
+import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
 
 const _names = {
   'Kansas City Chiefs': 'kansas_city_chiefs',
@@ -114,6 +121,86 @@ void main() {
           isServedGameDayEntry(
               _row(), GameDayServerStatus.notServed, _names, _now),
           isFalse);
+    });
+  });
+
+  group('servedGameDayEntryTestProvider — tri-state (the launch race)', () {
+    late StreamController<GameDayServerStatus> status;
+    late StreamController<List<GameDayAutopilotConfig>> configs;
+    late ProviderContainer c;
+
+    GameDayAutopilotConfig chiefs() => GameDayAutopilotConfig(
+          teamSlug: 'kansas_city_chiefs',
+          teamName: 'Kansas City Chiefs',
+          espnTeamId: '12',
+          sport: SportType.nfl,
+          primaryColorValue: 0xFFE31837,
+          secondaryColorValue: 0xFFFFB81C,
+          enabled: true,
+          createdAt: DateTime(2026, 9, 1),
+          updatedAt: DateTime(2026, 9, 1),
+        );
+
+    setUp(() {
+      status = StreamController<GameDayServerStatus>();
+      configs = StreamController<List<GameDayAutopilotConfig>>();
+      c = ProviderContainer(overrides: [
+        gameDayServerStatusProvider.overrideWith((_) => status.stream),
+        gameDayAutopilotConfigsProvider.overrideWith((_) => configs.stream),
+      ]);
+      // Keep both streams subscribed, as the app's widgets do.
+      c.listen(gameDayServerStatusProvider, (_, __) {});
+      c.listen(gameDayAutopilotConfigsProvider, (_, __) {});
+    });
+    tearDown(() {
+      c.dispose();
+      status.close();
+      configs.close();
+    });
+
+    ServedVerdict verdict(CalendarEntry e) =>
+        c.read(servedGameDayEntryTestProvider)(e, _now);
+
+    Future<void> flush() => Future<void>.delayed(Duration.zero);
+
+    test('nothing loaded → UNKNOWN for a Game Day row', () {
+      expect(verdict(_row()), ServedVerdict.unknown);
+    });
+
+    test('a non-Game-Day row is decided at once, never unknown', () {
+      expect(verdict(_row(tag: null, type: CalendarEntryType.user)),
+          ServedVerdict.notServed);
+    });
+
+    test('status loaded NOT served → notServed without waiting on teams',
+        () async {
+      status.add(GameDayServerStatus.notServed);
+      await flush();
+      expect(verdict(_row()), ServedVerdict.notServed);
+    });
+
+    test('status served, teams still loading → UNKNOWN', () async {
+      status.add(_status());
+      await flush();
+      expect(verdict(_row()), ServedVerdict.unknown);
+    });
+
+    test('status served, teams loaded → SERVED for the mapped team', () async {
+      status.add(_status());
+      configs.add([chiefs()]);
+      await flush();
+      expect(verdict(_row()), ServedVerdict.served);
+      expect(
+          verdict(_row(
+              note: 'Kansas City Royals vs Detroit — Game Day autopilot')),
+          ServedVerdict.notServed);
+    });
+
+    test('a status stream error is an answer (not served), not a wait',
+        () async {
+      status.addError(StateError('permission-denied'));
+      await flush();
+      expect(verdict(_row()), ServedVerdict.notServed);
     });
   });
 }

@@ -40,7 +40,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/game_day/served_game_day.dart'
-    show servedGameDayEntryTestProvider;
+    show ServedVerdict, servedGameDayEntryTestProvider;
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
@@ -668,7 +668,7 @@ class CalendarEntryLeaseManager {
     // writes, the sweep's promotion, eviction-and-lease, heir re-derivation),
     // so the served stand-down lives here and nowhere else. No device traffic
     // for a served night; an existing lease for it is retracted (LAN only).
-    if (_isServedGameDay(entry)) {
+    if (await _isServedGameDay(entry, waitIfUnknown: true)) {
       final existing = _activeLeases[entry.dateKey];
       if (existing != null) {
         await _retractLeases({entry.dateKey: existing});
@@ -1064,10 +1064,41 @@ class CalendarEntryLeaseManager {
 
   // ─── +114: server-run Game Day stand-down ─────────────────────────
 
+  /// How long a lease decision for a Game Day night waits for the server
+  /// status and the team list to load before falling back to the 112
+  /// behaviour (lease it). See [ServedVerdict] for why it waits at all.
+  @visibleForTesting
+  Duration servedStatusWait = const Duration(seconds: 10);
+
+  static const Duration _kServedStatusPoll = Duration(milliseconds: 250);
+
+  ServedVerdict _servedVerdict(CalendarEntry entry) =>
+      _ref.read(servedGameDayEntryTestProvider)(entry, nowProvider());
+
   /// Never throws; any failure to answer reads as NOT served (the phone path).
-  bool _isServedGameDay(CalendarEntry entry) {
+  ///
+  /// [waitIfUnknown] is the lease decision: wait (bounded) for the status to
+  /// load rather than lease a night the server may own. The sweep's
+  /// retraction pass does not wait — an unknown night is simply left for the
+  /// next sweep.
+  Future<bool> _isServedGameDay(CalendarEntry entry,
+      {bool waitIfUnknown = false}) async {
     try {
-      return _ref.read(servedGameDayEntryTestProvider)(entry, nowProvider());
+      var v = _servedVerdict(entry);
+      if (waitIfUnknown) {
+        var waited = Duration.zero;
+        while (v == ServedVerdict.unknown && waited < servedStatusWait) {
+          await Future<void>.delayed(_kServedStatusPoll);
+          waited += _kServedStatusPoll;
+          v = _servedVerdict(entry);
+        }
+        if (v == ServedVerdict.unknown) {
+          debugPrint('$_kLogPrefix ${entry.dateKey}: Game Day status still '
+              'loading after ${servedStatusWait.inSeconds}s — treated as not '
+              'served (112 behaviour)');
+        }
+      }
+      return v == ServedVerdict.served;
     } catch (e) {
       debugPrint('$_kLogPrefix served check failed — $e (treated as not '
           'served)');
@@ -1085,11 +1116,11 @@ class CalendarEntryLeaseManager {
       return 0;
     }
     final byDate = {for (final e in entries) e.dateKey: e};
-    final served = <String, CalendarEntryLease>{
-      for (final l in _activeLeases.values)
-        if (byDate[l.dateKey] != null && _isServedGameDay(byDate[l.dateKey]!))
-          l.dateKey: l,
-    };
+    final served = <String, CalendarEntryLease>{};
+    for (final l in _activeLeases.values) {
+      final e = byDate[l.dateKey];
+      if (e != null && await _isServedGameDay(e)) served[l.dateKey] = l;
+    }
     if (served.isEmpty) return 0;
     return _retractLeases(served);
   }
