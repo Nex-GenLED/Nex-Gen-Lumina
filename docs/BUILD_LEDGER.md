@@ -156,6 +156,48 @@ goes on a NEW bump + tag (never rewrite a public tag).
 
 ## Operational flags
 
+### FUNCTIONS + INDEXES + RULES — Game Day server authority, steps A + B — BUILT, NOT DEPLOYED (2026-10-02)
+
+| item | value |
+|---|---|
+| Branch | `fix/gameday-server-ab` off release `a35e30e`; code commits `05946da` (A1/A3 stuck `executing` sweep, age-capped in-flight guard, guarded sweeper writes), `43981f5` (A2 retry budget), `5d5fb6b` (B4 `on_time_override`), `a779bb0` (B1–B3 pre-flight, `gameday_server`, scorecard, index override), `ec0e50b` (B5 rules). NOT pushed, NOT tagged, NOT merged. |
+| Spec | `docs/gameday_server_authority_plan_2026-10-01.md` (`e397068`, docs branch, not pushed) |
+| Functions affected on deploy | `sweepExpiredCommands`, `dispatchFireJobs`, `planGameDayFires`, `probeControllerHealth`, `collectControllerHealth`; `backfillControllerHealth` (same module, same `classifyProbe` change) is outside the approved list and awaits the owner's call. `teardownTeamFires`, `syncControllerIps`, `backfillControllerIps` import only unchanged exports. |
+| Indexes | `fieldOverrides`: `fire_jobs.fireAt` adds COLLECTION_GROUP ASC (collection defaults kept). The stuck pass reuses the deployed `commands (status, createdAt)` COLLECTION_GROUP composite. |
+| Rules | `/users/{uid}`: clients cannot add or change `gameday_server` / `gameday_gate_blocking` (removal allowed). Emulator differential vs `a35e30e`: 100 requests, 28 deltas, all intended, 0 unexpected. NOT deployed. |
+| Bench invariant | an account that passes every check mints the SAME start and end documents as the 2026-10-01 live fire: payload byte-identical to the production start payload, keys identical plus `retryUntil` (unit `gameDayBenchRegression.test.js`, emulator `gameDayServerAB.emulator.test.ts`). Plus one `getInfo` P6 probe per event at mint. |
+| Gates | functions unit 789/789 (was 618; `npm test` now builds first) · emulator 262/264 — the only failures are `commercialRules` cross-dealer ×2 (#119), identical to the `a35e30e` baseline (217/220 there, whose third failure, the `setAccountProfile` wipe-hook timeout, did not recur) · PII scan of every added line and commit message clean |
+| Not verified | the bench account's live P1–P5 inputs (production reads beyond tonight's job and session were not taken from this session); `scripts/_gameday_preflight_dryrun.js <uid>` is the read-only check to run before deploying |
+| Deploy plan | `docs/gameday_server_ab_deploy_plan_2026-10-02.md` — indexes → step A functions → planner → rules (separate approval); observe-mode escape hatch `config/gameday_planner.preflight_mode: "observe"` |
+
+### FUNCTIONS DEPLOY — `planGameDayFires` rev 00015 (Game Day hard cap) — 2026-09-24 (row recorded late, 2026-10-02)
+
+| item | value |
+|---|---|
+| Deployed | 2026-09-24 13:13:40Z, from `dcd4d1c` ONLY (detached; the parity commit `089ee12` deliberately excluded) → revision `plangamedayfires-00015-zih`, ACTIVE, 100% traffic, 18 env vars (names identical to 00014) |
+| Function | `planGameDayFires` — sole function touched |
+| Change | `decideEndSignal` fires `hard_cap` strictly after start + estimatedDuration + 60 min (the app's `isAfter` fallback), after GUARD 0 / GUARD 3; END ownership is `outrankedBy(self)`, so a capped #1 hands off rather than being suppressed; new stat `hardCapsPlanned` |
+| Allowlist at deploy | `write_jobs: true`, one uid (the bench account) |
+| Read back | first tick 13:15:27Z: `hardCapsPlanned: 0` present, errors 0, espnErrors 0, no WARNING+ logs |
+| Tests | functions unit 598/0 at `dcd4d1c` |
+| In release | merged `6429e46` into `fix/release-109`, then `d3052b6` into release (+109); `a35e30e` planner source == rev 00015 |
+| Rollback | redeploy `planGameDayFires` from `c44a135` (planner source == rev 00014) |
+| Why late | the deploy record lived only in the single-authority session report (§7, untracked); the plan of 2026-10-01 §0 found the ledger had no row |
+
+### FUNCTIONS DEPLOY — `planGameDayFires` rev 00014 (team hierarchy + lead-time override) — 2026-09-23 (row recorded late, 2026-10-02)
+
+| item | value |
+|---|---|
+| Deployed | 2026-09-23 21:38:33Z, from `2ac3bc8` (branch `fix/gameday-planner-hierarchy-2026-09-23`, parent `6f53707` = build-106) → revision `plangamedayfires-00014-huy`; previous revision 00013 (2026-08-26) |
+| Function | `planGameDayFires` — sole function touched |
+| Change | new pure `gameDayHierarchy.ts`: the planner walks configs in hierarchy order, DEFERS a lower team's start while a lit higher team holds the house, SUPPRESSES a non-owner's end (`end:not_owner`), and makes the owner's end a HAND-OFF carrying the survivor's design; lead time reads `lead_time_minutes_override` (the field the app writes) before the legacy `lead_time_minutes` |
+| Allowlist at deploy | bench only, `write_jobs: true`; no config changed |
+| Read back | first tick 21:40:17Z: `handoffsPlanned` present, errors 0, summary buckets identical to the pre-deploy tick, the bench row unchanged |
+| Tests | functions unit 452 → 527 |
+| In release | merged `ddb35c5` (+107) |
+| Rollback | redeploy `planGameDayFires` from `6f53707` (rev 00013 source) |
+| Why late | the deploy happened on the branch; the ledger had no row (plan 2026-10-01 §0) |
+
 ### +112 — build-112 tagged 2026-10-01 (Codemagic build number: pending)
 
 | item | value |

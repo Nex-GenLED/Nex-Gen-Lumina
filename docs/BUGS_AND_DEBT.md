@@ -2589,6 +2589,68 @@ commit — merging `main` into this tree will collide with the untracked copies.
     sweep re-run the update path for dirty records when `repoCanWriteCfg` is true.
   - Files: `lib/features/schedule/calendar_entry_lease_manager.dart`. Related: **#123**, **#127**.
 
+- [ ] **#138 — THE PLANNER STILL ASSUMES UTC−5 FOR DAYLIGHT AND BASE RESTORE: an hour off for
+  Central from 2026-11-01, wrong year-round for every other zone**
+  - Status: **OPEN — filed 2026-10-02 from steps A+B (`fix/gameday-server-ab`); not fixed** ·
+    Severity: **P2** · Evidence: **verified-by-source**
+  - `planGameDayFires.ts` passes `tzOffsetHours: -5` to `isDaylightOnlyGame` and to
+    `baseRestorePayload`. B4 (`5d5fb6b`) resolves the user's IANA `time_zone` for
+    `on_time_override` and the scorecard date only (`gameDayHierarchy.tzOffsetResolverFor`), and
+    deliberately did not move daylight/restore, because that would change the bench's restore
+    choice inside the A+B branch. After DST ends a game finishing between 17:00 and 18:00 Central
+    restores the wrong base preset, and a skip-day-games check is an hour off.
+  - **Fix shape:** pass `tzOffsetResolverFor(udata)(nowMs)` to both. The resolver already falls
+    back to UTC−5 for a missing or abbreviation zone, so it is safe before the profile editor's
+    abbreviation write (TD-7 on the main-checkout lineage) is fixed. Pin it with a December
+    planner test. **Deadline 2026-11-01.**
+  - Files: `functions/src/planGameDayFires.ts`, `functions/src/gameDayPlanning.ts`.
+
+- [ ] **#139 — `backfillControllerHealth` keeps the OLD probe classification unless it is
+  redeployed with `collectControllerHealth`**
+  - Status: **OPEN — filed 2026-10-02; deploy decision** · Severity: **P3** · Evidence:
+    **verified-by-source**
+  - A1 (`05946da`) makes the sweeper terminate stuck probes as `failed` / `stuck_executing`,
+    and `classifyProbe` now blames the BRIDGE for them. `backfillControllerHealth` (admin-only
+    callable, same module) runs the same collector. If only `collectControllerHealth` is
+    redeployed, a manual backfill classifies a stuck probe as a controller failure.
+  - **Fix shape:** add `functions:backfillControllerHealth` to the step-A deploy (owner approval;
+    see `docs/gameday_server_ab_deploy_plan_2026-10-02.md` §1). Close this entry when it is.
+
+- [ ] **#140 — A Game Day START never lands after kickoff: the plan's retry formula reduces to
+  kickoff for every lead-based start**
+  - Status: **OPEN — decision owed; implemented as written** · Severity: **P3** · Evidence:
+    **verified-by-source**
+  - Plan §3.1 A2: `retryUntil = min(fireAt + lead, gameStart + 15 min)`. For a lead-based start
+    `fireAt + lead` IS `gameStart`, so retries stop at kickoff. The plan's own risk line ("a late
+    start lands after kickoff, bounded at +15 min") is reachable only with an `on_time_override`.
+    `fireJobs.startRetryUntilMs` implements the formula literally, never shorter than the pre-A2
+    90 s window.
+  - **Decision:** keep it (a start never lands mid-game), or let it land up to kickoff + 15 min
+    (change the `min` to `gameStart + START_RETRY_AFTER_KICKOFF_MS`; one line plus two tests).
+
+- [ ] **#141 — Two definitions of "stuck executing" exist across branches**
+  - Status: **OPEN — merge hazard** · Severity: **P3** · Evidence: **verified-by-source**
+  - `feat/neighborhood-sync-v1` (`776180a`, not merged) clears stuck commands inside
+    `applySyncPattern` with its own `STUCK_EXECUTING_MS = 90 s` and an unguarded update. A1 makes
+    `commandSafety.STUCK_EXECUTING_AFTER_MS` (180 s), `isStuckExecuting` and
+    `commandHygiene.markStuckExecuting` (`lastUpdateTime` precondition) the single definition.
+    The texts are compatible: `isStuckExecutingError` matches by prefix.
+  - **Fix shape:** when the sync branch is merged, replace its constant and write with the shared
+    predicate and guarded write. 90 s is only 2x the bridge's measured worst completion (~45 s),
+    against A1's 4x. Two thresholds would also let the sync path and the dispatcher disagree about
+    the same doc.
+
+- [ ] **#142 — The admin guide does not describe the two new planner flags or the pre-flight
+  reasons**
+  - Status: **OPEN — copy** · Severity: **P3** · Evidence: **verified-by-source**
+  - `config/gameday_planner` gains `preflight_mode` (`"observe"` / absent = enforce) and
+    `publish_server_status` (`false` / absent = publish). The skip reasons are
+    `preflight_no_bridge`, `preflight_bridge_stale`, `preflight_no_participation`,
+    `preflight_ladder_unknown`, `preflight_ladder_bad`, `preflight_gated` and
+    `preflight_controller_unreachable`, with `lease_hygiene_unknown` informational.
+    `docs/guides-2026-09/06-admin-guide.md` also still states `write_jobs: false` (plan §5).
+  - **Fix shape:** update the admin guide's planner table when A+B is deployed.
+
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
   - Status: OPEN (filed 2026-08-19) · Severity: **P2 — UX, installer-facing**

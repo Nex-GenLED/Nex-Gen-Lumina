@@ -64,3 +64,17 @@ production Auth.
   converge in either order. Also the `assignReferralCode` gate: assigns for
   an email user, skips anonymous / `staff_*` / Auth-less uids without writing
   a `referral_codes` doc.
+- `relayEligibility.emulator.test.ts` — also covers A1 (2026-10-02): the
+  sweeper's stuck-`executing` pass on real Firestore, and a `lastUpdateTime`
+  precondition refusing a write after a concurrent completion
+  ("completed wins").
+- `gameDayServerAB.emulator.test.ts` — Game Day server authority steps A + B:
+  the real planner tick mints the start byte-identical to the 2026-10-01
+  production payload, publishes `gameday_server` by dotted path without
+  touching `last_fire`, and reads the heartbeat's `updateTime`; the real
+  dispatcher's A2 reschedule transaction with nested scorecard increments; no
+  scorecard entry is invented for a pre-deploy session.
+- `gameDayServerFieldsRules.emulator.test.ts` — B5: no client (owner,
+  anonymous, another uid, admin claim) can add or change `gameday_server` /
+  `gameday_gate_blocking` on `/users/{uid}`; removal and every ordinary field
+  stay writable.
