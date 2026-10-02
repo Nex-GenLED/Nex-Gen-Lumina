@@ -20,6 +20,9 @@ import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_gam
     show EphemeralGameSession;
 import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session_providers.dart'
     show activeEphemeralSessionsProvider;
+import 'package:nexgen_command/features/game_day/game_day_server_status.dart';
+import 'package:nexgen_command/features/game_day/game_day_server_status_provider.dart'
+    show gameDayServerStatusSyncProvider;
 import 'package:nexgen_command/features/schedule/base_ladder_repair_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
@@ -35,6 +38,34 @@ import 'package:nexgen_command/features/wled/wled_service.dart';
 const String kLadderRepairPublishSource = 'ladder_repair';
 
 // ── Game Day activity (pure core + probe) ────────────────────────────────────
+
+/// PURE. What the server's own status says about a game in progress, or null.
+///
+/// Read whether or not the served flag is fresh: a planner that stopped
+/// writing may still have minted jobs that the dispatcher fires, so for a
+/// "do not touch the controller now" question the raw data is the safe input.
+///   • a start that completed within the last 8 h and no end since → live;
+///   • an END pending → the game is on;
+///   • a START due within [kLadderRepairGameGuard] (or overdue) → about to fire.
+String? serverLiveReasonAt(GameDayServerStatus s, DateTime now) {
+  final last = s.lastFire;
+  if (last != null &&
+      last.seq == 'start' &&
+      last.completed &&
+      last.completedAt != null &&
+      now.difference(last.completedAt!) < const Duration(hours: 8)) {
+    return 'our servers started a game and have not ended it yet';
+  }
+  final next = s.nextFire;
+  if (next == null) return null;
+  if (next.seq == 'end') return 'our servers will end a game in progress';
+  if (next.seq == 'start' &&
+      next.fireAt.difference(now) <= kLadderRepairGameGuard) {
+    return 'our servers start a game at ${next.fireAt.hour}:'
+        '${next.fireAt.minute.toString().padLeft(2, '0')}';
+  }
+  return null;
+}
 
 ({int hour, int min})? _hm(String? t) {
   if (t == null) return null;
@@ -127,6 +158,9 @@ final gameDayActivityProbeProvider =
         ephemeralSessions:
             ephemeral.valueOrNull ?? const <EphemeralGameSession>[],
         espnLiveReason: espn,
+        serverLiveReason: serverLiveReasonAt(
+            ref.read(gameDayServerStatusSyncProvider),
+            ref.read(healerPhoneNowProvider)()),
       );
     }
 
