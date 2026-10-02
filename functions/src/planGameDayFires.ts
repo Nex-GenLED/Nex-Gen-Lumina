@@ -126,6 +126,7 @@ import {
   capBoundMs,
   capCeilingMs,
   espnReportsLive,
+  CAP_RELEASE_STATUS_NAMES,
   FlagScope,
   flagOnFor,
   flagScopeFrom,
@@ -1435,6 +1436,26 @@ export async function runPlannerTick(
         const startBeyondHorizon = startFireAt >= nowMs + PLAN_HORIZON_MS;
 
         if (
+          !startAlreadyPlanned &&
+          !startInPast &&
+          !startBeyondHorizon &&
+          espnOn.statusAwareCap &&
+          CAP_RELEASE_STATUS_NAMES.has(game.statusName)
+        ) {
+          // #158 (status_aware_cap). ESPN already says this game will not be
+          // played tonight — postponed, cancelled, suspended, forfeited,
+          // abandoned — so no start is minted: it would light the house for
+          // nothing, and the cap would restore base hours later. One START
+          // bucket, so the reconciliation holds. Re-evaluated every tick: a
+          // game ESPN reschedules (status back to scheduled) mints as usual.
+          // A start ALREADY minted is not withdrawn here (#158, decision).
+          bump(stats.skipped, "game_not_played");
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: "game_not_played",
+            espnStatus: game.statusName,
+            fireAt: new Date(startFireAt).toISOString(),
+          });
+        } else if (
           !startAlreadyPlanned &&
           !startInPast &&
           !startBeyondHorizon &&
