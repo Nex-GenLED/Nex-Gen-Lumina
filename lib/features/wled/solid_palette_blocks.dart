@@ -178,3 +178,114 @@ String solidLayoutToJson(SolidLayout layout) =>
 /// the field existed, so every design saved earlier fires exactly as it did.
 SolidLayout solidLayoutFromJson(Object? value) =>
     value == 'alternating' ? SolidLayout.alternating : SolidLayout.blocks;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The tuner's colour-layout card: what it shows for a selection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// What the tuner's colour-layout card shows for one selection — decided
+/// here, in pure Dart, so every transition is unit-testable and the card
+/// cannot drift from the rule.
+///
+/// THE RULE. The Static setup (Blocks | Alternating) belongs to the PALETTE:
+/// it is live whenever picking Static would be substituted for this palette
+/// ([isSolidPaletteSubstitution] with effect 0), whatever effect is being
+/// previewed. It used to be gated on the SELECTED effect, so previewing Chase
+/// or Glitter removed it — and with a motion filter hiding the Solid tile the
+/// only way back was to close the card (field report, 2026-10-02). While
+/// another effect is previewed the chips stay, unselected, and tapping one
+/// selects Static in that layout. A preview never touches the remembered
+/// layout or grouping, so returning to Static shows them again.
+///
+/// The "LEDs per color" row (`grp`) is Alternating's band width. Blocks lays
+/// the palette out positionally and ignores it (see the file header), so the
+/// row is hidden under Blocks. Every other colour-layout effect (Twinkle,
+/// Glitter, Spots…) still takes its band width from `grp`, so the row stays
+/// for them, and for them a tap keeps the effect.
+class StaticSetupControls {
+  const StaticSetupControls({
+    required this.showCard,
+    required this.showChips,
+    required this.chipsActive,
+    required this.showGrouping,
+    required this.groupingReturnsToStatic,
+    required this.showSpacingAndPreview,
+  });
+
+  /// Nothing — a brightness gradient has its own controls.
+  static const StaticSetupControls none = StaticSetupControls(
+    showCard: false,
+    showChips: false,
+    chipsActive: false,
+    showGrouping: false,
+    groupingReturnsToStatic: false,
+    showSpacingAndPreview: false,
+  );
+
+  /// The whole card.
+  final bool showCard;
+
+  /// The Blocks | Alternating chips.
+  final bool showChips;
+
+  /// Static is the selected effect: the chosen chip is highlighted. Otherwise
+  /// the chips show unselected and tapping one selects Static.
+  final bool chipsActive;
+
+  /// The 1–5 "LEDs per color" row.
+  final bool showGrouping;
+
+  /// Tapping a grouping number also selects Static: the row is on screen as
+  /// Static setup (Alternating remembered) and the previewed effect does not
+  /// use it.
+  final bool groupingReturnsToStatic;
+
+  /// The "Dark LEDs between" row and the dot-row preview. They describe the
+  /// SELECTED effect, so they are shown only when it is one they describe.
+  final bool showSpacingAndPreview;
+
+  @override
+  String toString() => 'StaticSetupControls(card:$showCard chips:$showChips '
+      'active:$chipsActive grouping:$showGrouping '
+      'groupingReturns:$groupingReturnsToStatic '
+      'spacing+preview:$showSpacingAndPreview)';
+}
+
+/// The card's state for [effectId] (the selected effect) on a palette of
+/// [colorCount] colours with [layout] remembered on the chip.
+///
+/// [effectUsesColorLayout] is the catalog's flag for [effectId]
+/// (`WledEffect.usesColorLayout`): an effect whose band width is `grp`.
+StaticSetupControls staticSetupControls({
+  required int effectId,
+  required int colorCount,
+  required SolidLayout layout,
+  bool isArchitectural = false,
+  bool isBrightnessGradient = false,
+  bool effectUsesColorLayout = false,
+}) {
+  if (isBrightnessGradient) return StaticSetupControls.none;
+  final live = isSolidPaletteSubstitution(
+    effectId: 0,
+    colorCount: colorCount,
+    isArchitectural: isArchitectural,
+  );
+  final isStatic = effectId == 0;
+  final active = live && isStatic;
+  // The rows below the chips describe the selected effect when it reads
+  // `grp`: Static in either layout, a colour-layout effect, or an
+  // architectural multi-colour Solid (its spacing IS the look).
+  final describesSelected =
+      active || effectUsesColorLayout || (isStatic && colorCount > 1);
+  final showGrouping = active
+      ? layout == SolidLayout.alternating
+      : describesSelected || (live && layout == SolidLayout.alternating);
+  return StaticSetupControls(
+    showCard: live || describesSelected,
+    showChips: live,
+    chipsActive: active,
+    showGrouping: showGrouping,
+    groupingReturnsToStatic: showGrouping && !describesSelected,
+    showSpacingAndPreview: describesSelected,
+  );
+}
