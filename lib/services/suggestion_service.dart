@@ -33,15 +33,11 @@ class SuggestionService {
       final habits = await habitLearner.analyzeHabits(daysToAnalyze: 30);
       debugPrint('✅ Detected ${habits.length} habits');
 
-      // 2. Update auto-favorites
-      await habitLearner.updateAutoFavorites(topN: 5);
-      debugPrint('✅ Updated auto-favorites');
-
-      // 3. Generate suggestions
+      // 2. Generate suggestions. (Auto-favorites were removed, #164.)
       final suggestions = await habitLearner.generateSuggestions();
       debugPrint('✅ Generated ${suggestions.length} suggestions');
 
-      // 4. Send high-priority suggestions as notifications
+      // 3. Send high-priority suggestions as notifications
       await _sendSuggestionNotifications(suggestions);
     } catch (e) {
       debugPrint('❌ runDailySuggestionCheck failed: $e');

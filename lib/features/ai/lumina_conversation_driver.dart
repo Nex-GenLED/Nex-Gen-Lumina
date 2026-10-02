@@ -18,6 +18,8 @@ import 'package:nexgen_command/features/ai/recurring_sports_autopilot_handler.da
 import 'package:nexgen_command/features/ai/recurring_sports_autopilot_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
+import 'package:nexgen_command/features/favorites/favorite_doc.dart'
+    show FavoritesFullException, kFavoritesFullMessage;
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
     show calendarEntryLeaseManagerProvider;
@@ -395,6 +397,10 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
             wledPayload: wledPayload,
           );
       return WriteResult.success(message: 'Saved "$patternName" to Favorites');
+    } on FavoritesFullException {
+      // #164: capped at two. The chat cannot show the replace list, so it
+      // says plainly what to do.
+      return const WriteResult.blocked(kFavoritesFullMessage);
     } catch (e) {
       debugPrint('Lumina saveFavorite failed: $e');
       return WriteResult.failed(

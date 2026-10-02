@@ -53,10 +53,13 @@ const String kFavoriteFallbackName = 'Favorite';
 /// `pattern_data` is `jsonEncode`d: a WLED payload's `col: [[r,g,b,w]]` is an
 /// array-of-arrays, which the native iOS Firestore codec aborts on (#84) and
 /// [UserService.sanitizeForFirestore] refuses outright.
+///
+/// `auto_added` is always false (#164): a favorite is only ever the customer's
+/// explicit choice. The field stays because documents from before the cap
+/// carry `true` (the habit learner wrote them) and readers tell them apart.
 Map<String, dynamic> buildFavoriteCreateData({
   required String patternName,
   required Map<String, dynamic> payload,
-  bool autoAdded = false,
 }) {
   final name = patternName.trim();
   return UserService.sanitizeForFirestore({
@@ -64,7 +67,7 @@ Map<String, dynamic> buildFavoriteCreateData({
     kFavoriteAddedAt: FieldValue.serverTimestamp(),
     kFavoritePatternData: jsonEncode(payload),
     kFavoriteUsageCount: 0,
-    kFavoriteAutoAdded: autoAdded,
+    kFavoriteAutoAdded: false,
   });
 }
 
@@ -87,23 +90,70 @@ Map<String, dynamic> buildFavoriteUsageData() => {
       kFavoriteLastUsed: FieldValue.serverTimestamp(),
     };
 
+/// The most favorites an account keeps (#164, owner decision 2026-10-02). The
+/// two reserved white tiles on Home are not documents and do not count.
+const int kMaxFavorites = 2;
+
+/// What a customer is told when a new favorite would go over [kMaxFavorites].
+const String kFavoritesFullMessage =
+    'You can keep 2 favorites. Remove one to add another.';
+
+/// Thrown by [writeFavorite] when creating a favorite would go over
+/// [kMaxFavorites]. Nothing was written. Callers show [kFavoritesFullMessage]
+/// and offer to replace one ([replaceFavoriteDoc]).
+class FavoritesFullException implements Exception {
+  /// How many favorites the account holds now.
+  final int count;
+  const FavoritesFullException(this.count);
+
+  @override
+  String toString() => kFavoritesFullMessage;
+}
+
 /// Creates the favorite at [ref], or refreshes its stored look when it is
 /// already there. Throws on failure — callers surface it; a swallowed error
 /// here is how "saved" toasts came to sit on top of writes that never landed.
+///
+/// THE CAP (#164). A NEW favorite is refused with [FavoritesFullException]
+/// once the account holds [kMaxFavorites]; refreshing one that exists is not
+/// an add and is never refused. Every favorite is the customer's explicit
+/// choice: nothing writes here on its own (the habit learner's automatic
+/// favorites are gone).
 Future<void> writeFavorite(
   DocumentReference<Map<String, dynamic>> ref, {
   required String patternName,
   required Map<String, dynamic> payload,
-  bool autoAdded = false,
 }) async {
   final snap = await ref.get();
   if (snap.exists) {
     await ref.update(buildFavoriteRefreshData(payload: payload));
-  } else {
-    await ref.set(buildFavoriteCreateData(
-      patternName: patternName,
-      payload: payload,
-      autoAdded: autoAdded,
-    ));
+    return;
   }
+  final count = (await ref.parent.get()).size;
+  if (count >= kMaxFavorites) throw FavoritesFullException(count);
+  await ref.set(buildFavoriteCreateData(
+    patternName: patternName,
+    payload: payload,
+  ));
+}
+
+/// Replaces the favorite [replaceId] with a new one at [ref], in ONE batch:
+/// both land or neither does, so a full list never ends up one short or one
+/// over. Replacing keeps the count where it was, so it is allowed even on an
+/// account that holds more than [kMaxFavorites] from before the cap.
+Future<void> replaceFavoriteDoc(
+  DocumentReference<Map<String, dynamic>> ref, {
+  required String replaceId,
+  required String patternName,
+  required Map<String, dynamic> payload,
+}) async {
+  if (replaceId == ref.id) {
+    await ref.update(buildFavoriteRefreshData(payload: payload));
+    return;
+  }
+  final batch = ref.firestore.batch();
+  batch.delete(ref.parent.doc(replaceId));
+  batch.set(
+      ref, buildFavoriteCreateData(patternName: patternName, payload: payload));
+  await batch.commit();
 }

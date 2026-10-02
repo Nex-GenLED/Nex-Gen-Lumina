@@ -212,12 +212,8 @@ class BackgroundLearningService {
       final habits = await habitLearner.analyzeHabits(daysToAnalyze: 30);
       debugPrint('✅ Detected ${habits.length} habits');
 
-      // 2. Update auto-favorites
-      debugPrint('⭐ Updating auto-favorites...');
-      await habitLearner.updateAutoFavorites(topN: 5);
-      debugPrint('✅ Auto-favorites updated');
-
-      // 3. Generate suggestions
+      // 2. Generate suggestions. (Auto-favorites were removed, #164 — a
+      // favorite is only ever the customer's explicit choice.)
       debugPrint('💡 Generating smart suggestions...');
       await suggestionService.runDailySuggestionCheck();
       debugPrint('✅ Suggestions generated');

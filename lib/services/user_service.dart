@@ -625,24 +625,9 @@ class UserService {
 
   // ==================== Favorites Management ====================
 
-  /// Add a pattern to favorites
-  Future<void> addFavorite(String userId, Map<String, dynamic> patternData) async {
-    try {
-      final favorites = _firestore.collection('users').doc(userId).collection('favorites');
-
-      await favorites.add(sanitizeForFirestore({
-        ...patternData,
-        'added_at': FieldValue.serverTimestamp(),
-        'usage_count': 0,
-        'auto_added': patternData['auto_added'] ?? false,
-      }));
-
-      debugPrint('✅ Added pattern to favorites: ${patternData['pattern_name']}');
-    } catch (e) {
-      debugPrint('❌ addFavorite failed: $e');
-      rethrow;
-    }
-  }
+  // `addFavorite` (random id, any `auto_added`) was removed (#164): its only
+  // caller was the habit learner's automatic favorites. Every favorite is
+  // written by `writeFavorite` (favorite_doc.dart), which holds the cap.
 
   /// Remove a favorite by ID
   Future<void> removeFavorite(String userId, String favoriteId) async {

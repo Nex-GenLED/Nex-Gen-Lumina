@@ -4,11 +4,11 @@
 /// not fit those five templates — e.g. a "Shimmer" twinkle for jewelry,
 /// a "Wave" running pattern for a beach resort, etc.
 ///
-/// At brand-design generation time, each custom design is materialized
-/// into a /users/{uid}/favorites/{patternId} doc using the same schema
-/// as the five auto-generated designs (`autoAdded: true`, name,
-/// usageCount, lastUsed, wledPayload). Downstream code that reads
-/// favorites cannot tell the two apart by design.
+/// At brand-design generation time each custom design is built alongside
+/// the five canonical ones. Until #164 they were all written to the
+/// customer's favorites as automatic entries; favorites are now only the
+/// customer's explicit choice (capped at two), and the designs are rebuilt
+/// from the brand profile and its library entry wherever they are shown.
 ///
 /// Schema is snake_case in Firestore (project convention, matches every
 /// other model in lib/models/commercial/) and camelCase at the Dart

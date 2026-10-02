@@ -75,6 +75,7 @@ class _RecordingFavorites extends fav.FavoritesNotifier {
   _RecordingFavorites(this.db);
   final FakeFirebaseFirestore db;
   final saved = <({String name, bool oldTileStillThere})>[];
+  final replaced = <({String replaceId, String name})>[];
 
   @override
   Future<void> addToFavorites({
@@ -84,6 +85,22 @@ class _RecordingFavorites extends fav.FavoritesNotifier {
   }) async {
     final old = await db.doc('users/customer-test/favorites/f1').get();
     saved.add((name: patternName, oldTileStillThere: old.exists));
+  }
+
+  /// #164: a replace is ONE write — recorded, then applied to the fake.
+  @override
+  Future<void> replaceFavorite({
+    required String replaceId,
+    required String patternId,
+    required String patternName,
+    required Map<String, dynamic> patternData,
+  }) async {
+    replaced.add((replaceId: replaceId, name: patternName));
+    final batch = db.batch();
+    batch.delete(db.doc('users/customer-test/favorites/$replaceId'));
+    batch.set(db.doc('users/customer-test/favorites/$patternId'),
+        {'pattern_name': patternName});
+    await batch.commit();
   }
 }
 
@@ -246,15 +263,27 @@ void main() {
   });
 
   group('My Favorites — editable (item A)', () {
-    testWidgets('every favourite shows, plus EXACTLY ONE "+"', (tester) async {
+    testWidgets('#164: an account over the cap (from before it) sees EVERY '
+        'favourite it has, and no "+"', (tester) async {
       await _pumpWith(tester, const [], favorites: [
         _fav('f1', 'One', _savedAt255()),
         _fav('f2', 'Two', _savedAt255()),
         _fav('f3', 'Three', _savedAt255()),
       ]);
       for (final n in ['Warm White', 'Bright White', 'One', 'Two', 'Three']) {
-        expect(find.text(n), findsOneWidget, reason: n);
+        expect(find.text(n), findsOneWidget,
+            reason: '$n — existing data is never hidden silently');
       }
+      expect(find.byKey(const ValueKey('favorites-add-tile')), findsNothing,
+          reason: 'the list is full: change a favourite from its own tile');
+      await unmountHome(tester);
+    });
+
+    testWidgets('#164: under the cap, EXACTLY ONE "+"', (tester) async {
+      await _pumpWith(tester, const [], favorites: [
+        _fav('f1', 'One', _savedAt255()),
+      ]);
+      expect(find.text('One'), findsOneWidget);
       expect(find.byKey(const ValueKey('favorites-add-tile')), findsOneWidget);
       expect(find.byIcon(Icons.add_rounded), findsOneWidget,
           reason: 'no row of empty slots');
@@ -308,8 +337,8 @@ void main() {
     });
 
     testWidgets('a customer favourite can be REPLACED from Edit mode — the '
-        'library opens as the picker; the new look is saved FIRST, then the '
-        'old tile is deleted', (tester) async {
+        'library opens as the picker; the old tile and the new look change in '
+        'ONE write (#164)', (tester) async {
       final db = FakeFirebaseFirestore();
       await db.doc('users/customer-test/favorites/f1').set({'pattern_name': 'One'});
       final recorder = _RecordingFavorites(db);
@@ -341,10 +370,10 @@ void main() {
           const Duration(milliseconds: 50)));
       await _settle(tester);
 
-      expect(recorder.saved.single.name, 'Ocean Breeze - Chase');
-      expect(recorder.saved.single.oldTileStillThere, isTrue,
-          reason: 'saved before the old tile is removed — a failed save '
-              'never loses the tile');
+      expect(recorder.saved, isEmpty,
+          reason: 'never a plain add — on a full list that would be refused');
+      expect(recorder.replaced.single,
+          (replaceId: 'f1', name: 'Ocean Breeze - Chase'));
       final doc = await tester
           .runAsync(() => db.doc('users/customer-test/favorites/f1').get());
       expect(doc!.exists, isFalse);

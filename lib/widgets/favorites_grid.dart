@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
+import 'package:nexgen_command/features/favorites/favorite_doc.dart' show kMaxFavorites;
 import 'package:nexgen_command/features/favorites/favorites_editing.dart';
 import 'package:nexgen_command/features/favorites/favorites_picker.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
@@ -116,15 +117,17 @@ class _FavoritesGridState extends ConsumerState<FavoritesGrid> {
                 if (statusRow != null)
                   SizedBox(width: constraints.maxWidth, child: statusRow),
                 // Exactly one — and, with nothing else to show, the whole
-                // row, with words.
-                SizedBox(
-                  width: hasTiles || statusRow != null
-                      ? half
-                      : constraints.maxWidth,
-                  child: _AddFavoriteTile(
-                    labelled: !hasTiles && statusRow == null,
+                // row, with words. None once the list is full (#164): a
+                // favorite is changed from its own tile (Replace / Remove).
+                if (!loaded || userFavorites.length < kMaxFavorites)
+                  SizedBox(
+                    width: hasTiles || statusRow != null
+                        ? half
+                        : constraints.maxWidth,
+                    child: _AddFavoriteTile(
+                      labelled: !hasTiles && statusRow == null,
+                    ),
                   ),
-                ),
               ],
             );
           }),
@@ -193,10 +196,16 @@ class _FavoritesGridState extends ConsumerState<FavoritesGrid> {
 
   void _replace(FavoritePattern favorite) {
     final container = ProviderScope.containerOf(context, listen: false);
+    // #164: a favorite document is replaced in one write (the cap holds); a
+    // reserved white tile is not a document and is hidden once the new
+    // favorite is saved.
+    final reserved = isReservedFavoriteTile(favorite);
     openFavoritesPicker(
       context,
       replacing: favorite.displayName,
-      removeReplaced: () => removeFavoriteTile(container, favorite),
+      replaceId: reserved ? null : favorite.id,
+      removeReplaced:
+          reserved ? () => removeFavoriteTile(container, favorite) : null,
     );
   }
 

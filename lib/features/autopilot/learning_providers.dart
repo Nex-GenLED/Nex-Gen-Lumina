@@ -191,23 +191,6 @@ class FavoritesNotifier extends AutoDisposeAsyncNotifier<void> {
     // Nothing to build
   }
 
-  /// Add a pattern to favorites
-  Future<void> addFavorite({
-    required String patternName,
-    required Map<String, dynamic> patternData,
-    bool autoAdded = false,
-  }) async {
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
-
-    final userService = ref.read(userServiceProvider);
-    await userService.addFavorite(user.uid, {
-      'pattern_name': patternName,
-      'pattern_data': patternData,
-      'auto_added': autoAdded,
-    });
-  }
-
   /// Remove a favorite
   Future<void> removeFavorite(String favoriteId) async {
     final user = ref.read(authStateProvider).value;
@@ -227,17 +210,6 @@ class FavoritesNotifier extends AutoDisposeAsyncNotifier<void> {
 
     final userService = ref.read(userServiceProvider);
     await userService.updateFavoriteUsage(user.uid, favoriteId);
-  }
-
-  /// Trigger auto-favorites update
-  Future<void> refreshAutoFavorites({int topN = 5}) async {
-    final habitLearner = ref.read(currentUserHabitLearnerProvider);
-    if (habitLearner == null) return;
-
-    state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() async {
-      await habitLearner.updateAutoFavorites(topN: topN);
-    });
   }
 }
 

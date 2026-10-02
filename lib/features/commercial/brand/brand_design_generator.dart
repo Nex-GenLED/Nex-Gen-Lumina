@@ -2,14 +2,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/features/favorites/favorite_doc.dart';
 import 'package:nexgen_command/models/commercial/brand_color.dart';
 import 'package:nexgen_command/models/commercial/brand_custom_design.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 
-/// Auto-generates the five canonical brand-aligned WLED designs and
-/// saves them as favorites + records their names on the customer's
-/// /users/{userId}/brand_profile/brand doc.
+/// Auto-generates the five canonical brand-aligned WLED designs and records
+/// their names on the customer's /users/{userId}/brand_profile/brand doc.
+/// (#164: they are no longer saved as favorites — see the note in
+/// [BrandDesignGenerator.generateBrandDesigns].)
 ///
 /// Two call sites:
 ///   1. Customer self-service (BrandSetupScreen.dart): runs after the
@@ -18,15 +18,11 @@ import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 ///      the installer creates the customer's auth account and selected
 ///      a brand during the wizard's brandSetup step.
 ///
-/// Writes favorites directly to Firestore at /users/{userId}/favorites/
-/// {patternId} — explicit userId is authoritative. No FavoritesNotifier
-/// indirection because the installer flow needs to write to the
-/// CUSTOMER's uid even though the active auth session may be the
-/// installer's anonymous session by the time generation runs.
-///
-/// Documents are built by `writeFavorite` (favorite_doc.dart) — the same
-/// canonical shape every favorites writer uses and every favorites reader
-/// expects.
+/// Writes ONLY the design names, to brand_profile — explicit userId is
+/// authoritative (the installer flow writes for the CUSTOMER's uid while its
+/// own session may be the installer's). Until #164 it also wrote every design
+/// to /users/{userId}/favorites with `auto_added: true`; favorites are now the
+/// customer's explicit choice only, capped at two.
 ///
 /// Naming convention (no folder/grouping infrastructure exists in
 /// FavoritesNotifier — see Conflict A architectural directive — so brand
@@ -38,9 +34,8 @@ import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 ///   "[CompanyName] Event Mode"
 ///   "[CompanyName] Welcome"
 ///
-/// Pattern IDs are stable derivatives of the brand id ("brand_state-farm_solid"
-/// etc.) so re-saving the brand profile updates the existing favorites
-/// in-place rather than creating duplicates.
+/// Pattern IDs are stable derivatives of the brand id ("brand_<id>_solid"
+/// etc.), so a surface that rebuilds the designs gets the same ids each time.
 class BrandDesignGenerator {
   BrandDesignGenerator({required FirebaseFirestore firestore})
       : _firestore = firestore;
@@ -77,32 +72,11 @@ class BrandDesignGenerator {
     // non-fatal; the canonical five always go through regardless.
     designs.addAll(await _fetchCustomDesigns(brand));
 
-    final favoritesCol = _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('favorites');
-
-    for (final d in designs) {
-      try {
-        // The ONE canonical favorites document (favorite_doc.dart). This used
-        // to hand-write `{name, usageCount, lastUsed, wledPayload, autoAdded}`
-        // — a shape the live rule rejects (a create must carry `pattern_name`
-        // + `added_at`), with the payload's arrays-of-arrays un-encoded (#84).
-        // NOTE the rule is owner-only: from an installer's session this write
-        // is still denied, exactly as before. That is a rules decision, not a
-        // shape problem, and is deliberately not made here.
-        await writeFavorite(
-          favoritesCol.doc(d.patternId),
-          patternName: d.name,
-          payload: d.payload,
-          autoAdded: true,
-        );
-      } catch (e) {
-        // One failure shouldn't take down the rest. Log and continue.
-        debugPrint(
-            'BrandDesignGenerator: failed to save "${d.name}" — $e');
-      }
-    }
+    // #164: these designs are NOT written to favorites any more. Favorites
+    // are only ever the customer's explicit choice, capped at two; this wrote
+    // five or more `auto_added` favorites per brand save. The designs are
+    // rebuilt deterministically from the brand profile (and its brand_library
+    // entry), so nothing is lost: a Brand surface can build them on demand.
 
     final names = designs.map((d) => d.name).toList(growable: false);
 
