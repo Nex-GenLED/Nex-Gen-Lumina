@@ -68,6 +68,114 @@ export function leadMinutesFor(config: Record<string, unknown>): number {
 }
 
 // ---------------------------------------------------------------------------
+// On-time override — B4 (2026-10-02)
+// ---------------------------------------------------------------------------
+//
+// THE GAP. The app writes `on_time_override` ("HH:MM", 24-hour, local wall
+// clock — game_day_autopilot_config.dart onTimeOverride) when a user picks
+// "always 5:00 PM regardless of kickoff", and its calendar/lease path
+// (`_computeOnTime`) honours it: the entry's on-time is that wall-clock time on
+// the GAME'S LOCAL DATE, replacing kickoff − lead. The planner ignored it, so a
+// served account would silently lose a setting the app honours.
+
+/** The fleet's zone when a user has no usable IANA zone — the planner's convention. */
+export const DEFAULT_TZ_OFFSET_HOURS = -5;
+
+/**
+ * "HH:MM" (or "H:MM") 24-hour → minutes after local midnight; null otherwise.
+ * Anything else — "5pm", "17:60", a number — is not an override, and the lead
+ * applies, exactly as a null field would.
+ */
+export function parseOnTimeMinutes(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/**
+ * UTC offset in hours of IANA zone [zone] at [atMs], or null when [zone] is not
+ * a usable IANA id.
+ *
+ * Only `Area/Location` ids are accepted. The profile editor has been writing
+ * zone ABBREVIATIONS ("CDT", "PDT") over the wizard's IANA value (#TD-7), and
+ * some abbreviations happen to be legal fixed-offset ICU ids ("EST", "MST")
+ * that would silently ignore DST. Requiring a "/" rejects all of them.
+ */
+export function ianaOffsetHours(zone: unknown, atMs: number): number | null {
+  if (typeof zone !== "string" || !zone.includes("/")) return null;
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(new Date(atMs));
+  } catch {
+    return null; // RangeError: not a zone ICU knows
+  }
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const localAsUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour"),
+    get("minute"),
+    get("second")
+  );
+  const wholeSecondMs = Math.floor(atMs / 1000) * 1000;
+  return (localAsUtc - wholeSecondMs) / 3_600_000;
+}
+
+/** Offset resolver for one user: their IANA zone when usable, else the fleet default. */
+export function tzOffsetResolverFor(
+  user: Record<string, unknown>
+): (atMs: number) => number {
+  const zone = user.time_zone;
+  return (atMs: number) => ianaOffsetHours(zone, atMs) ?? DEFAULT_TZ_OFFSET_HOURS;
+}
+
+/**
+ * When this team's start fires for a game kicking off at [gameStartMs].
+ *
+ *   on_time_override valid → that wall-clock time on the game's LOCAL date
+ *                            (the app's `_computeOnTime`)
+ *   otherwise              → kickoff − leadMinutesFor(config) (unchanged)
+ *
+ * The local date is taken at kickoff, and the offset is re-read at the
+ * candidate instant, so a DST change between midnight and the on-time is
+ * honoured. An on-time AFTER kickoff is honoured as written — it is what the
+ * app's lease does.
+ */
+export function windowStartFor(
+  config: Record<string, unknown>,
+  gameStartMs: number,
+  offsetHoursAt: (atMs: number) => number = () => DEFAULT_TZ_OFFSET_HOURS
+): number {
+  const onTime = parseOnTimeMinutes(config.on_time_override);
+  if (onTime === null) return gameStartMs - leadMinutesFor(config) * 60_000;
+
+  const local = new Date(gameStartMs + offsetHoursAt(gameStartMs) * 3_600_000);
+  const wallAsUtc = Date.UTC(
+    local.getUTCFullYear(),
+    local.getUTCMonth(),
+    local.getUTCDate(),
+    Math.floor(onTime / 60),
+    onTime % 60
+  );
+  const first = wallAsUtc - offsetHoursAt(gameStartMs) * 3_600_000;
+  return wallAsUtc - offsetHoursAt(first) * 3_600_000;
+}
+
+// ---------------------------------------------------------------------------
 // Rank — the port of healGameDayTeamPriority
 // ---------------------------------------------------------------------------
 

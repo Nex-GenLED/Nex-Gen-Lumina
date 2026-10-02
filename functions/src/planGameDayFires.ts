@@ -81,7 +81,9 @@ import {
   profileNamesFrom,
   rankOf,
   startDecision,
+  tzOffsetResolverFor,
   windowEndMs,
+  windowStartFor,
 } from "./gameDayHierarchy";
 
 // admin.initializeApp() is called in index.js — do not call again here.
@@ -488,6 +490,7 @@ export async function runPlannerTick(
     if (controller) {
       const lat = u.get("latitude");
       const lon = u.get("longitude");
+      const offsetHoursAt = tzOffsetResolverFor(udata);
       for (let order = 0; order < orderedDocs.length; order++) {
         const d = orderedDocs[order];
         const c = d.data();
@@ -518,7 +521,10 @@ export async function runPlannerTick(
           eventId,
           rank: rankOf(d.id, priority),
           order,
-          windowStartMs: game.startMs - leadMinutesFor(c) * 60_000,
+          // B4: `on_time_override` (the app's "always 5:00 PM") replaces
+          // kickoff − lead, on the game's local date, in the user's IANA zone
+          // when the profile carries one (else the fleet's UTC−5).
+          windowStartMs: windowStartFor(c, game.startMs, offsetHoursAt),
           gameStartMs: game.startMs,
           windowEndMs: windowEndMs(game.startMs, sport),
           statusName: game.statusName,
@@ -624,9 +630,10 @@ export async function runPlannerTick(
         // ── START ────────────────────────────────────────────────────────
         // DEFECT 2: the app writes `lead_time_minutes_override`; this read
         // `lead_time_minutes`, which nothing writes, so every fire went out at
-        // the 30-minute default. leadMinutesFor holds the precedence; the
-        // pre-pass applied it when it built the window.
-        const startFireAt = win.windowStartMs; // game.startMs − lead
+        // the 30-minute default. leadMinutesFor holds the precedence, and B4's
+        // windowStartFor puts `on_time_override` ahead of both; the pre-pass
+        // applied it when it built the window.
+        const startFireAt = win.windowStartMs; // on-time, else game.startMs − lead
         // Rules 2/3: would a lit, higher-ranked (or first-come) team already
         // hold the house when this start fired? Then this team DEFERS — no
         // start job; tracked for hand-off.

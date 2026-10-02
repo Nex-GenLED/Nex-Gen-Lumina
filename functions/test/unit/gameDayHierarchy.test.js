@@ -387,3 +387,85 @@ describe("handoffWinner — the house goes to the highest team still playing, or
     expect(handoffWinner([chiefs(), b, a], "c", T0).eventId).toBe("a");
   });
 });
+
+// ---------------------------------------------------------------------------
+// B4 (2026-10-02) — on_time_override honoured server-side
+// ---------------------------------------------------------------------------
+describe("B4: on_time_override", () => {
+  const H = require("../../lib/gameDayHierarchy");
+  // TNF kickoff 2026-10-02T00:15Z = 19:15 CDT on Thursday 10-01.
+  const KICK = Date.parse("2026-10-02T00:15:00Z");
+
+  describe("parseOnTimeMinutes", () => {
+    test.each([
+      ["17:00", 1020],
+      ["07:05", 425],
+      ["7:05", 425],
+      ["00:00", 0],
+      ["23:59", 1439],
+    ])("%s → %d", (v, m) => expect(H.parseOnTimeMinutes(v)).toBe(m));
+    test.each([["24:00"], ["17:60"], ["5pm"], ["1700"], [""], [null], [1700], [undefined]])(
+      "%j is not an override",
+      (v) => expect(H.parseOnTimeMinutes(v)).toBeNull()
+    );
+  });
+
+  describe("ianaOffsetHours — IANA only", () => {
+    test("America/Chicago is −5 in October (CDT) and −6 in December (CST)", () => {
+      expect(H.ianaOffsetHours("America/Chicago", KICK)).toBe(-5);
+      expect(H.ianaOffsetHours("America/Chicago", Date.parse("2026-12-10T01:00:00Z"))).toBe(-6);
+    });
+    test("America/Los_Angeles is −7 in October", () => {
+      expect(H.ianaOffsetHours("America/Los_Angeles", KICK)).toBe(-7);
+    });
+    test.each([["CDT"], ["PDT"], ["EST"], ["MST"], ["UTC"], ["Not/AZone"], [""], [null], [42]])(
+      "%j is rejected (abbreviations are #TD-7's bad writes)",
+      (z) => expect(H.ianaOffsetHours(z, KICK)).toBeNull()
+    );
+  });
+
+  describe("windowStartFor", () => {
+    test("no override → kickoff − lead, exactly as before", () => {
+      expect(H.windowStartFor({}, KICK)).toBe(KICK - 30 * 60_000);
+      expect(H.windowStartFor({ lead_time_minutes_override: 45 }, KICK)).toBe(KICK - 45 * 60_000);
+    });
+
+    test("'17:00' → 17:00 local on the GAME's local date (22:00Z on 10-01), not the UTC date", () => {
+      const tz = H.tzOffsetResolverFor({ time_zone: "America/Chicago" });
+      expect(H.windowStartFor({ on_time_override: "17:00" }, KICK, tz)).toBe(Date.parse("2026-10-01T22:00:00Z"));
+    });
+
+    test("the override wins over any lead field", () => {
+      const tz = H.tzOffsetResolverFor({ time_zone: "America/Chicago" });
+      expect(
+        H.windowStartFor({ on_time_override: "17:00", lead_time_minutes_override: 90 }, KICK, tz)
+      ).toBe(Date.parse("2026-10-01T22:00:00Z"));
+    });
+
+    test("a Pacific customer's 17:00 is 17:00 Pacific", () => {
+      const tz = H.tzOffsetResolverFor({ time_zone: "America/Los_Angeles" });
+      // 00:15Z 10-02 is 17:15 PDT on 10-01.
+      expect(H.windowStartFor({ on_time_override: "17:00" }, KICK, tz)).toBe(Date.parse("2026-10-02T00:00:00Z"));
+    });
+
+    test("after DST ends, an IANA zone moves with it", () => {
+      const dec = Date.parse("2026-12-11T01:15:00Z"); // 19:15 CST 12-10
+      const tz = H.tzOffsetResolverFor({ time_zone: "America/Chicago" });
+      expect(H.windowStartFor({ on_time_override: "17:00" }, dec, tz)).toBe(Date.parse("2026-12-10T23:00:00Z"));
+    });
+
+    test("an abbreviation zone falls back to the fleet's UTC−5", () => {
+      const tz = H.tzOffsetResolverFor({ time_zone: "CDT" });
+      expect(H.windowStartFor({ on_time_override: "17:00" }, KICK, tz)).toBe(Date.parse("2026-10-01T22:00:00Z"));
+    });
+
+    test("a malformed override is ignored — the lead applies", () => {
+      expect(H.windowStartFor({ on_time_override: "5pm" }, KICK)).toBe(KICK - 30 * 60_000);
+    });
+
+    test("an on-time after kickoff is honoured as written (the app's lease does the same)", () => {
+      const tz = H.tzOffsetResolverFor({ time_zone: "America/Chicago" });
+      expect(H.windowStartFor({ on_time_override: "20:00" }, KICK, tz)).toBe(Date.parse("2026-10-02T01:00:00Z"));
+    });
+  });
+});

@@ -980,3 +980,30 @@ describe("A2: the planner stamps a retry budget on start and end jobs", () => {
     expect(end.retryUntil.toMillis()).toBe(at(21, 50));
   });
 });
+
+// ---------------------------------------------------------------------------
+// B4 (2026-10-02) — the tick honours on_time_override
+// ---------------------------------------------------------------------------
+describe("B4: on_time_override moves the start fire, on the planner tick", () => {
+  const CH = ev("nfl_chiefs", "401");
+
+  test("'17:00' with an IANA zone → start at 17:00 local; retries until 17:30 (fireAt + lead)", async () => {
+    const f = makeDb(seed({
+      user: { time_zone: "America/Chicago" },
+      configs: { nfl_chiefs: { on_time_override: "17:00" } },
+    }));
+    games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    const r = await tick(f.db, at(12));
+    const job = f.job(`${CH}_start`);
+    expect(job.fireAt.toMillis()).toBe(at(17));
+    expect(job.retryUntil.toMillis()).toBe(at(17, 30));
+    expect(rows(r, (x) => x.action === "plan_start")[0].fireAt).toBe(new Date(at(17)).toISOString());
+  });
+
+  test("no override: unchanged (kickoff − 30)", async () => {
+    const f = makeDb(seed({ user: { time_zone: "America/Chicago" }, configs: { nfl_chiefs: {} } }));
+    games({ nfl_chiefs: { gameId: "401", startMs: at(18) } });
+    await tick(f.db, at(12));
+    expect(f.job(`${CH}_start`).fireAt.toMillis()).toBe(at(17, 30));
+  });
+});
