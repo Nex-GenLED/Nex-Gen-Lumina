@@ -202,6 +202,31 @@ export async function fetchTeamGame(
   return findTeamGame((res.json as { events?: unknown } | null)?.events, espnTeamId);
 }
 
+/**
+ * #159. Did this tick's default-scoreboard read for `sport` get a usable
+ * answer — 2xx with an events array? Reads the per-tick cache only and never
+ * requests. False when the URL was not read this tick, failed on the network
+ * or timed out, answered non-2xx (5xx, 429, …), or answered something that is
+ * not a scoreboard. The planner uses it to tell "ESPN says nothing about the
+ * game" (silent) from "ESPN could not be read" (unavailable).
+ */
+export async function defaultScoreboardAnswered(sport: string, cache: EspnCache): Promise<boolean> {
+  const path = ESPN_PATH[sport];
+  if (!path) return false;
+  const request = cache.get(`${ESPN_BASE}/${path}/scoreboard`);
+  if (!request) return false;
+  try {
+    const res = await request;
+    return (
+      res.status >= 200 &&
+      res.status < 300 &&
+      Array.isArray((res.json as { events?: unknown } | null)?.events)
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // College football — the dated FBS slate (flag `espn_college_slate`)
 // ---------------------------------------------------------------------------

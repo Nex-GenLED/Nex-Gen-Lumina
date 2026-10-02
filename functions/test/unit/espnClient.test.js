@@ -113,6 +113,43 @@ describe("one fetch per URL per tick", () => {
 });
 
 // ---------------------------------------------------------------------------
+describe("defaultScoreboardAnswered (#159) — did the default board get a usable answer?", () => {
+  const board = `${BASE}/football/nfl/scoreboard`;
+  const answered = async (r) => {
+    route(() => r);
+    const cache = new Map();
+    try {
+      await E.fetchTeamGame("nfl", "901", cache);
+    } catch (_) {
+      /* a network failure: the cache still holds the rejected request */
+    }
+    const n = stub.calls.length;
+    const a = await E.defaultScoreboardAnswered("nfl", cache);
+    expect(stub.calls.length).toBe(n); // reads the cache only
+    stub.restore();
+    stub = null;
+    return a;
+  };
+
+  test("2xx with an events array (even empty) → true", async () => {
+    expect(await answered({ body: scoreboard([]) })).toBe(true);
+  });
+
+  test("5xx, 429, a timeout, a network failure, a 2xx without events → false", async () => {
+    expect(await answered({ status: 500, body: {} })).toBe(false);
+    expect(await answered({ status: 429, body: {} })).toBe(false);
+    expect(await answered({ throws: "AbortError" })).toBe(false);
+    expect(await answered({ throws: true })).toBe(false);
+    expect(await answered({ body: { notAScoreboard: true } })).toBe(false);
+  });
+
+  test("never read this tick, or an unknown sport → false", async () => {
+    expect(await E.defaultScoreboardAnswered("nfl", new Map())).toBe(false);
+    expect(await E.defaultScoreboardAnswered("cricket", new Map([[board, Promise.resolve({ status: 200, json: { events: [] } })]]))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe("the dated FBS slate", () => {
   test("ET yesterday / today / tomorrow, groups=80 only, limit 300 — FCS (81) is never requested", () => {
     expect(E.collegeSlateUrls(NOW)).toEqual([

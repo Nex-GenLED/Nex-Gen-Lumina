@@ -362,6 +362,11 @@ export interface CapContext {
   statusAware: boolean;
   /** `espnReportsLive` for this tick's read of the game. */
   espnLive: boolean;
+  /**
+   * #159. ESPN gave NO usable answer about this game this tick — see
+   * `decideEndWithoutEspn` for the failure modes. Only read with statusAware.
+   */
+  espnUnavailable?: boolean;
 }
 
 /**
@@ -405,6 +410,9 @@ export function decideEndSignal(args: {
   nowMs: number;
   cap?: CapContext;
 }): EndSignalDecision {
+  if (args.cap?.statusAware === true && args.cap.espnUnavailable === true) {
+    return decideEndWithoutEspn(args.state, args.sport, args.nowMs);
+  }
   const d = decideEndSignalFromEspn(args);
   if (d.fireEnd || d.reason === "no_start" || d.reason === "already_fired") return d;
   const startMs =
@@ -424,6 +432,66 @@ export function decideEndSignal(args: {
     return { fireEnd: true, reason: "hard_cap_ceiling", nextConsecutive: d.nextConsecutive };
   }
   return { fireEnd: false, reason: "cap_held_live", nextConsecutive: d.nextConsecutive };
+}
+
+/**
+ * #159 — THE CLOCK GUARANTEE (status_aware_cap). What the cap does when ESPN
+ * cannot be read, decided by the clock alone. The planner builds a clock-only
+ * game from the started session (its own kickoff, nothing final, no status)
+ * whenever this tick's lookups return nothing usable for that session's game,
+ * so the end path is reached every tick, whatever ESPN does.
+ *
+ *   ESPN failure mode (for a started, not-ended game)     classed      cap past the bound
+ *   ─────────────────────────────────────────────────     ───────────  ──────────────────────────
+ *   HTTP error: 5xx, 429 rate limit, 403, any non-2xx      UNAVAILABLE  HELD; ceiling on the clock
+ *     (a single-game 404 is not an error — see "missing")
+ *   timeout (10 s abort) / network failure                 UNAVAILABLE  HELD; ceiling on the clock
+ *   unparseable: 2xx without an events array, not JSON,    UNAVAILABLE  HELD; ceiling on the clock
+ *     a single-game body that is not this game
+ *   partial college slate (any date not answered)          UNAVAILABLE  HELD; ceiling on the clock
+ *   empty slate / scoreboard: 2xx, `events: []`            SILENT       fires at the bound (shipped)
+ *   game missing: 2xx without the game, single-game 404    SILENT       fires at the bound (shipped)
+ *   game status unknown: the game, under a status name     not live     fires at the bound (shipped);
+ *     in neither list (espnReportsLive)                                 under state "in" it is LIVE:
+ *                                                                       held, ceiling as for live
+ *
+ * UNAVAILABLE is decided here: no evidence either way, so nothing is concluded
+ * from ESPN — the final count is neither advanced nor reset (an error is not a
+ * non-final poll), the cap is HELD (an outage is not evidence the game ended,
+ * and ending a delayed game on a rate-limit blip is the outcome the hold
+ * exists to prevent), and the CEILING fires on the clock. SILENT and the other
+ * rows go through the ordinary decision with `espnLive: false`, which fires at
+ * the bound. No mode can hold past the ceiling: every one either fires at the
+ * bound or is held until the ceiling, and the ceiling needs nothing from ESPN.
+ */
+function decideEndWithoutEspn(
+  state: EndSignalState,
+  sport: string,
+  nowMs: number
+): EndSignalDecision {
+  const prior =
+    typeof state.consecutiveFinalPolls === "number" && state.consecutiveFinalPolls > 0
+      ? state.consecutiveFinalPolls
+      : 0;
+  // GUARD 0 (#66) and GUARD 3, exactly as with ESPN.
+  if (state.startPlannedAt === null || state.startPlannedAt === undefined) {
+    return { fireEnd: false, reason: "no_start", nextConsecutive: prior };
+  }
+  if (state.endFiredAt !== null && state.endFiredAt !== undefined) {
+    return { fireEnd: false, reason: "already_fired", nextConsecutive: prior };
+  }
+  const startMs = typeof state.gameStartMs === "number" ? state.gameStartMs : null;
+  if (startMs === null) {
+    return { fireEnd: false, reason: "espn_unavailable", nextConsecutive: prior };
+  }
+  if (nowMs > capCeilingMs(startMs, sport)) {
+    return { fireEnd: true, reason: "hard_cap_ceiling", nextConsecutive: prior };
+  }
+  return {
+    fireEnd: false,
+    reason: nowMs > fallbackEndMs(startMs, sport) ? "cap_held_unavailable" : "espn_unavailable",
+    nextConsecutive: prior,
+  };
 }
 
 /**
@@ -826,7 +894,11 @@ export function capBoundMs(args: {
   sport: string;
   statusAware: boolean;
   espnLive: boolean;
+  /** #159: no usable ESPN answer — the cap is held, so the window is too. */
+  espnUnavailable?: boolean;
 }): number {
-  if (!args.statusAware || !args.espnLive) return fallbackEndMs(args.gameStartMs, args.sport);
+  if (!args.statusAware || !(args.espnLive || args.espnUnavailable === true)) {
+    return fallbackEndMs(args.gameStartMs, args.sport);
+  }
   return capCeilingMs(args.gameStartMs, args.sport);
 }

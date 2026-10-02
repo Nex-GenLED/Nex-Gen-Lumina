@@ -137,6 +137,7 @@ import {
   fetchCollegeTeamDivision,
   fetchEventById,
   fetchTeamGame,
+  defaultScoreboardAnswered,
 } from "./espnClient";
 import {
   TeamRow,
@@ -468,8 +469,15 @@ export function openSessionsByTeam(
 interface ResolvedGame {
   game: EspnGame | null;
   via: "default" | "college_slate" | "tracked";
-  /** Tracked, and ESPN's single-game endpoint answered 404 — the game is gone. */
-  silent?: boolean;
+  /**
+   * The game is a CLOCK-ONLY stand-in for a started session (its kickoff,
+   * nothing final, no status). "silent": ESPN answered and the game is not in
+   * it (single-game 404, or a full scoreboard / slate without it).
+   * "unavailable" (#159): ESPN could not be read for it this tick.
+   */
+  espnState?: "silent" | "unavailable";
+  /** College slate: every date answered 2xx with an events array. */
+  answered?: boolean;
   /** College slate read in full, the id never on it, and ESPN says it is not FBS. */
   notOnSlate?: string;
 }
@@ -1031,32 +1039,40 @@ export async function runPlannerTick(
       return gameCache.get(key) ?? null;
     };
 
-    // ── track_started_by_id: this account's started, not-ended sessions ──
-    // Read once per account per tick (query #8), only with the flag on and a
-    // controller to fire into (without one no config reaches ESPN at all). A
-    // failed read tracks nothing this tick: every team falls back to the
-    // scoreboard, which is the pre-flag behaviour.
-    let tracked = new Map<string, TrackedSession>();
-    if (espnOn.trackStartedById && controller) {
+    // ── Started, not-ended sessions (query #8) ───────────────────────────
+    // Read once per account per tick when `track_started_by_id` (follow the
+    // game by id) or `status_aware_cap` (#159: the clock guarantee) is on for
+    // this account, and only with a controller to fire into (without one no
+    // config reaches ESPN at all). A failed read finds nothing this tick: every
+    // team falls back to the scoreboard, which is the pre-flag behaviour.
+    let openSessions = new Map<string, TrackedSession>();
+    if ((espnOn.trackStartedById || espnOn.statusAwareCap) && controller) {
       try {
         const open = await db
           .collection("users").doc(uid).collection(SESSION_COLLECTION)
           .where("gameStartMs", ">=", nowMs - TRACK_LOOKBACK_MS) // COLLECTION scope → automatic index
           .get();
-        tracked = openSessionsByTeam(
+        openSessions = openSessionsByTeam(
           open.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
           configs.docs.map((d) => d.id)
         );
       } catch (err) {
-        logger.warn(`planGameDayFires: tracked-session read failed for ${uid}; scoreboard only`, err);
+        logger.warn(`planGameDayFires: open-session read failed for ${uid}; scoreboard only`, err);
       }
     }
 
-    // A started game, followed by id. Cached per sport/game across accounts.
-    // ESPN 404 = the game is gone ("silent"): the session's own kickoff stands
-    // in, nothing is final, and the cap decides. Any other failure answers
-    // null and the caller falls back to the scoreboard — tracking only ever
-    // adds information.
+    /** A started session's game with nothing known but its kickoff (#159). */
+    const clockGame = (t: TrackedSession): EspnGame => ({
+      gameId: t.gameId, startMs: t.gameStartMs,
+      isFinal: false, isInProgress: false, statusName: "", statusState: "",
+      homeTeamId: "", awayTeamId: "",
+    });
+
+    // A started game, followed by id (track_started_by_id). Cached per
+    // sport/game across accounts. ESPN 404 = the game is gone ("silent"): the
+    // session's own kickoff stands in, nothing is final, and the cap decides.
+    // Any other failure answers null and the caller falls back to the
+    // scoreboard — tracking only ever adds information.
     const trackedGame = async (sport: string, t: TrackedSession): Promise<ResolvedGame | null> => {
       const key = `${sport}/${t.gameId}`;
       if (!trackedCache.has(key)) {
@@ -1064,15 +1080,7 @@ export async function runPlannerTick(
         if (r.kind === "found") {
           trackedCache.set(key, { game: r.game, via: "tracked" });
         } else if (r.kind === "absent") {
-          trackedCache.set(key, {
-            game: {
-              gameId: t.gameId, startMs: t.gameStartMs,
-              isFinal: false, isInProgress: false, statusName: "", statusState: "",
-              homeTeamId: "", awayTeamId: "",
-            },
-            via: "tracked",
-            silent: true,
-          });
+          trackedCache.set(key, { game: clockGame(t), via: "tracked", espnState: "silent" });
         } else {
           stats.espnErrors++;
           trackedCache.set(key, null);
@@ -1084,16 +1092,18 @@ export async function runPlannerTick(
     // espn_college_slate: the dated FBS slate and the deterministic pick. A
     // final stays pickable until the latest instant its end could fire (the
     // football ceiling), so a long game's final is never dropped mid-count.
+    // `answered` = every slate date came back 2xx with an events array (#159).
     const collegeGame = async (espnTeamId: string): Promise<ResolvedGame> => {
       const cached = collegeCache.get(espnTeamId);
       if (cached) return cached;
-      let r: ResolvedGame = { game: null, via: "college_slate" };
+      let r: ResolvedGame = { game: null, via: "college_slate", answered: false };
       try {
         const slate = await fetchCollegeSlateGame(
           espnTeamId, nowMs, espnCache, (g) => capCeilingMs(g.startMs, "ncaaFB")
         );
+        r = { ...r, answered: slate.complete };
         if (slate.game) {
-          r = { game: slate.game, via: "college_slate" };
+          r = { ...r, game: slate.game };
         } else if (!slate.onSlate && slate.complete && espnTeamId) {
           // Never on three full days of the FBS slate. A bye week looks the
           // same, so ask ESPN whether this id is an FBS team at all; only a
@@ -1115,13 +1125,38 @@ export async function runPlannerTick(
     const resolveGame = async (
       sport: string, espnTeamId: string, teamSlug: string
     ): Promise<ResolvedGame> => {
-      const t = tracked.get(teamSlug);
-      if (t) {
+      const t = openSessions.get(teamSlug);
+      let byIdFailed = false;
+      if (t && espnOn.trackStartedById) {
         const r = await trackedGame(sport, t);
         if (r) return r;
+        byIdFailed = true;
       }
-      if (sport === "ncaaFB" && espnOn.espnCollegeSlate) return collegeGame(espnTeamId);
-      return { game: await gameFor(sport, espnTeamId), via: "default" };
+      const base: ResolvedGame =
+        sport === "ncaaFB" && espnOn.espnCollegeSlate
+          ? await collegeGame(espnTeamId)
+          : { game: await gameFor(sport, espnTeamId), via: "default" };
+      // #159 — THE CLOCK GUARANTEE (status_aware_cap). A started, not-ended
+      // session whose game this tick's lookups did not return — ESPN down,
+      // erroring, rate limiting, answering nothing usable, or no longer listing
+      // the game — still reaches the end path, as a clock-only game. SILENT when
+      // ESPN answered in full and the game is not in it (the cap fires at the
+      // bound, as shipped); UNAVAILABLE when it could not be read (the cap is
+      // held and the clock fires the ceiling). gameDayPlanning
+      // .decideEndWithoutEspn has the full table.
+      if (t && espnOn.statusAwareCap && (base.game === null || base.game.gameId !== t.gameId)) {
+        const answered =
+          !byIdFailed &&
+          (base.via === "college_slate"
+            ? base.answered === true
+            : await defaultScoreboardAnswered(sport, espnCache));
+        return {
+          game: clockGame(t),
+          via: base.via,
+          espnState: answered ? "silent" : "unavailable",
+        };
+      }
+      return base;
     };
 
     // Pre-pass: every enabled team's window and session, so each START and
@@ -1143,7 +1178,8 @@ export async function runPlannerTick(
         const d = orderedDocs[order];
         const c = d.data();
         const sport = String(c.sport ?? "");
-        const game = (await resolveGame(sport, String(c.espn_team_id ?? ""), d.id)).game;
+        const resolvedPre = await resolveGame(sport, String(c.espn_team_id ?? ""), d.id);
+        const game = resolvedPre.game;
         if (!game) continue;
         const eventId = eventIdFor(d.id, game.gameId);
         const session = (await sessionRef(db, uid, eventId).get()).data() ?? {};
@@ -1182,6 +1218,7 @@ export async function runPlannerTick(
             ? capBoundMs({
                 gameStartMs: game.startMs, sport,
                 statusAware: true, espnLive: espnReportsLive(game),
+                espnUnavailable: resolvedPre.espnState === "unavailable",
               })
             : windowEndMs(game.startMs, sport),
           statusName: game.statusName,
@@ -1639,9 +1676,30 @@ export async function runPlannerTick(
           // status_aware_cap: hold the cap while ESPN says the game is on. A
           // silent (gone) game reports nothing, so its cap fires at the bound.
           ...(espnOn.statusAwareCap
-            ? { cap: { statusAware: true, espnLive: espnReportsLive(game) } }
+            ? {
+                cap: {
+                  statusAware: true,
+                  espnLive: espnReportsLive(game),
+                  // #159: no usable ESPN answer this tick — held, clock ceiling.
+                  espnUnavailable: resolved.espnState === "unavailable",
+                },
+              }
             : {}),
         });
+
+        if (decision.reason === "cap_held_unavailable" || decision.reason === "espn_unavailable") {
+          // #159. Constant fields, so one row per reason per day: ESPN could
+          // not be read for a started game, and when the clock will end it.
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: decision.reason,
+            ceilingAt: new Date(
+              capCeilingMs(
+                typeof session.gameStartMs === "number" ? session.gameStartMs : game.startMs,
+                sport
+              )
+            ).toISOString(),
+          });
+        }
 
         if (decision.reason === "cap_held_live") {
           // Legible, and bounded: ESPN's status name is the only varying
@@ -1812,7 +1870,14 @@ export async function runPlannerTick(
             // Only the flagged paths add these, so a flags-off row is unchanged.
             ...(resolved.via === "tracked" ? { espnVia: "tracked" } : {}),
             ...(espnOn.statusAwareCap && decision.reason.startsWith("hard_cap")
-              ? { capStatus: resolved.silent ? "silent" : game.statusName }
+              ? {
+                  capStatus:
+                    resolved.espnState === "silent"
+                      ? "silent"
+                      : resolved.espnState === "unavailable"
+                        ? "espn_unavailable"
+                        : game.statusName,
+                }
               : {}),
           });
           if (writeJobs) {

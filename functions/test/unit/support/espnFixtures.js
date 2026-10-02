@@ -55,8 +55,10 @@ const BASE = "https://site.api.espn.com/apis/site/v2/sports";
 
 /**
  * Install a `global.fetch` stub. `route(url)` returns `{ status, body }`, or
- * `{ throws: true }` for a network failure, or undefined for a 404.
- * Returns `{ calls, restore }`; `calls` is every URL requested, in order.
+ * `{ throws: true }` for a network failure (`{ throws: "AbortError" }` for the
+ * client's 10 s timeout, which rejects fetch with that error name), or
+ * undefined for a 404. Returns `{ calls, restore }`; `calls` is every URL
+ * requested, in order.
  */
 function installFetchStub(route) {
   const calls = [];
@@ -65,7 +67,11 @@ function installFetchStub(route) {
     const u = String(url);
     calls.push(u);
     const r = route(u);
-    if (r && r.throws) throw new Error("network down (stub)");
+    if (r && r.throws) {
+      const e = new Error(r.throws === "AbortError" ? "This operation was aborted (stub)" : "network down (stub)");
+      if (typeof r.throws === "string") e.name = r.throws;
+      throw e;
+    }
     const status = r ? r.status ?? 200 : 404;
     const body = r ? r.body : { code: 404, message: "not found (stub)" };
     return {

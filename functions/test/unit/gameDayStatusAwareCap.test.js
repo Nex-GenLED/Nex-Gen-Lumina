@@ -160,6 +160,46 @@ describe("flag ON — held while live, fired on silence / postponement, the ceil
 });
 
 // ---------------------------------------------------------------------------
+describe("#159 — ESPN unavailable: the clock alone decides", () => {
+  const off = (nowMs, state = started({ consecutiveFinalPolls: 1 }), sport = "ncaaFB") =>
+    P.decideEndSignal({ espnIsFinal: false, state, sport, nowMs, cap: { statusAware: true, espnLive: false, espnUnavailable: true } });
+  const bound = T0 + 4.5 * H;
+  const ceiling = T0 + 6 * H;
+
+  test("before the bound: nothing, and the final count is KEPT (an error is not a non-final poll)", () => {
+    expect(off(T0 + 3 * H)).toEqual({ fireEnd: false, reason: "espn_unavailable", nextConsecutive: 1 });
+  });
+
+  test("past the bound: held; up to and including the ceiling", () => {
+    for (const t of [bound + 1, ceiling]) {
+      expect(off(t)).toEqual({ fireEnd: false, reason: "cap_held_unavailable", nextConsecutive: 1 });
+    }
+  });
+
+  test("past the ceiling: fired, for every sport, with nothing from ESPN", () => {
+    for (const s of SPORTS) {
+      expect(off(P.capCeilingMs(T0, s) + 1, started(), s)).toMatchObject({ fireEnd: true, reason: "hard_cap_ceiling" });
+    }
+  });
+
+  test("the guards still come first; no kickoff known → nothing", () => {
+    expect(off(ceiling + H, { gameStartMs: T0 }).reason).toBe("no_start");
+    expect(off(ceiling + H, started({ endFiredAt: { seconds: 2 } })).reason).toBe("already_fired");
+    expect(off(ceiling + H, started({ gameStartMs: undefined }))).toEqual({ fireEnd: false, reason: "espn_unavailable", nextConsecutive: 0 });
+  });
+
+  test("ignored unless the cap is status-aware: the shipped function", () => {
+    const d = P.decideEndSignal({ espnIsFinal: false, state: started(), sport: "ncaaFB", nowMs: bound + 1, cap: { statusAware: false, espnLive: false, espnUnavailable: true } });
+    expect(d).toEqual(P.decideEndSignal({ espnIsFinal: false, state: started(), sport: "ncaaFB", nowMs: bound + 1 }));
+  });
+
+  test("capBoundMs: unavailable holds the window to the ceiling (status-aware only)", () => {
+    expect(P.capBoundMs({ gameStartMs: T0, sport: "nfl", statusAware: true, espnLive: false, espnUnavailable: true })).toBe(P.capCeilingMs(T0, "nfl"));
+    expect(P.capBoundMs({ gameStartMs: T0, sport: "nfl", statusAware: false, espnLive: false, espnUnavailable: true })).toBe(P.fallbackEndMs(T0, "nfl"));
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe("capBoundMs — the hierarchy window closes when the cap fires", () => {
   test("off, or not live: the shipped bound; on and live: the ceiling", () => {
     for (const s of SPORTS) {
