@@ -2662,9 +2662,13 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `ladderBad` copy ("Your everyday lighting settings need repairing. Opening the app at home
     repairs them."). One case and one test, next app build.
 
-- [ ] **#157 — The ESPN slate flags (and `preflight_ladder_lit`) are fleet-wide, not per
+- [x] **#157 — The ESPN slate flags (and `preflight_ladder_lit`) are fleet-wide, not per
   account**
-  - Status: **OPEN — decision owed** · Severity: **P3** · Evidence: **verified-by-source**
+  - Status: **FIXED on `fix/gameday-espn-slate` (`f821b8e`), not deployed** · Severity:
+    **P3** · Evidence: **verified-by-test**
+  - Fix: each flag (and `payload_full_state`) is exactly `true` (fleet-wide) or a uid list
+    (only those accounts); anything else is off, and a present-but-malformed field is logged.
+    `preflight_ladder_lit` keeps `"strict"` (fleet-wide). Tests: `plannerEspnFlags.test.js`.
   - `espn_college_slate`, `track_started_by_id`, `status_aware_cap` and `preflight_ladder_lit`
     are single values in `config/gameday_planner`. Flipping one for a bench rehearsal changes
     planning for every account: jobs only for allowlisted accounts, plan-log rows for all.
@@ -2676,8 +2680,12 @@ commit — merging `main` into this tree will collide with the untracked copies.
   - The admin-guide gap (#142) now also covers these four keys.
 
 - [ ] **#158 — A START is minted for a game ESPN already reports postponed or cancelled**
-  - Status: **OPEN — pre-existing since S5; found 2026-10-02** · Severity: **P2** · Evidence:
-    **verified-by-source**
+  - Status: **PARTLY FIXED on `fix/gameday-espn-slate` (`2c15e27`, behind
+    `status_aware_cap`), not deployed; the withdrawal half is a decision** · Severity: **P2**
+    · Evidence: **verified-by-test**
+  - Built: with `status_aware_cap` on, a game whose ESPN status is postponed, cancelled,
+    suspended, forfeit or abandoned gets no start (START bucket `game_not_played`, a row
+    naming the status). A reschedule mints as usual. Flag off = as shipped.
   - The START block of `planGameDayFires.ts` mints for any game the lookup returns inside the
     6 h horizon and reads no status there. `DEAD_STATUSES` (`gameDayHierarchy.ts`) only keeps
     such a game out of the hierarchy. A game postponed before its fire time still lights the
@@ -2688,9 +2696,15 @@ commit — merging `main` into this tree will collide with the untracked copies.
     postponed, cancelled or suspended. **Decision:** should a start already minted be withdrawn
     (state `skipped`, the P6 transaction) when ESPN reports postponed before its fireAt?
 
-- [ ] **#159 — An ESPN outage keeps a tracked game's cap from firing, the ceiling included**
-  - Status: **OPEN — residual of the slate fix** · Severity: **P3** · Evidence:
-    **verified-by-source**
+- [x] **#159 — An ESPN outage keeps a tracked game's cap from firing, the ceiling included**
+  - Status: **FIXED on `fix/gameday-espn-slate` (`18a8209`, behind `status_aware_cap`), not
+    deployed** · Severity: **P3** · Evidence: **verified-by-test**
+  - Fix: with `status_aware_cap` on, a started session whose game this tick's lookups did not
+    return reaches the end path as a clock-only game. UNAVAILABLE (HTTP error, 429, timeout,
+    network, unparseable, partial slate) holds the cap and the clock fires the ceiling;
+    SILENT (empty answer, game missing, single-game 404) fires at the bound. Table in
+    `gameDayPlanning.decideEndWithoutEspn`; tests `plannerCapClockGuarantee.test.js`.
+    The text below is the defect as filed.
   - With `track_started_by_id` on, a single-game ERROR (5xx, timeout, network) falls back to
     the scoreboard, because tracking only ever adds information. If the game is also missing
     from the scoreboard, or ESPN is down entirely, the config reads `no_game`, the end path is
@@ -2711,6 +2725,29 @@ commit — merging `main` into this tree will collide with the untracked copies.
     them against the catalog, and add the missing entries with curated LED colours, as the
     team-colour work did. Server side: with `espn_college_slate` on, a config whose id is not
     FBS is now named `team_not_on_slate`.
+
+- [ ] **#161 — A started game's END is not evaluated on a tick its participation is unusable**
+  - Status: **OPEN — pre-existing; found 2026-10-02** · Severity: **P3** · Evidence:
+    **verified-by-source**
+  - In `planGameDayFires.ts` the participation check (`participationForFire`) `continue`s
+    before both START and END. If a controller's participation facts become unusable after a
+    start was minted (aged past the fire floor, cleared), that game's end — final, cap or
+    ceiling — is not evaluated until they are usable again. The #159 clock guarantee does not
+    reach it either. The base restore (`{ps:N}`) needs no participation; only a hand-off
+    payload does.
+  - **Fix shape:** for a session with `startPlannedAt`, skip only the START when
+    participation is unusable and let the END path run, refusing a hand-off without it.
+
+- [ ] **#162 — The functions mirror two app tables with no drift check**
+  - Status: **OPEN — maintenance** · Severity: **P3** · Evidence: **verified-by-source**
+  - `espnClient.ESPN_PATH` (sport → ESPN path, from `SportType`) and
+    `gameDayPlanning.PALETTE_READING_EFFECT_IDS` / `COLORS_ONLY_VERIFIED_EFFECT_IDS`
+    (`payload_full_state`'s `pal`, from `WledEffectsCatalog` at `1057421`) are hand copies.
+    An app catalog change that is not copied makes a server fire choose a different palette
+    from the app's.
+  - **Fix shape:** a Dart test that prints both tables as JSON and a functions test that reads
+    that JSON (or a CI step that diffs them), the pattern the 115 contract test already uses
+    for segment arrays.
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
