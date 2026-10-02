@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/roofline_repair.dart';
 import 'package:nexgen_command/features/design/roofline_target_bar.dart';
+import 'package:nexgen_command/features/wled/zone_providers.dart';
+import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
@@ -112,6 +115,16 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
                   ),
                   // Stats header
                   _buildStatsHeader(totalPixels, segmentCount),
+
+                  // +113: a channel carrying stacked copies of the same
+                  // segment gets a one-tap, backed-up cleanup.
+                  if (config != null &&
+                      cleanupHasWork(planRooflineCleanup(config)))
+                    _CleanupBanner(
+                      onReview: _isSaving
+                          ? null
+                          : () => _showCleanupSheet(config),
+                    ),
 
                   // Segment list
                   Expanded(
@@ -236,10 +249,37 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
     );
   }
 
+  /// The channels a segment can belong to: every channel the map already
+  /// uses, every channel the connected controller reports, and at least the
+  /// map's declared channel count. Sorted, 0-based.
+  List<int> _channelChoices(RooflineConfiguration? config) {
+    final out = <int>{0};
+    if (config != null) {
+      out.addAll(config.allChannelIndices);
+      for (var i = 0; i < config.effectiveTotalChannelCount; i++) {
+        out.add(i);
+      }
+    }
+    for (final c in ref.read(deviceChannelsProvider)) {
+      out.add(c.id);
+    }
+    return out.toList()..sort();
+  }
+
   Future<void> _showAddSegmentDialog() async {
+    final config = ref.read(rooflineConfigEditorProvider);
+    final channels = _channelChoices(config);
+    // Default to the channel the last segment is on — a new segment usually
+    // continues the strip being described — never silently to channel 0.
+    final initialChannel = config != null && config.segments.isNotEmpty
+        ? config.segments.last.channelIndex
+        : channels.first;
     final result = await showDialog<_SegmentFormResult>(
       context: context,
-      builder: (ctx) => _SegmentFormDialog(),
+      builder: (ctx) => _SegmentFormDialog(
+        channels: channels,
+        initialChannel: initialChannel,
+      ),
     );
 
     if (result != null) {
@@ -249,6 +289,10 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
             type: result.type,
             anchorPixels: result.anchorPixels,
             anchorLedCount: result.anchorLedCount,
+            // Row 1 of #108's finding 2 (+113): the form names the channel.
+            // addSegment's default of 0 put every hand-added segment on
+            // channel 0 regardless of where the lights are.
+            channelIndex: result.channelIndex,
             // The customer chose this segment's type in the form.
             featureConfirmed: true,
           );
@@ -259,7 +303,11 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
   Future<void> _showEditSegmentDialog(RooflineSegment segment) async {
     final result = await showDialog<_SegmentFormResult>(
       context: context,
-      builder: (ctx) => _SegmentFormDialog(existingSegment: segment),
+      builder: (ctx) => _SegmentFormDialog(
+        existingSegment: segment,
+        channels: _channelChoices(ref.read(rooflineConfigEditorProvider)),
+        initialChannel: segment.channelIndex,
+      ),
     );
 
     if (result != null) {
@@ -270,10 +318,98 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
             type: result.type,
             anchorPixels: result.anchorPixels,
             anchorLedCount: result.anchorLedCount,
+            channelIndex: result.channelIndex,
             featureConfirmed: true,
           );
       setState(() => _dirty = true);
     }
+  }
+
+  /// Dry run, then "Back up and clean up". The backup goes to each channel's
+  /// own pixelMap doc before the cleaned map is saved
+  /// ([RooflineConfigEditorNotifier.applyCleanup]).
+  Future<void> _showCleanupSheet(RooflineConfiguration config) async {
+    final plans = planRooflineCleanup(config);
+    final text = [
+      for (final p in plans.values)
+        if (p.hasWork) describeChannelCleanup(p),
+    ].join('\n');
+    final go = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: NexGenPalette.gunmetal90,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Clean up duplicate segments',
+                  style: Theme.of(ctx)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(color: Colors.white)),
+              const SizedBox(height: 8),
+              const Text(
+                'This keeps one copy of each stacked segment. Nothing is '
+                'lit differently: the kept segments keep their lights, and '
+                'the removed copies are backed up on this map so the change '
+                'can be undone.',
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    text,
+                    key: const ValueKey('cleanup-dry-run'),
+                    style: const TextStyle(
+                        color: Colors.white, fontFamily: 'monospace', fontSize: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Not now'),
+                  ),
+                  FilledButton.icon(
+                    key: const ValueKey('cleanup-confirm'),
+                    onPressed: () => Navigator.pop(ctx, true),
+                    icon: const Icon(Icons.cleaning_services),
+                    label: const Text('Back up and clean up'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (go != true || !mounted) return;
+    setState(() => _isSaving = true);
+    final notifier = ref.read(rooflineConfigEditorProvider.notifier);
+    final ok = await notifier.applyCleanup(plans);
+    if (!mounted) return;
+    setState(() {
+      _isSaving = false;
+      if (ok) _dirty = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok
+          ? 'Cleaned up. The previous segments are backed up on this map.'
+          : notifier.lastSaveMessage ?? 'The cleanup did not save.'),
+      backgroundColor: ok ? Colors.green : Colors.red,
+    ));
   }
 
   Future<void> _showAnchorEditor(RooflineSegment segment) async {
@@ -298,40 +434,60 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
   }
 
   Future<void> _confirmDelete(RooflineSegment segment) async {
-    final confirm = await showDialog<bool>(
+    // +113: a segment's lights can join its neighbour on the channel (the
+    // channel keeps every light it has) or go with it (the old behaviour).
+    final neighbor =
+        ref.read(rooflineConfigEditorProvider)?.mergeNeighborOf(segment.id);
+    final n = segment.pixelCount;
+    final choice = await showDialog<_DeleteChoice>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: NexGenPalette.gunmetal90,
         title: const Text('Delete Segment?', style: TextStyle(color: Colors.white)),
         content: Text(
-          'Are you sure you want to delete "${segment.name}"?',
+          neighbor == null
+              ? 'Delete "${segment.name}" and its $n light${n == 1 ? '' : 's'}? '
+                  'It is the only segment on channel ${segment.channelIndex + 1}.'
+              : 'Delete "${segment.name}"? Its $n light${n == 1 ? '' : 's'} can '
+                  'join "${neighbor.name}" so channel '
+                  '${segment.channelIndex + 1} keeps all of its lights, or be '
+                  'removed with it.',
           style: const TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx, _DeleteChoice.cancel),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
-            child: const Text('Delete'),
+          TextButton(
+            key: const ValueKey('delete-remove-lights'),
+            onPressed: () => Navigator.pop(ctx, _DeleteChoice.remove),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: Text(neighbor == null ? 'Delete' : 'Remove with its lights'),
           ),
+          if (neighbor != null)
+            FilledButton(
+              key: const ValueKey('delete-merge'),
+              onPressed: () => Navigator.pop(ctx, _DeleteChoice.merge),
+              child: Text('Merge into "${neighbor.name}"'),
+            ),
         ],
       ),
     );
 
-    if (confirm == true) {
-      // Row 72 (+110): this used to call save() on the WHOLE editor, so one
-      // delete silently committed every other unsaved add, edit and reorder
-      // on the screen and bypassed the unsaved-changes prompt. A delete is
-      // now an edit like any other: it marks the screen dirty and is saved by
-      // Save (or discarded by leaving).
-      ref.read(rooflineConfigEditorProvider.notifier).removeSegment(segment.id);
-      setState(() => _dirty = true);
+    if (choice == null || choice == _DeleteChoice.cancel) return;
+    // Row 72 (+110): this used to call save() on the WHOLE editor, so one
+    // delete silently committed every other unsaved add, edit and reorder
+    // on the screen and bypassed the unsaved-changes prompt. A delete is
+    // now an edit like any other: it marks the screen dirty and is saved by
+    // Save (or discarded by leaving).
+    final notifier = ref.read(rooflineConfigEditorProvider.notifier);
+    if (choice == _DeleteChoice.merge) {
+      notifier.removeSegmentMerging(segment.id);
+    } else {
+      notifier.removeSegment(segment.id);
     }
+    setState(() => _dirty = true);
   }
 
   Future<void> _save() async {
@@ -480,6 +636,10 @@ class _SegmentCard extends StatelessWidget {
                   icon: Icons.anchor,
                   value: '${segment.anchorPixels.length} anchors',
                 ),
+                _InfoChip(
+                  icon: Icons.cable,
+                  value: 'Channel ${segment.channelIndex + 1}',
+                ),
               ],
             ),
             Wrap(
@@ -578,6 +738,57 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
+enum _DeleteChoice { cancel, remove, merge }
+
+/// "Clean up duplicates" offer, shown only when the map has stacked copies.
+class _CleanupBanner extends StatelessWidget {
+  const _CleanupBanner({required this.onReview});
+
+  final VoidCallback? onReview;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.layers, color: Colors.amber, size: 18),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Some segments on this map are stacked copies of each '
+                  'other. Clean-up keeps one of each and backs up the rest.',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.tonalIcon(
+              key: const ValueKey('cleanup-review'),
+              onPressed: onReview,
+              icon: const Icon(Icons.cleaning_services, size: 18),
+              label: const Text('Review clean-up'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Form result for segment creation/editing.
 class _SegmentFormResult {
   final String name;
@@ -585,6 +796,7 @@ class _SegmentFormResult {
   final SegmentType type;
   final List<int> anchorPixels;
   final int anchorLedCount;
+  final int channelIndex;
 
   _SegmentFormResult({
     required this.name,
@@ -592,6 +804,7 @@ class _SegmentFormResult {
     required this.type,
     required this.anchorPixels,
     required this.anchorLedCount,
+    required this.channelIndex,
   });
 }
 
@@ -599,7 +812,15 @@ class _SegmentFormResult {
 class _SegmentFormDialog extends StatefulWidget {
   final RooflineSegment? existingSegment;
 
-  const _SegmentFormDialog({this.existingSegment});
+  /// Channels offered (0-based), and the one selected to start with.
+  final List<int> channels;
+  final int initialChannel;
+
+  const _SegmentFormDialog({
+    this.existingSegment,
+    this.channels = const [0],
+    this.initialChannel = 0,
+  });
 
   @override
   State<_SegmentFormDialog> createState() => _SegmentFormDialogState();
@@ -610,6 +831,7 @@ class _SegmentFormDialogState extends State<_SegmentFormDialog> {
   late final TextEditingController _pixelCountController;
   late SegmentType _selectedType;
   late int _anchorLedCount;
+  late int _channelIndex;
   bool _hasStartAnchor = true;
   bool _hasEndAnchor = true;
 
@@ -623,6 +845,9 @@ class _SegmentFormDialogState extends State<_SegmentFormDialog> {
         TextEditingController(text: existing?.pixelCount.toString() ?? '');
     _selectedType = existing?.type ?? SegmentType.run;
     _anchorLedCount = existing?.anchorLedCount ?? 2;
+    _channelIndex = widget.channels.contains(widget.initialChannel)
+        ? widget.initialChannel
+        : widget.channels.first;
 
     if (existing != null && existing.anchorPixels.isNotEmpty) {
       _hasStartAnchor = existing.anchorPixels.contains(0);
@@ -653,6 +878,28 @@ class _SegmentFormDialogState extends State<_SegmentFormDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Channel — which strip the lights are on. Asked first because
+            // nothing else on the form means anything without it.
+            const Text(
+              'Channel',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int>(
+              key: const ValueKey('segment-form-channel'),
+              initialValue: _channelIndex,
+              dropdownColor: NexGenPalette.gunmetal90,
+              style: const TextStyle(color: Colors.white),
+              items: [
+                for (final ch in widget.channels)
+                  DropdownMenuItem(value: ch, child: Text('Channel ${ch + 1}')),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _channelIndex = v);
+              },
+            ),
+            const SizedBox(height: 16),
+
             // Name field
             TextField(
               controller: _nameController,
@@ -795,6 +1042,7 @@ class _SegmentFormDialogState extends State<_SegmentFormDialog> {
         type: _selectedType,
         anchorPixels: anchors,
         anchorLedCount: _anchorLedCount,
+        channelIndex: _channelIndex,
       ),
     );
   }

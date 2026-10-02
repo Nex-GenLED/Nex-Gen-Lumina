@@ -2589,6 +2589,133 @@ commit — merging `main` into this tree will collide with the untracked copies.
     sweep re-run the update path for dirty records when `repoCanWriteCfg` is true.
   - Files: `lib/features/schedule/calendar_entry_lease_manager.dart`. Related: **#123**, **#127**.
 
+- [x] **#130 — WALKTHROUGH SECTIONS SURFACE AS TOP-LEVEL SEGMENTS IN EVERY OTHER ROOFLINE SCREEN,
+  AND RE-MARKING MINTED DUPLICATE SECTION IDS (beta report: "placing anchors creates a new segment
+  every time, stacked; delete is grayed out")**
+  - Status: **DONE on `fix/113-roofline-segments` (2026-10-01), NOT merged, NOT tagged** ·
+    Severity: **P1 — customer-visible, tester stuck** · Evidence: **verified-by-source** @ `a35e30e`
+    + read-only production census (counts only: 41 pixelMap channel docs fleet-wide, 0 overlapping
+    ranges, 0 duplicate ranges, no channel above 4 segments; the reporter's two channel docs were
+    re-saved by the walkthrough minutes before the read and hold 1 and 3 sections)
+  - **What was true.** The +110 walkthrough (`roofline_feature_walkthrough.dart`) compiles a
+    channel's marks into a complete partition — a corner mark yields corner + trailing run, a peak
+    yields three peak pieces + run — and REPLACES the channel on save (`replaceChannelSegments`),
+    so it never stacks. But every other screen shows that partition as a flat list of independent
+    segments: Trace Roofline draws each section's outline slice (2-point slivers piling up at the
+    mark), Segment Setup lists them without channel grouping, the house-photo card counts them as
+    "N sections mapped". To the customer each mark "created new segments on top of the old ones".
+    Separately, `_carryForward` (`roofline_feature_marking.dart:117-152` @ a35e30e) kept an old
+    section's POSITIONAL id (`ch1_seg1`) while the compiler minted the same positional id for a
+    new section, so a re-marked channel carried duplicate ids: one Segment Setup delete removed
+    both, the trace merge (keyed by id) resurrected a deleted copy, and both lists keyed rows by
+    the duplicated id.
+  - **Fix.** New sections are named by where they start (`ch1_at42`) and
+    `withUniqueSectionIds` guarantees uniqueness; compiling the same marks twice yields the same
+    ids. `placeMark` makes one light carry one mark (same mark twice = no change). The walkthrough
+    gained a sections list with per-section **merge-delete** (removes the mark that made the
+    section; a run between two features explains why it cannot be merged), **Undo**, and **Start
+    over** with a confirmation that names what goes. Repair: `roofline_repair.dart` plans a
+    cleanup (same id + same lights, or same stored start + same lights → remove the later copy;
+    same id + different lights → rename; identical neighbours only reported), Segment Setup shows a
+    "Review clean-up" banner only when there is work, the dry run precedes the write, and
+    `backupChannelSegments` stores `segments_backup*` on the channel doc first (carried forward by
+    every later `savePixelMap`). Script mirror: `scripts/pixelmap_cleanup_dry_run.js` (read-only
+    without `--confirm`). Not run against production; nothing in production needs it today.
+  - Tests: `test/features/design/roofline_feature_marking_test.dart`,
+    `roofline_repair_test.dart`, `pixel_map_backup_carry_forward_test.dart`,
+    `roofline_walkthrough_controls_text_scale_test.dart` (1.0/1.75/2.0 + Bold),
+    `test/models/roofline_configuration_merge_delete_test.dart`.
+  - Related: **#108** (the parent-segment UI that would show sections UNDER their channel is still
+    the real fix and remains OPEN), **#131**–**#133**, **#137**.
+
+- [x] **#131 — TRACE ROOFLINE "DELETE" AND "UNDO" READ THE EDITOR'S STATE DURING THE SCREEN'S BUILD,
+  SO THEY STAYED GREY (null on the first frame; a selection never rebuilt the screen)**
+  - Status: **DONE on `fix/113-roofline-segments` (2026-10-01), NOT merged** · Severity: **P1 —
+    the grey delete in the beta report** · Evidence: **verified-by-source**
+    (`roofline_editor_screen.dart:292-294` @ a35e30e; same shape at build 109 `710b8f8:231`)
+  - Long-standing, not a 110/111/112 regression; +110 made it worse by re-keying the editor after
+    an async load. `RooflineEditor` now reports `onActiveSegmentChanged` (post-first-frame and on
+    every selection change); the screen holds the index. A disabled toolbar button carries a
+    `disabledReason`: tapping it says why (nothing traced / sections without a photo outline live
+    in Mark Your Roofline / select a segment first). The segment panel names how many stored
+    sections have no outline and are therefore not shown. Rider found by the new widget test under
+    Flutter 3.47.5: the panel's `ListTile`s sat in a coloured box without their own `Material`
+    (debug assertion, the 7b7dc79 class) — wrapped.
+  - Test: `test/features/site/trace_roofline_delete_state_test.dart` (green on 3.41.2 and 3.47.5).
+  - Related: **#130**.
+
+- [x] **#132 — SEGMENT SETUP "ADD SEGMENT" PUT EVERY NEW SEGMENT ON CHANNEL 0 (#108 finding 2)**
+  - Status: **DONE on `fix/113-roofline-segments` (2026-10-01), NOT merged** · Severity: **P2** ·
+    Evidence: **verified-by-source** (`segment_setup_screen.dart:246-254` never passed a channel;
+    `addSegment` defaults `channelIndex = 0`, `roofline_config_providers.dart:571`)
+  - The form now asks for the channel first (map channels ∪ live device channels ∪ declared count),
+    defaulting to the channel of the last segment, never silently 0; cards show their channel.
+    Delete offers **Merge into <neighbour>** (`RooflineConfiguration.removeSegmentMerging`: the
+    channel keeps every light; anchors and outline move with them) or **Remove with its lights**.
+  - Related: **#108**, **#130**.
+
+- [x] **#133 — THE WALKTHROUGH TOOK THE CHANNEL'S LENGTH FROM THE STORED SUM, NOT THE STRIP, AND
+  SAVED THE DRIFT BACK AS CONFIRMED FEATURES**
+  - Status: **DONE on `fix/113-roofline-segments` (2026-10-01), NOT merged; BEHAVIOUR CHANGE —
+    bench on `.173` before tagging** · Severity: **P2** · Evidence: **verified-by-source**
+    (`roofline_feature_marking.dart:264-274` @ a35e30e) + census: 16 of 41 fleet channel docs map
+    more (5) or fewer (11) lights than their recorded strip
+  - `channelLengthForMarking` now prefers the live strip, then the recorded `source_pixel_count`,
+    then the stored sum, and the walkthrough shows a notice when the map and strip disagree. The
+    first walkthrough save on a drifted channel therefore writes a partition of the STRIP length
+    (what #108 §1.4 specifies), not of the drifted sum. Existing exact sections carry forward.
+  - Related: **#130**, **#137**.
+
+- [ ] **#134 — INSTALLER MAP ROOFLINE STEP: SAVING WRITES ONLY THE CHANNELS WITH MARKS, AND
+  `savePixelMap` DELETES EVERY CHANNEL DOC ABSENT FROM THE CONFIG — a second visit that maps one
+  channel erases the others**
+  - Status: **OPEN — filed 2026-10-01 from the #130 audit; not fixed** · Severity: **P1 —
+    installer data loss, latent (one install has used the compile path so far)** · Evidence:
+    **verified-by-source** (`map_roofline_step.dart:426-458` builds the config from marked
+    channels only; `roofline_config_providers.dart:139,173-177` deletes the rest)
+  - **Fix shape:** load the stored channels first and fold the newly marked channels into them
+    (what the walkthrough's `replaceChannelSegments` does), or make `savePixelMap` take an explicit
+    "channels to replace" set and never delete unmentioned docs.
+  - Files: `lib/features/installer/screens/map_roofline_step.dart`,
+    `lib/features/design/roofline_config_providers.dart`. Related: **#130**.
+
+- [ ] **#135 — THE ROUTER LETS ANY SIGNED-IN USER REACH `/installer*`; `InstallerLandingScreen`
+  HAS NO IN-SCREEN GATE; "Setup Wizard" IS SHOWN TO EVERY CUSTOMER AND LEADS TO A LOCK SCREEN**
+  - Status: **OPEN — filed 2026-10-01 from the #130 reachability audit; not fixed (gating changes
+    are the owner's call)** · Severity: **P2 — hardening + UX** · Evidence: **verified-by-source**
+    (`route_guards.dart:273-277`; `installer_landing_screen.dart:11-201`;
+    `system_management_screen.dart:409-413`; the wizard screens themselves do check
+    `installerModeActiveProvider`)
+  - No customer-visible button pushes `/installer`, so exposure today is a typed deep link only.
+    **Fix shape:** redirect `/installer*` unless installer mode is active; hide or relabel the
+    customer-facing "Setup Wizard" tile.
+  - Related: **#130** (customer-reachability decision), **#107**.
+
+- [ ] **#136 — THE CUSTOMER WALKTHROUGH WRITES `architectural_role`, WHICH FLIPS THE DESIGN
+  STUDIO GATE FROM SOFT TO HARD FOR EVERY STILL-UNMARKED CHANNEL (the gate's comment says it
+  "leaves the role alone")**
+  - Status: **OPEN — filed 2026-10-01; not fixed** · Severity: **P2** · Evidence:
+    **verified-by-source** (`roofline_capture_logic.dart:170-196,240` sets corner/peak roles;
+    `_carryForward` keeps them; `design_studio_gate.dart:156-166,193-195` treats any role as
+    installer-marked → `requireSegmentation`)
+  - A customer who marks ONE corner on a two-channel home blocks Design Studio until the other
+    channel is marked too. **Fix shape:** key the hard gate on `created_by` starting with
+    `installer:` (or a map-level flag), not on the presence of a role; fix the comment.
+  - Files: `lib/features/design/design_studio_gate.dart`. Related: **#130**.
+
+- [ ] **#137 — TRACE "NEW SEGMENT" APPENDS WITH AN ESTIMATED LED COUNT (up to 500; 30 when it
+  cannot estimate), SO CHANNELS DRIFT PAST THEIR STRIP; 5 of 41 fleet channel docs overshoot and
+  11 under-map**
+  - Status: **OPEN — filed 2026-10-01 from the #130 census; not fixed** · Severity: **P2** ·
+    Evidence: **verified-by-source** (`roofline_editor.dart:484-492`, `roofline_trace_merge.dart:
+    51-56`) + read-only census (counts only)
+  - The walkthrough now corrects a drifted channel on its next save (#133); nothing corrects a
+    channel the customer never marks. **Fix shape:** when the live strip length is known, a new
+    traced segment takes the channel's REMAINING lights (strip − mapped), never an estimate; when
+    it is not, prompt for the count.
+  - Files: `lib/widgets/roofline_editor.dart`, `lib/features/design/roofline_trace_merge.dart`,
+    `lib/features/site/roofline_editor_screen.dart`. Related: **#130**, **#133**.
+
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
   - Status: OPEN (filed 2026-08-19) · Severity: **P2 — UX, installer-facing**

@@ -41,6 +41,12 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
   List<RooflineSegment> _currentSegments = [];
   int _totalChannelCount = 1;
 
+  /// The editor's selected segment, reported by [RooflineEditor]. The toolbar
+  /// used to read it off the editor's state while building, which is null on
+  /// the first frame and never refreshed by a selection, so Delete stayed
+  /// grey (+113, tester report).
+  int? _activeIndex;
+
   /// The stored map this trace started from, and which of its segments the
   /// editor was shown (the ones with photo points).
   bool _loaded = false;
@@ -70,8 +76,30 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
           .clamp(1, 8)
           .toInt();
       _editorKey = GlobalKey();
+      _activeIndex = null; // the new editor reports its own after its first frame
       _loaded = true;
     });
+  }
+
+  /// Stored sections the trace cannot show: they have no photo outline (the
+  /// installer's walk, or a walkthrough section over lights that were never
+  /// traced). They are kept on save and edited in Mark Your Roofline.
+  int get _hiddenSectionCount =>
+      _stored?.segments.where((s) => s.points.isEmpty).length ?? 0;
+
+  /// Why Delete is disabled right now.
+  String get _deleteDisabledReason {
+    if (_currentSegments.isEmpty) {
+      final hidden = _hiddenSectionCount;
+      if (hidden > 0) {
+        return 'This map\'s $hidden section${hidden == 1 ? '' : 's'} have no '
+            'outline on the photo, so there is nothing to select here. '
+            'Remove or merge them in Mark Your Roofline.';
+      }
+      return 'Nothing to delete yet. Trace a segment first.';
+    }
+    return 'Tap a segment on the photo or in the list to select it, then '
+        'Delete removes that one.';
   }
 
   Future<void> _onTargetChanged(ControllerInfo picked) async {
@@ -93,7 +121,7 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
       imageProvider = const AssetImage('assets/images/Demohomephoto.jpg');
     }
 
-    final activeIdx = _editorKey.currentState?.activeSegmentIndex;
+    final activeIdx = _activeIndex;
     final activeSeg = activeIdx != null && activeIdx < _currentSegments.length
         ? _currentSegments[activeIdx]
         : null;
@@ -193,6 +221,11 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                         onSegmentsChanged: (segments) {
                           setState(() => _currentSegments = segments);
                         },
+                        onActiveSegmentChanged: (index) {
+                          if (mounted && index != _activeIndex) {
+                            setState(() => _activeIndex = index);
+                          }
+                        },
                       ),
               ),
             ),
@@ -282,16 +315,20 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
               _ToolbarButton(
                 icon: Icons.undo,
                 label: 'Undo',
-                onTap: _editorKey.currentState?.canUndo == true
+                onTap: _activeIndex != null &&
+                        _activeIndex! < _currentSegments.length &&
+                        _currentSegments[_activeIndex!].points.isNotEmpty
                     ? () => _editorKey.currentState?.undo()
                     : null,
+                disabledReason: 'Undo removes the last point of the selected '
+                    'segment. Select a segment that has points first.',
               ),
               _ToolbarButton(
+                key: const ValueKey('trace-delete'),
                 icon: Icons.delete_outline,
                 label: 'Delete',
-                onTap: _editorKey.currentState?.activeSegmentIndex != null
-                    ? _deleteActiveSegment
-                    : null,
+                onTap: _activeIndex != null ? _deleteActiveSegment : null,
+                disabledReason: _deleteDisabledReason,
                 color: Colors.redAccent,
               ),
               _ToolbarButton(
@@ -359,13 +396,31 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
         border: Border.all(color: NexGenPalette.line),
       ),
       child: _currentSegments.isEmpty
-          ? const SingleChildScrollView(
-              padding: EdgeInsets.all(16),
-              child: Text('No segments yet. Tap on the photo to start tracing.',
-                  style: TextStyle(color: NexGenPalette.textMedium)),
+          ? SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                  _hiddenSectionCount > 0
+                      ? 'No outlines to show. $_hiddenSectionCount '
+                          'section${_hiddenSectionCount == 1 ? '' : 's'} '
+                          'from Mark Your Roofline have no photo outline and '
+                          'are kept as they are. Tap on the photo to trace.'
+                      : 'No segments yet. Tap on the photo to start tracing.',
+                  style: const TextStyle(color: NexGenPalette.textMedium)),
             )
           : ReorderableListView.builder(
               shrinkWrap: true,
+              footer: _hiddenSectionCount > 0
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: Text(
+                        '$_hiddenSectionCount more section'
+                        '${_hiddenSectionCount == 1 ? '' : 's'} from Mark Your '
+                        'Roofline have no photo outline and are not shown here.',
+                        style: const TextStyle(
+                            color: NexGenPalette.textMedium, fontSize: 11),
+                      ),
+                    )
+                  : null,
               buildDefaultDragHandles: false,
               itemCount: _currentSegments.length,
               onReorder: (old, newIdx) {
@@ -373,9 +428,16 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
               },
               itemBuilder: (context, index) {
                 final seg = _currentSegments[index];
-                final isActive = index == _editorKey.currentState?.activeSegmentIndex;
-                return ListTile(
+                final isActive = index == _activeIndex;
+                // A ListTile paints its ink and selected tint on the nearest
+                // Material; inside this coloured panel that Material is behind
+                // the panel, so Flutter 3.47 asserts in debug builds (the same
+                // class 7b7dc79 fixed in the walkthrough). A transparent
+                // Material of its own keeps the panel's look.
+                return Material(
                   key: ValueKey(seg.id),
+                  type: MaterialType.transparency,
+                  child: ListTile(
                   dense: true,
                   selected: isActive,
                   selectedTileColor: seg.channelDisplayColor.withValues(alpha: 0.08),
@@ -401,6 +463,7 @@ class _RooflineEditorScreenState extends ConsumerState<RooflineEditorScreen> {
                     ],
                   ),
                   onTap: () => _editorKey.currentState?.selectSegment(index),
+                  ),
                 );
               },
             ),
@@ -806,20 +869,39 @@ class _ToolbarButton extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? color;
 
+  /// Why the button is disabled. A disabled button with a reason still
+  /// responds to a tap — by saying the reason — instead of sitting grey and
+  /// silent (+113).
+  final String? disabledReason;
+
   const _ToolbarButton({
+    super.key,
     required this.icon,
     required this.label,
     this.onTap,
     this.color,
+    this.disabledReason,
   });
 
   @override
   Widget build(BuildContext context) {
     final isEnabled = onTap != null;
     final fgColor = isEnabled ? (color ?? Colors.white) : Colors.white38;
+    final reason = disabledReason;
 
-    return InkWell(
-      onTap: onTap,
+    return Semantics(
+      button: true,
+      enabled: isEnabled,
+      hint: isEnabled ? null : reason,
+      child: Tooltip(
+      message: isEnabled ? label : (reason ?? label),
+      child: InkWell(
+      onTap: onTap ??
+          (reason == null
+              ? null
+              : () => ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(SnackBar(content: Text(reason)))),
       borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -836,6 +918,8 @@ class _ToolbarButton extends StatelessWidget {
             Text(label, style: TextStyle(color: fgColor, fontSize: 12)),
           ],
         ),
+      ),
+      ),
       ),
     );
   }
