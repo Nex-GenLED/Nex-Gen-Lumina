@@ -159,14 +159,22 @@ channel-0 default is **long-standing** (spec finding 2, 2026-08-19).
   account has nothing to clean; the in-app banner will not appear for her.
 - **Functions, rules, firmware:** untouched.
 
-### Customer-reachability recommendation (no gating changed)
+### Customer reachability — recommended, then approved and implemented
 
 Keep the walkthrough, Trace Roofline and Refine customer-reachable: they are the +110 customer
-design and now explain themselves. **Recommend gating Segment Setup** (the installer's flat editor
-that lets a customer type pixel counts) on `installerModeActiveProvider`, the same lock the
-Roofline Setup Wizard already uses, and pointing the Design Studio "Roofline setup" button at the
-walkthrough for customers. Until #108's parent-segment UI exists, Segment Setup is where a
-customer can still make a channel longer than its strip. Owner decision; not changed here.
+design and now explain themselves. Gate Segment Setup (the installer's flat editor that lets a
+customer type pixel counts) on `installerModeActiveProvider`, the same lock the Roofline Setup
+Wizard already uses, and point Design Studio's "Roofline setup" at the walkthrough. Until #108's
+parent-segment UI exists, Segment Setup is where a customer could still make a channel longer than
+its strip.
+
+**Approved by the owner 2026-10-01 and implemented in the branch's second commit:** the wizard's
+lock is lifted into a shared `InstallerLockScreen` (wording unchanged) and Segment Setup shows it
+when installer mode is off, with a "Mark Your Roofline instead" door; Design Studio's "Roofline
+setup" button and its roofline-error action open the walkthrough. Nothing else about gating
+changed (#135 remains open). The smart-presets section's two "Roofline setup" links (behind the
+compile-time `LUMINA_SMART_PRESETS` define, off in every build) still target Segment Setup and now
+land on the lock for a customer.
 
 ### Device walk (for the owner)
 

@@ -3,8 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
+import 'package:nexgen_command/features/design/roofline_feature_walkthrough.dart';
 import 'package:nexgen_command/features/design/roofline_repair.dart';
 import 'package:nexgen_command/features/design/roofline_target_bar.dart';
+import 'package:nexgen_command/features/installer/installer_lock_screen.dart';
+import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -40,6 +43,8 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
   }
 
   Future<void> _initialize() async {
+    // Locked for a customer: nothing to load (see build).
+    if (!ref.read(installerModeActiveProvider)) return;
     await ref.read(rooflineConfigEditorProvider.notifier).initialize();
     if (mounted) {
       setState(() => _isLoading = false);
@@ -48,6 +53,20 @@ class _SegmentSetupScreenState extends ConsumerState<SegmentSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // +113 (owner decision 2026-10-01): this flat editor lets its user type
+    // pixel counts and add segments to any channel, which is how a channel
+    // outgrows its strip — an installer's tool. Same lock as the Roofline
+    // Setup Wizard; a customer marks corners, peaks and runs in Mark Your
+    // Roofline instead, and Design Studio's "Roofline setup" now opens that.
+    if (!ref.watch(installerModeActiveProvider)) {
+      return InstallerLockScreen(
+        title: 'Roofline Segments',
+        featureName: 'The Roofline Segments editor',
+        alternativeLabel: 'Mark Your Roofline instead',
+        onAlternative: () => openRooflineFeatureWalkthrough(context),
+      );
+    }
+
     final config = ref.watch(rooflineConfigEditorProvider);
     final totalPixels = ref.watch(editorTotalPixelCountProvider);
     final segmentCount = ref.watch(editorSegmentCountProvider);

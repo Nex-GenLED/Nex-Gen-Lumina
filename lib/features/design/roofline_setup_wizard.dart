@@ -9,6 +9,7 @@ import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/roofline_target_bar.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/installer/installer_lock_screen.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -261,66 +262,10 @@ class _RooflineSetupWizardState extends ConsumerState<RooflineSetupWizard> {
     final isInstallerMode = ref.watch(installerModeActiveProvider);
 
     if (!isInstallerMode) {
-      return Scaffold(
-        appBar: GlassAppBar(
-          title: const Text('Roofline Setup'),
-          leading: IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => context.pop(),
-          ),
-        ),
-        body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.lock_outline,
-                    size: 40,
-                    color: Colors.orange,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Installer Access Required',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: NexGenPalette.textHigh,
-                        fontWeight: FontWeight.bold,
-                      ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'The Roofline Setup Wizard is only available to certified installers. This ensures your LED system is configured correctly for optimal performance.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: NexGenPalette.textMedium,
-                      ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                FilledButton.icon(
-                  onPressed: () => context.pop(),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Go Back'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: NexGenPalette.cyan,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+      // +113: the lock is shared with Segment Setup; wording unchanged.
+      return const InstallerLockScreen(
+        title: 'Roofline Setup',
+        featureName: 'The Roofline Setup Wizard',
       );
     }
 

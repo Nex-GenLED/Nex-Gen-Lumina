@@ -104,8 +104,12 @@ List<Override> _overrides(
   UserService? userService,
   UserModel? profile,
   RecordingWledRepository? repo,
+  // +113: Segment Setup is installer-only; its tests run as an installer.
+  bool installerActive = false,
 }) =>
     [
+      if (installerActive)
+        installerModeActiveProvider.overrideWith((ref) => _ActiveInstaller(ref)),
       effectiveUserUidProvider.overrideWith((ref) => kTestUid),
       controllersStreamProvider
           .overrideWith((ref) => Stream.value(controllers)),
@@ -203,7 +207,7 @@ void main() {
       await seedPixelMap(fs, twoChannelRoofline(controllerId: 'ctrl-b'),
           controllerId: 'ctrl-b');
       await tester.pumpWidget(_hosted(const SegmentSetupScreen(),
-          _overrides(fs, controllers: [_front, _back])));
+          _overrides(fs, controllers: [_front, _back], installerActive: true)));
       await _open(tester);
       await tester.pumpAndSettle();
 
@@ -316,8 +320,8 @@ void main() {
       final corner = before.firstWhere((s) => s.id == 'ch0_corner');
       final run = before.firstWhere((s) => s.id == 'ch0_run');
 
-      await tester
-          .pumpWidget(_hosted(const SegmentSetupScreen(), _overrides(fs)));
+      await tester.pumpWidget(_hosted(
+          const SegmentSetupScreen(), _overrides(fs, installerActive: true)));
       await _open(tester);
       await tester.pumpAndSettle();
 
@@ -343,8 +347,8 @@ void main() {
         (tester) async {
       final fs = FakeFirebaseFirestore();
       await seedPixelMap(fs, twoChannelRoofline());
-      await tester
-          .pumpWidget(_hosted(const SegmentSetupScreen(), _overrides(fs)));
+      await tester.pumpWidget(_hosted(
+          const SegmentSetupScreen(), _overrides(fs, installerActive: true)));
       await _open(tester);
       await tester.pumpAndSettle();
 

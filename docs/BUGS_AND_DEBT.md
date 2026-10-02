@@ -2625,6 +2625,14 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `roofline_repair_test.dart`, `pixel_map_backup_carry_forward_test.dart`,
     `roofline_walkthrough_controls_text_scale_test.dart` (1.0/1.75/2.0 + Bold),
     `test/models/roofline_configuration_merge_delete_test.dart`.
+  - **Owner decision 2026-10-01 (second commit on the branch):** Segment Setup is locked to
+    installer mode with the Roofline Setup Wizard's lock (`InstallerLockScreen`, shared), and the
+    lock offers "Mark Your Roofline instead"; Design Studio's "Roofline setup" (both the toolbar
+    button and the roofline-error panel) opens the walkthrough. The walkthrough, Trace Roofline and
+    Refine stay customer-reachable; no other gating changed (#135 still open). Tests:
+    `test/features/design/segment_setup_installer_gate_test.dart`,
+    `design_studio_roofline_setup_link_test.dart`,
+    `test/features/installer/installer_lock_screen_text_scale_test.dart`.
   - Related: **#108** (the parent-segment UI that would show sections UNDER their channel is still
     the real fix and remains OPEN), **#131**–**#133**, **#137**.
 
