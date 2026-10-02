@@ -4333,6 +4333,139 @@ commit — merging `main` into this tree will collide with the untracked copies.
     the server note (**#151**) must then carry the same rule.
   - Files: `lib/features/game_day/game_day_apply.dart`, `lib/features/autopilot/game_day_autopilot_service.dart`.
 
+- [x] **#163 — LUMINA SAID A LOOK WAS FOR THE HOUSE AND LIT ONE CHANNEL: single-segment payloads
+  pinned to `id: 0` were never fanned out, and the reply card's "All Zones" was a hard-coded default**
+  - Status: **DONE on `fix/116-lumina-channels-favorites` (2026-10-02), NOT merged** · Severity:
+    **P1 — every team, holiday and multi-night look on a multi-channel home** · Evidence:
+    **verified-by-test** (`lumina_multichannel_apply_test.dart`, real builders on a fake 3-bus
+    controller) + owner report (a Lumina team look changed segment 0 of a 162/128/100 px
+    controller over the bridge; segments 1 and 2 kept the earlier look while the preview and Now
+    Playing showed the new one).
+  - Causes: the team, holiday and multi-night builders (`lumina_brain.dart`,
+    `lumina_smart_scheduler.dart`) pinned their one segment to `id: 0`, and a cloud reply could do
+    the same or send a bare `seg` object; `applyToDeviceResult`'s raw-broadcast check and
+    `expandForParticipation` rule 5 both treat an explicit id as "segment 0 specifically", so LAN
+    and relay alike sent segment 0 only. Lumina also went through `effectiveChannelIdsProvider`,
+    so a channel picked on the Home bar silently narrowed it and switched the other channels off.
+    The card's "Zone: All Zones" was `ZoneInfo`'s constant default, never set from what was sent.
+  - Fix: `WledNotifier.applyLuminaDesign` — any single-look shape becomes one fully stated segment
+    per participating channel (census ∩ participation, the design spine's set; not the Home bar),
+    display metadata off the wire, the stated channels reported in the result; the chat funnel and
+    the adjustment panel's "All Zones" use it; the card shows "Sent to: All 3 channels" (or the
+    channels by name) from that report, and a zone only when one was picked; the builders drop
+    `id: 0`.
+  - **Open residue:** (1) a dated Lumina team night (`teamPayloadFor` → calendar entry →
+    lease psave) is still one segment — #154's "a +112 carried payload is per-channel already" is
+    not true for it; fix it in the #154 lease change (channel-filter the carried payload before
+    `savePreset`). (2) A commercial zone chip writes a single look straight to another controller's
+    repository, where the global participation cache decides the fan-out.
+  - Files: `lib/features/ai/lumina_channel_apply.dart`, `lib/features/wled/wled_providers.dart`,
+    `lib/features/ai/lumina_conversation_driver.dart`, `lib/features/ai/adjustment_state_controller.dart`,
+    `lib/features/ai/lumina_response_card.dart`, `lib/features/ai/lumina_lighting_suggestion.dart`,
+    `lib/features/ai/lumina_sheet_controller.dart`, `lib/shared/write_result.dart`. Related **#154**,
+    **#165**.
+
+- [ ] **#164 — FAVORITES FILLED THEMSELVES IN AND HAD NO CAP**
+  - Status: **(a) and (b) DONE on `fix/116-lumina-channels-favorites` (2026-10-02), NOT merged;
+    (c) awaiting the owner's choice** · Severity: **P2** · Evidence: **verified-by-source** +
+    **verified-by-data** (read-only, counts only: 56 accounts, 12 with favorites, 24 favorites, of
+    which 23 `auto_added`; 2 accounts over two; none with more than two explicit ones).
+  - Cause: `HabitLearner.updateAutoFavorites` (`7b166b7`, 2026-01-23) ran on app resume and wrote
+    the top-5 most-used patterns into `users/{uid}/favorites` with `auto_added: true`, deleting the
+    ones that dropped out. +110 E1 made it visible: `cc22fee` and `f7f4d04` made every Explore apply
+    log usage, and `a5b229c` made Home show every favorite instead of two.
+  - (a) Every automatic writer removed (the learner and both callers, the latent auto paths,
+    `UserService.addFavorite`, the brand generator's favorites); a new favorite is always
+    `auto_added: false`. (b) `writeFavorite` refuses a third (`FavoritesFullException`, "You can
+    keep 2 favorites. Remove one to add another."); every explicit control offers a one-batch
+    replace; Home hides "+" at the cap.
+  - **(c) for the owner:** existing over-cap and auto-added data is untouched today (Home shows it
+    all; adds are refused until one is removed). Options: keep as is (recommended); Home shows
+    explicit favorites only, auto ones in a "Suggested from your use" row (11 of 12 accounts would
+    see their Favorites row change); a one-time "choose your 2" prompt with a backup for the two
+    over-cap accounts. Also: confirm the two reserved white tiles do not count toward the two.
+  - Files: `lib/features/favorites/favorite_doc.dart`, `favorites_providers.dart`,
+    `favorites_full_dialog.dart`, `favorites_picker.dart`, `lib/widgets/favorites_grid.dart`,
+    `lib/widgets/favorite_heart_button.dart`, `lib/features/autopilot/habit_learner.dart`.
+
+- [ ] **#165 — THE HOME PREVIEW AND NOW PLAYING READ SEGMENT 0 ONLY: a mixed controller shows one
+  channel's look on the whole house**
+  - Status: **OPEN — filed 2026-10-02 from #163** · Severity: **P2** · Evidence:
+    **verified-by-source** (`wled_providers.dart:1215-1262` parses `firstSeg` only;
+    `applyPayloadWithLabel` sets the preview and label from the payload sent, `:1891-1940`; the
+    hero draws `state.displayColors` / `effectId` across the roofline).
+  - #163 stops Lumina creating mixed states; other writers (the Home tuner on one channel, a
+    schedule, a per-channel scene) still can, and the app cannot tell.
+  - **Fix shape:** parse every segment on poll; when the participating channels differ, Now Playing
+    reads "Mixed" (or names the channels) and the hero draws each channel's own look from the
+    pixelMap spans.
+  - Files: `lib/features/wled/wled_providers.dart`, `lib/features/wled/display_pattern_providers.dart`,
+    `lib/features/dashboard/wled_dashboard_page.dart`.
+
+- [ ] **#166 — "Cannot use "ref" after the widget was disposed" ON THE GAME DAY SCREEN; the same
+  pattern app-wide**
+  - Status: **Game Day screen, My Schedule's eviction listener and the weekly regeneration DONE on
+    `fix/116-lumina-channels-favorites` (2026-10-02), NOT merged; app-wide OPEN** · Severity:
+    **P2** · Evidence: **verified-by-data** (one `debug_errors` record, iOS 2.5.10+114,
+    2026-10-02 20:36:06Z, `PlatformDispatcher.onError`, obfuscated frames) + **verified-by-test**
+    (`game_day_dispose_during_await_test.dart` reproduces the exact message on the old code).
+  - A widget method awaited a dialog, sheet or read, the card was torn down underneath it, and the
+    method then read the widget's `ref`. The team enable in the report DID land 5.4 s before the
+    error, so the throw came from code reacting to it; symbolicate with the build's
+    `app.ios-arm64.symbols` artifact to pin the frame.
+  - Fix on the branch: each handler captures the app's `ProviderContainer` (and messenger) before
+    its first await. Light Up Now's self-expiring session now starts even if the card is gone.
+  - **Open:** a scan finds about 220 `ref`-after-`await` sites across `lib/` (largest:
+    `my_schedule_page.dart`, `installer_setup_wizard.dart`, `demo_photo_screen.dart`). Fix by
+    screen, with the same capture-the-container shape; a lint or a source test would stop new ones.
+
+- [x] **#167 — EFFECT NAMES THE CUSTOMER READS NAMED A DIFFERENT EFFECT (fx 12 "Theater Chase" is
+  Fade on 0.15.1)**
+  - Status: **DONE on `fix/116-lumina-channels-favorites` (2026-10-02), NOT merged** · Severity:
+    **P3** · Evidence: **verified-by-source** (every hand table diffed against
+    `wled_effects_catalog.dart`, which matches WLED 0.15.1).
+  - Hand tables used an invented numbering (12 Theater Chase, 41 Running, 43 Twinkle, 52 Fireworks,
+    63 Candle, 65 Fire, …). Labels now come from the catalog: the schedule card and detail sheet,
+    Lumina's pattern names and night names, the Game Day design label, the Explore compact card,
+    the Neighborhood Sync picker and the brand custom-design list. No id that is sent changed.
+
+- [ ] **#168 — LIBRARY DESIGNS PLAY A DIFFERENT EFFECT THAN THEIR AUTHORS INTENDED, and the AI's
+  effect_database uses an older numbering**
+  - Status: **OPEN — filed 2026-10-02 from #167; owner decision** · Severity: **P3** · Evidence:
+    **verified-by-source**.
+  - About 180 `suggestedEffects` entries in `lib/data/` (holiday, party, seasonal, NCAA, sports,
+    golf libraries) say "Theater Chase, Running, Twinkle, Fireworks, Candle" in their comments and
+    send 12, 41, 43, 52, 63/101 — Fade, Lighthouse, Rain, Running Dual, Pride 2015 / Pacifica. The
+    Lumina team default ("Theater Chase for most") is fx 12 too. The brand list's 13 / 50 / 74 were
+    labelled Glitter / Twinkle / Twinkle Cat (now relabelled to what they play).
+    `effect_database.dart` (the AI decision tree's effect knowledge) is shifted from fx 37 up.
+  - **Decide:** keep today's looks and fix the comments, or move the ids to the intended effects
+    (13 Theater, 15 Running, 17 Twinkle, 42 / 90 Fireworks, 88 Candle) — a visible change to
+    every affected design; bench it first. `effect_database.dart` should be regenerated from the
+    catalog either way.
+
+- [ ] **#169 — GAME DAY CELEBRATION LENGTH: Short / Medium / Long (spec, not built); and an NFL extra
+  point celebrates as a touchdown**
+  - Status: **OPEN — spec `docs/game_day_celebration_length_spec_2026-10-02.md` awaiting owner
+    approval of the values** · Severity: **P3 (feature) / P2 (the extra point)** · Evidence:
+    **verified-by-source**.
+  - Proposal: `celebration_length` on the team doc (absent = medium = today), each event's length
+    × 0.5 / × 1 / × 2, every celebration clamped to 5–60 s, the control under Speed in the
+    celebration picker. The app half can ship in the next build; the server half rides S5b (plan
+    step G) with the poller dispatching short reverts itself.
+  - Extra point: `ScoreMonitorService._diffNfl` has no +1 case; a PAT falls to `default:` →
+    `touchdown`, so it plays a second 15 s celebration even under "Major only".
+
+- [ ] **#170 — A PHONE CELEBRATION CAN RUN ON INDEFINITELY if the app is suspended or killed mid-way**
+  - Status: **OPEN — filed 2026-10-02 from #169** · Severity: **P2** · Evidence:
+    **verified-by-source** (`foreground_celebration_providers.dart`: each stage is held with
+    `Future.delayed`, the revert runs after the last).
+  - iOS stops the Dart timers when the app is suspended; the revert waits for the next resume, and
+    never runs if the app is killed — the house stays on the celebration until the Game Day end, a
+    schedule or the customer changes it.
+  - **Fix shape:** persist `{captured state, revertBy}` before the first stage and revert on the
+    next resume or launch when past due (spec §2.5); single-stage celebrations away from home.
+
 ---
 
 ## P3 — debt (no launch relevance)
