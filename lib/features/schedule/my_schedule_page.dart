@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/schedule/calendar_entry_editor.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/day_timeline.dart';
 import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
+import 'package:nexgen_command/features/schedule/widgets/ladder_repair_banner.dart';
 import 'package:nexgen_command/features/schedule/widgets/channel_scope_picker.dart';
 import 'package:nexgen_command/features/schedule/widgets/timer_slot_meter.dart';
 import 'package:nexgen_command/features/schedule/widgets/timeline_row.dart';
@@ -365,6 +366,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
 
           // ── Last sync status ────────────────────────────────────────────
           const _SyncStatusRow(),
+
+          // ── +114: what the on-connect ladder repair did (renders nothing
+          // unless a repair wrote and the customer has not dismissed it) ────
+          const LadderRepairBanner(),
 
           // ── Schedule overload warning ──────────────────────────────────
           const ScheduleOverloadBanner(),

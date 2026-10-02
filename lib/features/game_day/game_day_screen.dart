@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/schedule/widgets/ladder_repair_banner.dart';
 import 'package:nexgen_command/features/autopilot/base_layer_gate.dart';
 import 'package:nexgen_command/features/game_day/gate_status.dart';
 import 'package:nexgen_command/features/game_day/gate_status_banner.dart';
@@ -104,6 +105,9 @@ class GameDayScreen extends ConsumerWidget {
                 GateStatusBanner(
                   onCreateSchedule: () => context.push(AppRoutes.schedule),
                 ),
+                // +114 — what the on-connect ladder repair did. The ladder is
+                // what a Game Day END restores to, so it is news here too.
+                const LadderRepairBanner(),
                 // Hero description
                 _buildHeroCard(context),
                 const SizedBox(height: 20),
