@@ -424,27 +424,68 @@ service cloud.firestore {
                != resource.data.get('dealer_code', '');
       }
 
+      // ── SERVER-OWNED GAME DAY FIELDS (B5, 2026-10-02) ────────────
+      // `gameday_server` is the planner's statement that the SERVER fires
+      // this account's Game Day (the app stands down when it reads
+      // served:true), and `gameday_gate_blocking` is the planner's readiness
+      // verdict. Both are written ONLY by Cloud Functions through the admin
+      // SDK, which bypasses these rules. A client that could write them
+      // could forge served:true and silence its own app's Game Day while
+      // the server is not firing for it.
+      //
+      // No client writes either field (grep of lib/ and functions/,
+      // 2026-10-02: the only reader is gate_status_provider.dart, read-only).
+      //
+      // Like the D0 guards these are ANDed at the top level, because the
+      // broad `|| request.auth != null` grant would otherwise bypass them.
+      // No admin/owner-claim exemption: no client role has a reason to write
+      // a server's verdict.
+      function serverOwnedGameDayFields() {
+        return ['gameday_server', 'gameday_gate_blocking'];
+      }
+
+      // CREATE: a new doc may not be born carrying either field.
+      function createsServerOwnedField() {
+        return request.resource.data.keys().hasAny(serverOwnedGameDayFields());
+      }
+
+      // UPDATE: deny ADDING or CHANGING either field. REMOVAL is allowed on
+      // purpose: an absent field reads as "not served" — the safe direction
+      // (the app runs Game Day itself) — and a full-document set() of a
+      // profile (user_service.dart createUser) on a doc that already carries
+      // the field would otherwise be denied as a removal.
+      function writesServerOwnedField() {
+        return request.resource.data.diff(resource.data).addedKeys()
+                 .hasAny(serverOwnedGameDayFields())
+            || request.resource.data.diff(resource.data).changedKeys()
+                 .hasAny(serverOwnedGameDayFields());
+      }
+
       // SECURITY: On create, enforce owner_id matches auth uid
       // OR any authenticated user (installer setup creates customer profiles;
       // PIN validation happens app-side).
       // D0: ...but never with a privileged user_role unless admin/owner.
+      // B5: ...and never carrying a server-owned Game Day field.
       allow create: if ((isOwner(userId) &&
                       request.resource.data.owner_id == userId &&
                       request.resource.data.id == userId &&
                       isValidDealerEmail(request.resource.data.get('dealer_email', null)))
                     || request.auth != null)
-                    && (!createsPrivilegedRole() || hasAdminOrOwnerClaim());
+                    && (!createsPrivilegedRole() || hasAdminOrOwnerClaim())
+                    && !createsServerOwnedField();
 
       // SECURITY: On update, prevent tampering with critical fields
       // OR any authenticated user (installer setup updates customer profiles).
       // D0: ...but never elevating user_role or reassigning dealer_code
       // unless admin/owner.
+      // B5: ...and never adding or changing a server-owned Game Day field.
       allow update: if ((isOwner(userId) &&
                       cannotModifyCriticalFields() &&
                       isValidDealerEmail(request.resource.data.get('dealer_email', null)))
                     || request.auth != null)
                     && (!elevatesRole() || hasAdminOrOwnerClaim())
-                    && (!reassignsDealerCode() || hasAdminOrOwnerClaim());
+                    && (!reassignsDealerCode() || hasAdminOrOwnerClaim())
+                    && !writesServerOwnedField();
 
       allow delete: if isOwner(userId);
 
