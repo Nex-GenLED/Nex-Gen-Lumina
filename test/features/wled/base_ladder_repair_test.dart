@@ -333,6 +333,11 @@ class _Harness {
   Future<bool> Function()? recordResult;
   Duration recordTimeout = const Duration(seconds: 10);
 
+  /// The controller doc's `base_ladder_repair` map as Firestore would hold it:
+  /// every record write MERGES into it, and the runner reads it back.
+  Map<String, dynamic>? doc;
+  bool failRead = false;
+
   BaseLadderRepairRunner runner() => BaseLadderRepairRunner(LadderRepairDeps(
         svc: ctl,
         controllerId: 'AA00000000A1',
@@ -345,8 +350,15 @@ class _Harness {
         writeRecord: (r) {
           ctl.log.add('record:${r['state']}');
           records.add(r);
+          doc = {...?doc, ...jsonDecode(jsonEncode(r)) as Map<String, dynamic>};
           onRecord?.call(r);
           return recordResult?.call() ?? Future.value(true);
+        },
+        readRecord: () async {
+          if (failRead) throw StateError('unavailable');
+          return doc == null
+              ? null
+              : jsonDecode(jsonEncode(doc)) as Map<String, dynamic>;
         },
         republish: (a, v) async => republished.add((asserts: a, v: v)),
         stillConnected: () => connected,
@@ -1183,6 +1195,126 @@ void main() {
       h.useDevice(dev);
       await h.run();
       expect(h.records.last['restore'], 'failed');
+    });
+  });
+
+  group('dry-run review record — written once per RESULT, not per connect', () {
+    _Harness dry() => _Harness(mode: LadderRepairMode.dryRun);
+
+    test('the same result twice = ONE write', () async {
+      final h = dry();
+      await h.run();
+      await h.run();
+      await h.run();
+      expect(h.records, hasLength(1));
+      expect(h.ctl.controllerWrites, 0);
+    });
+
+    test('a changed GATE result = a second write', () async {
+      final h = dry();
+      await h.run();
+      expect(h.records.single['gate'], 'ok');
+      h.ctl.timers = [
+        {'en': 1, 'hour': 13, 'min': 4, 'macro': 39, 'dow': 16},
+      ];
+      await h.run();
+      expect(h.records, hasLength(2));
+      expect(h.records.last['gate'], 'lease_timer_near');
+      await h.run(); // still near the lease: unchanged again
+      expect(h.records, hasLength(2));
+    });
+
+    test('a changed PLAN = a second write', () async {
+      final h = dry();
+      await h.run();
+      h.ctl.presets = {...h.ctl.presets, 3: _black('NGL Dim', 51)};
+      await h.run();
+      expect(h.records, hasLength(2));
+      expect([for (final e in h.records.last['plan'] as List) (e as Map)['preset']],
+          [1, 3, 4]);
+    });
+
+    test('a changed dark-channel list = a second write', () async {
+      final h = dry();
+      // Preset 4 dark on bus 2 only, then on buses 1 and 2: same slot, same
+      // fault code, different channels.
+      Map<String, dynamic> darkOn(List<int> ids) => {
+            'n': 'NGL Low',
+            'on': true,
+            'bri': 102,
+            'seg': [
+              for (final id in _buses)
+                {
+                  'id': id,
+                  'on': true,
+                  'fx': 0,
+                  'col': ids.contains(id) ? [[0, 0, 0, 0]] : [[0, 212, 255, 0]],
+                },
+            ],
+          };
+      h.ctl.presets = _healthy()..[4] = darkOn([2]);
+      await h.run();
+      h.ctl.presets = _healthy()..[4] = darkOn([1, 2]);
+      await h.run();
+      expect(h.records, hasLength(2));
+      expect(h.records.last['dark_channels'], [1, 2]);
+    });
+
+    test('the record cannot be READ → write (never a silently missing record)',
+        () async {
+      final h = dry()..failRead = true;
+      await h.run();
+      await h.run();
+      expect(h.records, hasLength(2));
+    });
+
+    test('a record left by a REPAIR (another phone) → the dry run writes',
+        () async {
+      final h = dry()
+        ..doc = {
+          'version': kLadderRepairVersion,
+          'state': 'repaired',
+          'saved': [1, 4],
+        };
+      await h.run();
+      expect(h.records, hasLength(1));
+      expect(h.doc!['state'], 'dry_run');
+    });
+
+    test('dryRunRecordDiffers — malformed or foreign records count as changed',
+        () {
+      final plan = [const LadderRepairStep(1, 'NGL On', ['channel_black'])];
+      Map<String, dynamic> rec({Object? planV, Object? dark, Object? gate,
+              Object? version = kLadderRepairVersion}) =>
+          {
+            'version': version,
+            'state': 'dry_run',
+            'plan': planV ??
+                [
+                  {'preset': 1, 'name': 'NGL On', 'faults': ['channel_black']}
+                ],
+            'dark_channels': dark ?? [0, 1],
+            'gate': gate ?? 'ok',
+          };
+      bool differs(Map<String, dynamic>? r) => dryRunRecordDiffers(
+          recorded: r, plan: plan, darkChannels: const [0, 1], gate: 'ok');
+      expect(differs(rec()), isFalse);
+      expect(differs(null), isTrue);
+      expect(differs(rec(version: 'v0')), isTrue);
+      expect(differs(rec(gate: 'timer_near')), isTrue);
+      expect(differs(rec(dark: [0])), isTrue);
+      expect(differs(rec(planV: 'nope')), isTrue);
+      expect(
+          differs(rec(planV: [
+            {'preset': 1, 'faults': ['channel_off']}
+          ])),
+          isTrue);
+      // Firestore hands numbers back as num and may reorder map keys.
+      expect(
+          differs(rec(planV: [
+            {'faults': ['channel_black'], 'preset': 1.0}
+          ])),
+          isFalse);
     });
   });
 }

@@ -322,6 +322,46 @@ List<LadderRepairStep> planLadderRepair(LadderRestoreVerdict verdict) => [
           LadderRepairStep(p.presetId, ladderSlotName(p.presetId), p.faults),
     ];
 
+/// PURE. Does a dry run have something new to record?
+///
+/// True unless [recorded] is a dry-run record with the same plan (slot ids and
+/// their fault codes, in order), the same dark channels and the same gate
+/// code. Unknown (null), a record from another state (`started`, `repaired`,
+/// …), an older version, or anything malformed counts as different — the
+/// safe direction is one extra write, never a missing record.
+bool dryRunRecordDiffers({
+  required Map<String, dynamic>? recorded,
+  required List<LadderRepairStep> plan,
+  required List<int> darkChannels,
+  required String gate,
+}) {
+  if (recorded == null) return true;
+  if (recorded['state'] != 'dry_run') return true;
+  if (recorded['version'] != kLadderRepairVersion) return true;
+  if (recorded['gate'] != gate) return true;
+
+  String want(Iterable<(int, List<String>)> entries) =>
+      [for (final (id, faults) in entries) '$id:${faults.join('+')}'].join('|');
+  final storedPlan = recorded['plan'];
+  if (storedPlan is! List) return true;
+  final stored = <(int, List<String>)>[];
+  for (final e in storedPlan) {
+    if (e is! Map) return true;
+    final id = e['preset'];
+    final faults = e['faults'];
+    if (id is! num || faults is! List) return true;
+    stored.add((id.toInt(), [for (final f in faults) '$f']));
+  }
+  if (want(stored) != want([for (final s in plan) (s.presetId, s.faults)])) {
+    return true;
+  }
+
+  final storedDark = recorded['dark_channels'];
+  if (storedDark is! List) return true;
+  final dark = [for (final c in storedDark) if (c is num) c.toInt()];
+  return dark.join(',') != darkChannels.join(',');
+}
+
 /// PURE. The state a slot is rewritten with — the builders' output, nothing
 /// hand-written here.
 Map<String, dynamic> ladderRepairState(
@@ -473,6 +513,12 @@ class LadderRepairDeps {
   /// returns false on failure, never throws.
   final Future<bool> Function(Map<String, Object?> record) writeRecord;
 
+  /// Reads the record already on the controller doc (null = none). Used to
+  /// keep the dry-run review record from being rewritten on every connect.
+  /// Null here, a throw, or no answer within [recordTimeout] all mean
+  /// "unknown", and the dry run writes.
+  final Future<Map<String, dynamic>?> Function()? readRecord;
+
   /// Republishes the ladder facts after a write (R2 + restore-lit).
   final Future<void> Function(bool? assertsSegments, LadderRestoreVerdict? v)
       republish;
@@ -502,6 +548,7 @@ class LadderRepairDeps {
     required this.gameDay,
     required this.store,
     required this.writeRecord,
+    this.readRecord,
     required this.republish,
     required this.stillConnected,
     this.pausePolling,
@@ -525,6 +572,19 @@ class BaseLadderRepairRunner {
   BaseLadderRepairRunner(this.d);
 
   void _log(String m) => debugPrint('[LadderRepair] ${d.controllerId}: $m');
+
+  /// The record already on the controller doc, or null when there is none or
+  /// it could not be read (bounded; never throws).
+  Future<Map<String, dynamic>?> _readRecorded() async {
+    final read = d.readRecord;
+    if (read == null) return null;
+    try {
+      return await read().timeout(d.recordTimeout);
+    } catch (e) {
+      _log('record read did not complete ($e) — treating as unknown');
+      return null;
+    }
+  }
 
   /// Best-effort, bounded record write (see [LadderRepairDeps.recordTimeout]).
   Future<void> _record(Map<String, Object?> record) async {
@@ -606,6 +666,24 @@ class BaseLadderRepairRunner {
     // the record says what WOULD happen and whether the guards would allow it
     // now — which is what a fleet review of dry-run records needs.
     if (mode == LadderRepairMode.dryRun) {
+      // ONE RECORD PER RESULT, NOT PER CONNECT. With dry run the default for
+      // the whole fleet, every connect of a phone whose ladder does not light
+      // lands here; rewriting an identical record each time is noise and a
+      // write per app open. The record is written only when the plan (slots,
+      // faults, dark channels) or the gate verdict differs from what the
+      // controller doc already holds — whichever phone wrote it.
+      final recorded = await _readRecorded();
+      if (!dryRunRecordDiffers(
+        recorded: recorded,
+        plan: plan,
+        darkChannels: verdict.darkChannels,
+        gate: gate.code,
+      )) {
+        return LadderRepairRun(LadderRepairOutcome.dryRun,
+            'mode dry_run — unchanged since the recorded review, nothing '
+            'written (gate: $gate)',
+            plan: plan);
+      }
       await _record({
         'version': kLadderRepairVersion,
         'state': 'dry_run',
@@ -614,7 +692,8 @@ class BaseLadderRepairRunner {
         'gate': gate.code,
       });
       return LadderRepairRun(LadderRepairOutcome.dryRun,
-          'mode dry_run — nothing written (gate: $gate)', plan: plan);
+          'mode dry_run — nothing written to the controller (gate: $gate)',
+          plan: plan);
     }
     if (!gate.allowed) {
       return LadderRepairRun(LadderRepairOutcome.deferred, gate.toString(),

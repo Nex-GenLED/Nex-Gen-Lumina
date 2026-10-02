@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -324,6 +325,20 @@ final ladderRepairCoordinatorProvider = Provider<LadderRepairConsider>((ref) {
         ],
         label: 'ladder repair',
       ),
+      // The record already on the controller doc, so a dry run only writes
+      // when its result changes (cache or server; a failed read writes).
+      readRecord: () async {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid == null || uid.isEmpty) return null;
+        final snap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('controllers')
+            .doc(controllerId)
+            .get();
+        final v = snap.data()?[kLadderRepairRecordField];
+        return v is Map ? Map<String, dynamic>.from(v) : null;
+      },
       republish: (asserts, v) async {
         await ref.read(controllerFactsPublisherProvider).publishDeviceFacts(
               controllerId: controllerId,
