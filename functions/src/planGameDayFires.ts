@@ -86,6 +86,7 @@ import {
 } from "./fireJobs";
 import {
   LadderLitMode,
+  LadderLitSetting,
   NextFire,
   PreflightMode,
   PreflightVerdict,
@@ -97,7 +98,8 @@ import {
   decideP6,
   evaluatePreflight,
   ladderDarkChannels,
-  ladderLitModeFrom,
+  ladderLitModeFor,
+  ladderLitSettingFrom,
   p6HoldsAccount,
   p6RecordFrom,
   preflightModeFrom,
@@ -124,6 +126,9 @@ import {
   capBoundMs,
   capCeilingMs,
   espnReportsLive,
+  FlagScope,
+  flagOnFor,
+  flagScopeFrom,
 } from "./gameDayPlanning";
 import {
   EspnCache,
@@ -290,29 +295,48 @@ export function writesJobsFor(policy: WriteJobsPolicy, uid: string): boolean {
   return policy.allowlist.includes(uid);
 }
 
-/** The three ESPN slate-fix flags. See the file header. */
+/**
+ * The three ESPN slate-fix flags, as SCOPES (#157): each field is exactly
+ * `true` (every account) or a uid list (only those accounts); anything else is
+ * off. See gameDayPlanning.flagScopeFrom and the file header.
+ */
 export interface EspnFlags {
+  espnCollegeSlate: FlagScope | null;
+  trackStartedById: FlagScope | null;
+  statusAwareCap: FlagScope | null;
+}
+
+export const ESPN_FLAGS_OFF: EspnFlags = {
+  espnCollegeSlate: null,
+  trackStartedById: null,
+  statusAwareCap: null,
+};
+
+/**
+ * PURE. Absent, `false`, `"true"`, `1`, a malformed list — off. A deploy
+ * therefore changes nothing until the owner writes a field, and a malformed
+ * write disarms rather than arms (or widens).
+ */
+export function espnFlagsFrom(data: Record<string, unknown> | undefined): EspnFlags {
+  return {
+    espnCollegeSlate: flagScopeFrom(data?.espn_college_slate),
+    trackStartedById: flagScopeFrom(data?.track_started_by_id),
+    statusAwareCap: flagScopeFrom(data?.status_aware_cap),
+  };
+}
+
+/** The ESPN flags as they apply to ONE account this tick. */
+export interface EspnFlagsForUid {
   espnCollegeSlate: boolean;
   trackStartedById: boolean;
   statusAwareCap: boolean;
 }
 
-export const ESPN_FLAGS_OFF: EspnFlags = {
-  espnCollegeSlate: false,
-  trackStartedById: false,
-  statusAwareCap: false,
-};
-
-/**
- * PURE. Each flag is on only when its field is exactly `true`. Absent, `false`,
- * `"true"`, `1` — off. A deploy therefore changes nothing until the owner
- * writes the field, and a malformed write disarms rather than arms.
- */
-export function espnFlagsFrom(data: Record<string, unknown> | undefined): EspnFlags {
+export function espnFlagsFor(flags: EspnFlags, uid: string): EspnFlagsForUid {
   return {
-    espnCollegeSlate: data?.espn_college_slate === true,
-    trackStartedById: data?.track_started_by_id === true,
-    statusAwareCap: data?.status_aware_cap === true,
+    espnCollegeSlate: flagOnFor(flags.espnCollegeSlate, uid),
+    trackStartedById: flagOnFor(flags.trackStartedById, uid),
+    statusAwareCap: flagOnFor(flags.statusAwareCap, uid),
   };
 }
 
@@ -326,7 +350,32 @@ export interface PlannerFlags {
   /** The ESPN slate fix. All default off. */
   espn: EspnFlags;
   /** P4b (#146), `preflight_ladder_lit`. Default off. */
-  ladderLit: LadderLitMode;
+  ladderLit: LadderLitSetting;
+}
+
+/** A forced P4b mode (tests, bench) in the production field's terms. */
+function forcedLadderLit(v: LadderLitMode | string[] | undefined): LadderLitSetting {
+  if (v === "strict") return "strict";
+  if (v === "on") return { all: true };
+  return Array.isArray(v) ? flagScopeFrom(v) : null;
+}
+
+/**
+ * A flag field that is PRESENT but parses as off (a typo, `"true"`, a list
+ * with a number in it) is almost certainly an attempted flip that did not
+ * take. Logged so it is seen; never armed.
+ */
+function warnMalformedFlags(data: Record<string, unknown> | undefined): void {
+  for (const key of ["espn_college_slate", "track_started_by_id", "status_aware_cap"]) {
+    const v = data?.[key];
+    if (v !== undefined && v !== false && flagScopeFrom(v) === null) {
+      logger.warn(`planGameDayFires: config/gameday_planner.${key} is malformed (want true or [uid, …]); OFF. Value: ${JSON.stringify(v)}`);
+    }
+  }
+  const lit = data?.preflight_ladder_lit;
+  if (lit !== undefined && lit !== false && ladderLitSettingFrom(data) === null) {
+    logger.warn(`planGameDayFires: config/gameday_planner.preflight_ladder_lit is malformed (want true, "strict" or [uid, …]); OFF. Value: ${JSON.stringify(lit)}`);
+  }
 }
 
 /**
@@ -340,12 +389,13 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
   try {
     const d = await db.collection("config").doc("gameday_planner").get();
     const data = d.exists ? d.data() : undefined;
+    warnMalformedFlags(data);
     return {
       policy: d.exists ? writeJobsPolicyFrom(data) : WRITE_JOBS_OFF,
       publishServerStatus: publishServerStatusFrom(data),
       preflightMode: preflightModeFrom(data),
       espn: espnFlagsFrom(data),
-      ladderLit: ladderLitModeFrom(data),
+      ladderLit: ladderLitSettingFrom(data),
     };
   } catch (err) {
     logger.warn("planGameDayFires: flag read failed; staying LOG-ONLY", err);
@@ -354,7 +404,7 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       publishServerStatus: false,
       preflightMode: "enforce",
       espn: ESPN_FLAGS_OFF,
-      ladderLit: "off",
+      ladderLit: null,
     };
   }
 }
@@ -773,15 +823,16 @@ export async function runPlannerTick(
     /**
      * Overrides for the B1/B2 flags, the ESPN flags and P4b when the policy is
      * forced (tests, bench). Each ESPN flag and P4b defaults OFF, as in
-     * production with the field absent.
+     * production with the field absent. An ESPN flag takes the production
+     * field's shapes: `true` (every account) or a uid list (#157).
      */
     forceFlags?: {
       publishServerStatus?: boolean;
       preflightMode?: PreflightMode;
-      espnCollegeSlate?: boolean;
-      trackStartedById?: boolean;
-      statusAwareCap?: boolean;
-      ladderLit?: LadderLitMode;
+      espnCollegeSlate?: boolean | string[];
+      trackStartedById?: boolean | string[];
+      statusAwareCap?: boolean | string[];
+      ladderLit?: LadderLitMode | string[];
     };
   } = {}
 ): Promise<PlanStats & { logRows: Array<Record<string, unknown>> }> {
@@ -799,11 +850,11 @@ export async function runPlannerTick(
         publishServerStatus: opts.forceFlags?.publishServerStatus ?? true,
         preflightMode: opts.forceFlags?.preflightMode ?? "enforce",
         espn: {
-          espnCollegeSlate: opts.forceFlags?.espnCollegeSlate === true,
-          trackStartedById: opts.forceFlags?.trackStartedById === true,
-          statusAwareCap: opts.forceFlags?.statusAwareCap === true,
+          espnCollegeSlate: flagScopeFrom(opts.forceFlags?.espnCollegeSlate),
+          trackStartedById: flagScopeFrom(opts.forceFlags?.trackStartedById),
+          statusAwareCap: flagScopeFrom(opts.forceFlags?.statusAwareCap),
         },
-        ladderLit: opts.forceFlags?.ladderLit ?? "off",
+        ladderLit: forcedLadderLit(opts.forceFlags?.ladderLit),
       }
     : await readPlannerFlags(db);
   const policy: WriteJobsPolicy = flags.policy;
@@ -847,6 +898,9 @@ export async function runPlannerTick(
     // growing for the eventual global audit, which is the only thing that can
     // clear F1 (the end path has never executed) fleet-wide.
     const allowlisted = writesJobsFor(policy, uid);
+    // #157: each ESPN flag is fleet-wide (`true`) or a uid list; resolved per
+    // account. With every field absent all three are false here.
+    const espnOn = espnFlagsFor(flags.espn, uid);
     if (opts.onlyUid && uid !== opts.onlyUid) continue;
     const udata = u.data() || {};
 
@@ -983,7 +1037,7 @@ export async function runPlannerTick(
     // failed read tracks nothing this tick: every team falls back to the
     // scoreboard, which is the pre-flag behaviour.
     let tracked = new Map<string, TrackedSession>();
-    if (flags.espn.trackStartedById && controller) {
+    if (espnOn.trackStartedById && controller) {
       try {
         const open = await db
           .collection("users").doc(uid).collection(SESSION_COLLECTION)
@@ -1066,7 +1120,7 @@ export async function runPlannerTick(
         const r = await trackedGame(sport, t);
         if (r) return r;
       }
-      if (sport === "ncaaFB" && flags.espn.espnCollegeSlate) return collegeGame(espnTeamId);
+      if (sport === "ncaaFB" && espnOn.espnCollegeSlate) return collegeGame(espnTeamId);
       return { game: await gameFor(sport, espnTeamId), via: "default" };
     };
 
@@ -1124,7 +1178,7 @@ export async function runPlannerTick(
           // live game holds up to its ceiling — so a held game keeps the house
           // (a lower team defers, nothing restores base under it). Off: the
           // shipped bound.
-          windowEndMs: flags.espn.statusAwareCap
+          windowEndMs: espnOn.statusAwareCap
             ? capBoundMs({
                 gameStartMs: game.startMs, sport,
                 statusAware: true, espnLive: espnReportsLive(game),
@@ -1160,7 +1214,7 @@ export async function runPlannerTick(
         p6Unreachable: [...sessionByEvent.values()].some((s) => p6HoldsAccount(s, nowMs)),
         appVersion: facts.appVersion,
         nowMs,
-        ladderLit: flags.ladderLit,
+        ladderLit: ladderLitModeFor(flags.ladderLit, uid),
       });
     }
     const preflightBlocks =
@@ -1584,7 +1638,7 @@ export async function runPlannerTick(
           nowMs,
           // status_aware_cap: hold the cap while ESPN says the game is on. A
           // silent (gone) game reports nothing, so its cap fires at the bound.
-          ...(flags.espn.statusAwareCap
+          ...(espnOn.statusAwareCap
             ? { cap: { statusAware: true, espnLive: espnReportsLive(game) } }
             : {}),
         });
@@ -1757,7 +1811,7 @@ export async function runPlannerTick(
             ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
             // Only the flagged paths add these, so a flags-off row is unchanged.
             ...(resolved.via === "tracked" ? { espnVia: "tracked" } : {}),
-            ...(flags.espn.statusAwareCap && decision.reason.startsWith("hard_cap")
+            ...(espnOn.statusAwareCap && decision.reason.startsWith("hard_cap")
               ? { capStatus: resolved.silent ? "silent" : game.statusName }
               : {}),
           });

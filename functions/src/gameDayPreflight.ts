@@ -46,6 +46,8 @@
  *                        a skip.
  */
 
+import { FlagScope, flagScopeFrom } from "./gameDayPlanning";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -120,17 +122,35 @@ export function publishServerStatusFrom(data: Record<string, unknown> | undefine
  *                                     (`ladder_lit_unknown`) — the +114 app
  *                                     rollout, while most controllers have not
  *                                     published the field.
- *   "strict"                "strict"  as "on", and absent also skips
- *                                     (`preflight_ladder_unknown`) — once the
- *                                     fleet has reported.
- * Only those two exact values arm it: a typo leaves P4 as it was.
+ *   [uid, …]                "on"      as `true`, for the listed accounts only
+ *                                     (#157, gameDayPlanning.flagScopeFrom)
+ *   "strict"                "strict"  as "on", fleet-wide, and absent also
+ *                                     skips (`preflight_ladder_unknown`) —
+ *                                     once the fleet has reported.
+ * Only those exact shapes arm it: a typo leaves P4 as it was.
  */
 export type LadderLitMode = "off" | "on" | "strict";
-export function ladderLitModeFrom(data: Record<string, unknown> | undefined): LadderLitMode {
+
+/** The parsed field: "strict", a scope for "on", or null (off). */
+export type LadderLitSetting = "strict" | FlagScope | null;
+
+export function ladderLitSettingFrom(data: Record<string, unknown> | undefined): LadderLitSetting {
   const v = data?.preflight_ladder_lit;
-  if (v === true) return "on";
-  if (v === "strict") return "strict";
-  return "off";
+  return v === "strict" ? "strict" : flagScopeFrom(v);
+}
+
+/** The mode for one account. Without a uid, a uid list reads as off. */
+export function ladderLitModeFor(setting: LadderLitSetting, uid?: string): LadderLitMode {
+  if (setting === "strict") return "strict";
+  if (setting === null) return "off";
+  return setting.all || (uid !== undefined && setting.uids.has(uid)) ? "on" : "off";
+}
+
+export function ladderLitModeFrom(
+  data: Record<string, unknown> | undefined,
+  uid?: string
+): LadderLitMode {
+  return ladderLitModeFor(ladderLitSettingFrom(data), uid);
 }
 
 // ---------------------------------------------------------------------------

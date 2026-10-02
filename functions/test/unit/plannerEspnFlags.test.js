@@ -5,28 +5,53 @@
 const { makeFakeFirestore } = require("./support/fakeFirestore");
 const { installFetchStub, espnEvent, scoreboard, BASE } = require("./support/espnFixtures");
 const S = require("./support/plannerScenario");
-const { runPlannerTick, espnFlagsFrom, openSessionsByTeam, TRACK_LOOKBACK_MS } = require("../../lib/planGameDayFires");
+const { runPlannerTick, espnFlagsFrom, espnFlagsFor, openSessionsByTeam, TRACK_LOOKBACK_MS } = require("../../lib/planGameDayFires");
+const { flagScopeFrom, flagOnFor } = require("../../lib/gameDayPlanning");
+const { ladderLitModeFrom } = require("../../lib/gameDayPreflight");
 
 const H = 3600_000;
 const CFB = `${BASE}/football/college-football`;
+const OFF = { espnCollegeSlate: false, trackStartedById: false, statusAwareCap: false };
 
 // ---------------------------------------------------------------------------
-describe("espnFlagsFrom — each flag on only when exactly true", () => {
-  test("absent = all off (a deploy changes nothing)", () => {
-    const off = { espnCollegeSlate: false, trackStartedById: false, statusAwareCap: false };
-    expect(espnFlagsFrom(undefined)).toEqual(off);
-    expect(espnFlagsFrom({})).toEqual(off);
-    expect(espnFlagsFrom({ write_jobs: true })).toEqual(off);
+describe("#157 — a flag is exactly true (fleet-wide) or a uid list (only those accounts)", () => {
+  test("true → every account", () => {
+    expect(flagScopeFrom(true)).toEqual({ all: true });
+    expect(flagOnFor(flagScopeFrom(true), "u_any")).toBe(true);
   });
 
-  test("each field independently; strings, numbers and null do not arm", () => {
-    expect(espnFlagsFrom({ espn_college_slate: true })).toEqual({ espnCollegeSlate: true, trackStartedById: false, statusAwareCap: false });
-    expect(espnFlagsFrom({ track_started_by_id: true })).toEqual({ espnCollegeSlate: false, trackStartedById: true, statusAwareCap: false });
-    expect(espnFlagsFrom({ status_aware_cap: true })).toEqual({ espnCollegeSlate: false, trackStartedById: false, statusAwareCap: true });
-    for (const v of ["true", 1, null, "yes", {}]) {
-      expect(espnFlagsFrom({ espn_college_slate: v, track_started_by_id: v, status_aware_cap: v })).toEqual({
-        espnCollegeSlate: false, trackStartedById: false, statusAwareCap: false,
-      });
+  test("a list containing the uid → on; a list without it → off; an empty list → nobody", () => {
+    const scope = flagScopeFrom(["u_bench", "u_other"]);
+    expect(flagOnFor(scope, "u_bench")).toBe(true);
+    expect(flagOnFor(scope, "u_friendly")).toBe(false);
+    expect(flagOnFor(flagScopeFrom([]), "u_bench")).toBe(false);
+  });
+
+  test("wrong types are OFF — never armed, never widened", () => {
+    for (const v of [undefined, null, false, "true", "u_bench", 1, 0, {}, { u_bench: true }, [1], ["u_bench", 2], [""], ["u_bench", null], [["u_bench"]]]) {
+      expect(flagScopeFrom(v)).toBeNull();
+      expect(flagOnFor(flagScopeFrom(v), "u_bench")).toBe(false);
+    }
+  });
+
+  test("espnFlagsFrom / espnFlagsFor: absent = all off; each field independently, per account", () => {
+    for (const data of [undefined, {}, { write_jobs: true }]) {
+      expect(espnFlagsFor(espnFlagsFrom(data), "u_bench")).toEqual(OFF);
+    }
+    const flags = espnFlagsFrom({ espn_college_slate: ["u_bench"], track_started_by_id: true, status_aware_cap: "true" });
+    expect(espnFlagsFor(flags, "u_bench")).toEqual({ espnCollegeSlate: true, trackStartedById: true, statusAwareCap: false });
+    expect(espnFlagsFor(flags, "u_friendly")).toEqual({ espnCollegeSlate: false, trackStartedById: true, statusAwareCap: false });
+  });
+
+  test("preflight_ladder_lit: true, \"strict\" (fleet-wide), or a uid list for \"on\"", () => {
+    expect(ladderLitModeFrom({ preflight_ladder_lit: true }, "u_x")).toBe("on");
+    expect(ladderLitModeFrom({ preflight_ladder_lit: "strict" }, "u_x")).toBe("strict");
+    expect(ladderLitModeFrom({ preflight_ladder_lit: ["u_bench"] }, "u_bench")).toBe("on");
+    expect(ladderLitModeFrom({ preflight_ladder_lit: ["u_bench"] }, "u_friendly")).toBe("off");
+    expect(ladderLitModeFrom({ preflight_ladder_lit: [] }, "u_bench")).toBe("off");
+    expect(ladderLitModeFrom({ preflight_ladder_lit: ["u_bench"] })).toBe("off"); // no uid → off
+    for (const v of ["on", 1, ["u_bench", 3], { strict: true }]) {
+      expect(ladderLitModeFrom({ preflight_ladder_lit: v }, "u_bench")).toBe("off");
     }
   });
 });
@@ -110,6 +135,84 @@ describe("the production read: flags come from config/gameday_planner", () => {
 });
 
 // ---------------------------------------------------------------------------
+describe("#157 in a real tick — a bench-only flip after a second account is allowlisted", () => {
+  const TICK = Date.parse("2026-10-09T17:30:00Z");
+  const route = (u) => {
+    if (u === `${CFB}/scoreboard`) return { body: scoreboard([]) };
+    if (u === `${CFB}/scoreboard?dates=20261009&groups=80&limit=300`) {
+      return { body: scoreboard([espnEvent({ id: "9300400", startIso: "2026-10-09T23:00:00Z", home: "807", away: "808" })]) };
+    }
+    if (u.startsWith(`${CFB}/scoreboard?dates=`)) return { body: scoreboard([]) };
+    return undefined;
+  };
+  async function tick(config) {
+    const f = makeFakeFirestore({ now: TICK });
+    for (const [uid, n] of [["u_bench", 3], ["u_friendly", 8]]) {
+      S.seedAccount(f, uid, n, {
+        configs: { ncaa_friday: S.teamConfig("ncaa_friday", "Friday College", "ncaaFB", "807") },
+        priority: ["ncaa_friday"],
+        bridge: true,
+      });
+      f.patch(`users/${uid}/controllers/ctrl_${uid}`, { participating_channels_at: f.ts(TICK - 3 * H) });
+    }
+    f.put("config/gameday_planner", { write_jobs: true, uid_allowlist: ["u_bench", "u_friendly"], ...config });
+    const stub = installFetchStub(route);
+    try {
+      const r = await runPlannerTick(f.db, TICK);
+      return { f, r, calls: stub.calls };
+    } finally {
+      stub.restore();
+    }
+  }
+  const JOB = (uid) => `users/${uid}/fire_jobs/gd_ncaa_friday_9300400_start`;
+
+  test("espn_college_slate: [bench] — the bench mints; the other allowlisted account keeps the old path", async () => {
+    const { f, r } = await tick({ espn_college_slate: ["u_bench"] });
+    expect(f.get(JOB("u_bench"))).toBeDefined();
+    expect(f.get(JOB("u_friendly"))).toBeUndefined();
+    expect(r.logRows).toEqual(expect.arrayContaining([
+      { uid: "u_friendly", teamSlug: "ncaa_friday", action: "skip", reason: "no_game" },
+    ]));
+  });
+
+  test("true — both mint; [] — neither; a malformed list — neither", async () => {
+    const both = await tick({ espn_college_slate: true });
+    expect([both.f.get(JOB("u_bench")), both.f.get(JOB("u_friendly"))].every(Boolean)).toBe(true);
+    for (const v of [[], ["u_bench", 7], "u_bench"]) {
+      const none = await tick({ espn_college_slate: v });
+      expect(none.f.get(JOB("u_bench"))).toBeUndefined();
+      expect(none.f.get(JOB("u_friendly"))).toBeUndefined();
+    }
+  });
+
+  test("track_started_by_id: [bench] — only the bench's sessions are queried and followed by id", async () => {
+    const { f } = await tick({ espn_college_slate: true });
+    for (const uid of ["u_bench", "u_friendly"]) f.patch(JOB(uid), { state: "completed" });
+    const live = Date.parse("2026-10-10T00:30:00Z");
+    f.setNow(live);
+    for (const uid of ["u_bench", "u_friendly"]) f.put(`users/${uid}/bridge_status/current`, { uptime: 1, version: "1.2" });
+    f.put("config/gameday_planner", {
+      write_jobs: true, uid_allowlist: ["u_bench", "u_friendly"],
+      espn_college_slate: true, track_started_by_id: ["u_bench"],
+    });
+    const readsBefore = f.reads.length;
+    const stub = installFetchStub((u) =>
+      u === `${CFB}/scoreboard/9300400`
+        ? { body: espnEvent({ id: "9300400", startIso: "2026-10-09T23:00:00Z", home: "807", away: "808", state: "in" }) }
+        : route(u)
+    );
+    try {
+      await runPlannerTick(f.db, live);
+    } finally {
+      stub.restore();
+    }
+    const sessionQueries = f.reads.slice(readsBefore).filter((x) => /^query:users\/[^/]+\/game_day_sessions$/.test(x));
+    expect(sessionQueries).toEqual(["query:users/u_bench/game_day_sessions"]);
+    expect(stub.calls).toContain(`${CFB}/scoreboard/9300400`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe("#146 in a real tick — a ladder measured dark", () => {
   async function tick(config, controllerOver) {
     const f = makeFakeFirestore({ now: S.T.T1 });
@@ -165,6 +268,14 @@ describe("#146 in a real tick — a ladder measured dark", () => {
     const { f, user } = await tick({ preflight_ladder_lit: true }, {});
     expect(f.get(START)).toBeDefined();
     expect(user.gameday_server.preflight.info).toContain("ladder_lit_unknown");
+  });
+
+  test("a uid list: on for the listed account only (#157)", async () => {
+    const listed = await tick({ preflight_ladder_lit: ["u_delta"] }, DARK);
+    expect(listed.f.get(START)).toBeUndefined();
+    expect(listed.user.gameday_server.preflight.reasons).toEqual(["preflight_ladder_dark"]);
+    const other = await tick({ preflight_ladder_lit: ["u_someone_else"] }, DARK);
+    expect(other.f.get(START)).toBeDefined();
   });
 
   test("\"strict\", field not yet published → withheld as preflight_ladder_unknown", async () => {

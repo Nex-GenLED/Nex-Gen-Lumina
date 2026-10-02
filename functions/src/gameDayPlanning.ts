@@ -89,6 +89,40 @@ export const FALLBACK_END_BUFFER_MS = 60 * 60_000;
 export const MAX_FIRE_PAYLOAD_BYTES = 4096;
 
 // ---------------------------------------------------------------------------
+// Flag scope — `true` for the fleet, or a uid list (#157)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a `config/gameday_planner` flag is on: every account, or only the
+ * listed uids. `null` = off.
+ */
+export type FlagScope = { all: true } | { all: false; uids: ReadonlySet<string> };
+
+/**
+ * PURE. A flag's field → its scope (#157):
+ *   exactly `true`                     → every account (fleet-wide)
+ *   an array of non-empty uid strings  → only those accounts; `[]` = nobody
+ *   anything else                      → OFF — absent, `false`, `"true"`, a
+ *                                        number, an object, or an array holding
+ *                                        a non-string or an empty string
+ * The malformed list is off rather than "everyone", for the uid_allowlist
+ * reason: someone meant to SCOPE the flip, and a typo must not widen it.
+ */
+export function flagScopeFrom(v: unknown): FlagScope | null {
+  if (v === true) return { all: true };
+  if (Array.isArray(v) && v.every((u) => typeof u === "string" && u.length > 0)) {
+    return { all: false, uids: new Set(v as string[]) };
+  }
+  return null;
+}
+
+/** Is the flag on for this account? */
+export function flagOnFor(scope: FlagScope | null, uid: string): boolean {
+  if (scope === null) return false;
+  return scope.all || scope.uids.has(uid);
+}
+
+// ---------------------------------------------------------------------------
 // Payload construction — the TS half of S3b
 // ---------------------------------------------------------------------------
 

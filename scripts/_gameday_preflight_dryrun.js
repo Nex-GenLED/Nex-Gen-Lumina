@@ -15,7 +15,8 @@
 // Prints uids you passed in; it never lists accounts on its own.
 //
 // P4b (#146, fix/gameday-espn-slate): the ladder-lights check follows
-// config/gameday_planner.preflight_ladder_lit exactly as the planner reads it.
+// config/gameday_planner.preflight_ladder_lit exactly as the planner reads it,
+// per uid (true, "strict", or a uid list that names the account — #157).
 // LADDER_LIT=on|strict|off overrides it, to preview a mode BEFORE flipping it:
 //   LADDER_LIT=on node scripts/_gameday_preflight_dryrun.js <uid>
 
@@ -32,14 +33,16 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-async function ladderLitMode() {
+async function ladderLitResolver() {
   const forced = process.env.LADDER_LIT;
-  if (forced === 'on' || forced === 'strict' || forced === 'off') return { mode: forced, source: 'env' };
+  if (forced === 'on' || forced === 'strict' || forced === 'off') return () => ({ mode: forced, source: 'env' });
   const cfg = await db.collection('config').doc('gameday_planner').get();
-  return { mode: ladderLitModeFrom(cfg.exists ? cfg.data() : undefined), source: 'config' };
+  const data = cfg.exists ? cfg.data() : undefined;
+  return (uid) => ({ mode: ladderLitModeFrom(data, uid), source: 'config' });
 }
 
-async function dryRun(uid, nowMs, lit) {
+async function dryRun(uid, nowMs, litFor) {
+  const lit = litFor(uid);
   const user = await db.collection('users').doc(uid).get();
   if (!user.exists) return { uid, error: 'no user doc' };
   const controllers = await db.collection('users').doc(uid).collection('controllers').get();
@@ -96,9 +99,9 @@ async function dryRun(uid, nowMs, lit) {
     process.exit(2);
   }
   const nowMs = Date.now();
-  const lit = await ladderLitMode();
+  const litFor = await ladderLitResolver();
   for (const uid of uids) {
-    const r = await dryRun(uid, nowMs, lit);
+    const r = await dryRun(uid, nowMs, litFor);
     console.log(JSON.stringify(r));
   }
   process.exit(0);
