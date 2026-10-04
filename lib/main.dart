@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:nexgen_command/services/debug_error_record.dart';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -76,25 +77,20 @@ Future<void> _reportUncaughtError({
     debugPrint('🛑 UNCAUGHT [$context]: $error\n$stack');
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final errStr = error.toString();
-    final stackStr = stack?.toString() ?? '';
-    const cap = 3000;
     await FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
         .collection('debug_errors')
-        .add({
-      'timestamp': FieldValue.serverTimestamp(),
-      'context': context,
-      'error_type': error.runtimeType.toString(),
-      'error': errStr.length > cap ? errStr.substring(0, cap) : errStr,
-      'stack': stackStr.length > cap ? stackStr.substring(0, cap) : stackStr,
-      'platform': Platform.isIOS
-          ? 'ios'
-          : Platform.isAndroid
-              ? 'android'
-              : 'other',
-    });
+        .add(debugErrorRecord(
+          error: error,
+          stack: stack,
+          context: context,
+          platform: Platform.isIOS
+              ? 'ios'
+              : Platform.isAndroid
+                  ? 'android'
+                  : 'other',
+        ));
   } catch (_) {
     // Sink must never crash the app. Swallow.
   } finally {

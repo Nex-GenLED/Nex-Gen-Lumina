@@ -360,6 +360,8 @@ class InstallerSetupWizard extends ConsumerStatefulWidget {
 }
 
 class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
+  /// Captured in [initState] for [dispose] (#166).
+  late final InstallerModeNotifier _installerMode;
   bool _hasCheckedDraft = false;
   Timer? _countdownTimer;
   int _warningSecondsRemaining = 300; // 5 minutes
@@ -370,8 +372,11 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
     // Record activity on wizard entry
     ref.read(installerModeActiveProvider.notifier).recordActivity();
 
-    // Set up session warning callback
-    ref.read(installerModeActiveProvider.notifier).onSessionWarning = _showTimeoutWarning;
+    // Set up session warning callback. The notifier is kept so [dispose] can
+    // clear the callback without `ref` — reading `ref` in dispose() throws
+    // "Cannot use ref after the widget was disposed" (#166).
+    _installerMode = ref.read(installerModeActiveProvider.notifier);
+    _installerMode.onSessionWarning = _showTimeoutWarning;
 
     // Check for existing draft
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -382,8 +387,8 @@ class _InstallerSetupWizardState extends ConsumerState<InstallerSetupWizard> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
-    // Clear the warning callback
-    ref.read(installerModeActiveProvider.notifier).onSessionWarning = null;
+    // Clear the warning callback (the notifier captured in initState).
+    _installerMode.onSessionWarning = null;
     super.dispose();
   }
 
