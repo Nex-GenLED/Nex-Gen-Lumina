@@ -9,6 +9,11 @@
 // scoreCelebrationEnabled). Kept alive + fed the foreground signal by
 // main_scaffold. No polling outside a live game or while backgrounded.
 
+import 'dart:async';
+
+import 'celebration_marker.dart';
+import 'package:nexgen_command/features/game_day/game_day_server_status_provider.dart';
+import 'package:nexgen_command/features/wled/base_look.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../autopilot/game_day_autopilot_config.dart'
@@ -33,8 +38,10 @@ import 'score_monitor_service.dart';
 /// — all through [wledRepositoryProvider] so it works on LAN and via the cloud
 /// relay, and fans out across every configured channel (bus).
 class WledCelebrationDelivery implements CelebrationDelivery {
-  WledCelebrationDelivery(this._ref);
+  WledCelebrationDelivery(this._ref, {DateTime Function()? now})
+      : _now = now ?? DateTime.now;
   final Ref _ref;
+  final DateTime Function() _now;
 
   @override
   Future<Map<String, dynamic>?> capture() async {
@@ -44,22 +51,37 @@ class WledCelebrationDelivery implements CelebrationDelivery {
   }
 
   @override
-  Future<void> play(List<AlertAnimationStep> steps) async {
+  Future<void> play(List<AlertAnimationStep> steps, {DateTime? deadline}) async {
     final repo = _ref.read(wledRepositoryProvider);
     if (repo == null) return;
     final channels = _ref.read(deviceChannelsProvider);
     final ids = channels.map((c) => c.id).toList();
     for (final step in steps) {
+      // #170: nothing starts after the deadline, and no hold runs past it.
+      if (deadline != null && !_now().isBefore(deadline)) break;
       final payload = applyChannelFilter(step.payload, ids, channels);
       await repo.applyJson(payload);
-      await Future<void>.delayed(step.hold);
+      var hold = step.hold;
+      if (deadline != null) {
+        final left = deadline.difference(_now());
+        if (left < hold) hold = left.isNegative ? Duration.zero : left;
+      }
+      await Future<void>.delayed(hold);
     }
   }
 
   @override
   Future<void> revert(Map<String, dynamic> captured) async {
     final repo = _ref.read(wledRepositoryProvider);
-    if (repo == null) return;
+    if (repo == null) {
+      throw StateError('no controller to revert on yet');
+    }
+    // #170: a house that was OFF stays off — reloading its preset (below)
+    // would turn it on.
+    if (captured['on'] == false) {
+      await repo.applyJson({'on': false});
+      return;
+    }
     // If a preset was active, reloading it is the cleanest restore.
     final ps = captured['ps'];
     if (ps is int && ps >= 0) {
@@ -75,6 +97,21 @@ class WledCelebrationDelivery implements CelebrationDelivery {
     };
     if (restore.isNotEmpty) await repo.applyJson(restore);
   }
+
+  @override
+  Future<void> revertToBaseLook() async {
+    final repo = _ref.read(wledRepositoryProvider);
+    if (repo == null) {
+      throw StateError('no controller to revert on yet');
+    }
+    final channels = _ref.read(deviceChannelsProvider);
+    await repo.applyJson(applyChannelFilter({
+      'on': true,
+      'seg': [
+        {...baseLookSegmentFields(), 'sx': 128, 'ix': 128, 'pal': 0},
+      ],
+    }, channels.map((c) => c.id).toList(), channels));
+  }
 }
 
 /// Singleton coordinator. Uses the reused [ScoreMonitorService] diff engine and
@@ -84,8 +121,22 @@ final foregroundCelebrationCoordinatorProvider =
   final coordinator = ForegroundCelebrationCoordinator(
     monitor: ScoreMonitorService(),
     delivery: WledCelebrationDelivery(ref),
+    // #170: survives a kill, so a cold start can end what was left playing.
+    markers: SharedPrefsCelebrationMarkerStore(),
+    // #170: a team the server runs is left to the server on recovery.
+    isServedTeam: (slug) => ref
+        .read(gameDayServerStatusSyncProvider)
+        .servesTeamAt(slug, DateTime.now()),
   );
   ref.onDispose(coordinator.dispose);
+  // #170: a cold start finishes a celebration a kill interrupted — now, and
+  // again when the controller connects (a revert needs somewhere to go).
+  unawaited(coordinator.recoverInterruptedCelebration());
+  ref.listen(wledRepositoryProvider, (prev, next) {
+    if (next != null && prev == null) {
+      unawaited(coordinator.recoverInterruptedCelebration());
+    }
+  });
   return coordinator;
 });
 

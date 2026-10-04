@@ -25,6 +25,7 @@
 // Lifecycle: polling runs ONLY while ≥1 tracked team is in the liveGame phase
 // AND the app is foregrounded. No polling pre/post game, or in the background.
 
+import 'celebration_marker.dart';
 import 'celebration_length.dart';
 import 'dart:async';
 
@@ -123,11 +124,21 @@ abstract class CelebrationDelivery {
   Future<Map<String, dynamic>?> capture();
 
   /// Play the ordered animation steps on the lights (channel-filtered).
-  Future<void> play(List<AlertAnimationStep> steps);
+  ///
+  /// #170: stops at [deadline] — no stage starts after it and no hold runs
+  /// past it — so a slow write cannot stretch a celebration open-ended.
+  Future<void> play(List<AlertAnimationStep> steps, {DateTime? deadline});
 
   /// Restore the captured state. If the phase machine had a team design active,
-  /// this lands back on it seamlessly (it's whatever was captured).
+  /// this lands back on it seamlessly (it's whatever was captured). A house
+  /// that was OFF stays off. Throws when nothing could be sent, so the caller
+  /// keeps its marker and tries again later.
   Future<void> revert(Map<String, dynamic> captured);
+
+  /// #170: the end of a celebration whose prior state is unknown (it could
+  /// not be read, or the record of it was lost): the base look on every
+  /// channel. Throws when nothing could be sent.
+  Future<void> revertToBaseLook();
 }
 
 /// Coordinates foreground score monitoring + serialized celebration playback.
@@ -139,15 +150,36 @@ class ForegroundCelebrationCoordinator {
     required CelebrationDelivery delivery,
     Duration pollInterval = kCelebrationPollInterval,
     Duration minGap = kCelebrationMinGap,
+    CelebrationMarkerStore? markers,
+    bool Function(String teamSlug)? isServedTeam,
+    DateTime Function()? now,
+    Duration revertMargin = kCelebrationRevertMargin,
   })  : _monitor = monitor,
         _delivery = delivery,
         _pollInterval = pollInterval,
-        _minGap = minGap;
+        _minGap = minGap,
+        _markers = markers ?? InMemoryCelebrationMarkerStore(),
+        _isServedTeam = isServedTeam ?? _notServed,
+        _now = now ?? DateTime.now,
+        _revertMargin = revertMargin;
+
+  static bool _notServed(String _) => false;
 
   final ScoreMonitor _monitor;
   final CelebrationDelivery _delivery;
   final Duration _pollInterval;
   final Duration _minGap;
+
+  /// #170: the in-progress record that lets a suspended or killed app finish
+  /// a celebration on its next resume or launch.
+  final CelebrationMarkerStore _markers;
+
+  /// #170: true while the server runs [teamSlug]'s Game Day. Recovery leaves
+  /// such a house alone (observe only): the server may have moved it on.
+  final bool Function(String teamSlug) _isServedTeam;
+  final DateTime Function() _now;
+  final Duration _revertMargin;
+  bool _recovering = false;
 
   List<CelebrationTeam> _liveTeams = const [];
 
@@ -199,6 +231,43 @@ class ForegroundCelebrationCoordinator {
     if (_disposed || _foreground == foreground) return;
     _foreground = foreground;
     _reconcile();
+    // #170: back on screen — finish a celebration a suspension interrupted.
+    if (foreground) unawaited(recoverInterruptedCelebration());
+  }
+
+  /// #170: if a celebration was left unfinished — the app was suspended or
+  /// killed before its revert ran — put the house back now: to the state
+  /// captured before it, or the base look when that was lost.
+  ///
+  /// Skipped while this process is still playing one (its own deadline ends
+  /// it). A team the server runs is left to the server — the marker is cleared
+  /// and nothing is written. A revert that cannot be sent keeps the marker for
+  /// the next try (next resume, or the controller connecting).
+  Future<void> recoverInterruptedCelebration() async {
+    if (_disposed || _celebrating || _recovering) return;
+    _recovering = true;
+    try {
+      final marker = await _markers.load();
+      if (marker == null) return;
+      if (_isServedTeam(marker.teamSlug)) {
+        debugPrint('[Celebration] interrupted celebration for a server-run '
+            'team — left to the server');
+        await _markers.clear();
+        return;
+      }
+      final revertTo = marker.revertTo;
+      if (revertTo != null && revertTo.isNotEmpty) {
+        await _delivery.revert(revertTo);
+      } else {
+        await _delivery.revertToBaseLook();
+      }
+      await _markers.clear();
+      debugPrint('[Celebration] finished an interrupted celebration');
+    } catch (e) {
+      debugPrint('[Celebration] recovery deferred: $e');
+    } finally {
+      _recovering = false;
+    }
   }
 
   void _reconcile() {
@@ -288,7 +357,8 @@ class ForegroundCelebrationCoordinator {
 
       // Read the choice AFTER the capture so a pick saved during a slow relay
       // read still counts. A null capture (unreadable state) resolves
-      // fail-open: the choice fires as picked, and the revert is skipped.
+      // fail-open: the choice fires as picked, and the celebration still ends
+      // — on the base look (#170).
       final choice = _knownTeams[event.teamSlug];
       final resolution = resolveCelebration(
         chosenEffectId: choice?.celebrationEffectId,
@@ -304,10 +374,32 @@ class ForegroundCelebrationCoordinator {
       final steps = AlertTriggerService.buildAnimationStepsAt(
           event.eventType, team, resolution,
           length: choice?.celebrationLength ?? CelebrationLength.medium);
-      await _delivery.play(steps);
-      if (captured != null && captured.isNotEmpty) {
-        await _delivery.revert(captured);
+
+      // #170: the record that lets a suspended or killed app end this, and
+      // the deadline past which nothing of it plays: its clamped length plus
+      // a small margin.
+      final start = _now();
+      final endBy = start.add(
+          totalOf([for (final s in steps) s.hold]) + _revertMargin);
+      final hasCapture = captured != null && captured.isNotEmpty;
+      try {
+        await _markers.save(CelebrationMarker(
+          teamSlug: event.teamSlug,
+          revertTo: hasCapture ? captured : null,
+          startedAt: start,
+          endBy: endBy,
+        ));
+      } catch (e) {
+        debugPrint('[Celebration] marker not saved: $e');
       }
+
+      await _delivery.play(steps, deadline: endBy);
+      if (hasCapture) {
+        await _delivery.revert(captured);
+      } else {
+        await _delivery.revertToBaseLook();
+      }
+      await _markers.clear();
     } catch (e) {
       debugPrint('[Celebration] playback failed: $e');
     } finally {
