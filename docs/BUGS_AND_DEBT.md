@@ -4365,9 +4365,9 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `lib/features/ai/lumina_sheet_controller.dart`, `lib/shared/write_result.dart`. Related **#154**,
     **#165**.
 
-- [ ] **#164 — FAVORITES FILLED THEMSELVES IN AND HAD NO CAP**
-  - Status: **(a) and (b) DONE on `fix/116-lumina-channels-favorites` (2026-10-02), NOT merged;
-    (c) awaiting the owner's choice** · Severity: **P2** · Evidence: **verified-by-source** +
+- [x] **#164 — FAVORITES FILLED THEMSELVES IN AND HAD NO CAP**
+  - Status: **DONE on `fix/116-lumina-channels-favorites` — (a) and (b) 2026-10-02, (c) 2026-10-04
+    (owner decision), NOT merged** · Severity: **P2** · Evidence: **verified-by-source** +
     **verified-by-data** (read-only, counts only: 56 accounts, 12 with favorites, 24 favorites, of
     which 23 `auto_added`; 2 accounts over two; none with more than two explicit ones).
   - Cause: `HabitLearner.updateAutoFavorites` (`7b166b7`, 2026-01-23) ran on app resume and wrote
@@ -4376,17 +4376,18 @@ commit — merging `main` into this tree will collide with the untracked copies.
     log usage, and `a5b229c` made Home show every favorite instead of two.
   - (a) Every automatic writer removed (the learner and both callers, the latent auto paths,
     `UserService.addFavorite`, the brand generator's favorites); a new favorite is always
-    `auto_added: false`. (b) `writeFavorite` refuses a third (`FavoritesFullException`, "You can
-    keep 2 favorites. Remove one to add another."); every explicit control offers a one-batch
-    replace; Home hides "+" at the cap.
-  - **(c) for the owner:** existing over-cap and auto-added data is untouched today (Home shows it
-    all; adds are refused until one is removed). Options: keep as is (recommended); Home shows
-    explicit favorites only, auto ones in a "Suggested from your use" row (11 of 12 accounts would
-    see their Favorites row change); a one-time "choose your 2" prompt with a backup for the two
-    over-cap accounts. Also: confirm the two reserved white tiles do not count toward the two.
+    `auto_added: false`. (b) `writeFavorite` refuses a third saved favorite
+    (`FavoritesFullException`, "You can keep 2 favorites. Remove one to add another."); every
+    explicit control offers a one-batch replace; Home hides "+" at the cap. (c) Home shows only
+    the favorites the customer saved.
+  - **Over-cap handling:** automatic (`auto_added: true`) favorites are never deleted or changed —
+    they stay in the data, are not shown on Home and do not count toward the cap; the white tiles
+    do not count; saved favorites over two (none exist) are all shown and new adds are refused
+    until one is removed.
   - Files: `lib/features/favorites/favorite_doc.dart`, `favorites_providers.dart`,
     `favorites_full_dialog.dart`, `favorites_picker.dart`, `lib/widgets/favorites_grid.dart`,
-    `lib/widgets/favorite_heart_button.dart`, `lib/features/autopilot/habit_learner.dart`.
+    `lib/widgets/favorite_heart_button.dart`, `lib/features/autopilot/habit_learner.dart`,
+    `lib/features/autopilot/learning_providers.dart`.
 
 - [ ] **#165 — THE HOME PREVIEW AND NOW PLAYING READ SEGMENT 0 ONLY: a mixed controller shows one
   channel's look on the whole house**
@@ -4404,20 +4405,29 @@ commit — merging `main` into this tree will collide with the untracked copies.
 
 - [ ] **#166 — "Cannot use "ref" after the widget was disposed" ON THE GAME DAY SCREEN; the same
   pattern app-wide**
-  - Status: **Game Day screen, My Schedule's eviction listener and the weekly regeneration DONE on
-    `fix/116-lumina-channels-favorites` (2026-10-02), NOT merged; app-wide OPEN** · Severity:
-    **P2** · Evidence: **verified-by-data** (one `debug_errors` record, iOS 2.5.10+114,
-    2026-10-02 20:36:06Z, `PlatformDispatcher.onError`, obfuscated frames) + **verified-by-test**
-    (`game_day_dispose_during_await_test.dart` reproduces the exact message on the old code).
-  - A widget method awaited a dialog, sheet or read, the card was torn down underneath it, and the
-    method then read the widget's `ref`. The team enable in the report DID land 5.4 s before the
-    error, so the throw came from code reacting to it; symbolicate with the build's
-    `app.ios-arm64.symbols` artifact to pin the frame.
-  - Fix on the branch: each handler captures the app's `ProviderContainer` (and messenger) before
-    its first await. Light Up Now's self-expiring session now starts even if the card is gone.
-  - **Open:** a scan finds about 220 `ref`-after-`await` sites across `lib/` (largest:
-    `my_schedule_page.dart`, `installer_setup_wizard.dart`, `demo_photo_screen.dart`). Fix by
-    screen, with the same capture-the-container shape; a lint or a source test would stop new ones.
+  - Status: **Game Day screen, My Schedule's eviction listener, the weekly regeneration, the last
+    ref-in-dispose site and `app_version` on every `debug_errors` record DONE on
+    `fix/116-lumina-channels-favorites` (2026-10-02 / 10-04), NOT merged; the remaining async
+    sites OPEN (ranked below)** · Severity: **P2** · Evidence: **verified-by-data** (read-only,
+    counts only, last 14 days to 2026-10-04: 204 records across ~10 build ids) +
+    **verified-by-test**.
+  - Production: release stacks are bare addresses. The one group with symbols on this machine
+    (build 102, Android, 15 records) symbolicates to `LibraryBrowserScreen.dispose` reading `ref`
+    during unmount (`FlutterError.onError`), fixed in build 109 (`4bca3c9`). By first/last-seen
+    time, 202 of the 204 records come from builds ≤ 108 and stop when 109 arrived; since then two,
+    both async (09-30, and 10-02 on 114, 5.4 s after a Game Day enable that DID land). Records now
+    carry `app_version`, so the next one can be matched to its build's `.symbols`.
+  - Fixed: every Game Day card handler captures the app container before its first await (tests
+    reproduce the production message on the old code); `InstallerSetupWizard.dispose` no longer
+    reads `ref`; `no_ref_in_dispose_test` keeps it that way app-wide.
+  - **Next build — remaining `ref`-after-`await` sites, ranked by count per file** (a heuristic
+    scan, about 220 in all; it cannot tell a widget's `ref` from a provider's, which only fails in
+    auto-dispose providers, so the customer-facing screens come first):
+    `my_schedule_page.dart` (13), `neighborhood_sync_screen.dart` (9), `pattern_grid_widgets.dart`
+    (7, Explore), `CommercialScheduleScreen.dart` (7), `demo_photo_screen.dart` (10),
+    `controller_setup_screen.dart` (7) and `installer_setup_wizard.dart` (16, installer-only); the
+    provider-side counts (`wled_providers.dart` 20, `apply_saved_design.dart` 9, `lumina_brain.dart`
+    8, `schedule_sync.dart` 7) need a per-site check first.
 
 - [x] **#167 — EFFECT NAMES THE CUSTOMER READS NAMED A DIFFERENT EFFECT (fx 12 "Theater Chase" is
   Fade on 0.15.1)**
@@ -4429,42 +4439,38 @@ commit — merging `main` into this tree will collide with the untracked copies.
     Lumina's pattern names and night names, the Game Day design label, the Explore compact card,
     the Neighborhood Sync picker and the brand custom-design list. No id that is sent changed.
 
-- [ ] **#168 — LIBRARY DESIGNS PLAY A DIFFERENT EFFECT THAN THEIR AUTHORS INTENDED, and the AI's
+- [x] **#168 — LIBRARY DESIGNS PLAY A DIFFERENT EFFECT THAN THEIR AUTHORS INTENDED, and the AI's
   effect_database uses an older numbering**
-  - Status: **OPEN — filed 2026-10-02 from #167; owner decision** · Severity: **P3** · Evidence:
-    **verified-by-source**.
+  - Status: **DECIDED 2026-10-04 (owner): keep today's effects — no id changes.** Severity: **P3** ·
+    Evidence: **verified-by-source**.
   - About 180 `suggestedEffects` entries in `lib/data/` (holiday, party, seasonal, NCAA, sports,
     golf libraries) say "Theater Chase, Running, Twinkle, Fireworks, Candle" in their comments and
-    send 12, 41, 43, 52, 63/101 — Fade, Lighthouse, Rain, Running Dual, Pride 2015 / Pacifica. The
-    Lumina team default ("Theater Chase for most") is fx 12 too. The brand list's 13 / 50 / 74 were
-    labelled Glitter / Twinkle / Twinkle Cat (now relabelled to what they play).
-    `effect_database.dart` (the AI decision tree's effect knowledge) is shifted from fx 37 up.
-  - **Decide:** keep today's looks and fix the comments, or move the ids to the intended effects
-    (13 Theater, 15 Running, 17 Twinkle, 42 / 90 Fireworks, 88 Candle) — a visible change to
-    every affected design; bench it first. `effect_database.dart` should be regenerated from the
-    catalog either way.
+    send 12, 41, 43, 52, 63/101 — Fade, Lighthouse, Rain, Running Dual, Pride 2015 / Pacifica. What
+    the customer reads is already the effect that plays (#167); the looks stay as they are.
+  - Residue, no behaviour change: the comments could be corrected, and `effect_database.dart` (the
+    AI decision tree's effect knowledge, shifted from fx 37 up) regenerated from the catalog.
 
-- [ ] **#169 — GAME DAY CELEBRATION LENGTH: Short / Medium / Long (spec, not built); and an NFL extra
-  point celebrates as a touchdown**
-  - Status: **OPEN — spec `docs/game_day_celebration_length_spec_2026-10-02.md` awaiting owner
-    approval of the values** · Severity: **P3 (feature) / P2 (the extra point)** · Evidence:
-    **verified-by-source**.
-  - Proposal: `celebration_length` on the team doc (absent = medium = today), each event's length
-    × 0.5 / × 1 / × 2, every celebration clamped to 5–60 s, the control under Speed in the
-    celebration picker. The app half can ship in the next build; the server half rides S5b (plan
-    step G) with the poller dispatching short reverts itself.
-  - Extra point: `ScoreMonitorService._diffNfl` has no +1 case; a PAT falls to `default:` →
-    `touchdown`, so it plays a second 15 s celebration even under "Major only".
+- [ ] **#169 — GAME DAY CELEBRATION LENGTH: Short / Medium / Long; and an NFL extra point
+  celebrated as a touchdown**
+  - Status: **app half DONE on `fix/116-lumina-channels-favorites` (2026-10-04, owner values),
+    NOT merged; server half OPEN (rides S5b, plan step G)** · Severity: **P3 (feature) / P2 (the
+    extra point)** · Evidence: **verified-by-test** (`celebration_length_test.dart`).
+  - `celebration_length` on the team doc: Short x0.5, Medium x1 (today; absent = Medium), Long x2,
+    every celebration clamped to 5-60 s in code. Picker: Length under Speed. An extra point (+1)
+    plays nothing; a two-point conversion plays its +2 stages at Short. Spec:
+    `docs/game_day_celebration_length_spec_2026-10-02.md` (the server note is in §4).
+  - Not changed: Neighborhood Sync's own score classifier still calls a +1 a field goal
+    (`sync_celebration_service.dart`); the disabled background path and commercial teams play
+    Medium.
 
-- [ ] **#170 — A PHONE CELEBRATION CAN RUN ON INDEFINITELY if the app is suspended or killed mid-way**
-  - Status: **OPEN — filed 2026-10-02 from #169** · Severity: **P2** · Evidence:
-    **verified-by-source** (`foreground_celebration_providers.dart`: each stage is held with
-    `Future.delayed`, the revert runs after the last).
-  - iOS stops the Dart timers when the app is suspended; the revert waits for the next resume, and
-    never runs if the app is killed — the house stays on the celebration until the Game Day end, a
-    schedule or the customer changes it.
-  - **Fix shape:** persist `{captured state, revertBy}` before the first stage and revert on the
-    next resume or launch when past due (spec §2.5); single-stage celebrations away from home.
+- [x] **#170 — A PHONE CELEBRATION COULD RUN ON INDEFINITELY if the app was suspended or killed
+  mid-way**
+  - Status: **DONE on `fix/116-lumina-channels-favorites` (2026-10-04), NOT merged** · Severity:
+    **P2** · Evidence: **verified-by-test** (`celebration_always_ends_test.dart`).
+  - Before a celebration plays the phone stores a marker (what to revert to, when it must have
+    ended: its clamped length + 10 s); playback stops at that deadline; a resume, a cold start or
+    the controller connecting finishes a leftover marker — to the captured state, the base look
+    when the capture was lost, OFF staying off; a server-run team is left to the server.
 
 ---
 
