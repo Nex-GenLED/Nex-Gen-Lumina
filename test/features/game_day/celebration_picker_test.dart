@@ -17,6 +17,7 @@
 // render inside a Scaffold supplied by their caller. The header inset test
 // pins the SafeArea that closes that gap.
 
+import 'package:nexgen_command/features/sports_alerts/services/celebration_length.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -189,10 +190,20 @@ Future<void> _pumpCelebration(
   int? initialEffectId,
   int? initialSpeed,
   int? initialIntensity,
+  CelebrationLength? initialCelebrationLength,
+  double textScale = 1.0,
+  bool boldText = false,
 }) async {
   await tester.pumpWidget(ProviderScope(
     overrides: _overrides(repo),
     child: MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: TextScaler.linear(textScale),
+          boldText: boldText,
+        ),
+        child: child!,
+      ),
       // No Scaffold — this mirrors the real push in game_day_screen.dart.
       home: ColorwayEffectSelectorPage(
         paletteNode: _teamNode,
@@ -200,6 +211,7 @@ Future<void> _pumpCelebration(
         initialEffectId: initialEffectId,
         initialSpeed: initialSpeed,
         initialIntensity: initialIntensity,
+        initialCelebrationLength: initialCelebrationLength,
         onDesignSelected: onSelected ?? (_) {},
       ),
     ),
@@ -486,5 +498,68 @@ void main() {
       expect(find.textContaining('Editing a saved design'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+  });
+
+  // #169 — Length, under Speed.
+  group('celebration Length (Short / Medium / Long)', () {
+    bool selected(WidgetTester tester, String wire) => tester
+        .widget<ChoiceChip>(find.byKey(ValueKey('celebration-length-$wire')))
+        .selected;
+
+    testWidgets('sits under Speed and above Intensity; Medium by default; the '
+        'helper gives a touchdown at each setting', (tester) async {
+      _tallViewport(tester);
+      await _pumpCelebration(tester, _FakeRepo());
+      final speedY =
+          tester.getTopLeft(find.byKey(const ValueKey('celebration-speed'))).dy;
+      final lengthY =
+          tester.getTopLeft(find.byKey(const ValueKey('celebration-length'))).dy;
+      final intensityY = tester.getTopLeft(find.text('Intensity')).dy;
+      expect(lengthY, greaterThan(speedY));
+      expect(lengthY, lessThan(intensityY));
+      expect(selected(tester, 'medium'), isTrue);
+      expect(selected(tester, 'short'), isFalse);
+      expect(selected(tester, 'long'), isFalse);
+      expect(
+          find.text('A touchdown plays 8 seconds on Short, 15 on Medium and '
+              '30 on Long. Every celebration ends on its own.'),
+          findsOneWidget);
+    });
+
+    testWidgets('choosing Long and saving hands Long back', (tester) async {
+      _tallViewport(tester);
+      LibraryDesignSelection? got;
+      await _pumpCelebration(tester, _FakeRepo(), onSelected: (s) => got = s);
+      await tester.tap(find.byKey(const ValueKey('celebration-length-long')));
+      await tester.pump();
+      expect(selected(tester, 'long'), isTrue);
+      await tester.tap(find.byKey(const ValueKey('celebration-save')));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(got?.celebrationLength, CelebrationLength.long);
+    });
+
+    testWidgets('reopens on the stored length', (tester) async {
+      _tallViewport(tester);
+      await _pumpCelebration(tester, _FakeRepo(),
+          initialCelebrationLength: CelebrationLength.short);
+      expect(selected(tester, 'short'), isTrue);
+    });
+
+    for (final (scale, bold) in [(1.0, false), (1.75, true), (2.0, true)]) {
+      testWidgets('reads at text x$scale, bold $bold — all three options and '
+          'the helper, nothing clipped', (tester) async {
+        tester.view.devicePixelRatio = 3.0;
+        tester.view.physicalSize = const Size(1170, 6000);
+        addTearDown(tester.view.reset);
+        await _pumpCelebration(tester, _FakeRepo(),
+            textScale: scale, boldText: bold);
+        for (final w in ['short', 'medium', 'long']) {
+          expect(find.byKey(ValueKey('celebration-length-$w')), findsOneWidget);
+        }
+        expect(find.byKey(const ValueKey('celebration-length-helper')),
+            findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }

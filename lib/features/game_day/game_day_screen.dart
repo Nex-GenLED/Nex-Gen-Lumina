@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/sports_alerts/services/celebration_length.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -545,6 +546,10 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // Capture messenger up-front because the awaits below can unmount this
     // widget before we get to show the result snackbar.
     final messenger = ScaffoldMessenger.of(context);
+    // #166: and the app's container, for every provider read after the first
+    // await. The card's `ref` throws "Cannot use ref after the widget was
+    // disposed" once the card is gone; the container outlives it.
+    final container = ProviderScope.containerOf(context, listen: false);
 
     // Snapshot what the house is showing BEFORE we overwrite it — this is what
     // the ephemeral session puts back when the game ends. Captured here rather
@@ -554,13 +559,13 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     Map<String, dynamic> revertPayload = const {};
     try {
       revertPayload =
-          await ref.read(wledRepositoryProvider)?.getState() ?? const {};
+          await container.read(wledRepositoryProvider)?.getState() ?? const {};
     } catch (e) {
       debugPrint('[GameDay] Light Up Now: revert capture failed: $e');
     }
     // Null when nothing named is showing — the session needs a concrete label
     // to restore the Now Playing chip to, so fall back to the neutral one.
-    final revertLabel = ref.read(activePresetLabelProvider) ?? 'Custom';
+    final revertLabel = container.read(activePresetLabelProvider) ?? 'Custom';
 
     // Convergence-Phase-2b: the payload build + apply routes through
     // the shared [applyGameDayConfigToDevice] helper. The Path 2
@@ -575,24 +580,26 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     //
     // resume in a finally — a failed or throwing apply must not leave the
     // dashboard permanently un-polled.
-    final poller = ref.read(wledStateProvider.notifier);
+    final poller = container.read(wledStateProvider.notifier);
     poller.pausePolling();
     final bool ok;
     try {
       ok = await applyGameDayConfigToDevice(
         applyPayloadWithLabel: poller.applyPayloadWithLabel,
         config: config,
-        participatingChannels: ref.read(effectiveChannelIdsProvider),
-        deviceChannels: ref.read(deviceChannelsProvider),
+        participatingChannels: container.read(effectiveChannelIdsProvider),
+        deviceChannels: container.read(deviceChannelsProvider),
       );
     } finally {
       poller.resumePolling();
     }
-    if (!context.mounted) return;
 
+    // The session is what puts the house back at the final whistle, so it
+    // starts whether or not this card is still on screen (#166).
     if (ok) {
-      await _startManualSession(ref, config, revertPayload, revertLabel);
+      await _startManualSession(container, config, revertPayload, revertLabel);
     }
+    if (!context.mounted) return;
 
     messenger.showSnackBar(
       SnackBar(
@@ -620,6 +627,9 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     GameDayAutopilotConfig config,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    // #166: the app's container, captured before the dialog — the card (and
+    // its `ref`) can be gone when it closes; the container cannot.
+    final container = ProviderScope.containerOf(context, listen: false);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -643,7 +653,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     if (confirmed != true) return;
 
     try {
-      await ref.read(gameDayAutopilotNotifierProvider.notifier).removeTeam(
+      await container.read(gameDayAutopilotNotifierProvider.notifier).removeTeam(
             teamSlug: config.teamSlug,
             teamName: config.teamName,
           );
@@ -687,7 +697,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
   /// auto-revert is a far better outcome than a silent house. The session is
   /// best-effort on top.
   static Future<void> _startManualSession(
-    WidgetRef ref,
+    ProviderContainer container,
     GameDayAutopilotConfig config,
     Map<String, dynamic> revertPayload,
     String revertLabel,
@@ -696,8 +706,9 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // THIS game rather than guessing from a timer.
     String? gameId;
     try {
-      gameId = (await ref.read(activeGameProvider(config.teamSlug).future))
-          ?.gameId;
+      gameId =
+          (await container.read(activeGameProvider(config.teamSlug).future))
+              ?.gameId;
     } catch (e) {
       debugPrint('[GameDay] Light Up Now: game lookup failed: $e');
     }
@@ -724,7 +735,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     }
 
     try {
-      final svc = ref.read(ephemeralGameSessionServiceProvider);
+      final svc = container.read(ephemeralGameSessionServiceProvider);
       if (svc == null) return; // signed out
       final session = await svc.createSession(
         teamSlug: config.teamSlug,
@@ -743,6 +754,14 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
   // ── Celebration effect ───────────────────────────────────────────────────
 
   static String _celebrationLabel(GameDayAutopilotConfig config) {
+    final name = _celebrationEffectLabel(config);
+    // #169: the Length rides on the row once it is not the usual.
+    return config.celebrationLength == CelebrationLength.medium
+        ? name
+        : '$name · ${config.celebrationLength.label}';
+  }
+
+  static String _celebrationEffectLabel(GameDayAutopilotConfig config) {
     final id = config.celebrationEffectId;
     if (id == null) return 'Default';
     // A stored id the picker no longer offers fires as "no pick"
@@ -778,6 +797,10 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
 
     final navigator = Navigator.of(context, rootNavigator: true);
     final messenger = ScaffoldMessenger.of(context);
+    // #166: the pick lands while the picker is on top; the card below may be
+    // rebuilt or gone by then, so the callback reads the app's container,
+    // never the card's `ref`.
+    final container = ProviderScope.containerOf(context, listen: false);
 
     await navigator.push<void>(MaterialPageRoute(
       builder: (_) => ColorwayEffectSelectorPage(
@@ -789,12 +812,13 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
         initialEffectId: config.celebrationEffectId,
         initialSpeed: config.celebrationSpeed,
         initialIntensity: config.celebrationIntensity,
+        initialCelebrationLength: config.celebrationLength,
         onDesignSelected: (selection) async {
           final picked = _celebrationFromPayload(selection.wledPayload);
           navigator.pop();
           if (picked == null) return;
           try {
-            await ref
+            await container
                 .read(gameDayAutopilotNotifierProvider.notifier)
                 .setCelebrationEffect(
                   teamSlug: config.teamSlug,
@@ -802,6 +826,15 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                   speed: picked.sx,
                   intensity: picked.ix,
                 );
+            final length = selection.celebrationLength;
+            if (length != null && length != config.celebrationLength) {
+              await container
+                  .read(gameDayAutopilotNotifierProvider.notifier)
+                  .setCelebrationLength(
+                    teamSlug: config.teamSlug,
+                    length: length,
+                  );
+            }
           } catch (e, st) {
             debugPrint('[GameDay] setCelebrationEffect failed: $e\n$st');
             messenger.showSnackBar(const SnackBar(
@@ -853,6 +886,9 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     WidgetRef ref,
     GameDayAutopilotConfig config,
   ) async {
+    // #166: the app's container, captured before the sheet — the card (and
+    // its `ref`) can be gone when it closes; the container cannot.
+    final container = ProviderScope.containerOf(context, listen: false);
     // Dock-safe on every screen size: see showDockSafeModalBottomSheet.
     final picked = await showDockSafeModalBottomSheet<AlertSensitivity>(
       context: context,
@@ -897,7 +933,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
 
     if (picked == null || picked == config.alertSensitivity) return;
     try {
-      await ref
+      await container
           .read(gameDayAutopilotNotifierProvider.notifier)
           .setAlertSensitivity(teamSlug: config.teamSlug, sensitivity: picked);
     } catch (e, st) {
@@ -924,6 +960,14 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     debugPrint(
       '\u{1F3DF}\u{FE0F} Game Day Autopilot set to: $value for team: ${config.teamSlug}',
     );
+    // #166 (2.5.10+114, 2026-10-02): the base-layer dialog below is awaited,
+    // and this card can be torn down while it is open (the team list rebuilds
+    // under it). Reading `ref` after the dialog then threw "Cannot use ref
+    // after the widget was disposed", and the enable the customer had just
+    // confirmed was not written. What is needed after the await is captured
+    // here: the app's container and the messenger, which outlive any card.
+    final container = ProviderScope.containerOf(context, listen: false);
+    final messenger = ScaffoldMessenger.of(context);
     // BASE-LAYER GATE (audit/BASE_LAYER_GATE.md). Fires only on ENABLE, and
     // only when no everyday schedule is visible. Informational: 'Enable
     // anyway' proceeds, a dismissal proceeds, and ANY failure proceeds. It
@@ -944,7 +988,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
       }
     }
     try {
-      await ref
+      await container
           .read(gameDayAutopilotNotifierProvider.notifier)
           .toggleAutopilot(
             teamSlug: config.teamSlug,
@@ -952,16 +996,14 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
           );
     } catch (e, st) {
       debugPrint('[GameDayAutopilot] toggleAutopilot failed: $e\n$st');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not update Game Day Autopilot for ${config.teamName}.',
-            ),
-            duration: const Duration(seconds: 6),
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not update Game Day Autopilot for ${config.teamName}.',
           ),
-        );
-      }
+          duration: const Duration(seconds: 6),
+        ),
+      );
     }
   }
 

@@ -1,3 +1,5 @@
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
+
 /// Human-readable display metadata for WLED effect IDs.
 ///
 /// Used by the schedule card UI and detail bottom sheet to describe
@@ -30,10 +32,25 @@ class EffectDisplayMeta {
     isMotion: true,
   );
 
-  /// Look up display metadata for a WLED effect ID.
-  static EffectDisplayMeta fromId(int fxId) => _map[fxId] ?? _fallback;
+  /// Look up display metadata for a WLED effect ID. An id without a curated
+  /// entry is named by the effect catalog (WLED 0.15.1's own names, #167) —
+  /// never "Custom Effect" for an effect the controller can name.
+  static EffectDisplayMeta fromId(int fxId) {
+    final curated = _map[fxId];
+    if (curated != null) return curated;
+    final known = WledEffectsCatalog.getById(fxId);
+    if (known == null) return _fallback;
+    return EffectDisplayMeta(
+      name: known.name,
+      motionDescription: _fallback.motionDescription,
+      isMotion: fxId != 0,
+    );
+  }
 
-  /// All mapped effects, keyed by WLED effect ID.
+  /// All mapped effects, keyed by WLED effect ID. Every [name] is the effect
+  /// catalog's name for that id (#167: several used to name a different
+  /// effect — 12 read "Theater Chase" while the controller plays Fade).
+  /// effect_display_meta_test.dart holds each one to the catalog.
   static const Map<int, EffectDisplayMeta> _map = {
     0: EffectDisplayMeta(
       name: 'Solid',
@@ -64,8 +81,8 @@ class EffectDisplayMeta {
       isMotion: true,
     ),
     12: EffectDisplayMeta(
-      name: 'Theater Chase',
-      motionDescription: 'Blocks of light sweeping forward',
+      name: 'Fade',
+      motionDescription: 'Colors fading smoothly from one to the next',
       isMotion: true,
       previewFrameOffset: 0.3,
     ),
@@ -76,25 +93,25 @@ class EffectDisplayMeta {
       previewFrameOffset: 0.4,
     ),
     17: EffectDisplayMeta(
-      name: 'Sparkle',
-      motionDescription: 'Random bright flashes on a dim base',
+      name: 'Twinkle',
+      motionDescription: 'Random lights twinkling on and off',
       isMotion: true,
     ),
     41: EffectDisplayMeta(
-      name: 'Running',
-      motionDescription: 'Colors streaming along the strip',
+      name: 'Lighthouse',
+      motionDescription: 'A beam of light sweeping along the strip',
       isMotion: true,
       previewFrameOffset: 0.4,
     ),
     43: EffectDisplayMeta(
-      name: 'Twinkle',
-      motionDescription: 'Random lights flickering on and off',
+      name: 'Rain',
+      motionDescription: 'Drops of color falling along the strip',
       isMotion: true,
       previewFrameOffset: 0.45,
     ),
     46: EffectDisplayMeta(
-      name: 'Twinkle Fox',
-      motionDescription: 'Soft random twinkling like starlight',
+      name: 'Gradient',
+      motionDescription: 'A smooth color blend moving across the strip',
       isMotion: true,
     ),
     49: EffectDisplayMeta(
@@ -103,20 +120,20 @@ class EffectDisplayMeta {
       isMotion: true,
     ),
     51: EffectDisplayMeta(
-      name: 'Gradient',
-      motionDescription: 'Smooth color blend across the strip',
+      name: 'Fairytwinkle',
+      motionDescription: 'Delicate lights twinkling softly',
       isMotion: true,
       previewFrameOffset: 0.0,
     ),
     52: EffectDisplayMeta(
-      name: 'Fireworks',
-      motionDescription: 'Bursts of color with sparkle',
+      name: 'Running Dual',
+      motionDescription: 'Two waves of color running in opposite directions',
       isMotion: true,
       previewFrameOffset: 0.6,
     ),
     63: EffectDisplayMeta(
-      name: 'Candle',
-      motionDescription: 'Gentle warm flicker',
+      name: 'Pride 2015',
+      motionDescription: 'Slowly shifting waves of color',
       isMotion: true,
       previewFrameOffset: 0.3,
     ),

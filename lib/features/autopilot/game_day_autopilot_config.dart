@@ -3,6 +3,7 @@
 // Persistent configuration for a user's Game Day Autopilot subscription
 // for a single team. Stored in Firestore at /users/{uid}/game_day_autopilot/{teamSlug}.
 
+import 'package:nexgen_command/features/sports_alerts/services/celebration_length.dart';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -231,6 +232,10 @@ class GameDayAutopilotConfig {
   /// True when the user has picked a celebration effect for this team.
   bool get hasCelebrationEffect => celebrationEffectId != null;
 
+  /// How long this team's celebrations play (#169): `celebration_length` on
+  /// the team doc. Absent = [CelebrationLength.medium], today's lengths.
+  final CelebrationLength celebrationLength;
+
   const GameDayAutopilotConfig({
     required this.teamSlug,
     required this.teamName,
@@ -262,6 +267,7 @@ class GameDayAutopilotConfig {
     this.celebrationEffectId,
     this.celebrationSpeed = 240,
     this.celebrationIntensity = 240,
+    this.celebrationLength = CelebrationLength.medium,
   });
 
   Color get primaryColor => Color(primaryColorValue);
@@ -375,12 +381,14 @@ class GameDayAutopilotConfig {
   /// Curated short names for game-day-relevant effects; any other id uses
   /// the catalog's name so a saved design never reads as a bare "Custom".
   static String _effectShortName(int effectId) {
+    // #167: a short name must still BE the effect ("Running" for Running
+    // Dual, "Pattern" for Solid Pattern). 38, 39, 43 and 46 used to read
+    // Fire, Fireworks, Chase and Lightning for Aurora, Stream, Rain and
+    // Gradient; they now take the catalog's name.
     const names = {
       0: 'Solid', 2: 'Breathe', 12: 'Fade',
-      28: 'Chase', 38: 'Fire', 39: 'Fireworks',
-      17: 'Twinkle', 20: 'Sparkle', 41: 'Lighthouse',
-      43: 'Chase', 46: 'Lightning', 52: 'Running',
-      80: 'Twinklefox', 83: 'Pattern', 87: 'Glitter',
+      28: 'Chase', 17: 'Twinkle', 20: 'Sparkle', 41: 'Lighthouse',
+      52: 'Running', 80: 'Twinklefox', 83: 'Pattern', 87: 'Glitter',
     };
     return names[effectId] ?? WledEffectsCatalog.getName(effectId);
   }
@@ -430,6 +438,10 @@ class GameDayAutopilotConfig {
           'celebration_speed': celebrationSpeed,
           'celebration_intensity': celebrationIntensity,
         },
+        // Written only when chosen, like the effect: an untouched config
+        // stays byte-identical and plays today's lengths.
+        if (celebrationLength != CelebrationLength.medium)
+          'celebration_length': celebrationLength.wire,
       };
 
   factory GameDayAutopilotConfig.fromFirestore(Map<String, dynamic> data) {
@@ -492,6 +504,8 @@ class GameDayAutopilotConfig {
       celebrationSpeed: (data['celebration_speed'] as num?)?.toInt() ?? 240,
       celebrationIntensity:
           (data['celebration_intensity'] as num?)?.toInt() ?? 240,
+      celebrationLength:
+          CelebrationLength.fromWire(data['celebration_length']),
     );
   }
 
@@ -522,6 +536,7 @@ class GameDayAutopilotConfig {
     bool clearCelebrationEffect = false,
     int? celebrationSpeed,
     int? celebrationIntensity,
+    CelebrationLength? celebrationLength,
   }) {
     return GameDayAutopilotConfig(
       teamSlug: teamSlug,
@@ -560,6 +575,7 @@ class GameDayAutopilotConfig {
           : (celebrationEffectId ?? this.celebrationEffectId),
       celebrationSpeed: celebrationSpeed ?? this.celebrationSpeed,
       celebrationIntensity: celebrationIntensity ?? this.celebrationIntensity,
+      celebrationLength: celebrationLength ?? this.celebrationLength,
     );
   }
 

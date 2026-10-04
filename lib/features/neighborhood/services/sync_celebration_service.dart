@@ -311,6 +311,7 @@ class SyncCelebrationService {
       case AlertEventType.fieldGoal:
         return Duration(seconds: (baseDuration * 0.6).round());
       case AlertEventType.safety:
+      case AlertEventType.twoPointConversion:
       case AlertEventType.run:
         return Duration(seconds: (baseDuration * 0.5).round());
       case AlertEventType.clutchBasket:

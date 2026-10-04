@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/sports_alerts/services/celebration_length.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,7 +35,7 @@ import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
-import 'package:nexgen_command/features/favorites/favorites_providers.dart';
+import 'package:nexgen_command/features/favorites/favorites_full_dialog.dart';
 import 'package:nexgen_command/features/game_day/game_day_design_save.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
     show showScheduleEditor, PatternSelection;
@@ -108,12 +109,17 @@ class LibraryDesignSelection {
   /// they show can never disagree with the payload they fire.
   final String? paletteName;
 
+  /// CELEBRATION MODE only: the Length the customer chose under Speed (#169).
+  /// Null from every other mode.
+  final CelebrationLength? celebrationLength;
+
   const LibraryDesignSelection({
     required this.id,
     required this.name,
     required this.wledPayload,
     this.imageUrl = '',
     this.paletteName,
+    this.celebrationLength,
   });
 
   /// [paletteName] when known, else [name].
@@ -246,6 +252,9 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   final int? initialSpeed;
   final int? initialIntensity;
 
+  /// CELEBRATION MODE only: the team's stored Length (#169). Null = Medium.
+  final CelebrationLength? initialCelebrationLength;
+
   const ColorwayEffectSelectorPage({
     super.key,
     required this.paletteNode,
@@ -256,6 +265,7 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
     this.initialEffectId,
     this.initialSpeed,
     this.initialIntensity,
+    this.initialCelebrationLength,
   });
 
   /// Opens the tuner on a stored effect design.
@@ -304,6 +314,10 @@ class _ColorwayEffectSelectorPageState
     isRemote: () => ref.read(isRemoteModeProvider),
     localDelay: const Duration(milliseconds: 150),
   );
+
+  /// CELEBRATION MODE: the Length chosen under Speed (#169).
+  late CelebrationLength _celebrationLength =
+      widget.initialCelebrationLength ?? CelebrationLength.medium;
 
   /// SAVE mode: true once the user tapped "Preview on lights". Until then no
   /// adjustment reaches the controller — choosing a design for a schedule,
@@ -1061,6 +1075,8 @@ class _ColorwayEffectSelectorPageState
         name: '${widget.paletteNode.name} - $effectName',
         paletteName: widget.paletteNode.name,
         wledPayload: payload,
+        celebrationLength:
+            widget.celebrationMode ? _celebrationLength : null,
       );
       // Undo the preview via the same applyJson mechanism (see
       // _restoreCapturedLook). Await so the restore write lands before the
@@ -1332,13 +1348,16 @@ class _ColorwayEffectSelectorPageState
     switch (choice) {
       case _SaveTarget.favorites:
         try {
-          await ref.read(favoritesNotifierProvider.notifier).addToFavorites(
-                patternId: favoritePatternIdFor(selection),
-                patternName: selection.name,
-                wledPayload: selection.wledPayload,
-              );
+          // #164: capped at two — a full list asks which one to replace.
+          final outcome = await saveFavoriteWithCap(
+            context,
+            ProviderScope.containerOf(context, listen: false),
+            patternId: favoritePatternIdFor(selection),
+            patternName: selection.name,
+            payload: selection.wledPayload,
+          );
           messenger.showSnackBar(SnackBar(
-              content: Text('Saved "${selection.name}" to Favorites')));
+              content: Text(favoriteSaveMessage(outcome, selection.name))));
         } catch (e) {
           messenger
               .showSnackBar(SnackBar(content: Text('Could not save: $e')));
@@ -1948,6 +1967,10 @@ class _ColorwayEffectSelectorPageState
               ),
             ),
 
+            // Length — how long a celebration plays (#169). Under Speed;
+            // separate from it (Speed is how fast the effect animates).
+            SliverToBoxAdapter(child: _buildCelebrationLength()),
+
             // Intensity — drives `ix`.
             SliverToBoxAdapter(
               child: _buildSlider(
@@ -2003,50 +2026,116 @@ class _ColorwayEffectSelectorPageState
     );
   }
 
-  Widget _buildCelebrationHeader() {
+  /// Short / Medium / Long, and a touchdown's seconds at each (#169).
+  /// Wraps to one option per line at large text sizes.
+  Widget _buildCelebrationLength() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
-      child: Row(
+      key: const ValueKey('celebration-length'),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          IconButton(
-            key: const ValueKey('celebration-back'),
-            onPressed: () => Navigator.of(context).maybePop(),
-            icon: const Icon(Icons.arrow_back, size: 22),
-            tooltip: 'Back',
-            style: IconButton.styleFrom(
-              foregroundColor: NexGenPalette.textHigh,
+          Text(
+            'Length',
+            style: TextStyle(
+              color: NexGenPalette.textHigh,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          Expanded(
-            child: Text(
-              widget.paletteNode.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: NexGenPalette.textHigh,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final l in CelebrationLength.values)
+                ChoiceChip(
+                  key: ValueKey('celebration-length-${l.wire}'),
+                  label: Text(l.label),
+                  selected: l == _celebrationLength,
+                  onSelected: (_) => setState(() => _celebrationLength = l),
+                  selectedColor: NexGenPalette.cyan,
+                  labelStyle: TextStyle(
+                    color: l == _celebrationLength
+                        ? NexGenPalette.matteBlack
+                        : NexGenPalette.textHigh,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(width: 8),
-          ElevatedButton.icon(
-            key: const ValueKey('celebration-save'),
-            onPressed: _applyPattern,
-            icon: const Icon(Icons.check, size: 18),
-            label: const Text('Set celebration'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: NexGenPalette.cyan,
-              foregroundColor: NexGenPalette.matteBlack,
-              minimumSize: const Size(0, 40),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              textStyle:
-                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          const SizedBox(height: 6),
+          Text(
+            celebrationLengthHelper(),
+            key: const ValueKey('celebration-length-helper'),
+            style: TextStyle(
+              color: NexGenPalette.textMedium,
+              fontSize: 12.5,
+              height: 1.35,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCelebrationHeader() {
+    final back = IconButton(
+      key: const ValueKey('celebration-back'),
+      onPressed: () => Navigator.of(context).maybePop(),
+      icon: const Icon(Icons.arrow_back, size: 22),
+      tooltip: 'Back',
+      style: IconButton.styleFrom(
+        foregroundColor: NexGenPalette.textHigh,
+      ),
+    );
+    final title = Text(
+      widget.paletteNode.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: NexGenPalette.textHigh,
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    final save = ElevatedButton.icon(
+      key: const ValueKey('celebration-save'),
+      onPressed: _applyPattern,
+      icon: const Icon(Icons.check, size: 18),
+      label: const Text('Set celebration'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: NexGenPalette.cyan,
+        foregroundColor: NexGenPalette.matteBlack,
+        minimumSize: const Size(0, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+    );
+    // At large text sizes the button no longer fits beside the title (it
+    // overflowed by 83 px at x1.75 and 131 px at x2.0): it moves under it.
+    final large = MediaQuery.textScalerOf(context).scale(13) > 16.25;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 16, 8),
+      child: large
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [back, Expanded(child: title)]),
+                Padding(
+                  padding: const EdgeInsets.only(left: 12, top: 4),
+                  child: save,
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                back,
+                Expanded(child: title),
+                const SizedBox(width: 8),
+                save,
+              ],
+            ),
     );
   }
 

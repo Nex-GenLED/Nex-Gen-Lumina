@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -967,7 +968,8 @@ class LuminaBrain {
       'bri': 255,
       'seg': [
         {
-          'id': 0,
+          // No `id` (#163): ONE look for the house. An id here read as
+          // "segment 0 specifically" to every consumer, so only channel 1 lit.
           'on': true,
           'bri': 255,
           'col': segCol.isEmpty ? [[255, 255, 255, 0]] : segCol,
@@ -1026,7 +1028,8 @@ class LuminaBrain {
       'bri': 255,
       'seg': [
         {
-          'id': 0,
+          // No `id` (#163): ONE look for the house. An id here read as
+          // "segment 0 specifically" to every consumer, so only channel 1 lit.
           'on': true,
           'bri': 255,
           'col': segCol.isEmpty
@@ -1071,19 +1074,11 @@ class LuminaBrain {
     return teamShortName(officialName);
   }
 
-  static String _effectIdToName(int id) {
-    const names = <int, String>{
-      0: 'Solid',
-      2: 'Breathe',
-      12: 'Theater Chase',
-      41: 'Running',
-      43: 'Twinkle',
-      52: 'Fireworks',
-      63: 'Candle',
-      65: 'Fire',
-    };
-    return names[id] ?? 'Effect $id';
-  }
+  /// The controller's own name for [id] (#167). This used to be a local
+  /// table that named a different effect for half its ids — 12 read
+  /// "Theater Chase" while WLED 0.15.1 plays Fade — so a reply named a look
+  /// the house was not showing.
+  static String _effectIdToName(int id) => WledEffectsCatalog.getName(id);
 
   static String _colorToName(dynamic color) {
     final r = color.red as int;

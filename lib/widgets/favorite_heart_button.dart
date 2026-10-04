@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/favorites/favorite_design_payload.dart';
+import 'package:nexgen_command/features/favorites/favorite_doc.dart'
+    show kFavoritesFullMessage;
+import 'package:nexgen_command/features/favorites/favorites_full_dialog.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -81,15 +84,25 @@ class FavoriteHeartButton extends ConsumerWidget {
     }
 
     final notifier = ref.read(favoritesNotifierProvider.notifier);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
       if (currentlyFavorited) {
         await notifier.removeFromFavorites(patternId);
       } else {
-        await notifier.addFavorite(
+        final payload = await patternDataBuilder();
+        if (!context.mounted) return;
+        // #164: capped at two — a full list asks which one to replace.
+        final outcome = await saveFavoriteWithCap(
+          context,
+          container,
           patternId: patternId,
           patternName: patternName,
-          patternData: await patternDataBuilder(),
+          payload: payload,
         );
+        if (outcome == FavoriteSaveOutcome.keptExisting && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text(kFavoritesFullMessage)));
+        }
       }
     } on FavoriteNotSavable catch (e) {
       // Nothing was written, and the builder knows why — say that, not

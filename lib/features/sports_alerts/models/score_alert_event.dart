@@ -7,6 +7,11 @@ enum AlertEventType {
   fieldGoal,
   safety,
 
+  /// NFL / NCAA FB: a +2 right after the same team's touchdown (#169). It
+  /// plays the +2 stages it always played, but always at Short length — the
+  /// touchdown already had its celebration. (An extra point, +1, plays none.)
+  twoPointConversion,
+
   // NHL (hockey goal — 15s animation)
   goal,
 

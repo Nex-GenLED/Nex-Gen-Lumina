@@ -751,16 +751,10 @@ class _CompactPatternItemCard extends ConsumerWidget {
   final List<Color> themeColors;
   const _CompactPatternItemCard({required this.item, required this.themeColors});
 
-  static String _effectDisplayName(int effectId) {
-    const names = {
-      0: 'Solid', 1: 'Blink', 2: 'Breathe', 3: 'Wipe', 6: 'Sweep', 10: 'Scan',
-      12: 'Fade', 22: 'Running', 23: 'Chase', 37: 'Fill Noise', 43: 'Theater',
-      46: 'Twinkle', 49: 'Fire', 51: 'Gradient', 52: 'Loading', 63: 'Palette',
-      65: 'Colorwave', 67: 'Ripple', 73: 'Pacifica', 76: 'Fireworks', 78: 'Meteor',
-      108: 'Meteor', 120: 'Sparkle',
-    };
-    return names[effectId] ?? 'Effect';
-  }
+  /// The controller's own name for [effectId] (#167 — a local table named a
+  /// different effect for 16 of its 23 ids).
+  static String _effectDisplayName(int effectId) =>
+      WledEffectsCatalog.getById(effectId)?.name ?? 'Effect';
 
   static double _speedFromPayload(Map<String, dynamic> payload) {
     try {

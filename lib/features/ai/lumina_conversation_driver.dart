@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart'
     show activePresetLabelProvider, authStateProvider, selectedTabIndexProvider;
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
+import 'package:nexgen_command/features/ai/lumina_channel_apply.dart';
 import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
 import 'package:nexgen_command/features/ai/ephemeral_session_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
@@ -17,6 +18,8 @@ import 'package:nexgen_command/features/ai/recurring_sports_autopilot_handler.da
 import 'package:nexgen_command/features/ai/recurring_sports_autopilot_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent_handler.dart';
+import 'package:nexgen_command/features/favorites/favorite_doc.dart'
+    show FavoritesFullException, kFavoritesFullMessage;
 import 'package:nexgen_command/features/favorites/favorites_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
     show calendarEntryLeaseManagerProvider;
@@ -212,9 +215,8 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
       return Future.value(WriteResult.blocked(
           applyBlockedReason(ref.read) ?? kApplyBlockedFallback));
     }
-    return ref
-        .read(wledStateProvider.notifier)
-        .applyToDeviceResult(payload, labelHint: null);
+    // #163: one look for the house → every participating channel.
+    return ref.read(wledStateProvider.notifier).applyLuminaDesign(payload);
   }
 
   @override
@@ -395,6 +397,10 @@ class RiverpodLuminaConversationServices implements LuminaConversationServices {
             wledPayload: wledPayload,
           );
       return WriteResult.success(message: 'Saved "$patternName" to Favorites');
+    } on FavoritesFullException {
+      // #164: capped at two. The chat cannot show the replace list, so it
+      // says plainly what to do.
+      return const WriteResult.blocked(kFavoritesFullMessage);
     } catch (e) {
       debugPrint('Lumina saveFavorite failed: $e');
       return WriteResult.failed(
@@ -589,7 +595,7 @@ class LuminaConversationDriver {
     }
 
     // ── Normal single-pattern apply ───────────────────────────────────────
-    final preview = _previewFor(result);
+    var preview = _previewFor(result);
     if (result.wledPayload != null) {
       final outcome = await _applyDesign(
         result.wledPayload!,
@@ -611,6 +617,11 @@ class LuminaConversationDriver {
           wledPayload: result.wledPayload,
         );
         return LuminaResultBranch.apply;
+      }
+      // #163: the card names the channels the look was SENT to, from the
+      // write's own report — never an assumed "all".
+      if (preview != null && outcome.channels != null) {
+        preview = preview.withAppliedTo(outcome.message);
       }
     }
 
@@ -953,15 +964,8 @@ class LuminaConversationDriver {
 /// The WLED state a favourite stores: the payload's device keys only, so the
 /// Lumina display metadata (`patternName`, `colors`, `effect`…) never rides
 /// to the controller.
-Map<String, dynamic> favoritePayloadOf(Map<String, dynamic> lumina) {
-  const deviceKeys = {'on', 'bri', 'seg', 'transition', 'tt', 'ps', 'pl'};
-  final wled = lumina['wled'];
-  final source = wled is Map ? Map<String, dynamic>.from(wled) : lumina;
-  return {
-    for (final e in source.entries)
-      if (deviceKeys.contains(e.key)) e.key: e.value,
-  };
-}
+Map<String, dynamic> favoritePayloadOf(Map<String, dynamic> lumina) =>
+    luminaDevicePayload(lumina);
 
 /// A stable favourite id for a Lumina design: the same design saved twice
 /// updates one favourite rather than adding a second.

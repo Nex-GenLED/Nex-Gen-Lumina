@@ -45,6 +45,7 @@ import 'package:nexgen_command/widgets/pattern_adjustment_panel.dart';
 import 'package:nexgen_command/widgets/favorites_grid.dart';
 import 'package:nexgen_command/widgets/smart_suggestions_list.dart';
 import 'package:nexgen_command/features/favorites/favorite_apply.dart';
+import 'package:nexgen_command/features/favorites/favorites_full_dialog.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart' hide FavoritePattern;
 import 'package:nexgen_command/features/dashboard/widgets/feature_button.dart';
 import 'package:nexgen_command/features/game_day/game_day_entry_button.dart';
@@ -1301,14 +1302,19 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         final pattern = _suggestedPattern(ref, suggestion).value;
         if (pattern == null) return;
         try {
-          await container.read(favoritesNotifierProvider.notifier).addToFavorites(
-                patternId: 'suggested_${pattern.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}',
-                patternName: pattern.name,
-                wledPayload: pattern.toWledPayload(),
-              );
-          await dismiss();
+          if (!mounted) return;
+          // #164: an explicit tap, capped at two — a full list asks which
+          // one to replace.
+          final outcome = await saveFavoriteWithCap(
+            context,
+            container,
+            patternId: 'suggested_${pattern.name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}',
+            patternName: pattern.name,
+            payload: pattern.toWledPayload(),
+          );
+          if (outcome != FavoriteSaveOutcome.keptExisting) await dismiss();
           messenger.showSnackBar(SnackBar(
-              content: Text('Added "${pattern.name}" to My Favorites')));
+              content: Text(favoriteSaveMessage(outcome, pattern.name))));
         } catch (e) {
           messenger.showSnackBar(SnackBar(
             content: Text("Couldn't add \"${pattern.name}\" to favorites."),

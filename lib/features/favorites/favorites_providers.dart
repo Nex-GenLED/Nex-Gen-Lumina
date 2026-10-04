@@ -163,11 +163,14 @@ class FavoritesNotifier extends Notifier<void> {
   /// autoAdded}`, which the live rule rejects (a create must carry
   /// `pattern_name` + `added_at`): every heart tap and every "Save to
   /// Favorites" ended in "Failed to save favorite".
+  ///
+  /// Throws [FavoritesFullException] when the account already holds
+  /// [kMaxFavorites] — the caller shows [kFavoritesFullMessage] and offers
+  /// [replaceFavorite] (#164).
   Future<void> addFavorite({
     required String patternId,
     required String patternName,
     required Map<String, dynamic> patternData,
-    bool autoAdded = false,
   }) async {
     final user = ref.read(authStateProvider).value;
     if (user == null) return;
@@ -179,12 +182,30 @@ class FavoritesNotifier extends Notifier<void> {
             .doc('users/${user.uid}/favorites/$patternId'),
         patternName: patternName,
         payload: patternData,
-        autoAdded: autoAdded,
       );
     } catch (e) {
       debugPrint('Failed to add favorite: $e');
       rethrow;
     }
+  }
+
+  /// Puts a new favorite in the place of [replaceId], in one write (#164).
+  Future<void> replaceFavorite({
+    required String replaceId,
+    required String patternId,
+    required String patternName,
+    required Map<String, dynamic> patternData,
+  }) async {
+    final user = ref.read(authStateProvider).value;
+    if (user == null) return;
+    await replaceFavoriteDoc(
+      ref
+          .read(favoritesFirestoreProvider)
+          .doc('users/${user.uid}/favorites/$patternId'),
+      replaceId: replaceId,
+      patternName: patternName,
+      payload: patternData,
+    );
   }
 
   /// Remove a pattern from favorites
@@ -218,36 +239,6 @@ class FavoritesNotifier extends Notifier<void> {
     }
   }
 
-  /// Legacy wrapper if you still use trackPatternUsage elsewhere
-  Future<void> trackPatternUsage({
-    required String patternId,
-    required String patternName,
-    required Map<String, dynamic> wledPayload,
-  }) async {
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
-
-    try {
-      final docRef = FirebaseFirestore.instance
-          .doc('users/${user.uid}/favorites/$patternId');
-
-      final docSnap = await docRef.get();
-
-      if (docSnap.exists) {
-        await recordFavoriteUsage(patternId);
-      } else {
-        await addFavorite(
-          patternId: patternId,
-          patternName: patternName,
-          patternData: wledPayload,
-          autoAdded: true, // Implicitly true for tracking usage of new patterns
-        );
-      }
-    } catch (e) {
-      debugPrint('Failed to track pattern usage: $e');
-    }
-  }
-
   /// Legacy alias to support older calls to addToFavorites
   Future<void> addToFavorites({
     required String patternId,
@@ -258,7 +249,6 @@ class FavoritesNotifier extends Notifier<void> {
       patternId: patternId,
       patternName: patternName,
       patternData: wledPayload,
-      autoAdded: false, // Explicit adds are not auto-added
     );
   }
 }

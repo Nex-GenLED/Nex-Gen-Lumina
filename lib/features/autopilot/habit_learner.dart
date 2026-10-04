@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/models/usage_analytics_models.dart';
 import 'package:nexgen_command/services/user_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Service for learning user behavior patterns and generating smart suggestions.
 ///
@@ -129,115 +128,14 @@ class HabitLearner {
     }
   }
 
-  // ==================== Auto-Favorites ====================
-
-  /// Auto-populate favorites with most-used patterns
-  Future<void> updateAutoFavorites({int topN = 5}) async {
-    try {
-      // Get current favorites
-      final currentFavorites = await _userService.getFavorites(userId);
-      final autoFavIds = currentFavorites
-          .where((f) => f['auto_added'] == true)
-          .map((f) => f['id'] as String)
-          .toSet();
-
-      // Get usage statistics
-      final frequency = await _userService.getPatternFrequency(userId, days: 30);
-      final recentUsage = await _userService.getRecentUsage(userId, days: 30);
-
-      // Calculate scores for each pattern
-      final patternScores = <String, PatternUsageStats>{};
-      for (final entry in frequency.entries) {
-        final patternName = entry.key;
-        final usageCount = entry.value;
-
-        // Find most recent usage
-        final recentEvents = recentUsage.where((e) {
-          final name = e['pattern_name'] as String?;
-          final effectId = e['effect_id']?.toString();
-          return name == patternName || 'effect_$effectId' == patternName;
-        }).toList();
-
-        if (recentEvents.isEmpty) continue;
-
-        final lastUsed = (recentEvents.first['created_at'] as Timestamp).toDate();
-        final firstUsed = (recentEvents.last['created_at'] as Timestamp).toDate();
-
-        final stats = PatternUsageStats(
-          patternId: patternName,
-          patternName: patternName,
-          usageCount: usageCount,
-          lastUsed: lastUsed,
-          firstUsed: firstUsed,
-          sources: recentEvents
-              .map((e) => e['source'] as String?)
-              .whereType<String>()
-              .toSet()
-              .toList(),
-          avgBrightness: recentEvents
-                  .map((e) => e['brightness'] as num?)
-                  .whereType<num>()
-                  .fold<double>(0, (sum, b) => sum + b.toDouble()) /
-              recentEvents.length.clamp(1, double.infinity),
-        );
-
-        patternScores[patternName] = stats;
-      }
-
-      // Rank patterns by favorite score
-      final rankedPatterns = patternScores.values.toList()
-        ..sort((a, b) => b.favoriteScore.compareTo(a.favoriteScore));
-
-      // Get top N patterns that aren't already manually favorited
-      final manualFavoriteNames = currentFavorites
-          .where((f) => f['auto_added'] != true)
-          .map((f) => f['pattern_name'] as String?)
-          .whereType<String>()
-          .toSet();
-
-      final topPatterns = rankedPatterns
-          .where((stats) => !manualFavoriteNames.contains(stats.patternName))
-          .take(topN)
-          .toList();
-
-      // Remove old auto-favorites that are no longer in top N
-      final topPatternNames = topPatterns.map((p) => p.patternName).toSet();
-      for (final favId in autoFavIds) {
-        final fav = currentFavorites.firstWhere((f) => f['id'] == favId);
-        final favName = fav['pattern_name'] as String?;
-        if (favName != null && !topPatternNames.contains(favName)) {
-          await _userService.removeFavorite(userId, favId);
-          debugPrint('🗑️ Removed outdated auto-favorite: $favName');
-        }
-      }
-
-      // Add new auto-favorites
-      for (final pattern in topPatterns) {
-        // Check if already favorited
-        final alreadyFavorited = currentFavorites.any(
-          (f) => f['pattern_name'] == pattern.patternName,
-        );
-
-        if (!alreadyFavorited) {
-          // Find a recent event to extract pattern data
-          final recentEvent = recentUsage.firstWhere(
-            (e) => e['pattern_name'] == pattern.patternName,
-            orElse: () => <String, dynamic>{},
-          );
-
-          await _userService.addFavorite(userId, {
-            'pattern_name': pattern.patternName,
-            'pattern_data': recentEvent['wled'] ?? {},
-            'auto_added': true,
-          });
-
-          debugPrint('⭐ Auto-added favorite: ${pattern.patternName}');
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ updateAutoFavorites failed: $e');
-    }
-  }
+  // ==================== Auto-Favorites — REMOVED (#164) ====================
+  //
+  // `updateAutoFavorites` wrote the top-5 most-used patterns into
+  // users/{uid}/favorites with `auto_added: true` on every app resume (and
+  // deleted the ones that fell out of the top 5). Since +110 every Explore
+  // apply logs usage, so browsing patterns filled Home's My Favorites on its
+  // own. A favorite is now only ever the customer's explicit choice, capped at
+  // two (favorite_doc.dart). Usage history still feeds suggestions and Recent.
 
   // ==================== Smart Suggestions ====================
 

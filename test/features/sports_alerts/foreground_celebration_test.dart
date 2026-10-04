@@ -73,10 +73,15 @@ class _FakeDelivery implements CelebrationDelivery {
     return captureReturn;
   }
 
+  /// The deadline every play() was given (#170).
+  final List<DateTime?> deadlines = [];
+  int baseLookCount = 0;
+
   @override
-  Future<void> play(List<AlertAnimationStep> steps) async {
+  Future<void> play(List<AlertAnimationStep> steps, {DateTime? deadline}) async {
     playCount++;
     plays.add(steps);
+    deadlines.add(deadline);
     log.add('play(${steps.length})');
     if (blockPlay != null) await blockPlay!.future;
   }
@@ -86,6 +91,12 @@ class _FakeDelivery implements CelebrationDelivery {
     revertCount++;
     revertedWith = captured;
     log.add('revert');
+  }
+
+  @override
+  Future<void> revertToBaseLook() async {
+    baseLookCount++;
+    log.add('baseLook');
   }
 }
 
@@ -147,7 +158,8 @@ void main() {
       expect(d.revertedWith, d.captureReturn);
     });
 
-    test('no revert when capture returns null (can\'t read state)', () async {
+    test('capture returns null (can\'t read state) → the celebration still '
+        'ends, on the base look (#170)', () async {
       final m = _FakeMonitor();
       final d = _FakeDelivery()..captureReturn = null;
       final c = build(m, d);
@@ -156,7 +168,7 @@ void main() {
       c.handleAlert(_event(anySlug));
       await _settle();
 
-      expect(d.log, ['capture', 'play(3)']);
+      expect(d.log, ['capture', 'play(3)', 'baseLook']);
       expect(d.revertCount, 0);
     });
   });
@@ -413,7 +425,8 @@ void main() {
           reason: 'Meteor over Meteor is invisible — falls back');
     });
 
-    test('unreadable state → fail-open: the pick fires, no revert', () async {
+    test('unreadable state → fail-open: the pick fires, then the base look '
+        '(#170)', () async {
       final d = _FakeDelivery()..captureReturn = null;
       final c = build(_FakeMonitor(), d);
       addTearDown(c.dispose);
@@ -424,6 +437,7 @@ void main() {
 
       expect(segsOf(d.plays.single).map((s) => s['fx']), everyElement(76));
       expect(d.revertCount, 0);
+      expect(d.baseLookCount, 1);
     });
 
     test('a no-animation event never touches the device, pick or no pick',

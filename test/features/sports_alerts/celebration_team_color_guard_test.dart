@@ -42,6 +42,8 @@ const _expectedEffectNames = <AlertEventType, List<String>>{
   AlertEventType.win: ['Breathe', 'Wipe', 'Running'],
   AlertEventType.fieldGoal: ['Breathe'],
   AlertEventType.safety: ['Strobe'],
+  // #169: a two-point conversion plays the +2 stage it always played.
+  AlertEventType.twoPointConversion: ['Strobe'],
   AlertEventType.run: ['Theater'],
   AlertEventType.quarterEndWinning: ['Breathe'],
   AlertEventType.clutchBasket: ['Strobe'],

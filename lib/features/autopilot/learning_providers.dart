@@ -163,18 +163,19 @@ final userFavoritePatternsProvider =
   );
 });
 
-/// Parses and orders the stored favorites for My Favorites.
+/// Parses and orders the stored favorites for My Favorites — ONLY the ones
+/// the customer saved (#164 c, owner decision 2026-10-04). Documents the
+/// retired habit learner wrote (`auto_added: true`) stay in Firestore,
+/// untouched, but are not shown and do not count toward the cap of two.
 @visibleForTesting
 List<FavoritePattern> sortUserFavorites(
     List<Map<String, dynamic>> favoritesData) {
-  final userFavorites =
-      favoritesData.map((data) => FavoritePattern.fromJson(data)).toList();
+  final userFavorites = favoritesData
+      .map((data) => FavoritePattern.fromJson(data))
+      .where((f) => !f.autoAdded)
+      .toList();
   userFavorites.sort((a, b) {
-    // Manual favorites first
-    if (a.autoAdded != b.autoAdded) {
-      return a.autoAdded ? 1 : -1;
-    }
-    // Then by last used (most recent first)
+    // By last used (most recent first)
     if (a.lastUsed != null && b.lastUsed != null) {
       return b.lastUsed!.compareTo(a.lastUsed!);
     }
@@ -189,23 +190,6 @@ class FavoritesNotifier extends AutoDisposeAsyncNotifier<void> {
   @override
   Future<void> build() async {
     // Nothing to build
-  }
-
-  /// Add a pattern to favorites
-  Future<void> addFavorite({
-    required String patternName,
-    required Map<String, dynamic> patternData,
-    bool autoAdded = false,
-  }) async {
-    final user = ref.read(authStateProvider).value;
-    if (user == null) return;
-
-    final userService = ref.read(userServiceProvider);
-    await userService.addFavorite(user.uid, {
-      'pattern_name': patternName,
-      'pattern_data': patternData,
-      'auto_added': autoAdded,
-    });
   }
 
   /// Remove a favorite
@@ -227,17 +211,6 @@ class FavoritesNotifier extends AutoDisposeAsyncNotifier<void> {
 
     final userService = ref.read(userServiceProvider);
     await userService.updateFavoriteUsage(user.uid, favoriteId);
-  }
-
-  /// Trigger auto-favorites update
-  Future<void> refreshAutoFavorites({int topN = 5}) async {
-    final habitLearner = ref.read(currentUserHabitLearnerProvider);
-    if (habitLearner == null) return;
-
-    state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() async {
-      await habitLearner.updateAutoFavorites(topN: topN);
-    });
   }
 }
 

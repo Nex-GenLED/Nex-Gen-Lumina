@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/autopilot/learning_providers.dart';
+import 'package:nexgen_command/features/favorites/favorite_doc.dart';
 import 'package:nexgen_command/features/favorites/favorites_load_guard.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -208,11 +209,11 @@ void main() {
     expect(find.byKey(const ValueKey('favorites-add-tile')), findsOneWidget);
     expect(find.text('Candy Cane Chase'), findsNothing);
 
-    await tester.runAsync(() => svc.addFavorite(_uid, {
-          'pattern_name': 'Candy Cane Chase',
-          'pattern_data': const {'on': true, 'bri': 200},
-          'auto_added': false,
-        }));
+    await tester.runAsync(() => writeFavorite(
+          db.doc('users/$_uid/favorites/candy-cane-chase'),
+          patternName: 'Candy Cane Chase',
+          payload: const {'on': true, 'bri': 200},
+        ));
     await tester.pump();
     await tester.pump();
 

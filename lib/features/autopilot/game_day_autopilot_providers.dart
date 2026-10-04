@@ -9,6 +9,7 @@
 //   - WledNotifier (applying payloads to the device)
 //   - AutopilotProfile.preferredEffectStyles (design auto-selection)
 
+import 'package:nexgen_command/features/sports_alerts/services/celebration_length.dart';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -1011,6 +1012,32 @@ class GameDayAutopilotNotifier extends Notifier<Map<String, AutopilotSession>> {
       'celebration_effect_id': effectId,
       'celebration_speed': speed.clamp(0, 255),
       'celebration_intensity': intensity.clamp(0, 255),
+      'updated_at': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
+  /// Set how long a team's celebrations play (#169): Short, Medium (today's
+  /// lengths) or Long. Every celebration stays within 5-60 s whatever this
+  /// says (celebration_length.dart). `update`, like the effect: a control on
+  /// an existing card.
+  Future<void> setCelebrationLength({
+    required String teamSlug,
+    required CelebrationLength length,
+  }) async {
+    final user = ref.read(authStateProvider).maybeWhen(
+          data: (u) => u,
+          orElse: () => null,
+        );
+    if (user == null) {
+      throw StateError('You must be signed in to set a celebration length.');
+    }
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('game_day_autopilot')
+        .doc(teamSlug)
+        .update({
+      'celebration_length': length.wire,
       'updated_at': Timestamp.fromDate(DateTime.now()),
     });
   }
