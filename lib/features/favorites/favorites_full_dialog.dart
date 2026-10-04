@@ -67,9 +67,10 @@ Future<FavoriteSaveOutcome> saveFavoriteWithCap(
     final replaceId = await showFavoritesFullDialog(
       context,
       newName: displayNameFor(patternName),
+      // Only the customer's own favorites — the ones the cap counts.
       current: [
         for (final f in current)
-          FavoriteChoice(f.patternId, displayNameFor(f.name)),
+          if (!f.autoAdded) FavoriteChoice(f.patternId, displayNameFor(f.name)),
       ],
     );
     if (replaceId == null) return FavoriteSaveOutcome.keptExisting;

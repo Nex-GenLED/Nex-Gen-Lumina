@@ -94,7 +94,9 @@ void main() {
 
   group('accounts already over the cap are left exactly as they are', () {
     test('an add is refused and all four documents are untouched', () async {
-      final db = await _withFavorites(4, auto: true);
+      // Four SAVED favorites (automatic ones no longer count — see
+      // favorites_explicit_only_test.dart).
+      final db = await _withFavorites(4);
       final before = {
         for (final d in (await db.collection('users/u1/favorites').get()).docs)
           d.id: d.data().toString(),

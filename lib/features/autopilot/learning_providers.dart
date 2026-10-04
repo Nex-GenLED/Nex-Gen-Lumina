@@ -163,18 +163,19 @@ final userFavoritePatternsProvider =
   );
 });
 
-/// Parses and orders the stored favorites for My Favorites.
+/// Parses and orders the stored favorites for My Favorites — ONLY the ones
+/// the customer saved (#164 c, owner decision 2026-10-04). Documents the
+/// retired habit learner wrote (`auto_added: true`) stay in Firestore,
+/// untouched, but are not shown and do not count toward the cap of two.
 @visibleForTesting
 List<FavoritePattern> sortUserFavorites(
     List<Map<String, dynamic>> favoritesData) {
-  final userFavorites =
-      favoritesData.map((data) => FavoritePattern.fromJson(data)).toList();
+  final userFavorites = favoritesData
+      .map((data) => FavoritePattern.fromJson(data))
+      .where((f) => !f.autoAdded)
+      .toList();
   userFavorites.sort((a, b) {
-    // Manual favorites first
-    if (a.autoAdded != b.autoAdded) {
-      return a.autoAdded ? 1 : -1;
-    }
-    // Then by last used (most recent first)
+    // By last used (most recent first)
     if (a.lastUsed != null && b.lastUsed != null) {
       return b.lastUsed!.compareTo(a.lastUsed!);
     }

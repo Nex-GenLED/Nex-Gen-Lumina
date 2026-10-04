@@ -90,9 +90,16 @@ Map<String, dynamic> buildFavoriteUsageData() => {
       kFavoriteLastUsed: FieldValue.serverTimestamp(),
     };
 
-/// The most favorites an account keeps (#164, owner decision 2026-10-02). The
-/// two reserved white tiles on Home are not documents and do not count.
+/// The most favorites an account keeps (#164, owner decisions 2026-10-02 and
+/// 10-04). Only favorites the CUSTOMER saved count: documents the retired
+/// habit learner wrote (`auto_added: true`) stay in the data but are not
+/// shown and do not count, and the two reserved white tiles on Home are not
+/// documents at all.
 const int kMaxFavorites = 2;
+
+/// Whether a stored favorite is one the customer saved (not an automatic one).
+bool isExplicitFavorite(Map<String, dynamic>? data) =>
+    data != null && data[kFavoriteAutoAdded] != true;
 
 /// What a customer is told when a new favorite would go over [kMaxFavorites].
 const String kFavoritesFullMessage =
@@ -125,12 +132,24 @@ Future<void> writeFavorite(
   required Map<String, dynamic> payload,
 }) async {
   final snap = await ref.get();
-  if (snap.exists) {
+  if (snap.exists && isExplicitFavorite(snap.data())) {
     await ref.update(buildFavoriteRefreshData(payload: payload));
     return;
   }
-  final count = (await ref.parent.get()).size;
+  final count = (await ref.parent.get())
+      .docs
+      .where((d) => isExplicitFavorite(d.data()))
+      .length;
   if (count >= kMaxFavorites) throw FavoritesFullException(count);
+  if (snap.exists) {
+    // An automatic document at this id becomes the customer's own: same
+    // name and date (the rule keeps them), new look, and now explicit.
+    await ref.update({
+      ...buildFavoriteRefreshData(payload: payload),
+      kFavoriteAutoAdded: false,
+    });
+    return;
+  }
   await ref.set(buildFavoriteCreateData(
     patternName: patternName,
     payload: payload,
