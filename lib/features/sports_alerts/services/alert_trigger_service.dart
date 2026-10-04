@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'celebration_length.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -124,7 +125,8 @@ class AlertTriggerService {
     try {
       // Request override from autopilot if available
       if (autopilotScheduler != null) {
-        final animDuration = animationDuration(event.eventType);
+        final animDuration = animationDuration(event.eventType,
+            length: config.celebrationLength);
         token = await autopilotScheduler!.requestOverride(
           source: OverrideSource.sportsScoreAlert,
           duration: animDuration,
@@ -172,7 +174,8 @@ class AlertTriggerService {
           }
 
           await _applyAlertAnimation(
-              event.eventType, teamColors, svc, channels, resolution);
+              event.eventType, teamColors, svc, channels, resolution,
+              length: config.celebrationLength);
 
           if (token == null) {
             await _restoreZoneState(svc, previousState);
@@ -198,13 +201,34 @@ class AlertTriggerService {
   ///
   /// Used by the override protocol to set the override window, and
   /// available to the scheduler for pre-computing durations.
-  static Duration animationDuration(AlertEventType eventType) {
+  static Duration animationDuration(
+    AlertEventType eventType, {
+    CelebrationLength length = CelebrationLength.medium,
+  }) {
+    final medium = _mediumDuration(eventType);
+    if (medium == Duration.zero) return Duration.zero;
+    return totalOf(
+        scaleCelebrationHolds([medium], lengthFor(eventType, length)));
+  }
+
+  /// The length [eventType] plays at when the team chose [chosen] (#169): a
+  /// two-point conversion is always Short — the touchdown before it already
+  /// had its celebration.
+  static CelebrationLength lengthFor(
+          AlertEventType eventType, CelebrationLength chosen) =>
+      eventType == AlertEventType.twoPointConversion
+          ? CelebrationLength.short
+          : chosen;
+
+  /// Medium (today's) total per event: the staged holds below, summed.
+  static Duration _mediumDuration(AlertEventType eventType) {
     return switch (eventType) {
       AlertEventType.touchdown || AlertEventType.goal =>
         const Duration(seconds: 15),
       AlertEventType.soccerGoal => const Duration(seconds: 20),
       AlertEventType.fieldGoal => const Duration(seconds: 8),
       AlertEventType.safety => const Duration(seconds: 6),
+      AlertEventType.twoPointConversion => const Duration(seconds: 6),
       AlertEventType.run => const Duration(seconds: 6),
       AlertEventType.quarterEndWinning => const Duration(seconds: 10),
       AlertEventType.clutchBasket => const Duration(seconds: 5),
@@ -289,10 +313,12 @@ class AlertTriggerService {
     TeamColors team,
     WledService svc,
     List<DeviceChannel> channels,
-    CelebrationResolution? celebration,
-  ) async {
+    CelebrationResolution? celebration, {
+    CelebrationLength length = CelebrationLength.medium,
+  }) async {
     final ids = channels.map((c) => c.id).toList();
-    for (final step in buildAnimationSteps(eventType, team, celebration)) {
+    for (final step in buildAnimationStepsAt(eventType, team, celebration,
+        length: length)) {
       await svc.applyJson(applyChannelFilter(step.payload, ids, channels));
       await Future<void>.delayed(step.hold);
     }
@@ -385,8 +411,25 @@ class AlertTriggerService {
     AlertEventType eventType,
     TeamColors team, [
     CelebrationResolution? celebration,
-  ]) {
-    final steps = _legacyAnimationSteps(eventType, team);
+  ]) =>
+      buildAnimationStepsAt(eventType, team, celebration);
+
+  /// [buildAnimationSteps] at the team's [length] (#169): each stage's hold
+  /// scaled by the preset and the whole clamped to 5-60 s
+  /// ([scaleCelebrationHolds]). Medium is the table below, unchanged.
+  static List<AlertAnimationStep> buildAnimationStepsAt(
+    AlertEventType eventType,
+    TeamColors team,
+    CelebrationResolution? celebration, {
+    CelebrationLength length = CelebrationLength.medium,
+  }) {
+    final legacy = _legacyAnimationSteps(eventType, team);
+    final holds = scaleCelebrationHolds(
+        [for (final s in legacy) s.hold], lengthFor(eventType, length));
+    final steps = [
+      for (var i = 0; i < legacy.length; i++)
+        AlertAnimationStep(legacy[i].payload, holds[i]),
+    ];
     if (celebration == null) return steps; // no user choice → legacy verbatim
     return [
       for (final step in steps)
@@ -448,6 +491,7 @@ class AlertTriggerService {
         ];
 
       case AlertEventType.safety:
+      case AlertEventType.twoPointConversion:
         return [
           AlertAnimationStep({
             'on': true,
@@ -598,6 +642,7 @@ class AlertTriggerService {
     final action = switch (event.eventType) {
       AlertEventType.touchdown => 'Touchdown!',
       AlertEventType.fieldGoal => 'Field Goal!',
+      AlertEventType.twoPointConversion => 'Two-point conversion!',
       AlertEventType.safety => 'Safety!',
       AlertEventType.goal => 'Goal!',
       AlertEventType.run =>

@@ -25,6 +25,7 @@
 // Lifecycle: polling runs ONLY while ≥1 tracked team is in the liveGame phase
 // AND the app is foregrounded. No polling pre/post game, or in the background.
 
+import 'celebration_length.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -69,6 +70,9 @@ class CelebrationTeam {
   final int celebrationSpeed;
   final int celebrationIntensity;
 
+  /// How long this team's celebrations play (#169). Medium = today's lengths.
+  final CelebrationLength celebrationLength;
+
   const CelebrationTeam({
     required this.teamSlug,
     required this.sport,
@@ -76,6 +80,7 @@ class CelebrationTeam {
     this.celebrationEffectId,
     this.celebrationSpeed = 240,
     this.celebrationIntensity = 240,
+    this.celebrationLength = CelebrationLength.medium,
   });
 
   /// Adapt to the diff engine's config shape (reuses ScoreMonitorService as-is).
@@ -88,6 +93,7 @@ class CelebrationTeam {
         celebrationEffectId: celebrationEffectId,
         celebrationSpeed: celebrationSpeed,
         celebrationIntensity: celebrationIntensity,
+        celebrationLength: celebrationLength,
       );
 
   @override
@@ -98,11 +104,13 @@ class CelebrationTeam {
       sensitivity == other.sensitivity &&
       celebrationEffectId == other.celebrationEffectId &&
       celebrationSpeed == other.celebrationSpeed &&
-      celebrationIntensity == other.celebrationIntensity;
+      celebrationIntensity == other.celebrationIntensity &&
+      celebrationLength == other.celebrationLength;
 
   @override
   int get hashCode => Object.hash(teamSlug, sport, sensitivity,
-      celebrationEffectId, celebrationSpeed, celebrationIntensity);
+      celebrationEffectId, celebrationSpeed, celebrationIntensity,
+      celebrationLength);
 }
 
 /// The delivery seam — capture current lights, play the flash, revert. Injected
@@ -293,8 +301,9 @@ class ForegroundCelebrationCoordinator {
             'look — using the safe fallback');
       }
 
-      final steps = AlertTriggerService.buildAnimationSteps(
-          event.eventType, team, resolution);
+      final steps = AlertTriggerService.buildAnimationStepsAt(
+          event.eventType, team, resolution,
+          length: choice?.celebrationLength ?? CelebrationLength.medium);
       await _delivery.play(steps);
       if (captured != null && captured.isNotEmpty) {
         await _delivery.revert(captured);

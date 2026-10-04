@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/sports_alerts/services/celebration_length.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -753,6 +754,14 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
   // ── Celebration effect ───────────────────────────────────────────────────
 
   static String _celebrationLabel(GameDayAutopilotConfig config) {
+    final name = _celebrationEffectLabel(config);
+    // #169: the Length rides on the row once it is not the usual.
+    return config.celebrationLength == CelebrationLength.medium
+        ? name
+        : '$name · ${config.celebrationLength.label}';
+  }
+
+  static String _celebrationEffectLabel(GameDayAutopilotConfig config) {
     final id = config.celebrationEffectId;
     if (id == null) return 'Default';
     // A stored id the picker no longer offers fires as "no pick"
@@ -803,6 +812,7 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
         initialEffectId: config.celebrationEffectId,
         initialSpeed: config.celebrationSpeed,
         initialIntensity: config.celebrationIntensity,
+        initialCelebrationLength: config.celebrationLength,
         onDesignSelected: (selection) async {
           final picked = _celebrationFromPayload(selection.wledPayload);
           navigator.pop();
@@ -816,6 +826,15 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
                   speed: picked.sx,
                   intensity: picked.ix,
                 );
+            final length = selection.celebrationLength;
+            if (length != null && length != config.celebrationLength) {
+              await container
+                  .read(gameDayAutopilotNotifierProvider.notifier)
+                  .setCelebrationLength(
+                    teamSlug: config.teamSlug,
+                    length: length,
+                  );
+            }
           } catch (e, st) {
             debugPrint('[GameDay] setCelebrationEffect failed: $e\n$st');
             messenger.showSnackBar(const SnackBar(

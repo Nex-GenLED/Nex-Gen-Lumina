@@ -53,6 +53,13 @@ class ScoreMonitorService implements ScoreMonitor {
   /// per-sport cooldowns for high-frequency scoring leagues (basketball).
   final Map<String, DateTime> _lastCelebrationAt = {};
 
+  /// When each team last scored a touchdown, per game (`gameId|teamSlug`), so
+  /// a +2 right after it reads as the two-point conversion it is (#169).
+  final Map<String, DateTime> _lastTouchdownAt = {};
+
+  /// How soon after a touchdown a +2 is still its conversion.
+  static const Duration kConversionWindow = Duration(minutes: 5);
+
   /// Minimum gap between celebration emissions for a single team in a
   /// single game. Basketball sports fire frequently so we throttle them;
   /// other sports are rare enough that the dedup key alone is sufficient.
@@ -326,20 +333,8 @@ class ScoreMonitorService implements ScoreMonitor {
     GameState current,
     DateTime now,
   ) {
-    final AlertEventType type;
-    switch (delta) {
-      case 3:
-        type = AlertEventType.fieldGoal;
-      case 2:
-        type = AlertEventType.safety;
-      case 6:
-      case 8: // TD + 2-pt conversion
-      case 7: // TD + extra point (rare single-poll jump)
-        type = AlertEventType.touchdown;
-      default:
-        // Any other positive delta — default to touchdown.
-        type = AlertEventType.touchdown;
-    }
+    final type = _classifyFootballScore(delta, config, current, now);
+    if (type == null) return const [];
 
     return [
       ScoreAlertEvent(
@@ -377,25 +372,49 @@ class ScoreMonitorService implements ScoreMonitor {
   }
 
   /// NCAA FBS Football: reuse NFL scoring logic (same TD/FG/safety patterns).
+  /// NFL and NCAA football: what a [delta] for the team means (#169).
+  ///
+  ///  * +1 — an extra point: NO celebration (the touchdown already played one).
+  ///  * +2 within [kConversionWindow] of the same team's touchdown — a
+  ///    two-point conversion (plays the +2 stages, always at Short length);
+  ///    any other +2 is a safety.
+  ///  * +3 field goal; +6 / +7 / +8 (a touchdown, with the try in the same
+  ///    poll) and any other positive delta — touchdown.
+  AlertEventType? _classifyFootballScore(
+    int delta,
+    ScoreAlertConfig config,
+    GameState current,
+    DateTime now,
+  ) {
+    final key = '${current.gameId}|${config.teamSlug}';
+    switch (delta) {
+      case 1:
+        // The try was a kick: no conversion can follow this touchdown.
+        _lastTouchdownAt.remove(key);
+        return null;
+      case 2:
+        final td = _lastTouchdownAt.remove(key);
+        if (td != null && now.difference(td) <= kConversionWindow) {
+          return AlertEventType.twoPointConversion;
+        }
+        return AlertEventType.safety;
+      case 3:
+        _lastTouchdownAt.remove(key);
+        return AlertEventType.fieldGoal;
+      default:
+        _lastTouchdownAt[key] = now;
+        return AlertEventType.touchdown;
+    }
+  }
+
   List<ScoreAlertEvent> _diffNcaaFB(
     int delta,
     ScoreAlertConfig config,
     GameState current,
     DateTime now,
   ) {
-    final AlertEventType type;
-    switch (delta) {
-      case 3:
-        type = AlertEventType.fieldGoal;
-      case 2:
-        type = AlertEventType.safety;
-      case 6:
-      case 8: // TD + 2-pt conversion
-      case 7: // TD + extra point (rare single-poll jump)
-        type = AlertEventType.touchdown;
-      default:
-        type = AlertEventType.touchdown;
-    }
+    final type = _classifyFootballScore(delta, config, current, now);
+    if (type == null) return const [];
 
     return [
       ScoreAlertEvent(

@@ -181,6 +181,7 @@ List<CelebrationTeam> computeLiveCelebrationTeams({
           celebrationEffectId: cfg.celebrationEffectId,
           celebrationSpeed: cfg.celebrationSpeed,
           celebrationIntensity: cfg.celebrationIntensity,
+          celebrationLength: cfg.celebrationLength,
         ),
   ];
 }

@@ -1,3 +1,4 @@
+import '../services/celebration_length.dart';
 import 'sport_type.dart';
 
 /// How sensitive the alert system is to scoring events.
@@ -41,6 +42,10 @@ class ScoreAlertConfig {
   final int celebrationSpeed;
   final int celebrationIntensity;
 
+  /// How long the team's celebrations play (#169). In-memory, like the three
+  /// above; Medium (today's lengths) unless the team chose otherwise.
+  final CelebrationLength celebrationLength;
+
   const ScoreAlertConfig({
     required this.id,
     required this.teamSlug,
@@ -52,6 +57,7 @@ class ScoreAlertConfig {
     this.celebrationEffectId,
     this.celebrationSpeed = 240,
     this.celebrationIntensity = 240,
+    this.celebrationLength = CelebrationLength.medium,
   });
 
   ScoreAlertConfig copyWith({
@@ -65,6 +71,7 @@ class ScoreAlertConfig {
     int? celebrationEffectId,
     int? celebrationSpeed,
     int? celebrationIntensity,
+    CelebrationLength? celebrationLength,
   }) {
     return ScoreAlertConfig(
       id: id ?? this.id,
@@ -77,6 +84,7 @@ class ScoreAlertConfig {
       celebrationEffectId: celebrationEffectId ?? this.celebrationEffectId,
       celebrationSpeed: celebrationSpeed ?? this.celebrationSpeed,
       celebrationIntensity: celebrationIntensity ?? this.celebrationIntensity,
+      celebrationLength: celebrationLength ?? this.celebrationLength,
     );
   }
 
