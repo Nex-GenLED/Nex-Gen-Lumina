@@ -35,9 +35,13 @@ class _Recorder implements CelebrationDelivery {
   @override
   Future<Map<String, dynamic>?> capture() async => {'on': false, 'seg': []};
   @override
-  Future<void> play(List<AlertAnimationStep> steps) async => played = steps;
+  Future<void> play(List<AlertAnimationStep> steps,
+          {DateTime? deadline}) async =>
+      played = steps;
   @override
   Future<void> revert(Map<String, dynamic> captured) async {}
+  @override
+  Future<void> revertToBaseLook() async {}
 }
 
 // Bench .150 topology: two buses, 0-128 and 128-290.
