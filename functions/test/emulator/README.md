@@ -64,3 +64,12 @@ production Auth.
   converge in either order. Also the `assignReferralCode` gate: assigns for
   an email user, skips anonymous / `staff_*` / Auth-less uids without writing
   a `referral_codes` doc.
+- `bridgeLeastPrivilegeRules.emulator.test.ts` — the shared bridge identity
+  limited to what firmware 1.2 does. 100 raw REST requests (the firmware's own
+  runQuery and PATCH-with-updateMask calls, sent with unsigned mock tokens),
+  each run against the current rules AND the ruleset at
+  `BRIDGE_RULES_BASELINE_REF` (read with `git show`; the old-rules half is
+  skipped if git cannot produce it). Asserts every firmware operation is still
+  allowed, the 39 ALLOW → DENY deltas are all the bridge identity, the pinned
+  residuals stay allowed, and no owner / staff / installer / user-pairing /
+  anonymous request changes.
