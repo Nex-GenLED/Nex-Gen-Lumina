@@ -2749,6 +2749,83 @@ commit — merging `main` into this tree will collide with the untracked copies.
     that JSON (or a CI step that diffs them), the pattern the 115 contract test already uses
     for segment arrays.
 
+- [ ] **#171 — Firmware-1.2 bridges stop landing Firestore writes for about ten minutes, several
+  times a day, without rebooting; the cause is not known**
+  - Status: **OPEN — cause undiagnosed; server side mitigated by #172's fix** · Severity: **P2** ·
+    Evidence: **verified-by-live-data** (plan log + a 16 h read-only heartbeat watcher,
+    2026-10-03 to 10-05); the cause is **inferred**
+  - The bench bridge's `bridge_status/current` goes unwritten for about ten minutes roughly
+    every 7 h 28 min. Uptime is continuous across each gap, so the bridge does not reboot. The
+    same gap (620 to 635 s, Wi-Fi up, no reboot) was seen on three other fleet bridges at other
+    houses at staggered times, so the home network is an unlikely cause.
+  - Firmware 1.2 resets its poll watchdog after every heartbeat attempt, successful or not, so
+    a run of failed writes never trips it. Its error counter rises by 6 or 7 per gap, which
+    fits each loop pass blocking for about 90 s on a hung TLS call.
+  - Untested candidates: the single shared TLS client, token refresh on the one shared bridge
+    identity, a provider-side connection reset. No sub-day fleet history exists: `fleet_health`
+    is daily.
+  - **Consequence today:** one or two planner ticks per gap fail pre-flight P2. See #172.
+  - **Fix shape:** diagnose before changing firmware. Firmware 1.3 restarts on failed
+    heartbeats and needs a site visit per bridge. A sub-day heartbeat record (a 5-minute sample
+    of each registry row's age, kept for a week) would turn the cadence from an inference into a
+    measurement for the whole fleet.
+
+- [ ] **#172 — Each bridge write gap published `gameday_server.served:false` for about five to
+  ten minutes, and an open app on the home network could arm the phone lease in that time**
+  - Status: **FIX BUILT `3dfce14` — behind `served_sticky` and `preflight_bridge_grace`, both
+    default OFF; NOT deployed** · Severity: **P1** · Evidence: **verified-by-source** (planner
+    and app reader) + **verified-by-live-data** (seven bench stale ticks on the gap's cadence in
+    the plan log, 2026-10-03 and 10-04)
+  - `served` was `writeStarts`: a tick whose pre-flight failed published `served:false,
+    teams:[], preflight.ok:false`. A gap (#171) fails P2 on one or two ticks. App builds 114
+    and 115 read the field live (`game_day_server_status.dart`): during those minutes the app
+    shows "Phone", and a calendar entry inside the lease horizon lets the lease manager save
+    a preset and write a timer row on the controller. The next sweep retracts only the timer.
+  - **The fix, two flags in `config/gameday_planner` (each `true` or a uid list, #157):**
+    - `served_sticky` (B2). `served` stays true while P2 is the ONLY failing reason, the stored
+      `served` is already true, and under 30 minutes have passed since
+      `gameday_server.stale_since` (the tick P2 first failed in the current unbroken run).
+      `checked_at` is written every tick, and `preflight` still carries the real reasons.
+    - `preflight_bridge_grace` (A). P2's window is 15 minutes instead of 5.
+  - No start is minted on a tick P2 fails, with or without the hold. Ends are never gated.
+  - Tests: `gameDayBridgeStale.test.js`, `plannerBridgeStale.test.js`. With both flags absent
+    the flags-off golden and the bench regression snapshot are unchanged.
+  - **Close when** both flags are `true` fleet-wide and one real gap has been read back held
+    (deploy plan §6b). Turn them on before any account beyond the bench is allowlisted.
+
+- [ ] **#173 — While `served` is held, a start that first falls due inside the gap and whose
+  fire time passes before the bridge writes again is fired by nobody**
+  - Status: **OPEN — accepted for the 10-09 deploy; narrow** · Severity: **P3** · Evidence:
+    **verified-by-test** (`plannerBridgeStale.test.js`, "never minted late")
+  - A held tick still mints no start, by design. If the bridge is back before the fire time,
+    the start is minted on the first good tick with its normal `fireAt`. If the fire time has
+    passed by then, the planner answers `start_time_passed` and never mints late. Before the
+    hold, the app read "not served" during the gap and the phone could run that game. With the
+    hold, the phone stands down.
+  - It needs a game that becomes plannable less than about ten minutes before its fire time:
+    a team enabled at the last minute, or a kickoff ESPN moves or first lists that late. A
+    normal game is minted six hours ahead, and a job that already exists is fired by the
+    dispatcher, which pre-flight does not gate.
+  - **Fix shape (either):** end the hold early on a tick that withholds a start whose fire
+    time is inside the remaining hold; or mint that start on a stale tick when P2 is the only
+    failing reason and let the dispatcher's retry budget (until kickoff) carry it across the
+    gap. The second also removes the one-tick mint delay.
+
+- [ ] **#174 — With both write-gap flags on, a bridge that has really died reads as served for
+  about 45 minutes**
+  - Status: **OPEN — a stated trade, to revisit with field data** · Severity: **P3** ·
+    Evidence: **verified-by-test** (`plannerBridgeStale.test.js`, "a dead bridge")
+  - P2 first fails 15 minutes after the last heartbeat (`preflight_bridge_grace`), and the
+    hold then runs 30 minutes (`served_sticky`). With `served_sticky` alone it is about 35
+    minutes. For that time the app shows "Server" and the phone does not take over. A start
+    already minted is still attempted by the dispatcher and retried until kickoff; a start
+    not yet minted is not created.
+  - The two windows are constants (`BRIDGE_STALE_GRACE_MS`, `SERVED_STICKY_MS`), sized against
+    the one gap length seen so far. They are not tunable without a deploy.
+  - **Fix shape:** once #171 has a fleet-wide measurement of gap lengths, size both windows
+    from it (or make them config values), and consider a second signal for "dead" that does
+    not wait on the heartbeat, such as the bridge's registry `lastSeen` and command pickup.
+
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
   - Status: OPEN (filed 2026-08-19) · Severity: **P2 — UX, installer-facing**
