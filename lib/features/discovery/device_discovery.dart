@@ -7,8 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/shared/explicit_selection.dart';
 
 /// Represents a discovered device endpoint
@@ -189,22 +189,24 @@ final deviceDiscoveryServiceProvider = Provider<DeviceDiscoveryService>((ref) =>
 final deviceRepositoryProvider =
     Provider<DeviceRepository>((ref) => DeviceRepository());
 
-/// Selected device IP provider (null until chosen).
+/// The address of the controller this phone drives (null until chosen).
 ///
-/// #118 — a selection belongs to the account that made it. When the account
-/// whose data the app shows changes away from a signed-in one (sign-out,
-/// another account, an installer opening or leaving a customer), the previous
-/// account's address is dropped here, so auto-connect fills the selection
-/// from the new account's own records. Without this the old address stayed
-/// selected (auto-connect only fills an EMPTY selection) and, matching none of
-/// the new account's records, reached the network with no identity check.
-/// A first sign-in (no previous account) clears nothing.
-final selectedDeviceIpProvider = StateProvider<String?>((ref) {
-  ref.listen<String?>(effectiveUserUidProvider, (previous, next) {
-    if (previous != null && previous != next) ref.controller.state = null;
-  });
-  return null;
-});
+/// #118 — DERIVED from [controllerSelectionProvider]: the selected record's
+/// CURRENT address, or the transient address of a device being set up. It is
+/// re-derived whenever the selection changes, so a record whose address
+/// changes is followed and another account's address never survives. Choose
+/// through `controllerSelectionProvider.notifier` (`use`, `pointAt`,
+/// `release`, `clear`); lib/ never writes this provider directly.
+///
+/// An account change (sign-out, another account, an installer opening or
+/// leaving a customer) resets the selection, and with it this address: the
+/// previous account's address never survives. A first sign-in clears nothing.
+///
+/// It stays a StateProvider so its readers and tests' overrides keep their
+/// shape. A value written directly (tests only) lasts until the selection
+/// next changes.
+final selectedDeviceIpProvider = StateProvider<String?>(
+    (ref) => ref.watch(controllerSelectionProvider.select((s) => s.ip)));
 
 /// Async discovery provider that runs once on watch.
 ///
@@ -224,8 +226,9 @@ final discoveredDevicesProvider = FutureProvider<List<DeviceEndpoint>>((ref) asy
     allowSoleCandidate: true,
   );
   if (decision.hasSelection && ref.read(selectedDeviceIpProvider) == null) {
-    ref.read(selectedDeviceIpProvider.notifier).state =
-        decision.value!.address.address;
+    ref
+        .read(controllerSelectionProvider.notifier)
+        .pointAt(decision.value!.address.address);
   }
   return devices;
 });

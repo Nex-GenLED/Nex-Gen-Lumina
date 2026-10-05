@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -100,7 +101,7 @@ class _MyControllersTab extends ConsumerWidget {
                     onTap: isActive
                         ? null
                         : () {
-                            ref.read(selectedDeviceIpProvider.notifier).state = c.ip;
+                            ref.read(controllerSelectionProvider.notifier).use(c.id);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('${c.name ?? "Controller"} is now active'),
@@ -151,7 +152,7 @@ class _MyControllersTab extends ConsumerWidget {
           if (ref.read(selectedDeviceIpProvider) != item.ip)
             FilledButton(
               onPressed: () {
-                ref.read(selectedDeviceIpProvider.notifier).state = item.ip;
+                ref.read(controllerSelectionProvider.notifier).use(item.id);
                 Navigator.of(ctx).pop();
               },
               child: const Text('Set as Active'),

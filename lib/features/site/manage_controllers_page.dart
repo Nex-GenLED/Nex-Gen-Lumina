@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/controller_type.dart';
@@ -102,7 +103,7 @@ class _ControllerTile extends ConsumerWidget {
             icon: const Icon(Icons.delete_outline),
           )
         ]),
-        onTap: isActive ? null : () => ref.read(selectedDeviceIpProvider.notifier).state = item.ip,
+        onTap: isActive ? null : () => ref.read(controllerSelectionProvider.notifier).use(item.id),
       ),
     );
   }
@@ -210,7 +211,7 @@ class _ControllerTile extends ConsumerWidget {
           if (ref.read(selectedDeviceIpProvider) != item.ip)
             FilledButton(
               onPressed: () {
-                ref.read(selectedDeviceIpProvider.notifier).state = item.ip;
+                ref.read(controllerSelectionProvider.notifier).use(item.id);
                 Navigator.of(ctx).pop();
               },
               child: const Text('Set as Active'),

@@ -10,6 +10,7 @@ import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
@@ -47,16 +48,16 @@ class _DiscoveryPageState extends ConsumerState<DiscoveryPage> {
     if (!mounted) return;
     if (!saved.ok) {
       setState(() => _choosing = null);
-      if (ref.read(selectedDeviceIpProvider) == ip) {
-        ref.read(selectedDeviceIpProvider.notifier).state = null;
-      }
+      // #118: let go of the address only if it is still the transient one
+      // this page pointed at; an existing record stays selected.
+      ref.read(controllerSelectionProvider.notifier).release(ip: ip);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(saved.message ?? "Couldn't save that controller."),
         backgroundColor: Colors.orange,
       ));
       return;
     }
-    ref.read(selectedDeviceIpProvider.notifier).state = ip;
+    ref.read(controllerSelectionProvider.notifier).pointAt(ip);
     context.go(AppRoutes.dashboard);
   }
 

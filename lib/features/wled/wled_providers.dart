@@ -17,6 +17,7 @@ import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
 import 'package:nexgen_command/services/routing_diagnostics.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
@@ -676,17 +677,28 @@ final controllerRepositoryProvider =
 });
 
 /// Provider for the currently selected controller's Firestore document ID.
-/// Needed for cloud relay to identify which controller to target.
+/// Needed for cloud relay to identify which controller to target, and handed
+/// to the LAN service as the identity it must prove (#92) before writing.
+///
+/// #118 — the selected RECORD's id, from [controllerSelectionProvider]. It used
+/// to be found by matching the selected address against the controller list,
+/// which answered "no id" whenever the two disagreed (another account's
+/// address, a record's old address) and whenever the list was reloading: the
+/// repository built then carried no identity expectation and could not use the
+/// relay. An address the selection did not choose (a device being set up, or a
+/// value written directly) is still matched against the list, as before.
 final selectedControllerIdProvider = Provider<String?>((ref) {
+  final selectedIp = ref.watch(selectedDeviceIpProvider);
+  final selection = ref.watch(controllerSelectionProvider);
+  if (selectedIp == null) return null;
+  if (selection.controllerId != null && selection.ip == selectedIp) {
+    return selection.controllerId;
+  }
+
   final controllers = ref.watch(controllersStreamProvider).maybeWhen(
     data: (list) => list,
     orElse: () => <dynamic>[],
   );
-  final selectedIp = ref.watch(selectedDeviceIpProvider);
-
-  if (selectedIp == null || controllers.isEmpty) return null;
-
-  // Find the controller with matching IP
   for (final controller in controllers) {
     if (controller.ip == selectedIp) {
       return controller.id;
@@ -694,6 +706,16 @@ final selectedControllerIdProvider = Provider<String?>((ref) {
   }
 
   return null;
+});
+
+/// #118 — remembers, per account on this phone, the controller it most
+/// recently connected to: the selection's tie-break when an account has
+/// several records and its saved choice is gone. Watched by MainScaffold.
+/// Stamped when the connection comes up.
+final controllerConnectionStampProvider = Provider<void>((ref) {
+  ref.listen<bool>(wledStateProvider.select((s) => s.connected), (_, next) {
+    if (next) ref.read(controllerSelectionProvider.notifier).markConnected();
+  });
 });
 
 /// Provider that fetches the total LED count from the connected WLED device.

@@ -24,6 +24,7 @@ import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.d
 import 'package:nexgen_command/features/dashboard/widgets/route_path_badge.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/smart_presets/smart_presets_section.dart';
@@ -546,7 +547,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       data: (list) => list,
       orElse: () => <ControllerInfo>[],
     );
-    final selectedIp = ref.watch(selectedDeviceIpProvider);
+    // #118: the selected RECORD, by id — an address can belong to another
+    // account or be a record's old one.
+    final selectedId = ref.watch(selectedControllerIdProvider);
 
     if (controllers.isEmpty) return const SizedBox.shrink();
 
@@ -568,10 +571,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
           ),
         ),
         itemBuilder: (context) => controllers.map((controller) {
-          final isSelected = controller.ip == selectedIp;
+          final isSelected = controller.id == selectedId;
           final name = controller.name ?? controller.ip;
           return PopupMenuItem<String>(
-            value: controller.ip,
+            value: controller.id,
             child: Row(
               children: [
                 Icon(
@@ -604,8 +607,8 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             ),
           );
         }).toList(),
-        onSelected: (newIp) {
-          ref.read(selectedDeviceIpProvider.notifier).state = newIp;
+        onSelected: (controllerId) {
+          ref.read(controllerSelectionProvider.notifier).use(controllerId);
         },
       ),
     );

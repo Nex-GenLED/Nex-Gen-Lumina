@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/wled/base_ladder_repair_providers.dart'
     show ladderBusChangeWatchProvider;
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
@@ -146,6 +147,8 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     // #183: re-evaluates the base ladder when the controller's bus list
     // changes, not only at connect.
     ref.watch(ladderBusChangeWatchProvider);
+    // #118: remembers the controller this phone most recently connected to.
+    ref.watch(controllerConnectionStampProvider);
     ref.watch(installationConfigLoaderProvider);
     ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
     // Foreground score celebrations: keep the driver alive so it pushes the

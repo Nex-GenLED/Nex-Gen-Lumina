@@ -5,9 +5,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/installer/installer_preference_draft.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_state.dart';
@@ -902,5 +902,5 @@ void resetInstallerWizardState(WidgetRef ref) {
   // [installerSelectedControllerIpProvider]); clear it with the rest of the
   // wizard state so a staff-session selection cannot leak into the next
   // install or into the customer's dashboard.
-  ref.read(selectedDeviceIpProvider.notifier).state = null;
+  ref.read(controllerSelectionProvider.notifier).clear();
 }

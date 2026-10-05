@@ -3,8 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
-import 'package:nexgen_command/features/discovery/device_discovery.dart';
 
 /// The Firestore [controllersStreamProvider] reads. Overridden in tests so
 /// the real reader can be driven against a fake store.
@@ -74,32 +74,22 @@ final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
 /// closure) so consumers rebuild when the impersonation target changes, matching
 /// [controllersStreamProvider].
 ///
-/// #118 — deleting the ACTIVE controller also lets go of its address, so
-/// auto-connect moves to the next record instead of the app holding an address
-/// that no longer belongs to any record (no identity check, no relay).
+/// #118 — deleting the ACTIVE controller also lets go of it: the record id is
+/// added to [deletedControllerIdsProvider], which the controller selection
+/// drops at once, choosing again from the records that remain (instead of the
+/// app holding an address that belongs to no record — no identity check, no
+/// relay).
 final deleteControllerProvider = Provider<Future<bool> Function(String)>((ref) {
   final uid = ref.watch(effectiveUserUidProvider);
   final db = ref.watch(controllersFirestoreProvider);
   return (String id) async {
     if (uid == null || uid.isEmpty) return false;
-    // Captured before the await: the address the record had, and the handles
-    // needed to release it afterwards.
-    String? deletedIp;
-    for (final c in ref.read(controllersStreamProvider).valueOrNull ??
-        const <ControllerInfo>[]) {
-      if (c.id == id) deletedIp = c.ip;
-    }
-    final selection = ref.read(selectedDeviceIpProvider.notifier);
+    // Captured before the await.
     final deleted = ref.read(deletedControllerIdsProvider.notifier);
     try {
       await db.collection('users').doc(uid).collection('controllers').doc(id).delete();
       // The set is per account; after an account change mid-delete it is gone.
       if (deleted.mounted) deleted.state = {...deleted.state, id};
-      if (deletedIp != null &&
-          deletedIp.isNotEmpty &&
-          selection.state == deletedIp) {
-        selection.state = null;
-      }
       return true;
     } catch (e) {
       debugPrint('Delete controller failed: $e');
@@ -108,9 +98,9 @@ final deleteControllerProvider = Provider<Future<bool> Function(String)>((ref) {
   };
 });
 
-/// #118 — record ids deleted from this phone in this session. Auto-connect
-/// skips them, so a controller list that has not yet caught up with the
-/// delete cannot hand the deleted record straight back.
+/// #118 — record ids deleted from this phone in this session, per account. The
+/// controller selection skips them, so a controller list that has not yet
+/// caught up with the delete cannot hand the deleted record straight back.
 final deletedControllerIdsProvider = StateProvider<Set<String>>((ref) {
   ref.watch(effectiveUserUidProvider);
   return const <String>{};
@@ -146,41 +136,21 @@ final renameControllerProvider = Provider<Future<bool> Function(String, String)>
   };
 });
 
-/// Auto-connects to the user's first saved controller when the app loads.
-/// This provider should be watched early in the app (e.g., in MainScaffold).
-/// It only sets the selectedDeviceIpProvider once when controllers first load.
+/// Arms the controller selection for the running app. Watched by MainScaffold.
 ///
-/// Returns true if auto-connect was triggered, false otherwise.
+/// #118 — this used to copy the newest record's address into
+/// selectedDeviceIpProvider, and only while the selection was EMPTY: a stale
+/// address (another account's, a record's old one, a deleted record's) was
+/// never revisited, and a newest record without an address selected nothing.
+/// While the shell is up the selection is now chosen by
+/// [ControllerSelectionNotifier] — the saved choice, the only record, the most
+/// recently connected one, or the customer's answer when two or more answer —
+/// and chosen again on every change to the account or its records.
+///
+/// Returns true once armed.
 final autoConnectControllerProvider = Provider<bool>((ref) {
-  final controllersAsync = ref.watch(controllersStreamProvider);
-  final currentSelection = ref.watch(selectedDeviceIpProvider);
-  final deleted = ref.watch(deletedControllerIdsProvider);
-
-  // If already connected, no action needed
-  if (currentSelection != null) {
-    return false;
-  }
-
-  bool triggered = false;
-  controllersAsync.whenData((all) {
-    final controllers =
-        all.where((c) => !deleted.contains(c.id)).toList(growable: false);
-    if (controllers.isNotEmpty) {
-      final firstController = controllers.first;
-      if (firstController.ip.isNotEmpty) {
-        debugPrint('🔌 Auto-connecting to saved controller: ${firstController.name ?? firstController.ip}');
-        // Schedule the state update for after the current build phase
-        Future.microtask(() {
-          // Double-check selection is still null before setting
-          final stillNull = ref.read(selectedDeviceIpProvider) == null;
-          if (stillNull) {
-            ref.read(selectedDeviceIpProvider.notifier).state = firstController.ip;
-          }
-        });
-        triggered = true;
-      }
-    }
-  });
-
-  return triggered;
+  final selection = ref.watch(controllerSelectionProvider.notifier);
+  // Not during this build: arming may change the selection at once.
+  Future.microtask(selection.enableAutoSelect);
+  return true;
 });
