@@ -12,6 +12,27 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show executeCustomEffectIfNeeded;
+import 'package:nexgen_command/utils/effect_display_meta.dart';
+
+/// A Recent Patterns card at the default text size. Owner request from live
+/// use, 2026-10-05: the width is unchanged and the height is cut by a third,
+/// from 100 to 66, so the section takes less of Explore. Larger Text makes the
+/// card taller when its labels need it; it never makes it wider.
+@visibleForTesting
+const double kRecentPatternCardWidth = 120;
+@visibleForTesting
+const double kRecentPatternCardMinHeight = 66;
+
+/// Above this text scale the card stops fitting one line of name, one line of
+/// effect and the time badge in [kRecentPatternCardMinHeight]: the badge and
+/// the motion icon give way, and the name and effect may each wrap to two
+/// lines.
+const double _kRecentCardLargeTextScale = 1.3;
+
+/// The card's inner padding either side, and the room the motion icon and its
+/// gap take in front of the effect name.
+const double _kRecentCardSidePadding = 8;
+const double _kRecentCardIconSlot = 16;
 
 class RecentPatternsSection extends ConsumerWidget {
   const RecentPatternsSection();
@@ -42,20 +63,25 @@ class RecentPatternsSection extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 12),
-            // Horizontal scrolling list of recent patterns (most recent on left)
-            SizedBox(
-              height: 100,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: patterns.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, index) {
-                  final pattern = patterns[index];
-                  return _RecentPatternCard(
-                    pattern: pattern,
-                    onTap: () => _applyPattern(context, ref, pattern),
-                  );
-                },
+            // Horizontal scrolling row of recent patterns (most recent on
+            // left). At most five, so a plain Row; IntrinsicHeight gives every
+            // card the height of the tallest — kRecentPatternCardMinHeight at
+            // the default text size, more only when Larger Text needs it.
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < patterns.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 12),
+                      _RecentPatternCard(
+                        pattern: patterns[i],
+                        onTap: () => _applyPattern(context, ref, patterns[i]),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -150,7 +176,14 @@ class RecentPatternsSection extends ConsumerWidget {
   }
 }
 
-/// Card for displaying a recent pattern
+/// Card for one recent pattern: its colours as the background, its name, and
+/// the effect it plays.
+///
+/// At the default text size it is [kRecentPatternCardWidth] by
+/// [kRecentPatternCardMinHeight]: the name on one line, the effect on one line
+/// after a motion icon, and how long ago it was used in the corner. Past
+/// [_kRecentCardLargeTextScale] the badge and the icon give way, the name and
+/// the effect may each take two lines, and the card grows taller to hold them.
 class _RecentPatternCard extends StatelessWidget {
   final GradientPattern pattern;
   final VoidCallback onTap;
@@ -165,83 +198,169 @@ class _RecentPatternCard extends StatelessWidget {
     final colors = pattern.colors.isNotEmpty
         ? pattern.colors
         : const [Color(0xFFFFB347), Color(0xFFFFE4B5)];
+    // The controller's own name for the effect a tap sends (#167 catalog) —
+    // not the stored `effect_name`, which only two writers set and which can
+    // predate #167. An entry without an fx id is sent as fx 0, so reads
+    // "Solid".
+    final effect = EffectDisplayMeta.fromId(pattern.effectId);
+    final ago = pattern.subtitle ?? '';
+    final large = MediaQuery.textScalerOf(context).scale(1) >
+        _kRecentCardLargeTextScale;
+    final textTheme = Theme.of(context).textTheme;
+    final shadows = [
+      Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 4),
+    ];
+    final effectStyle = textTheme.labelSmall?.copyWith(
+      color: Colors.white.withValues(alpha: 0.85),
+      shadows: shadows,
+    );
+    final showIcon =
+        !large && _effectFitsBesideIcon(context, effect.name, effectStyle);
+    final radius = BorderRadius.circular(12);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 120,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: colors.length == 1 ? [colors[0], colors[0]] : colors,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: colors.first.withValues(alpha: 0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+    final card = Container(
+      width: kRecentPatternCardWidth,
+      constraints:
+          const BoxConstraints(minHeight: kRecentPatternCardMinHeight),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: colors.length == 1 ? [colors[0], colors[0]] : colors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        child: Stack(
-          children: [
-            // Dark overlay
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.1),
-                      Colors.black.withValues(alpha: 0.6),
-                    ],
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: colors.first.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      // Dark overlay, so the labels read on any colourway.
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.1),
+              Colors.black.withValues(alpha: 0.6),
+            ],
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: _kRecentCardSidePadding, vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Time ago badge
+              if (!large && ago.isNotEmpty)
+                Align(
+                  alignment: Alignment.topRight,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      ago,
+                      style: textTheme.labelSmall?.copyWith(
+                        color: Colors.white70,
+                        fontSize: 9,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            // Time ago badge
-            Positioned(
-              top: 6,
-              right: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  pattern.subtitle ?? '',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: Colors.white70,
-                    fontSize: 9,
-                  ),
-                ),
-              ),
-            ),
-            // Pattern name
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
-              child: Text(
+              const Spacer(),
+              Text(
                 pattern.name,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                key: const ValueKey('recent-card-name'),
+                style: textTheme.bodySmall?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
-                  shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 4)],
+                  shadows: shadows,
                 ),
-                maxLines: 2,
+                maxLines: large ? 2 : 1,
                 overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ],
+              Row(
+                children: [
+                  if (showIcon) ...[
+                    Icon(
+                      effect.isMotion ? Icons.animation_rounded : Icons.circle,
+                      key: const ValueKey('recent-card-motion-icon'),
+                      size: _kRecentCardIconSlot - 4,
+                      color: Colors.white70,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Flexible(
+                    child: Text(
+                      effect.name,
+                      key: const ValueKey('recent-card-effect'),
+                      style: effectStyle,
+                      maxLines: large ? 2 : 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
+
+    // One node that reads the name, the effect and when, in that order.
+    // ExcludeSemantics rather than `excludeSemantics:` keeps the labels
+    // visible to the text-scale harness, which skips excluded subtrees.
+    return Semantics(
+      container: true,
+      button: true,
+      label: [pattern.name, '${effect.name} effect', if (ago.isNotEmpty) ago]
+          .join(', '),
+      onTap: onTap,
+      child: ExcludeSemantics(
+        // A name or effect cut short on the card can still be read in full.
+        child: Tooltip(
+          message: '${pattern.name} · ${effect.name}',
+          child: GestureDetector(
+            onTap: onTap,
+            behavior: HitTestBehavior.opaque,
+            child: card,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Whether [label] still fits on one line with the motion icon in front of
+  /// it. The icon is optional: it gives way before the effect name is cut.
+  /// Measured as the Text will lay it out — the ambient text scale, and Bold
+  /// Text — against the card's fixed inner width.
+  static bool _effectFitsBesideIcon(
+      BuildContext context, String label, TextStyle? style) {
+    var effective = DefaultTextStyle.of(context).style.merge(style);
+    if (MediaQuery.boldTextOf(context)) {
+      effective = effective.merge(const TextStyle(fontWeight: FontWeight.bold));
+    }
+    final painter = TextPainter(
+      text: TextSpan(text: label, style: effective),
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+      maxLines: 1,
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return width <=
+        kRecentPatternCardWidth -
+            2 * _kRecentCardSidePadding -
+            _kRecentCardIconSlot;
   }
 }
 
