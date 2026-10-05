@@ -322,7 +322,7 @@ void main() {
       expect(
           tester.getSemantics(
               find.bySemanticsLabel('Royals Fade, Fade effect, 3m ago')),
-          containsSemantics(
+          isSemantics(
             label: 'Royals Fade, Fade effect, 3m ago',
             isButton: true,
             hasTapAction: true,
