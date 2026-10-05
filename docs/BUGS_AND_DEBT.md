@@ -4472,13 +4472,12 @@ commit — merging `main` into this tree will collide with the untracked copies.
     the controller connecting finishes a leftover marker — to the captured state, the base look
     when the capture was lost, OFF staying off; a server-run team is left to the server.
 
-- [ ] **#175 — AFTER AN ACCOUNT SWITCH THE PHONE KEPT THE PREVIOUS ACCOUNT'S CONTROLLER ADDRESS,
+- [x] **#175 — AFTER AN ACCOUNT SWITCH THE PHONE KEPT THE PREVIOUS ACCOUNT'S CONTROLLER ADDRESS,
   and drove it with no identity check**
-  - Status: **PARTLY DONE — commit 1 of 3 in `release-candidate/116` (`99a95b0`, cherry-picked from
-    `7339314`); commits 2 (`8a74ac9`) and 3 (`cbe4e82`) PENDING: they stay on
-    `fix/118-controller-selection` for a later build, after a device walk** · Severity: **P2** ·
-    Evidence: **owner report** (one controller; "Set as Active" needed after signing out of one
-    account and into another — test, reviewer, installer — on the same phone) +
+  - Status: **DONE on `build/117-prep` (2026-10-12): commit 1 `99a95b0` shipped in build 116;
+    commits 2 (`f2199ba`, from `8a74ac9`) and 3 (`4999063`, from `cbe4e82`) cherry-picked here;
+    NOT merged** · Severity: **P2** · Evidence: **owner report** (one controller; "Set as Active" needed after signing out
+    of one account and into another — test, reviewer, installer — on the same phone) +
     **verified-by-test** (`controller_selection_account_switch_test.dart`: 6 of 7 fail on the
     old code).
   - Cause: the selection was an in-memory address (`selectedDeviceIpProvider`) that auto-connect
@@ -4487,21 +4486,23 @@ commit — merging `main` into this tree will collide with the untracked copies.
     matching that address. Account B kept account A's address; B has no record there, so the id
     was null: on the home network the repository was built with no identity expectation (the #92
     check skipped — a write could reach A's controller on a shared network), and away from home
-    no relay was built (nothing sent at all).
-  - In this build (commit 1): any change away from a signed-in account (sign-out, another
-    account, an installer entering or leaving a customer) drops the previous account's address,
-    so auto-connect selects the new account's own record and its id; deleting the active
-    controller releases its address.
-  - Still open until commits 2 and 3 ship: a record's address changed on another phone
-    (installer re-add, discovery re-save) and the old address read from the local cache on a
-    cold start are not followed; a newest record with no address selects nothing; the record id
-    is still found by address match, so it is lost while the controller list reloads (a
-    repository built then carries no identity expectation). Commit 2 selects by record id at its
-    CURRENT address, re-resolved on every change; commit 3 adds "Use this controller" (two or
-    more records only) and the "Which controller should this phone use?" prompt.
+    no relay was built (nothing sent at all). The same staleness followed a record's address
+    changed on another phone (installer re-add, discovery re-save), a cold start reading the old
+    address from the local cache, and deleting the active record; a newest record with no
+    address selected nothing.
+  - Fix: `7339314` drops the previous account's address on any change away from a signed-in
+    account, and deleting the active record releases it. `8a74ac9` makes a selection a record by
+    document id at its CURRENT address, re-resolved on every change to the account or its
+    records (saved per account on this phone; the only record silently; the most recently
+    connected; a prompt only when two or more answer); `selectedControllerIdProvider` comes from
+    it, so a selected record always carries its identity expectation — including while the list
+    reloads, when the old lookup lost it. `cbe4e82` "Use this controller" (two or more records only)
+    and the prompt.
   - Production (read-only, 2026-10-05, bench excluded): 24 accounts × one record each; no
     duplicates, no empty addresses; relay commands all targeted the current record — a stale
     selection sends nothing, so it never showed server-side.
+  - Unchanged: an address that is not (yet) a record — a device being set up — has no identity
+    to check against.
 
 - [x] **#183 — A BUS ADDED OUTSIDE THE APP BLOCKED GAME DAY, AND THE LADDER REPAIR COULD NOT FIX IT**
   - Status: **DONE on `fix/ladder-repair-bus-change` (2026-10-07), NOT merged** · Severity: **P2** ·
@@ -4708,20 +4709,18 @@ commit — merging `main` into this tree will collide with the untracked copies.
     infos are a separate, larger cleanup and are NOT part of this item.
   - Files: `codemagic.yaml`, the 8 source files above. Related: **P1-46** (green-main gate).
 
-- [ ] **#176 — "REMOTE ACCESS ISN'T SET UP" / "REQUIRES A LUMINA BRIDGE" WAS SHOWN FOR A STALE
+- [x] **#176 — "REMOTE ACCESS ISN'T SET UP" / "REQUIRES A LUMINA BRIDGE" WAS SHOWN FOR A STALE
   CONTROLLER SELECTION**
-  - Status: **OPEN in this build — fix built in commit 3 (`cbe4e82`), PENDING on
-    `fix/118-controller-selection` for a later build after a device walk** · Severity: **P3**
-    (copy — it sends customers to Remote Access and bridge setup) · Evidence:
-    **verified-by-test** on that branch (`apply_blocked_stale_selection_test.dart`).
-  - Cause: away from home, an address matching none of the account's records gives the relay no
-    record id; `applyBlockedReasonProvider` reads the missing repository as a missing bridge or
-    missing remote access. Commit 1 (in this build) removes the account-switch way of getting
-    there; the other stale cases in #175 still reach it.
-  - Fix (commit 3): `notThisAccount` — "This phone is set to a controller that isn't on your
-    account. Choose your controller in Settings → System & Device Management → Controllers." —
-    checked after offline and before the away-from-home reasons; `chooseController` when two or
-    more controllers answered and none is chosen yet. Related: #175.
+  - Status: **DONE on `build/117-prep` (`4999063`, from `cbe4e82`; 2026-10-12), NOT merged** ·
+    Severity: **P3** (copy — it sent customers to Remote Access and bridge setup) · Evidence:
+    **verified-by-test** (`apply_blocked_stale_selection_test.dart`).
+  - Cause: away from home, an address matching none of the account's records gave the relay no
+    record id; `applyBlockedReasonProvider` read the missing repository as a missing bridge or
+    missing remote access.
+  - Fix: `notThisAccount` — "This phone is set to a controller that isn't on your account. Choose
+    your controller in Settings → System & Device Management → Controllers." — checked after
+    offline and before the away-from-home reasons; `chooseController` when two or more
+    controllers answered and none is chosen yet. Related: #175.
 
 - [x] **#184 — "OPENING THE APP AT HOME REPAIRS THEM" WAS SHOWN FOR A LADDER THE APP COULD NOT REPAIR**
   - Status: **DONE on `fix/ladder-repair-bus-change` (2026-10-07), NOT merged** · Severity: **P3**
