@@ -222,6 +222,15 @@ const alexaClientSecret = defineString("ALEXA_CLIENT_SECRET");
 const googleClientId = defineString("GOOGLE_CLIENT_ID");
 const googleClientSecret = defineString("GOOGLE_CLIENT_SECRET");
 
+// Account-linking login pages (alexaAuth / googleAuth): exact redirect_uri
+// allowlists, script-safe values and the page CSP — see
+// functions/src/oauthLinkPage.ts. The allowlists read ALEXA_VENDOR_ID and
+// GOOGLE_HOME_PROJECT_ID from .env; unset means every link request is refused.
+const linkPage = require("./lib/oauthLinkPage");
+// Must equal firebaseConfig.projectId in both pages: the CSP admits callable
+// requests to this project's functions host only.
+const LINK_PAGE_FIREBASE_PROJECT_ID = "icrt6menwsv2d8all8oijs021b06s5";
+
 // Messaging — Twilio (SMS) configuration (add to .env file)
 const twilioAccountSid = defineString("TWILIO_ACCOUNT_SID");
 const twilioAuthToken = defineString("TWILIO_AUTH_TOKEN");
@@ -485,8 +494,13 @@ exports.generateAlexaAuthCode = onCall({ region: "us-central1" }, async (request
 exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
   // SECURITY: Add security headers
   addSecurityHeaders(res);
+  // Lock-down policy for every refusal below; the page path replaces it.
+  linkPage.setLinkPageHeaders(res, linkPage.ERROR_PAGE_CSP);
 
-  const { client_id, redirect_uri, state, response_type } = req.query;
+  // Non-string values (repeated keys, a[b]=c) count as missing.
+  const client_id = linkPage.queryString(req.query.client_id);
+  const redirect_uri = linkPage.queryString(req.query.redirect_uri);
+  const state = linkPage.queryString(req.query.state);
 
   // Validate required parameters
   if (!client_id || !redirect_uri || !state) {
@@ -502,10 +516,11 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
     return;
   }
 
-  // Validate redirect_uri is from Amazon
-  if (!redirect_uri.includes("amazon.com") && !redirect_uri.includes("alexa.amazon")) {
-    console.error(`Invalid redirect_uri: ${redirect_uri}`);
-    res.status(400).send("Invalid redirect_uri");
+  // redirect_uri must EQUAL one of this skill's Alexa redirect URLs.
+  if (!linkPage.isAllowedRedirect(
+    redirect_uri, linkPage.alexaRedirectAllowlist(process.env.ALEXA_VENDOR_ID))) {
+    console.error("alexaAuth: redirect_uri not allowlisted:", JSON.stringify(redirect_uri.slice(0, 200)));
+    linkPage.sendLinkPageError(res, 400);
     return;
   }
 
@@ -515,6 +530,9 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
     timestamp: Date.now(),
     nonce: Math.random().toString(36).substring(7)
   })).toString('base64');
+
+  const nonce = linkPage.newCspNonce();
+  linkPage.setLinkPageHeaders(res, linkPage.linkPageCsp(nonce, LINK_PAGE_FIREBASE_PROJECT_ID));
 
   // Return a simple HTML login page
   // In production, you might want to use Firebase Hosting for a nicer UI
@@ -528,7 +546,7 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
   <!-- SECURITY: Load Firebase SDK from CDN -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-  <style>
+  <style nonce="${nonce}">
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -646,7 +664,7 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
     <div class="error" id="error"></div>
   </div>
 
-  <script>
+  <script nonce="${nonce}">
     // Firebase config for Nex-Gen Lumina
     const firebaseConfig = {
       apiKey: "AIzaSyB2VhrbVD1lBbs_b_JuCkjLa1Yh_AsbWJs",
@@ -656,8 +674,9 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
 
     firebase.initializeApp(firebaseConfig);
 
-    const redirectUri = decodeURIComponent("${redirect_uri}");
-    const state = "${state}";
+    // SECURITY: request values arrive only as escaped JSON string literals.
+    const redirectUri = ${linkPage.scriptString(redirect_uri)};
+    const state = ${linkPage.scriptString(state)};
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -685,7 +704,7 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
         const generateCodeFunction = firebase.functions().httpsCallable('generateAlexaAuthCode');
         const result = await generateCodeFunction({
           idToken: idToken,
-          state: "${secureState}"
+          state: ${linkPage.scriptString(secureState)}
         });
 
         const authCode = result.data.code;
@@ -1483,8 +1502,13 @@ async function handleGoogleDisconnect(userId) {
  */
 exports.googleAuth = onRequest({ region: "us-central1" }, async (req, res) => {
   addSecurityHeaders(res);
+  // Lock-down policy for every refusal below; the page path replaces it.
+  linkPage.setLinkPageHeaders(res, linkPage.ERROR_PAGE_CSP);
 
-  const { client_id, redirect_uri, state, response_type } = req.query;
+  // Non-string values (repeated keys, a[b]=c) count as missing.
+  const client_id = linkPage.queryString(req.query.client_id);
+  const redirect_uri = linkPage.queryString(req.query.redirect_uri);
+  const state = linkPage.queryString(req.query.state);
 
   if (!client_id || !redirect_uri || !state) {
     res.status(400).send("Missing required OAuth parameters");
@@ -1498,11 +1522,16 @@ exports.googleAuth = onRequest({ region: "us-central1" }, async (req, res) => {
     return;
   }
 
-  // Validate redirect_uri is from Google
-  if (!redirect_uri.includes("google.com") && !redirect_uri.includes("googleusercontent.com")) {
-    res.status(400).send("Invalid redirect_uri");
+  // redirect_uri must EQUAL one of this project's Google redirect URLs.
+  if (!linkPage.isAllowedRedirect(
+    redirect_uri, linkPage.googleRedirectAllowlist(process.env.GOOGLE_HOME_PROJECT_ID))) {
+    console.error("googleAuth: redirect_uri not allowlisted:", JSON.stringify(redirect_uri.slice(0, 200)));
+    linkPage.sendLinkPageError(res, 400);
     return;
   }
+
+  const nonce = linkPage.newCspNonce();
+  linkPage.setLinkPageHeaders(res, linkPage.linkPageCsp(nonce, LINK_PAGE_FIREBASE_PROJECT_ID));
 
   // Return login page (similar to Alexa but for Google)
   const html = `
@@ -1514,7 +1543,7 @@ exports.googleAuth = onRequest({ region: "us-central1" }, async (req, res) => {
   <title>Link Nex-Gen Lumina to Google Home</title>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-  <style>
+  <style nonce="${nonce}">
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1596,15 +1625,16 @@ exports.googleAuth = onRequest({ region: "us-central1" }, async (req, res) => {
     <div class="loading" id="loading">Linking your account...</div>
     <div class="error" id="error"></div>
   </div>
-  <script>
+  <script nonce="${nonce}">
     const firebaseConfig = {
       apiKey: "AIzaSyB2VhrbVD1lBbs_b_JuCkjLa1Yh_AsbWJs",
       authDomain: "icrt6menwsv2d8all8oijs021b06s5.firebaseapp.com",
       projectId: "icrt6menwsv2d8all8oijs021b06s5",
     };
     firebase.initializeApp(firebaseConfig);
-    const redirectUri = decodeURIComponent("${redirect_uri}");
-    const state = "${state}";
+    // SECURITY: request values arrive only as escaped JSON string literals.
+    const redirectUri = ${linkPage.scriptString(redirect_uri)};
+    const state = ${linkPage.scriptString(state)};
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = document.getElementById('email').value;
