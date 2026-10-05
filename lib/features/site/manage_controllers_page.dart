@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
+import 'package:nexgen_command/features/site/controller_choice_prompt.dart';
 import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -54,7 +55,9 @@ class _ControllerTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isActive = ref.watch(selectedDeviceIpProvider) == item.ip;
+    // #118: the active record by its id; a choice only with 2+ records.
+    final isActive = ref.watch(selectedControllerIdProvider) == item.id;
+    final canChoose = ref.watch(controllerChoiceAvailableProvider);
     final deleteController = ref.watch(deleteControllerProvider);
     return Card(
       child: ListTile(
@@ -80,7 +83,9 @@ class _ControllerTile extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 4),
-            Text('IP: ${item.ip}', overflow: TextOverflow.ellipsis),
+            // #118: wraps rather than cutting the address short at large text
+            // sizes, where the three actions leave little width.
+            Text('IP: ${item.ip}'),
             if (item.wifiConfigured == true && item.ssid != null)
               Text('Network: ${item.ssid}', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ],
@@ -103,7 +108,9 @@ class _ControllerTile extends ConsumerWidget {
             icon: const Icon(Icons.delete_outline),
           )
         ]),
-        onTap: isActive ? null : () => ref.read(controllerSelectionProvider.notifier).use(item.id),
+        onTap: isActive || !canChoose
+            ? null
+            : () => ref.read(controllerSelectionProvider.notifier).use(item.id),
       ),
     );
   }
@@ -184,20 +191,24 @@ class _ControllerTile extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(item.name ?? 'Controller Details'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DetailRow(label: 'Name', value: item.name ?? 'Unnamed'),
-            _DetailRow(label: 'IP Address', value: item.ip),
-            _DetailRow(label: 'Serial', value: item.serial ?? 'N/A'),
-            if (item.ssid != null) _DetailRow(label: 'Wi-Fi Network', value: item.ssid!),
-            _DetailRow(label: 'Wi-Fi Configured', value: (item.wifiConfigured == true || item.ip.isNotEmpty) ? 'Yes' : 'No'),
-            if (item.createdAt != null)
-              _DetailRow(label: 'Added', value: _formatDate(item.createdAt)),
-            if (item.updatedAt != null)
-              _DetailRow(label: 'Last Updated', value: _formatDate(item.updatedAt)),
-          ],
+        // #118: scrolls at large text sizes (it overflowed at 1.75x and 2.0x
+        // with Bold Text).
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _DetailRow(label: 'Name', value: item.name ?? 'Unnamed'),
+              _DetailRow(label: 'IP Address', value: item.ip),
+              _DetailRow(label: 'Serial', value: item.serial ?? 'N/A'),
+              if (item.ssid != null) _DetailRow(label: 'Wi-Fi Network', value: item.ssid!),
+              _DetailRow(label: 'Wi-Fi Configured', value: (item.wifiConfigured == true || item.ip.isNotEmpty) ? 'Yes' : 'No'),
+              if (item.createdAt != null)
+                _DetailRow(label: 'Added', value: _formatDate(item.createdAt)),
+              if (item.updatedAt != null)
+                _DetailRow(label: 'Last Updated', value: _formatDate(item.updatedAt)),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
@@ -208,13 +219,14 @@ class _ControllerTile extends ConsumerWidget {
             },
             child: const Text('Rename'),
           ),
-          if (ref.read(selectedDeviceIpProvider) != item.ip)
+          if (ref.read(controllerChoiceAvailableProvider) &&
+              ref.read(selectedControllerIdProvider) != item.id)
             FilledButton(
               onPressed: () {
                 ref.read(controllerSelectionProvider.notifier).use(item.id);
                 Navigator.of(ctx).pop();
               },
-              child: const Text('Set as Active'),
+              child: const Text(kUseThisControllerLabel),
             ),
         ],
       ),
