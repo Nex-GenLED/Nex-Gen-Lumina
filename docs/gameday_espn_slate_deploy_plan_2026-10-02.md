@@ -95,19 +95,49 @@ The rule, unchanged from A+B: no deploy between an allowlisted start's mint (fir
 
 ## 4. Step 0 — read-only pre-checks (Fri 10-09, from 08:00)
 
+4.0 **Create the worktree — the first commands of the window.** The worktrees this branch was built in were removed after each push, so the window makes its own. It is named `lumina-gd-espn`, as in every command below. From Git Bash, in the main checkout:
+```
+cd "C:/Flutter Projects/Lumina V 1.6"
+
+# 1. fetch
+git fetch origin --prune
+
+# 2. the two heads
+git ls-remote --heads origin fix/gameday-espn-slate fix/gameday-server-ab
+#    fix/gameday-server-ab    must be 309a5d9. It is rev 00016's source line and the rollback target.
+#                             If it moved: stop, rebase this branch onto it, and re-run 4.3.
+#    fix/gameday-espn-slate   must be ff917d8 (the code as gated on 2026-10-05) or a DOCS-ONLY
+#                             descendant of it, the close-out head the owner was given. Prove that:
+git diff --name-only ff917d8 origin/fix/gameday-espn-slate     # only docs/ paths (nothing if the head IS ff917d8)
+
+# 3. the worktree, with node_modules as a junction to the main checkout's
+git worktree add "C:/Flutter Projects/lumina-gd-espn" fix/gameday-espn-slate
+cmd //c mklink //J "C:\\Flutter Projects\\lumina-gd-espn\\functions\\node_modules" "C:\\Flutter Projects\\Lumina V 1.6\\functions\\node_modules"
+git -C "C:/Flutter Projects/lumina-gd-espn" rev-parse --short HEAD   # the ls-remote head; if behind: merge --ff-only origin/fix/gameday-espn-slate
+```
+- These are the commands the branch was built and gated with on 2026-10-05, with only the folder name changed.
+- The junction is sound because the branch adds no dependency: `git diff --stat 309a5d9 HEAD -- functions/package.json functions/package-lock.json` prints nothing. From PowerShell the junction command is `cmd /c mklink /J "<link>" "<target>"`.
+- **Teardown, after the ledger commit (§9).** Restore the two stale build outputs, remove the JUNCTION (never its target, never `rm -rf` on the worktree), then remove the worktree, and check the main checkout still has its modules:
+```
+git -C "C:/Flutter Projects/lumina-gd-espn" checkout -- functions/lib/createCustomerAccount.js functions/lib/createCustomerAccount.js.map
+cmd //c rmdir "C:\\Flutter Projects\\lumina-gd-espn\\functions\\node_modules"
+git worktree remove "C:/Flutter Projects/lumina-gd-espn"
+ls "C:/Flutter Projects/Lumina V 1.6/functions/node_modules" | wc -l     # unchanged from before the window
+```
+
 4.1 **Nothing live.** No allowlisted session with `startPlannedAt` and no `endFiredAt` (`node scripts/_check_gameday.js end`). Thursday's end job is `completed`. `gameday_plan_log/<today>.lastSummary` shows `errors: 0`.
 
-4.2 **A+B is the live planner, and this branch sits on its head.** Rev 00016 is live from `d2e0f6e`. Run `git fetch` and confirm `fix/gameday-server-ab` is still `309a5d9`; if it moved, rebase and re-run 4.3.
+4.2 **A+B is the live planner, and this branch sits on its head.** Rev 00016 is live from `d2e0f6e`. Step 4.0's `ls-remote` confirmed `fix/gameday-server-ab` is still `309a5d9`; if it moved, rebase and re-run 4.3.
 
 4.3 **Tree and gates.**
 ```
 cd "C:/Flutter Projects/lumina-gd-espn"
 git status --short                       # only functions/lib/createCustomerAccount.js{,.map} (stale tracked output; never commit)
 git diff --stat 309a5d9 HEAD -- functions/src   # the four modules, nothing else
-cd functions && npm run build && npm test
+cd functions && npm run build && npm test          # 43 suites, 1018 tests
 firebase --config <scratch>/firebase.json emulators:exec --only firestore,auth --project lumina-fn-test \
   "npx jest --config jest.emulator.config.js --runInBand --forceExit --testTimeout=120000"
-# only the two #119 commercialRules cross-dealer cases may fail
+# 262 of 264: only the two #119 commercialRules cross-dealer cases may fail
 ```
 
 4.4 **No new key is in the config.** Read `config/gameday_planner` (§2) and confirm all seven keys are absent: the five ESPN-slate keys, `served_sticky` and `preflight_bridge_grace`.
@@ -147,7 +177,37 @@ Only after §6 is clean with every flag absent. Each step is one `update()` (§2
 | S2 | `{preflight_bridge_grace:['<BENCH_UID>']}` | after S1's gap read below; not between the rehearsal's 17:30 fire and prompt C |
 | S3 | `{served_sticky:true, preflight_bridge_grace:true}` | after S2's gap read; before `uid_allowlist` changes (Sat 10-10) |
 
-**Placing the next gap.** The bench bridge's gaps run about 7 h 28 min apart. Take the latest one from the plan log (the newest bench `preflight_skip` row naming `preflight_bridge_stale`, or the heartbeat watcher's log) and add multiples of that, ±15 min. The cadence drifts, so read the log on the day instead of trusting a time worked out earlier.
+**The predicted gap (bench).** The bench bridge's write gap recurs about every 7.46 h. The planner saw P2 fail on these ticks: 10-03 at 01:10, 08:40, 16:05 and 23:30Z; 10-04 at 07:00, 14:30 and 21:55Z; 10-05 at 05:25 and 12:50Z. That is nine ticks, each 7 h 25 min or 7 h 30 min after the one before. Carried forward from the 10-04 21:55Z tick (the 10-05 ticks give the same times to within two minutes):
+
+| Predicted stale tick, ±1 h of drift | CDT | What is going on then |
+|---|---|---|
+| Fri 10-09, about 13:46Z | about 8:46 AM | **inside the deploy window** (§4 to §6) |
+| Fri 10-09, about 21:13Z | about 4:13 PM | S1 in place; about 75 min before the rehearsal's 17:30 fire |
+| Sat 10-10, about 04:41Z | Fri, about 11:41 PM | after prompt C: the S2 read |
+| Sat 10-10, about 12:08Z | about 7:08 AM | before `uid_allowlist` changes: the margin for S3 |
+
+The bridge is silent from about ten minutes before a stale tick until just after it. The cadence drifts, so re-anchor on the day: take the newest entry in `gameday_plan_log/<UTC date>.ticks` with `preflightSkips: 1` and add multiples of 7 h 28 min.
+
+**A real gap, or a deploy problem?** Read these for the bench:
+
+| Read | The known gap, flags absent (§6, before S1) | The known gap, HELD (S1 in place) | A deploy problem |
+|---|---|---|---|
+| `gameday_server.served` | false for one or two ticks | **true** | false and staying false |
+| `gameday_server.preflight` | `ok:false`, reasons exactly `["preflight_bridge_stale"]` | `ok:false`, reasons exactly `["preflight_bridge_stale"]` | any other reason, or `ok:false` while the heartbeat is fresh |
+| `gameday_server.stale_since` | absent | **set**, equal to the first stale tick | not applicable |
+| `gameday_server.checked_at` | the first stale tick, then not rewritten | **fresh on every tick** | not advancing while `served` is true: the planner is not ticking |
+| plan log | a `preflight_skip` row | `preflight_skip` **and `served_held`** rows; `servedHeld: 1` on that tick | `errors` above 0, a WARNING+ log line, or a summary key missing |
+| heartbeat (`heartbeatAgeS` in the dry run) | over 300, and back under 60 within about 11 min | the same | fresh while P2 fails, or still stale after 15 min |
+| other accounts | unaffected | unaffected | several change on the same tick |
+
+So a real held gap reads: `served:true` with `preflight.ok:false`, `stale_since` set, `checked_at` fresh, and a `served_held` row in the plan log. All of that, clearing without help inside about eleven minutes, is the fix working. It is not a reason to roll back.
+
+**If the gap lands mid-deploy** (the 8:46 AM one):
+- **During the upload (§5):** carry on. The deploy does not involve the bridge.
+- **During the §6 reads (flags absent):** the bench may show a `preflight_skip` naming only `preflight_bridge_stale`, and `served:false` for one or two ticks. That is rev 00016's behaviour, and the new code's with no flag written. Confirm it with the dry run (`heartbeatAgeS` over 300, no other reason), wait for the heartbeat to return, and take §6's two ticks after that. The other §6 reads (the zip, `espnFetches`, `errors: 0`, no warning) hold good during the gap.
+- **Do not write S1 during a gap.** The hold only keeps a `served:true` that is already stored. If a flags-absent tick has just published `served:false`, S1 cannot hold that gap: the bench stays `served:false` until the heartbeat returns. That is correct, and it looks exactly like S1's stop sign. Write S1 when the dry run reads `ok: true` with a fresh heartbeat. If S1 went in mid-gap anyway, judge it on the next gap, not this one.
+- **Not the known gap:** the heartbeat is still stale after 15 minutes, or a second reason appears. Stop. Write no flag, and treat the rehearsal's precondition (§8.3, dry run `ok`) as failed until the bridge is back.
+- **The afternoon gap and the rehearsal:** the start job exists from 11:30, and the dispatcher fires it at 17:30 whatever pre-flight says. If the bridge is silent at that minute the command waits, and the dispatcher retries until kickoff (18:00). Prompt A then shows a late start with retries: record it as the gap. If it has not landed by kickoff − 5 min, §8.6's manual recovery applies.
 
 **S1 reads (`served_sticky`, bench).**
 - Config read-back: `served_sticky` is an array holding exactly the bench uid string. No "malformed" warning in the planner log.
@@ -293,6 +353,7 @@ Every R3/A/B/C expectation is met, the stop-sign list is empty, the end came fro
 
 ## 9. Ledger and merge notes
 - **On deploy,** add a `docs/BUILD_LEDGER.md` row in the A+B row's format: deploy time, rev, read-backs, rollback = `309a5d9`.
+- **After the ledger commit,** tear the worktree down as §4.0 says: the junction first, then `git worktree remove`.
 - **#146 and #150 keep the 114 branch's numbers.** They are fixed here in `6fe971d`; mark them FIXED when the branches meet.
 - **This branch's debt is #156–#162.** `fix/115-multichannel-and-design-card` holds #151–#155. #157 and #159 are fixed here; #158 is partly fixed (the mint-time skip); #161 and #162 are new.
 - **The 2026-10-05 write-gap entries are #171–#174** (the release line and `fix/116` hold #163–#170). #172 is fixed here behind `served_sticky` and stays open until the flag is on fleet-wide; #171 (the cause of the gap), #173 and #174 are open.
