@@ -4472,6 +4472,37 @@ commit — merging `main` into this tree will collide with the untracked copies.
     the controller connecting finishes a leftover marker — to the captured state, the base look
     when the capture was lost, OFF staying off; a server-run team is left to the server.
 
+- [x] **#175 — AFTER AN ACCOUNT SWITCH THE PHONE KEPT THE PREVIOUS ACCOUNT'S CONTROLLER ADDRESS,
+  and drove it with no identity check**
+  - Status: **DONE on `fix/118-controller-selection` (2026-10-05), NOT merged** · Severity:
+    **P2** · Evidence: **owner report** (one controller; "Set as Active" needed after signing out
+    of one account and into another — test, reviewer, installer — on the same phone) +
+    **verified-by-test** (`controller_selection_account_switch_test.dart`: 6 of 7 fail on the
+    old code).
+  - Cause: the selection was an in-memory address (`selectedDeviceIpProvider`) that auto-connect
+    filled only while it was EMPTY, from the newest record. Nothing reset it on sign-out, an
+    account switch or an installer leaving a customer, and the record id was then found by
+    matching that address. Account B kept account A's address; B has no record there, so the id
+    was null: on the home network the repository was built with no identity expectation (the #92
+    check skipped — a write could reach A's controller on a shared network), and away from home
+    no relay was built (nothing sent at all). The same staleness followed a record's address
+    changed on another phone (installer re-add, discovery re-save), a cold start reading the old
+    address from the local cache, and deleting the active record; a newest record with no
+    address selected nothing.
+  - Fix: `7339314` drops the previous account's address on any change away from a signed-in
+    account, and deleting the active record releases it. `8a74ac9` makes a selection a record by
+    document id at its CURRENT address, re-resolved on every change to the account or its
+    records (saved per account on this phone; the only record silently; the most recently
+    connected; a prompt only when two or more answer); `selectedControllerIdProvider` comes from
+    it, so a selected record always carries its identity expectation — including while the list
+    reloads, when the old lookup lost it. `cbe4e82` "Use this controller" (two or more records only)
+    and the prompt.
+  - Production (read-only, 2026-10-05, bench excluded): 24 accounts × one record each; no
+    duplicates, no empty addresses; relay commands all targeted the current record — a stale
+    selection sends nothing, so it never showed server-side.
+  - Unchanged: an address that is not (yet) a record — a device being set up — has no identity
+    to check against.
+
 ---
 
 ## P3 — debt (no launch relevance)
@@ -4645,6 +4676,19 @@ commit — merging `main` into this tree will collide with the untracked copies.
   - Fix: clear the 11 warnings, then tighten the gate to `--no-fatal-infos` only. The 370
     infos are a separate, larger cleanup and are NOT part of this item.
   - Files: `codemagic.yaml`, the 8 source files above. Related: **P1-46** (green-main gate).
+
+- [x] **#176 — "REMOTE ACCESS ISN'T SET UP" / "REQUIRES A LUMINA BRIDGE" WAS SHOWN FOR A STALE
+  CONTROLLER SELECTION**
+  - Status: **DONE on `fix/118-controller-selection` (`cbe4e82`, 2026-10-05), NOT merged** · Severity:
+    **P3** (copy — it sent customers to Remote Access and bridge setup) · Evidence:
+    **verified-by-test** (`apply_blocked_stale_selection_test.dart`).
+  - Cause: away from home, an address matching none of the account's records gave the relay no
+    record id; `applyBlockedReasonProvider` read the missing repository as a missing bridge or
+    missing remote access.
+  - Fix: `notThisAccount` — "This phone is set to a controller that isn't on your account. Choose
+    your controller in Settings → System & Device Management → Controllers." — checked after
+    offline and before the away-from-home reasons; `chooseController` when two or more
+    controllers answered and none is chosen yet. Related: #175.
 
 ## Features promised (post-cleanup)
 
