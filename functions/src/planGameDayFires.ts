@@ -52,6 +52,14 @@
  * is the per-tick URL cache (fewer identical ESPN requests) and the
  * `espnFetches` count it reports in the tick summary.
  *
+ * ─── BRIDGE WRITE-GAP FLAGS (2026-10-05, each default OFF, `true` | uid list) ─
+ *   preflight_bridge_grace  fix A: P2's heartbeat window is 15 min, not 5
+ *   served_sticky           B2 sticky: `gameday_server.served` stays true
+ *                           through a P2 failure shorter than 30 min; the state
+ *                           is `gameday_server.stale_since`
+ * See gameDayPreflight (decideServedSticky). With both absent nothing here
+ * reads or writes anything it did not before.
+ *
  * **NO collection-group query is used anywhere in this file.** That is a
  * deliberate constraint, not a coincidence: iterating users and then reading
  * each subcollection costs one extra read per user per tick and buys immunity
@@ -95,7 +103,10 @@ import {
   SCORECARD_COLLECTION,
   SCORECARD_ENTRIES,
   ServerStatusCore,
+  bridgeGraceScopeFrom,
+  bridgeStaleMsFor,
   decideP6,
+  decideServedSticky,
   evaluatePreflight,
   ladderDarkChannels,
   ladderLitModeFor,
@@ -107,6 +118,7 @@ import {
   scorecardDateKey,
   scorecardEntryId,
   serverStatusKey,
+  servedStickyScopeFrom,
   storedServerStatusKey,
 } from "./gameDayPreflight";
 import { hasPairedBridge } from "./relayEligibility";
@@ -224,6 +236,12 @@ interface PlanStats {
   p6Probes: number;
   /** B2. users/{uid}.gameday_server writes this tick. */
   serverStatusWrites: number;
+  /**
+   * B2 sticky (`served_sticky`). Accounts whose `served` was HELD true this
+   * tick through a bridge write gap. Present only when non-zero, so a tick
+   * with the flag off (or nothing held) has exactly the summary it always had.
+   */
+  servedHeld?: number;
   espnErrors: number;
   /**
    * Distinct ESPN URLs requested this tick — one request each, whatever the
@@ -360,6 +378,17 @@ export interface PlannerFlags {
    * (gameDayPlanning, "Full segment state").
    */
   payloadFullState: FlagScope | null;
+  /**
+   * `preflight_bridge_grace` (true or a uid list; default off): fix A, P2's
+   * window is 15 min instead of 5 (gameDayPreflight.bridgeStaleMsFor).
+   */
+  preflightBridgeGrace: FlagScope | null;
+  /**
+   * `served_sticky` (true or a uid list; default off): B2 sticky, `served`
+   * rides through a P2 failure shorter than 30 min
+   * (gameDayPreflight.decideServedSticky).
+   */
+  servedSticky: FlagScope | null;
 }
 
 /** A forced P4b mode (tests, bench) in the production field's terms. */
@@ -375,7 +404,10 @@ function forcedLadderLit(v: LadderLitMode | string[] | undefined): LadderLitSett
  * take. Logged so it is seen; never armed.
  */
 function warnMalformedFlags(data: Record<string, unknown> | undefined): void {
-  for (const key of ["espn_college_slate", "track_started_by_id", "status_aware_cap", "payload_full_state"]) {
+  for (const key of [
+    "espn_college_slate", "track_started_by_id", "status_aware_cap", "payload_full_state",
+    "preflight_bridge_grace", "served_sticky",
+  ]) {
     const v = data?.[key];
     if (v !== undefined && v !== false && flagScopeFrom(v) === null) {
       logger.warn(`planGameDayFires: config/gameday_planner.${key} is malformed (want true or [uid, …]); OFF. Value: ${JSON.stringify(v)}`);
@@ -389,7 +421,8 @@ function warnMalformedFlags(data: Record<string, unknown> | undefined): void {
 
 /**
  * Read the flags. Defaults: write-jobs OFF (log-only until deliberately on),
- * publish ON, pre-flight ENFORCE, every ESPN flag and P4b OFF. A read failure
+ * publish ON, pre-flight ENFORCE, every ESPN flag, P4b and both bridge
+ * write-gap flags OFF. A read failure
  * keeps log-only AND stops the status publish for that tick: a transient error
  * must not flip every account to `served:false` — the app's staleness window
  * covers a longer outage.
@@ -406,6 +439,8 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       espn: espnFlagsFrom(data),
       ladderLit: ladderLitSettingFrom(data),
       payloadFullState: flagScopeFrom(data?.payload_full_state),
+      preflightBridgeGrace: bridgeGraceScopeFrom(data),
+      servedSticky: servedStickyScopeFrom(data),
     };
   } catch (err) {
     logger.warn("planGameDayFires: flag read failed; staying LOG-ONLY", err);
@@ -416,6 +451,8 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       espn: ESPN_FLAGS_OFF,
       ladderLit: null,
       payloadFullState: null,
+      preflightBridgeGrace: null,
+      servedSticky: null,
     };
   }
 }
@@ -860,6 +897,10 @@ export async function runPlannerTick(
       statusAwareCap?: boolean | string[];
       ladderLit?: LadderLitMode | string[];
       payloadFullState?: boolean | string[];
+      /** Fix A, `preflight_bridge_grace`: `true` or a uid list. Default off. */
+      preflightBridgeGrace?: boolean | string[];
+      /** B2 sticky, `served_sticky`: `true` or a uid list. Default off. */
+      servedSticky?: boolean | string[];
     };
   } = {}
 ): Promise<PlanStats & { logRows: Array<Record<string, unknown>> }> {
@@ -883,6 +924,8 @@ export async function runPlannerTick(
         },
         ladderLit: forcedLadderLit(opts.forceFlags?.ladderLit),
         payloadFullState: flagScopeFrom(opts.forceFlags?.payloadFullState),
+        preflightBridgeGrace: flagScopeFrom(opts.forceFlags?.preflightBridgeGrace),
+        servedSticky: flagScopeFrom(opts.forceFlags?.servedSticky),
       }
     : await readPlannerFlags(db);
   const policy: WriteJobsPolicy = flags.policy;
@@ -951,6 +994,12 @@ export async function runPlannerTick(
             "gameday_server.teams": [],
             "gameday_server.next_fire": null,
             "gameday_server.checked_at": admin.firestore.FieldValue.serverTimestamp(),
+            // B2 sticky: no pre-flight runs for an account with no team, so a
+            // stale run cannot be continuing. Only a doc that carries the
+            // field pays for its removal (never one, with the flag never on).
+            ...(prior.stale_since !== undefined
+              ? { "gameday_server.stale_since": admin.firestore.FieldValue.delete() }
+              : {}),
           });
           stats.serverStatusWrites++;
         } catch (_) {
@@ -1273,6 +1322,9 @@ export async function runPlannerTick(
         appVersion: facts.appVersion,
         nowMs,
         ladderLit: ladderLitModeFor(flags.ladderLit, uid),
+        // Fix A (`preflight_bridge_grace`): 15 min for a flagged account; the
+        // shipped 5 min for every other.
+        bridgeStaleMs: bridgeStaleMsFor(flagOnFor(flags.preflightBridgeGrace, uid)),
       });
     }
     const preflightBlocks =
@@ -1280,6 +1332,28 @@ export async function runPlannerTick(
     // Starts are minted only for an account the allowlist arms, the gate
     // arms, and (in enforce mode) pre-flight passes. Ends keep `writeJobs`.
     const writeStarts = writeJobs && !preflightBlocks;
+    // B2 sticky (`served_sticky`): a P2 failure shorter than 30 min does not
+    // change what is PUBLISHED. It changes nothing about what is minted:
+    // `writeStarts` above is final, and a held tick mints no start.
+    const sticky = decideServedSticky({
+      stickyOn: flagOnFor(flags.servedSticky, uid),
+      preflight,
+      startsWithheld: writeJobs && preflightBlocks,
+      stored: udata.gameday_server,
+      nowMs,
+    });
+    const servedHeld = !writeStarts && sticky.hold;
+    if (servedHeld || sticky.expired) {
+      // One row per stale run (no per-tick field, so arrayUnion dedupes it):
+      // when the run began, and whether `served` is still held through it.
+      logRows.push({
+        uid,
+        action: servedHeld ? "served_held" : "served_hold_expired",
+        reason: "preflight_bridge_stale",
+        staleSince: new Date(sticky.staleSinceMs ?? nowMs).toISOString(),
+      });
+      if (servedHeld) stats.servedHeld = (stats.servedHeld ?? 0) + 1;
+    }
     if (writeJobs && preflight !== null && !preflight.ok) {
       // One row per (uid, reasons) per day — no per-tick field, so arrayUnion
       // dedupes it exactly like the gate rows.
@@ -1323,8 +1397,10 @@ export async function runPlannerTick(
         // B2: a team is "served" when the server could build its fire at all —
         // participation usable and a payload the server path accepts (a
         // per-pixel saved design is refused). Independent of whether a game is
-        // on the board today.
-        if (controller && writeStarts) {
+        // on the board today. A held tick (B2 sticky) lists them as the last
+        // good tick did: the list is a property of the config and the
+        // controller, not of the heartbeat.
+        if (controller && (writeStarts || servedHeld)) {
           const pv = participationForFire(controller.data(), nowMs);
           if (
             pv.usable &&
@@ -2059,15 +2135,30 @@ export async function runPlannerTick(
     }
 
     // ── B2: users/{uid}.gameday_server ──────────────────────────────────
-    // served = this account's starts are minted by the server this tick.
-    // Written EVERY tick for a served account (D1: `checked_at` is the
-    // heartbeat the app uses to distrust a dead planner) and ON CHANGE
+    // served = this account's starts are minted by the server this tick — or,
+    // with `served_sticky` on, were until a bridge write gap began less than
+    // 30 min ago (`servedHeld`; the verdict itself is published unchanged in
+    // `preflight`).
+    // Written EVERY tick for a served account, held or not (D1: `checked_at`
+    // is the heartbeat the app uses to distrust a dead planner) and ON CHANGE
     // otherwise. Dotted-path update: each named field is replaced whole, and
     // the dispatcher-owned `last_fire` is never touched. Inside a catch, like
     // the gate persist above — a failed status write must never stop planning.
     if (flags.publishServerStatus) {
       try {
-        const served = writeStarts;
+        const served = writeStarts || servedHeld;
+        // B2 sticky: `stale_since` exactly as decideServedSticky defines it. A
+        // time while P2 is failing with the flag on; otherwise removed, and
+        // only from a doc that carries it — with the flag never on, this adds
+        // no field to any write.
+        const storedSince =
+          (udata.gameday_server as Record<string, unknown> | undefined)?.stale_since;
+        const staleSincePatch: Record<string, unknown> =
+          sticky.staleSinceMs !== null
+            ? { "gameday_server.stale_since": admin.firestore.Timestamp.fromMillis(sticky.staleSinceMs) }
+            : storedSince !== undefined
+              ? { "gameday_server.stale_since": admin.firestore.FieldValue.delete() }
+              : {};
         let nextFire: NextFire | null = null;
         if (served) {
           const sched = await db
@@ -2114,6 +2205,7 @@ export async function runPlannerTick(
                   fire_at: admin.firestore.Timestamp.fromMillis(core.next_fire.fire_at_ms),
                 }
               : null,
+            ...staleSincePatch,
           });
           stats.serverStatusWrites++;
         }
@@ -2166,6 +2258,9 @@ export async function runPlannerTick(
     preflightObserved: stats.preflightObserved,
     p6Probes: stats.p6Probes,
     serverStatusWrites: stats.serverStatusWrites,
+    // B2 sticky: only on a tick that held someone, so every other tick's
+    // summary is the one it always was.
+    ...(stats.servedHeld ? { servedHeld: stats.servedHeld } : {}),
     espnErrors: stats.espnErrors,
     // Distinct ESPN URLs requested — one request each (the per-tick cache).
     espnFetches: stats.espnFetches,

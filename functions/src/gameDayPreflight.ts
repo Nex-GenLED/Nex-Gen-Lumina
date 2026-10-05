@@ -26,7 +26,8 @@
  *   P2 bridge healthy    users/{uid}/bridge_status/current server updateTime
  *                        within 5 min. The heartbeat PATCH carries no
  *                        timestamp field, so the server's updateTime IS the
- *                        heartbeat clock.
+ *                        heartbeat clock. With `preflight_bridge_grace` on for
+ *                        the account the window is 15 min (fix A below).
  *   P3 participation     participating_channels a non-empty int array,
  *                        participating_channels_at within 30 days,
  *                        participating_channels_device_ids non-empty.
@@ -44,6 +45,17 @@
  *                        start. See decideP6.
  *   P7 app build ≥ 114   INFORMATIONAL ONLY (`lease_hygiene_unknown`). Never
  *                        a skip.
+ *
+ * THE BRIDGE WRITE GAP (2026-10-05). Fleet bridges on firmware 1.2 stop landing
+ * Firestore writes for about ten minutes at a time, a few times a day, without
+ * rebooting. Each gap fails P2 on one or two planner ticks. Two flags, both
+ * default OFF, both `true` or a uid list (gameDayPlanning.flagScopeFrom):
+ *   A   `preflight_bridge_grace`  P2's window is 15 min instead of 5, so a
+ *                                 ten-minute gap does not fail P2 at all.
+ *   B2  `served_sticky`           a P2 failure no longer flips the published
+ *                                 `gameday_server.served` until it has lasted
+ *                                 30 min. See decideServedSticky.
+ * Neither changes what a failing tick mints: no start on a tick P2 fails.
  */
 
 import { FlagScope, flagScopeFrom } from "./gameDayPlanning";
@@ -59,6 +71,18 @@ export const PREFLIGHT_PROBE_ID_PREFIX = "gdpre";
 
 /** P2: the heartbeat is every 30 s; ten missed beats is not a blip. */
 export const BRIDGE_STALE_MS = 5 * 60_000;
+/**
+ * P2 with `preflight_bridge_grace` on (fix A): the observed write gap is about
+ * ten minutes, so the window that tells a gap from a dead bridge is 15.
+ */
+export const BRIDGE_STALE_GRACE_MS = 15 * 60_000;
+/**
+ * B2 sticky (`served_sticky`): how long P2 may fail WITHOUT A BREAK before the
+ * published `served` follows it. Matches the app's own staleness window
+ * (kServerStatusStaleAfter, 30 min): the app already trusts a served flag for
+ * that long with no planner at all.
+ */
+export const SERVED_STICKY_MS = 30 * 60_000;
 /** P3: stricter than the 90-day fire floor (participationForFire). */
 export const PREFLIGHT_PARTICIPATION_MAX_AGE_MS = 30 * 86_400_000;
 /** P6: the second probe is written no sooner than this after the first. */
@@ -139,6 +163,29 @@ export function ladderLitSettingFrom(data: Record<string, unknown> | undefined):
   return v === "strict" ? "strict" : flagScopeFrom(v);
 }
 
+/**
+ * `config/gameday_planner.preflight_bridge_grace` — fix A. Default OFF.
+ * Exactly `true` (every account) or a uid list (only those accounts); anything
+ * else is off and P2 keeps its 5-minute window.
+ */
+export function bridgeGraceScopeFrom(data: Record<string, unknown> | undefined): FlagScope | null {
+  return flagScopeFrom(data?.preflight_bridge_grace);
+}
+
+/** P2's freshness window for one account. */
+export function bridgeStaleMsFor(graceOn: boolean): number {
+  return graceOn ? BRIDGE_STALE_GRACE_MS : BRIDGE_STALE_MS;
+}
+
+/**
+ * `config/gameday_planner.served_sticky` — B2 sticky. Default OFF. Exactly
+ * `true` or a uid list; anything else is off and `served` follows every tick's
+ * verdict, as A+B shipped it.
+ */
+export function servedStickyScopeFrom(data: Record<string, unknown> | undefined): FlagScope | null {
+  return flagScopeFrom(data?.served_sticky);
+}
+
 /** The mode for one account. Without a uid, a uid list reads as off. */
 export function ladderLitModeFor(setting: LadderLitSetting, uid?: string): LadderLitMode {
   if (setting === "strict") return "strict";
@@ -172,10 +219,18 @@ export function checkBridgePaired(paired: boolean | null): PreflightReason | nul
   return paired === false ? "preflight_no_bridge" : null;
 }
 
-/** P2. `updateMs` null = no bridge_status/current at all. */
-export function checkBridgeFresh(updateMs: number | null, nowMs: number): PreflightReason | null {
+/**
+ * P2. `updateMs` null = no bridge_status/current at all. `staleMs` is the
+ * window for this account (bridgeStaleMsFor); a heartbeat exactly that old is
+ * still fresh.
+ */
+export function checkBridgeFresh(
+  updateMs: number | null,
+  nowMs: number,
+  staleMs: number = BRIDGE_STALE_MS
+): PreflightReason | null {
   if (updateMs === null) return "preflight_bridge_stale";
-  return nowMs - updateMs > BRIDGE_STALE_MS ? "preflight_bridge_stale" : null;
+  return nowMs - updateMs > staleMs ? "preflight_bridge_stale" : null;
 }
 
 /** P3, over the controller document the planner fires into. */
@@ -256,6 +311,8 @@ export interface PreflightInputs {
   nowMs: number;
   /** P4b (#146). Absent = "off": the pre-flight exactly as A+B shipped it. */
   ladderLit?: LadderLitMode;
+  /** Fix A. P2's window for this account. Absent = BRIDGE_STALE_MS (5 min). */
+  bridgeStaleMs?: number;
 }
 
 export interface PreflightVerdict {
@@ -273,7 +330,7 @@ export function evaluatePreflight(i: PreflightInputs): PreflightVerdict {
     if (r !== null) reasons.push(r);
   };
   push(checkBridgePaired(i.bridgePaired));
-  push(checkBridgeFresh(i.bridgeStatusUpdateMs, i.nowMs));
+  push(checkBridgeFresh(i.bridgeStatusUpdateMs, i.nowMs, i.bridgeStaleMs ?? BRIDGE_STALE_MS));
   push(checkParticipation(i.controller, i.nowMs));
   push(checkLadder(i.controller));
   const lit = checkLadderLit(i.controller, i.ladderLit ?? "off");
@@ -467,6 +524,94 @@ export function storedServerStatusKey(stored: unknown): string | null {
           }
         : null,
   });
+}
+
+// ---------------------------------------------------------------------------
+// B2 sticky — `served` rides through a short bridge write gap (`served_sticky`)
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY. `served` was "this tick mints starts". A bridge that misses ten minutes
+ * of Firestore writes fails P2 on one or two ticks, so each gap published
+ * `served:false, teams:[]` for about five minutes. App builds 114 and 115 read
+ * that live: an app open on the home network during that window sees "not
+ * served" and arms the phone's own lease (a preset save and a timer row) for a
+ * game the server is about to run.
+ *
+ * `gameday_server.stale_since` — DEFINED. With the flag on for the account, it
+ * is the clock of the planner tick on which P2 (`preflight_bridge_stale`) first
+ * failed in the current UNBROKEN run of failing ticks:
+ *   - set to that tick's `nowMs` on the first tick P2 fails;
+ *   - carried unchanged on every later tick P2 still fails;
+ *   - absent on any tick P2 does not fail (the bridge wrote again, or
+ *     pre-flight did not run for the account), and whenever the flag is off.
+ * "Continuously" therefore means "on every planner tick since", at the
+ * planner's 5-minute cadence; a single passing tick ends the run.
+ *
+ * THE HOLD. `served` is published TRUE on a tick that mints no start when ALL of:
+ *   1. the flag is on for the account;
+ *   2. pre-flight is what withheld the start (enforce mode, verdict failed);
+ *   3. `preflight_bridge_stale` is the ONLY failing reason. Any other reason
+ *      (no bridge, participation, ladder, gate, unreachable) is not a write
+ *      gap, and flips `served` at once, as before;
+ *   4. the stored `served` is true. A hold keeps a statement the planner has
+ *      already made; it never makes one for an account that was not served;
+ *   5. now − stale_since < SERVED_STICKY_MS (30 min).
+ * At 30 minutes the hold ends and the tick publishes what an unflagged stale
+ * tick publishes: `served:false`, `teams:[]`, and the reasons.
+ *
+ * WHAT A HOLD DOES NOT CHANGE. No start is minted on a held tick, the
+ * `preflight_skip` row and the scorecard skip are written as before, and
+ * `gameday_server.preflight` carries the real verdict (`ok:false`, the
+ * reasons). Ends were never gated by pre-flight and are not gated by this.
+ */
+export interface ServedStickyInputs {
+  /** `served_sticky` is on for this account. */
+  stickyOn: boolean;
+  /** This tick's verdict. null = pre-flight did not run (not allowlisted). */
+  preflight: PreflightVerdict | null;
+  /**
+   * Pre-flight is the reason no start is minted this tick: the account is
+   * allowlisted and gate-armed, the mode is enforce, and the verdict failed.
+   */
+  startsWithheld: boolean;
+  /** The `gameday_server` map as stored BEFORE this tick's write. */
+  stored: unknown;
+  nowMs: number;
+}
+
+export interface ServedStickyDecision {
+  /** Publish `served:true` and the servable teams although no start is minted. */
+  hold: boolean;
+  /**
+   * The hold applied until now and P2 has failed for SERVED_STICKY_MS: `served`
+   * follows the verdict from this tick on. True on that one tick only.
+   */
+  expired: boolean;
+  /**
+   * What `gameday_server.stale_since` must be after this tick: a time (set, or
+   * carried) while P2 is failing with the flag on; null (absent) otherwise.
+   */
+  staleSinceMs: number | null;
+}
+
+/** PURE. See the block comment above for the definition. */
+export function decideServedSticky(i: ServedStickyInputs): ServedStickyDecision {
+  const pf = i.preflight;
+  if (!i.stickyOn || pf === null || !pf.reasons.includes("preflight_bridge_stale")) {
+    return { hold: false, expired: false, staleSinceMs: null };
+  }
+  const stored =
+    i.stored && typeof i.stored === "object" ? (i.stored as Record<string, unknown>) : {};
+  const prior = millis(stored.stale_since);
+  // A stored time later than this tick is not a run this tick continues.
+  const since = prior !== null && prior <= i.nowMs ? prior : i.nowMs;
+  const eligible =
+    i.startsWithheld &&
+    stored.served === true &&
+    pf.reasons.every((r) => r === "preflight_bridge_stale");
+  const within = i.nowMs - since < SERVED_STICKY_MS;
+  return { hold: eligible && within, expired: eligible && !within, staleSinceMs: since };
 }
 
 // ---------------------------------------------------------------------------
