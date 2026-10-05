@@ -156,6 +156,24 @@ goes on a NEW bump + tag (never rewrite a public tag).
 
 ## Operational flags
 
+### RULES DEPLOY — shared bridge identity limited to firmware 1.2's operations — 2026-10-05
+
+| item | value |
+|---|---|
+| Deployed | 2026-10-05 15:10:26–15:11:30 UTC: `firebase deploy --only firestore:rules --project icrt6menwsv2d8all8oijs021b06s5` from `security/bridge-rules` at `32290c2` (worktree clean). Rules only. |
+| Live ruleset | `cloud.firestore` → `b5a1764a-32e4-4c0a-978a-63304ef991dd`, released 2026-10-05T15:11:31Z, byte-identical to `firestore.rules` at `32290c2` (= this branch from `39ac4c2` on) |
+| Previous ruleset (rollback target) | `f7b0658e-3aa1-4a25-ab51-bcb876282a27`, released 2026-09-20T01:14:09Z, byte-identical to `firestore.rules` at `5e09663` and `7bc8c3e` |
+| Merge | `39ac4c2` = `--no-ff` of `32290c2` into this branch at `7bc8c3e`. The merge diff is byte-identical to `32290c2`'s: `firestore.rules`, `functions/test/emulator/bridgeLeastPrivilegeRules.emulator.test.ts`, one README line. Branch push only; no tag, no build, no version change. |
+| Change | The bridge branches admit only what bridge firmware 1.2 does. **commands**: list only with `status == "pending"`, no get; update only `status` / `completedAt` / `error` / `result`, only pending → executing and pending/executing → completed/failed. **bridge_status**: no read; only doc `current`, only the seven heartbeat fields, typed. **bridge_registry**: get only (no list); create only as the full 14-field self-registration; every changed field must hold the value the firmware writes; no user pairing arm for the bridge identity. |
+| Not changed | Owner, staff, installer, user-pairing and anonymous paths; functions, indexes, storage, config. |
+| Tests | `bridgeLeastPrivilegeRules.emulator.test.ts`: 100 raw-REST requests against this ruleset and the previous one, 202/202 — 39 deltas, all the bridge identity going ALLOW → DENY, none for any other caller. Full emulator suite 420/422; the 2 are the pre-existing #119 `commercialRules` cross-dealer cases (baseline 218/220, same two). PII scan of every added line and both commit messages clean. |
+| Pre-deploy (14:50Z, read-only) | Live ruleset == `7bc8c3e` rules (MATCH). 15 paired bridges online, all firmware 1.2, heartbeats < 30 s, each paired user doc delegating to the account its registry doc names. Last 24 h: 62 completed, 2 failed, 0 pending / executing / expired. No Game Day fire job scheduled in the next 2 h or in flight. |
+| Post-deploy (read-only) | Live == branch (MATCH). All 15 bridges' heartbeats written under the new rules by 15:13:47Z, every one < 32 s old. Bench relay commands from a phone on cellular (ping, getState, getInfo / Remote Access check, applyJson / brightness) all completed in 1.6–9.2 s (p50 4.2 s); 0 pending or executing; `errors` flat on the bridge that ran them. |
+| Evening re-check | 17:00 CDT on natural traffic, rollback decision deadline 17:30 CDT (before the 18:15 CDT bench Game Day window). A rollback gets its own row. |
+| Rollback (instant) | Re-point the release; no recompile: `curl -X PATCH -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "x-goog-user-project: icrt6menwsv2d8all8oijs021b06s5" -H "Content-Type: application/json" "https://firebaserules.googleapis.com/v1/projects/icrt6menwsv2d8all8oijs021b06s5/releases/cloud.firestore" -d '{"release":{"name":"projects/icrt6menwsv2d8all8oijs021b06s5/releases/cloud.firestore","rulesetName":"projects/icrt6menwsv2d8all8oijs021b06s5/rulesets/f7b0658e-3aa1-4a25-ab51-bcb876282a27"}}'`. Then GET the release to confirm it names `f7b0658e`. |
+| Rollback (recompile) | `git worktree add --detach <tmp> 5e09663`, then from `<tmp>`: `firebase deploy --only firestore:rules --project icrt6menwsv2d8all8oijs021b06s5`. After either rollback, revert `39ac4c2` on this branch so the next rules deploy does not re-apply it. |
+| Hazard | Any rules deploy from a branch that lacks `39ac4c2` silently reverts this. Bridge firmware 1.3 writes fields this ruleset denies on commands, bridge_status and bridge_registry: widen the bridge allowlists in a rules deploy before any 1.3 unit is flashed. |
+
 ### +115 — build-115 tagged 2026-10-04 (Codemagic build number: pending) — Lumina on every channel, favorites you saved (cap 2), celebration length, and a celebration that always ends
 
 | item | value |
