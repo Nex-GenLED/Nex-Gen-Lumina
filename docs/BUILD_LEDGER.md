@@ -156,6 +156,38 @@ goes on a NEW bump + tag (never rewrite a public tag).
 
 ## Operational flags
 
+### +115 — build-115 tagged 2026-10-04 (Codemagic build number: pending) — Lumina on every channel, favorites you saved (cap 2), celebration length, and a celebration that always ends
+
+| item | value |
+|---|---|
+| Tag | `build-115` = `e055540` (the `--no-ff` merge of `fix/116-lumina-channels-favorites` @ `f77be06` into `release/store-submission-consolidated`; the bump 2.5.10+115 rides on the branch as `ee06511`; this row lands after, outside the tag). The branch is named 116 after its tracker batch; the build is 115. |
+| Base | `5e09663` (= `build-114` + its ledger row) |
+| Contents — Lumina (#163) | One look for the house reaches every participating channel as one fully stated segment each. Team, holiday and multi-night builders pinned `id:0`, and a cloud reply could too, so multi-channel homes lit channel 1 only. A channel picked on the Home bar no longer narrows Lumina. The reply card says "Sent to: All N channels" from the write's own report instead of a hard-coded "All Zones" (`3a55d58`). |
+| Contents — favorites (#164) | Nothing adds a favorite on its own: the habit learner's automatic favorites (`7b166b7`, made visible in +110) and every other automatic writer are removed. A cap of two saved favorites, with a one-batch Replace and "You can keep 2 favorites. Remove one to add another." Home's "+" hides at the cap (`cc787dd`). Home shows only the favorites the customer saved. Automatic (`auto_added: true`) favorites are never deleted or changed: they stay in the data, are not shown and do not count. The white tiles do not count (`c775459`). |
+| Contents — diagnostics (#166) | No widget `ref` after an await on the Game Day screen (`72d20d6`). None in any `dispose` (`InstallerSetupWizard`, plus an app-wide guard test). `app_version` on every `debug_errors` record (`28bb927`). The remaining async sites are ranked in debt #166 for the next build. |
+| Contents — effect names (#167) | Every effect name a customer reads is the controller's own: fx 12 = Fade, not "Theater Chase"; 41 Lighthouse, 43 Rain, 52 Running Dual, 63 Pride 2015. Covers the schedule card and detail, Lumina names, the multi-night planner and the Game Day design label. No effect id changes (#168 decided: keep the effects) (`d6fa852`). |
+| Contents — celebrations (#169, #170) | **Length** (app half): Short x0.5 / Medium x1 (today; absent = Medium) / Long x2 of each event's current duration. Every celebration is clamped to 5–60 s in code. A Length picker sits under Speed with touchdown seconds (8 / 15 / 30). An NFL extra point plays nothing. A two-point conversion plays at Short (`f960983`). **Always ends**: before playing, the phone stores a marker (`celebration_in_progress.v1`) holding the capture and a deadline (clamped length + 10 s). Playback stops at the deadline. A resume, cold start or controller connect finishes a leftover marker: to the capture, or the base look if the capture is lost, with OFF staying off. A team the server runs is left to the server (`dc87ca1`). |
+| Also | Debt and spec docs (`8e041c7`, `bf01844`). Bump (`ee06511`). The two tracked `evidence/` probe fakes follow the #170 interface (`f77be06`, analyzer only). |
+| Gates on `e055540` | Carried from the gated branch tip: `git diff --stat f77be06 e055540` is EMPTY and both trees are `18b2f59`, so the `f77be06` results in the next row are the tag's results. PII scan of every added line and commit message `5e09663..f77be06` clean. |
+| Branch gates (`f77be06`, 2026-10-04, after `flutter clean`) | local 3.41.2: analyze 0 / 12 / 355 · 5,205 pass / 37 skip / 0 fail — 3.47.5 `TZ=UTC0`: 0 / 12 / 360 · 5,205 / 37 / 0, lock + yaml restored · the 12 warnings are identical to the `8e041c7` gate · `functions/` `9002c3a` == base · branch pushed (branch only). The first run, on `ee06511`, found 4 analyzer errors in the two `evidence/` fakes; fixed in `f77be06` and re-gated from scratch. |
+| Functions | No deploy: the `functions/` tree is `9002c3a`, byte-identical to `5e09663`. No rules, indexes or config changed. The server half of celebration length (S5b) is not built, so server-run celebrations play today's lengths. |
+| Config | None. |
+| Check-run | GitHub check-run `111566766277` "iOS Release" on `e055540`: completed / **success** 2026-10-04 23:58:03Z → 2026-10-05 00:18:33Z (20.5 min; opened as `111562902113`, which stays `in_progress` — the result arrived under the new id, as with +109, +112 and +114). Every step OK: Preparing build machine 0:25 · Fetching app sources 0:05 · Installing SDKs 1:05 · keychain/signing 0:05 · **Test and analyze (build gate) 12:11** · Set build number 0:01 · Install CocoaPods 0:21 · Build IPA 4:32 · Dump signed entitlements 0:01 · **Publishing 1:36** · Cleaning up 0:00. |
+| iOS build number | pending |
+| Android | NOT built (#125). The next Android artifact must be ≥ versionCode 115. |
+| Rollback | below |
+
+**Rollback: what persists if build 115 is expired and testers go back to 114.** This build wrote nothing to any controller beyond what the customer applied, and nothing needs cleaning up.
+1. **Favorites are hidden, not deleted.** The automatic favorites the retired habit learner wrote are still in each account's data. 114 shows every favorite again, and its learner starts writing automatic ones again on resume. Favorites saved on 115 are ordinary favorites, which 114 shows and its learner leaves alone.
+2. **Dated celebration markers.** A phone that was interrupted mid-celebration on 115 may hold a local `celebration_in_progress.v1` marker (capture, start and end-by time). 114 never reads it; it stays on the phone, unused.
+3. **Celebration length.** Teams set to Short or Long carry `celebration_length` on `users/{uid}/game_day_autopilot/{team}`. 114 ignores it and plays today's lengths. 114 writes team docs with `update()`, so the field survives for a later 115. An extra point celebrates again on 114.
+4. **Lumina.** On 114, team, holiday and multi-night looks light channel 1 only again on multi-channel homes, and the card says "All Zones" again.
+5. **Effect names** go back to the old labels (fx 12 reads "Theater Chase"). The looks do not change.
+6. **`debug_errors`.** Records from 115 carry `app_version`; 114's do not. Both read fine.
+
+**Tester text (return to 114):**
+> Build 115 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install 2.5.10 (114). Your schedules, teams, designs and roofline stay. A few things go back to how they were: Lumina may change only one of your channels for a team look, My Favorites can fill with patterns you use often again, and celebrations play their standard length. If you see anything wrong after switching, tell us the date and time.
+
 ### +114 — build-114 tagged 2026-10-02 (Codemagic build number: pending) — roofline (+113), Game Day/ladder (+114) and the design-card fix (+115 bug 2) in ONE build
 
 | item | value |
