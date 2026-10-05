@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/installer/map_roofline/roofline_capture_logic.dart';
@@ -50,7 +51,7 @@ class _MapRooflineStepState extends ConsumerState<MapRooflineStep> {
       if (ref.read(selectedDeviceIpProvider) != null) return;
       final fromWizard = ref.read(installerSelectedControllerIpProvider);
       if (fromWizard == null) return;
-      ref.read(selectedDeviceIpProvider.notifier).state = fromWizard;
+      ref.read(controllerSelectionProvider.notifier).pointAt(fromWizard);
     });
   }
 

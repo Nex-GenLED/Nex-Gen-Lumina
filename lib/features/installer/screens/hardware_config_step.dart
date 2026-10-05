@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/wled/hardware_config_screen.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart';
@@ -43,7 +44,7 @@ class _HardwareConfigStepState extends ConsumerState<HardwareConfigStep> {
     if (existing != null) return existing;
     final fromWizard = ref.read(installerSelectedControllerIpProvider);
     if (fromWizard != null) {
-      ref.read(selectedDeviceIpProvider.notifier).state = fromWizard;
+      ref.read(controllerSelectionProvider.notifier).pointAt(fromWizard);
     }
     return fromWizard;
   }

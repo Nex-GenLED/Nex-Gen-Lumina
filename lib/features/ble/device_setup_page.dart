@@ -9,11 +9,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:nexgen_command/app_providers.dart';
-import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
@@ -502,7 +502,7 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
           _provisionedIp = ip;
           _showSuccessOverlay = true;
         });
-        ref.read(selectedDeviceIpProvider.notifier).state = ip;
+        ref.read(controllerSelectionProvider.notifier).pointAt(ip);
         // Proactively refresh dashboard-related providers
         try {
           ref.invalidate(controllersStreamProvider);
@@ -560,7 +560,7 @@ class _DeviceSetupPageState extends ConsumerState<DeviceSetupPage> with SingleTi
     final saved = result.savedToAccount;
     final done = saved && result.reachable;
     if (saved) {
-      ref.read(selectedDeviceIpProvider.notifier).state = result.ip;
+      ref.read(controllerSelectionProvider.notifier).pointAt(result.ip);
       // Proactively refresh dashboard-related providers to reflect the new
       // device immediately.
       try {

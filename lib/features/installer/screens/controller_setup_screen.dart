@@ -7,11 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nexgen_command/app_router.dart';
-import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:nexgen_command/models/controller_type.dart';
@@ -855,7 +855,7 @@ class _ControllerSetupScreenState extends ConsumerState<ControllerSetupScreen> {
       statusById: _controllerStatus,
     );
     if (ip != null) {
-      ref.read(selectedDeviceIpProvider.notifier).state = ip;
+      ref.read(controllerSelectionProvider.notifier).pointAt(ip);
       debugPrint('Installer: wizard selection → selectedDeviceIp=$ip');
     }
 

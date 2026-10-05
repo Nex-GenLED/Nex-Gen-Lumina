@@ -24,6 +24,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -131,6 +132,9 @@ Future<_Harness> _harness() async {
         .overrideWith((ref) => Stream<UserModel?>.value(null)),
     pairedBridgeProvider
         .overrideWith((ref) => Stream.value(const PairedBridgeLookup.none())),
+    // No network in tests: nothing answers, so with several records and no
+    // saved choice the newest record is selected (#118 rule 8).
+    controllerReachabilityProbeProvider.overrideWithValue((ip) async => false),
   ]);
   final h = _Harness(c, auth, db);
   addTearDown(() async {

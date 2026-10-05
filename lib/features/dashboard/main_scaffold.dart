@@ -12,6 +12,7 @@ import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
@@ -141,6 +142,8 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
   @override
   Widget build(BuildContext context) {
     ref.watch(autoConnectControllerProvider);
+    // #118: remembers the controller this phone most recently connected to.
+    ref.watch(controllerConnectionStampProvider);
     ref.watch(installationConfigLoaderProvider);
     ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
     // Foreground score celebrations: keep the driver alive so it pushes the
