@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_choice_prompt.dart';
 import 'package:nexgen_command/features/site/controller_selection.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
@@ -58,7 +58,9 @@ class _MyControllersTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncControllers = ref.watch(controllersStreamProvider);
-    final selectedIp = ref.watch(selectedDeviceIpProvider);
+    // #118: the active record by its id; a choice only with 2+ records.
+    final selectedId = ref.watch(selectedControllerIdProvider);
+    final canChoose = ref.watch(controllerChoiceAvailableProvider);
     final deleteController = ref.watch(deleteControllerProvider);
 
     return Padding(
@@ -93,18 +95,18 @@ class _MyControllersTab extends ConsumerWidget {
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
                 itemBuilder: (context, i) {
                   final c = items[i];
-                  final isActive = c.ip == selectedIp;
+                  final isActive = c.id == selectedId;
 
                   return _ControllerTile(
                     controller: c,
                     isActive: isActive,
-                    onTap: isActive
+                    onTap: isActive || !canChoose
                         ? null
                         : () {
                             ref.read(controllerSelectionProvider.notifier).use(c.id);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('${c.name ?? "Controller"} is now active'),
+                                content: Text('This phone now uses ${c.name ?? "this controller"}'),
                                 backgroundColor: Colors.green,
                                 duration: const Duration(seconds: 2),
                               ),
@@ -129,33 +131,38 @@ class _MyControllersTab extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(item.name ?? 'Controller Details'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DetailRow(label: 'Name', value: item.name ?? 'Unnamed'),
-            _DetailRow(label: 'IP Address', value: item.ip),
-            _DetailRow(label: 'Serial', value: item.serial ?? 'N/A'),
-            if (item.ssid != null) _DetailRow(label: 'Wi-Fi Network', value: item.ssid!),
-            _DetailRow(label: 'Wi-Fi Configured', value: (item.wifiConfigured == true || item.ip.isNotEmpty) ? 'Yes' : 'No'),
-            if (item.createdAt != null)
-              _DetailRow(label: 'Added', value: _formatDate(item.createdAt!)),
-            if (item.updatedAt != null)
-              _DetailRow(label: 'Last Updated', value: _formatDate(item.updatedAt!)),
-          ],
+        // #118: scrolls at large text sizes (it overflowed at 1.75x and 2.0x
+        // with Bold Text).
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _DetailRow(label: 'Name', value: item.name ?? 'Unnamed'),
+              _DetailRow(label: 'IP Address', value: item.ip),
+              _DetailRow(label: 'Serial', value: item.serial ?? 'N/A'),
+              if (item.ssid != null) _DetailRow(label: 'Wi-Fi Network', value: item.ssid!),
+              _DetailRow(label: 'Wi-Fi Configured', value: (item.wifiConfigured == true || item.ip.isNotEmpty) ? 'Yes' : 'No'),
+              if (item.createdAt != null)
+                _DetailRow(label: 'Added', value: _formatDate(item.createdAt!)),
+              if (item.updatedAt != null)
+                _DetailRow(label: 'Last Updated', value: _formatDate(item.updatedAt!)),
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Close'),
           ),
-          if (ref.read(selectedDeviceIpProvider) != item.ip)
+          if (ref.read(controllerChoiceAvailableProvider) &&
+              ref.read(selectedControllerIdProvider) != item.id)
             FilledButton(
               onPressed: () {
                 ref.read(controllerSelectionProvider.notifier).use(item.id);
                 Navigator.of(ctx).pop();
               },
-              child: const Text('Set as Active'),
+              child: const Text(kUseThisControllerLabel),
             ),
         ],
       ),

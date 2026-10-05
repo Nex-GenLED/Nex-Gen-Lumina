@@ -1,5 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_selection.dart';
+import 'package:nexgen_command/features/site/controller_choice_prompt.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/services/bridge_pairing.dart';
@@ -10,6 +13,16 @@ import 'package:nexgen_command/shared/write_result.dart';
 enum ApplyBlock {
   /// No controller is selected or registered.
   noController,
+
+  /// #118 — two or more of the account's controllers answered and the
+  /// customer has not said which one this phone uses.
+  chooseController,
+
+  /// #118 — this phone is pointed at an address that is none of this
+  /// account's controllers (a selection left over from another account,
+  /// or a record's old address). Nothing about remote access or a bridge
+  /// is wrong, and saying so sent customers to the wrong screen.
+  notThisAccount,
 
   /// The phone has no network at all.
   offline,
@@ -81,6 +94,13 @@ final applyBlockedReasonProvider = Provider<ApplyBlockedReason?>((ref) {
 
   if (ref.watch(wledRepositoryProvider) == null) {
     if (ref.watch(selectedDeviceIpProvider) == null) {
+      if (ref.watch(controllerSelectionProvider).needsChoice) {
+        return const ApplyBlockedReason(
+          ApplyBlock.chooseController,
+          'More than one of your controllers is on this network. Choose '
+          'the one this phone should use in $kChooseControllerWhere.',
+        );
+      }
       return const ApplyBlockedReason(
         ApplyBlock.noController,
         'No controller is set up yet. Add your controller in Settings to '
@@ -92,6 +112,19 @@ final applyBlockedReasonProvider = Provider<ApplyBlockedReason?>((ref) {
       return const ApplyBlockedReason(
         ApplyBlock.offline,
         'Your phone is offline. Connect to Wi-Fi or mobile data and try again.',
+      );
+    }
+    // #118: an address that is none of this account's records. The relay
+    // declined for want of a record id, not for want of a bridge or remote
+    // access — say what is actually wrong.
+    final records = ref.watch(controllersStreamProvider).valueOrNull;
+    if (records != null &&
+        records.isNotEmpty &&
+        ref.watch(selectedControllerIdProvider) == null) {
+      return const ApplyBlockedReason(
+        ApplyBlock.notThisAccount,
+        "This phone is set to a controller that isn't on your account. "
+        'Choose your controller in $kChooseControllerWhere.',
       );
     }
     if (remote) {

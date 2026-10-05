@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/geofence/geofence_monitor.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/site/controller_choice_prompt.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/widgets/installer_mode_banner.dart';
@@ -144,6 +145,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     ref.watch(autoConnectControllerProvider);
     // #118: remembers the controller this phone most recently connected to.
     ref.watch(controllerConnectionStampProvider);
+    // #118: "Which controller should this phone use?" — only when two or
+    // more of the account's controllers answer and nothing says which.
+    listenForControllerChoice(ref, context);
     ref.watch(installationConfigLoaderProvider);
     ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
     // Foreground score celebrations: keep the driver alive so it pushes the
