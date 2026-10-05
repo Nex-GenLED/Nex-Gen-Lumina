@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
 import 'package:nexgen_command/shared/explicit_selection.dart';
 
@@ -188,8 +189,22 @@ final deviceDiscoveryServiceProvider = Provider<DeviceDiscoveryService>((ref) =>
 final deviceRepositoryProvider =
     Provider<DeviceRepository>((ref) => DeviceRepository());
 
-/// Selected device IP provider (null until chosen)
-final selectedDeviceIpProvider = StateProvider<String?>((ref) => null);
+/// Selected device IP provider (null until chosen).
+///
+/// #118 — a selection belongs to the account that made it. When the account
+/// whose data the app shows changes away from a signed-in one (sign-out,
+/// another account, an installer opening or leaving a customer), the previous
+/// account's address is dropped here, so auto-connect fills the selection
+/// from the new account's own records. Without this the old address stayed
+/// selected (auto-connect only fills an EMPTY selection) and, matching none of
+/// the new account's records, reached the network with no identity check.
+/// A first sign-in (no previous account) clears nothing.
+final selectedDeviceIpProvider = StateProvider<String?>((ref) {
+  ref.listen<String?>(effectiveUserUidProvider, (previous, next) {
+    if (previous != null && previous != next) ref.controller.state = null;
+  });
+  return null;
+});
 
 /// Async discovery provider that runs once on watch.
 ///
