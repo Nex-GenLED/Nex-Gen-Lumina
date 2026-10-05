@@ -73,18 +73,47 @@ final controllersStreamProvider = StreamProvider<List<ControllerInfo>>((ref) {
 /// `true` having deleted nothing. Read at provider-build time (not inside the
 /// closure) so consumers rebuild when the impersonation target changes, matching
 /// [controllersStreamProvider].
+///
+/// #118 — deleting the ACTIVE controller also lets go of its address, so
+/// auto-connect moves to the next record instead of the app holding an address
+/// that no longer belongs to any record (no identity check, no relay).
 final deleteControllerProvider = Provider<Future<bool> Function(String)>((ref) {
   final uid = ref.watch(effectiveUserUidProvider);
+  final db = ref.watch(controllersFirestoreProvider);
   return (String id) async {
     if (uid == null || uid.isEmpty) return false;
+    // Captured before the await: the address the record had, and the handles
+    // needed to release it afterwards.
+    String? deletedIp;
+    for (final c in ref.read(controllersStreamProvider).valueOrNull ??
+        const <ControllerInfo>[]) {
+      if (c.id == id) deletedIp = c.ip;
+    }
+    final selection = ref.read(selectedDeviceIpProvider.notifier);
+    final deleted = ref.read(deletedControllerIdsProvider.notifier);
     try {
-      await FirebaseFirestore.instance.collection('users').doc(uid).collection('controllers').doc(id).delete();
+      await db.collection('users').doc(uid).collection('controllers').doc(id).delete();
+      // The set is per account; after an account change mid-delete it is gone.
+      if (deleted.mounted) deleted.state = {...deleted.state, id};
+      if (deletedIp != null &&
+          deletedIp.isNotEmpty &&
+          selection.state == deletedIp) {
+        selection.state = null;
+      }
       return true;
     } catch (e) {
       debugPrint('Delete controller failed: $e');
       return false;
     }
   };
+});
+
+/// #118 — record ids deleted from this phone in this session. Auto-connect
+/// skips them, so a controller list that has not yet caught up with the
+/// delete cannot hand the deleted record straight back.
+final deletedControllerIdsProvider = StateProvider<Set<String>>((ref) {
+  ref.watch(effectiveUserUidProvider);
+  return const <String>{};
 });
 
 /// Renames a controller in Firestore.
@@ -125,6 +154,7 @@ final renameControllerProvider = Provider<Future<bool> Function(String, String)>
 final autoConnectControllerProvider = Provider<bool>((ref) {
   final controllersAsync = ref.watch(controllersStreamProvider);
   final currentSelection = ref.watch(selectedDeviceIpProvider);
+  final deleted = ref.watch(deletedControllerIdsProvider);
 
   // If already connected, no action needed
   if (currentSelection != null) {
@@ -132,7 +162,9 @@ final autoConnectControllerProvider = Provider<bool>((ref) {
   }
 
   bool triggered = false;
-  controllersAsync.whenData((controllers) {
+  controllersAsync.whenData((all) {
+    final controllers =
+        all.where((c) => !deleted.contains(c.id)).toList(growable: false);
     if (controllers.isNotEmpty) {
       final firstController = controllers.first;
       if (firstController.ip.isNotEmpty) {
