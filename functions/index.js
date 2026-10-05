@@ -546,6 +546,7 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
   <!-- SECURITY: Load Firebase SDK from CDN -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-functions-compat.js"></script>
   <style nonce="${nonce}">
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -1543,6 +1544,7 @@ exports.googleAuth = onRequest({ region: "us-central1" }, async (req, res) => {
   <title>Link Nex-Gen Lumina to Google Home</title>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-functions-compat.js"></script>
   <style nonce="${nonce}">
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {

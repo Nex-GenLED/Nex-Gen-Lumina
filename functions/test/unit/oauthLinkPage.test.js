@@ -247,8 +247,12 @@ async function call(handler, query) {
 
 const INLINE_SCRIPT = /<script nonce="([^"]+)">([\s\S]*?)<\/script>/;
 
-/** Run the page's inline script with fakes; submit the form; report. */
-async function runPage(html) {
+/**
+ * Run the page's inline script with fakes; submit the form; report.
+ * `namespaces`, when given, limits the fake `firebase` to the namespaces the
+ * page's SDK scripts really define (see sdkNamespaces below).
+ */
+async function runPage(html, { namespaces } = {}) {
   const m = html.match(INLINE_SCRIPT);
   if (!m) throw new Error("no nonce'd inline script");
   const elements = {};
@@ -279,6 +283,11 @@ async function runPage(html) {
       },
     }),
   };
+  if (namespaces) {
+    for (const ns of ["auth", "functions"]) {
+      if (!namespaces.has(ns)) delete firebase[ns];
+    }
+  }
   const sandbox = {
     firebase,
     document: { getElementById: el },
@@ -292,6 +301,45 @@ async function runPage(html) {
   );
   await el("loginForm").handlers.submit({ preventDefault() {} });
   return { sandbox, calls, captured: sandbox.__captured, nonce: m[1], errorText: el("error").textContent };
+}
+
+/**
+ * Load the REAL Firebase compat bundles a page names into a vm context and
+ * return that context. The page pins 10.7.1 on gstatic; the npm `firebase`
+ * devDependency ships the same CDN bundles under the same file names (a newer
+ * version), and the namespace each one registers (firebase.auth,
+ * firebase.functions, …) is the same. Network is disabled: any fetch throws.
+ */
+function sdkContext(html) {
+  const fs = require("fs");
+  const path = require("path");
+  const dir = path.dirname(require.resolve("firebase/package.json"));
+  const srcs = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
+  const quiet = { log() {}, info() {}, warn() {}, error() {}, debug() {} };
+  const ctx = {
+    console: quiet,
+    setTimeout,
+    clearTimeout,
+    navigator: { userAgent: "node" },
+    fetch: () => {
+      throw new Error("network disabled in test");
+    },
+  };
+  ctx.self = ctx;
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  for (const src of srcs) {
+    expect(src.startsWith(FIREBASE_SDK_PATH)).toBe(true);
+    const file = src.slice(FIREBASE_SDK_PATH.length);
+    vm.runInContext(fs.readFileSync(path.join(dir, file), "utf8"), ctx, { filename: file });
+  }
+  return { ctx, files: srcs.map((s) => s.slice(FIREBASE_SDK_PATH.length)) };
+}
+
+/** Which page-used namespaces the page's own SDK scripts really define. */
+function sdkNamespaces(html) {
+  const { ctx } = sdkContext(html);
+  return new Set(["auth", "functions"].filter((ns) => typeof ctx.firebase[ns] === "function"));
 }
 
 describe("alexaAuth / googleAuth handlers (index.js)", () => {
@@ -384,7 +432,7 @@ describe("alexaAuth / googleAuth handlers (index.js)", () => {
       test.each(PAYLOADS)("hostile state is inert through render, script and submit: %s", async (payload) => {
         const res = await call(h(), { client_id: p.client, redirect_uri: p.ok[0], state: payload });
         expect(res.statusCode).toBe(200);
-        expect(res.body.match(/<script\b/gi)).toHaveLength(3); // 2 SDK + 1 inline
+        expect(res.body.match(/<script\b/gi)).toHaveLength(4); // 3 SDK + 1 inline
         if (payload.length > 2 && /[<>&]/.test(payload)) expect(res.body).not.toContain(payload);
         const { sandbox, captured, calls } = await runPage(res.body);
         expect(sandbox.__pwned).toBeUndefined();
@@ -439,5 +487,55 @@ describe("alexaAuth / googleAuth handlers (index.js)", () => {
     const minted = JSON.parse(Buffer.from(calls[0].data.state, "base64").toString("utf8"));
     expect(minted.originalState).toBe(`</script>"'`);
     expect(calls[0].data.idToken).toBe("fake-id-token");
+  });
+
+  // -------------------------------------------------------------------------
+  // The link fix: both pages call firebase.functions(), which only exists
+  // once firebase-functions-compat.js is loaded. Without it the call threw
+  // "firebase.functions is not a function" in the browser right after a
+  // successful sign-in, so no account was ever linked.
+  // -------------------------------------------------------------------------
+  describe("SDK scripts cover every firebase namespace the page calls", () => {
+    for (const p of [
+      { name: "alexaAuth", client: ALEXA_CLIENT, ok: ALEXA_OK, callable: "generateAlexaAuthCode" },
+      { name: "googleAuth", client: GOOGLE_CLIENT, ok: GOOGLE_OK, callable: "generateGoogleAuthCode" },
+    ]) {
+      const page = async () =>
+        (await call(idx[p.name], { client_id: p.client, redirect_uri: p.ok[0], state: "s" })).body;
+
+      test(`${p.name}: a compat script, in load order, for each namespace used`, async () => {
+        const html = await page();
+        const inline = html.match(INLINE_SCRIPT)[2];
+        const used = new Set([...inline.matchAll(/firebase\.(\w+)\(/g)].map((m) => m[1]));
+        expect([...used].sort()).toEqual(["auth", "functions", "initializeApp"]);
+        const { files } = sdkContext(html);
+        expect(files).toEqual([
+          "firebase-app-compat.js", // defines firebase.initializeApp; must load first
+          "firebase-auth-compat.js",
+          "firebase-functions-compat.js",
+        ]);
+      });
+
+      test(`${p.name}: the real SDK defines firebase.functions and the callable builds`, async () => {
+        const { ctx } = sdkContext(await page());
+        expect(typeof ctx.firebase.functions).toBe("function");
+        const callable = vm.runInContext(
+          `firebase.initializeApp({ apiKey: "k", projectId: "demo-voice-project" });
+           firebase.functions().httpsCallable(${JSON.stringify(p.callable)})`,
+          ctx
+        );
+        expect(typeof callable).toBe("function");
+      });
+
+      test(`${p.name}: sign-in → callable → redirect completes with the real namespaces`, async () => {
+        const html = await page();
+        const namespaces = sdkNamespaces(html);
+        expect([...namespaces].sort()).toEqual(["auth", "functions"]);
+        const { sandbox, calls, errorText } = await runPage(html, { namespaces });
+        expect(errorText).toBe("");
+        expect(calls.map((c) => c.name)).toEqual([p.callable]);
+        expect(sandbox.window.location.href).toBe(`${p.ok[0]}?state=s&code=FAKECODE`);
+      });
+    }
   });
 });
