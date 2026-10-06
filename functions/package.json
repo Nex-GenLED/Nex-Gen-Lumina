@@ -7,6 +7,7 @@
     "test": "jest",
     "test:unit": "tsc && jest",
     "test:emulator": "jest --config jest.emulator.config.js --runInBand",
+    "test:voice": "tsc -p tsconfig.test.json && node --test \"lib-test/test/voice/**/*.test.js\"",
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",

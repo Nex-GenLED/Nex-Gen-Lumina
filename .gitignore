@@ -253,3 +253,5 @@ functions/scripts/_*.js
 # unaffected (ignore rules only apply to untracked files).
 /scripts/_lumina_ai_entries.js
 /backups/
+# Cloud Functions test-only build output (tsconfig.test.json → node --test)
+functions/lib-test/

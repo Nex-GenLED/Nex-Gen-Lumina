@@ -214,9 +214,22 @@ exports.migrateClearScheduleItemsV1 = migrateClearScheduleItemsV1;
 
 const db = admin.firestore();
 
+// Voice: canonical Google Smart Home fulfillment (SYNC/QUERY/EXECUTE) routed
+// through intentCore — see functions/src/voice/googleSmartHome.ts.
+const googleVoice = require("./lib/voice/googleSmartHome");
+
+// Voice: Alexa Smart Home fulfillment + the JWT access-token signer (B-3b) —
+// see functions/src/voice/alexaSmartHome.ts and alexaJwt.ts.
+const alexaVoice = require("./lib/voice/alexaSmartHome");
+const { signAlexaJwt } = require("./lib/voice/alexaJwt");
+
 // Alexa OAuth configuration (add to .env file)
 const alexaClientId = defineString("ALEXA_CLIENT_ID");
 const alexaClientSecret = defineString("ALEXA_CLIENT_SECRET");
+// B-3b: HS256 signing secret for the Alexa access-token JWT. Falls back to the
+// existing ALEXA_CLIENT_SECRET when ALEXA_JWT_SECRET is not set in .env, so the
+// signer (alexaToken) and verifier (alexaSmartHome) always agree.
+const alexaJwtSecret = defineString("ALEXA_JWT_SECRET");
 
 // Google Home OAuth configuration (add to .env file)
 const googleClientId = defineString("GOOGLE_CLIENT_ID");
@@ -798,8 +811,14 @@ exports.alexaToken = onRequest({ region: "us-central1" }, async (req, res) => {
       // Mark the code as used (one-time use only)
       await codeDoc.ref.update({ used: true });
 
-      // Generate a fresh custom token for the user
-      const customToken = await admin.auth().createCustomToken(userId);
+      // B-3b(a): issue a self-signed short-lived JWT (uid + client claims)
+      // instead of a Firebase custom token — Amazon replays the access token on
+      // every directive and custom tokens cannot be verified server-side. The
+      // refresh-token rotation below is unchanged and format-independent.
+      const customToken = signAlexaJwt(
+        { uid: userId, client_id },
+        alexaJwtSecret.value() || alexaClientSecret.value()
+      );
 
       // Store the link in Firestore
       await db.collection("users").doc(userId).collection("integrations").doc("alexa").set({
@@ -850,8 +869,12 @@ exports.alexaToken = onRequest({ region: "us-central1" }, async (req, res) => {
 
       const userId = tokenData.userId;
 
-      // Generate a new custom token for the user
-      const customToken = await admin.auth().createCustomToken(userId);
+      // B-3b(a): re-issue the self-signed JWT on refresh (same format as the
+      // authorization_code grant; the refresh token itself is unchanged).
+      const customToken = signAlexaJwt(
+        { uid: userId, client_id },
+        alexaJwtSecret.value() || alexaClientSecret.value()
+      );
 
       console.log(`Refreshed access token for user ${userId}`);
 
@@ -869,6 +892,29 @@ exports.alexaToken = onRequest({ region: "us-central1" }, async (req, res) => {
   } catch (error) {
     console.error("Token exchange error:", error);
     res.status(400).json({ error: "invalid_grant", error_description: error.message });
+  }
+});
+
+/**
+ * Alexa Smart Home Fulfillment — Discovery / PowerController /
+ * BrightnessController / SceneController / ReportState, all routed through
+ * intentCore. Access-token JWT verified in-handler. See
+ * functions/src/voice/alexaSmartHome.ts.
+ */
+exports.alexaSmartHome = onRequest({ region: "us-central1" }, async (req, res) => {
+  addSecurityHeaders(res);
+  if (req.method !== "POST") {
+    res.status(405).send("Method not allowed");
+    return;
+  }
+  try {
+    const secret = alexaJwtSecret.value() || alexaClientSecret.value();
+    const response = await alexaVoice.handleAlexaDirective(req.body, secret, db);
+    res.json(response);
+  } catch (error) {
+    console.error("Alexa Smart Home directive error:", error);
+    // Always return a well-formed Alexa envelope (HTTP 200), never a bare 500.
+    res.json(alexaVoice.internalError(req.body));
   }
 });
 
@@ -1298,187 +1344,30 @@ exports.googleSmartHome = onRequest({ region: "us-central1" }, async (req, res) 
 });
 
 /**
- * Handle Google SYNC intent
+ * Handle Google SYNC intent — delegates to the canonical resolver-backed
+ * fulfillment (functions/src/voice/googleSmartHome.ts). Device/nickname
+ * continuity is guaranteed by deviceResolver.
  */
 async function handleGoogleSync(requestId, userId) {
-  const userDoc = await db.collection("users").doc(userId).get();
-  const profile = userDoc.exists ? userDoc.data() : {};
-  const propertyName = profile.propertyName || "House Lights";
-
-  const scenesSnapshot = await db
-    .collection("users")
-    .doc(userId)
-    .collection("scenes")
-    .get();
-
-  const devices = [];
-
-  // Main lighting device
-  devices.push({
-    id: "lumina-main",
-    type: "action.devices.types.LIGHT",
-    traits: [
-      "action.devices.traits.OnOff",
-      "action.devices.traits.Brightness",
-    ],
-    name: {
-      name: propertyName,
-      defaultNames: ["Lumina Lights", "House Lights"],
-      nicknames: [propertyName, "outdoor lights", "house lights"],
-    },
-    willReportState: true,
-    roomHint: "Outside",
-    deviceInfo: {
-      manufacturer: "Nex-Gen Lumina",
-      model: "WLED Controller",
-      hwVersion: "1.0",
-      swVersion: "1.0",
-    },
-    customData: { userId, type: "main" },
-  });
-
-  // Add scenes
-  scenesSnapshot.docs.forEach((doc) => {
-    const scene = doc.data();
-    if (scene.type === "system") return;
-
-    devices.push({
-      id: `scene-${doc.id}`,
-      type: "action.devices.types.SCENE",
-      traits: ["action.devices.traits.Scene"],
-      name: {
-        name: scene.name,
-        defaultNames: [scene.name],
-      },
-      willReportState: false,
-      attributes: { sceneReversible: false },
-      customData: { userId, type: "scene", sceneId: doc.id },
-    });
-  });
-
-  console.log(`Google SYNC returning ${devices.length} devices`);
-
-  return {
-    requestId,
-    payload: {
-      agentUserId: userId,
-      devices,
-    },
-  };
+  return googleVoice.handleSync(requestId, userId, db);
 }
 
 /**
- * Handle Google QUERY intent
+ * Handle Google QUERY intent — optimistic/cached state (see googleSmartHome.ts;
+ * live getState is a v1.1 upgrade, Webhook Mode only).
  */
 async function handleGoogleQuery(requestId, userId, payload) {
-  const { devices } = payload;
-  const deviceStates = {};
-
-  const stateDoc = await db
-    .collection("users")
-    .doc(userId)
-    .collection("device_state")
-    .doc("current")
-    .get();
-
-  const state = stateDoc.exists ? stateDoc.data() : { on: false, brightness: 200 };
-
-  for (const device of devices) {
-    if (device.id === "lumina-main") {
-      deviceStates[device.id] = {
-        online: true,
-        on: state.on ?? false,
-        brightness: Math.round((state.brightness ?? 200) / 255 * 100),
-      };
-    } else {
-      deviceStates[device.id] = { online: true };
-    }
-  }
-
-  return {
-    requestId,
-    payload: { devices: deviceStates },
-  };
+  return googleVoice.handleQuery(requestId, userId, payload, db);
 }
 
 /**
- * Handle Google EXECUTE intent
+ * Handle Google EXECUTE intent — every command routed through
+ * intentCore.executeIntent, which writes canonical RemoteCommand docs. The
+ * legacy write path (raw-map payload, hardcoded primary target, no
+ * controllerIp/webhookUrl) has been removed.
  */
 async function handleGoogleExecute(requestId, userId, payload) {
-  const { commands } = payload;
-  const results = [];
-
-  for (const command of commands) {
-    for (const device of command.devices) {
-      for (const execution of command.execution) {
-        try {
-          const newState = await executeGoogleCommand(userId, device, execution);
-          results.push({
-            ids: [device.id],
-            status: "SUCCESS",
-            states: newState,
-          });
-        } catch (error) {
-          console.error(`Execute error for ${device.id}:`, error);
-          results.push({
-            ids: [device.id],
-            status: "ERROR",
-            errorCode: error.code || "hardError",
-          });
-        }
-      }
-    }
-  }
-
-  return {
-    requestId,
-    payload: { commands: results },
-  };
-}
-
-/**
- * Execute a Google command
- */
-async function executeGoogleCommand(userId, device, execution) {
-  const { command, params } = execution;
-  let commandPayload = {};
-  let newState = {};
-
-  switch (command) {
-    case "action.devices.commands.OnOff":
-      commandPayload = { type: "power", payload: { on: params.on } };
-      newState = { on: params.on };
-      break;
-
-    case "action.devices.commands.BrightnessAbsolute":
-      const bri = Math.round(params.brightness / 100 * 255);
-      commandPayload = { type: "brightness", payload: { brightness: bri, on: true } };
-      newState = { on: true, brightness: params.brightness };
-      break;
-
-    case "action.devices.commands.ActivateScene":
-      const sceneId = device.customData?.sceneId;
-      if (!sceneId) throw { code: "notSupported" };
-      commandPayload = { type: "scene", payload: { sceneId } };
-      newState = { on: true };
-      break;
-
-    default:
-      throw { code: "notSupported" };
-  }
-
-  // Send command to Firestore for processing
-  await db.collection("users").doc(userId).collection("commands").add({
-    type: commandPayload.type,
-    payload: commandPayload.payload,
-    controllerId: "primary",
-    status: "pending",
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    source: "google_home",
-    expiresAt: new Date(Date.now() + 60000),
-  });
-
-  return newState;
+  return googleVoice.handleExecute(requestId, userId, payload, db);
 }
 
 /**
