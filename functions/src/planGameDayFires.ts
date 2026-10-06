@@ -60,6 +60,18 @@
  * See gameDayPreflight (decideServedSticky). With both absent nothing here
  * reads or writes anything it did not before.
  *
+ * ─── END FLAG (2026-10-06, default OFF, `true` | uid list) ──────────────────
+ *   end_ignores_gate        the END of a start this system FIRED (GUARD 0b:
+ *                           the start job `dispatched` or `completed`) is
+ *                           written while the account is allowlisted, even
+ *                           when the readiness gate blocks the account. The
+ *                           hard cap and the status-aware cap use the same
+ *                           path. Starts keep the gate; a hand-off (a start
+ *                           for the survivor) is refused under a blocking
+ *                           gate and the end restores base instead. Rows gain
+ *                           `gateBypassed`, the summary `endsGateBypassed`,
+ *                           only when it acted.
+ *
  * **NO collection-group query is used anywhere in this file.** That is a
  * deliberate constraint, not a coincidence: iterating users and then reading
  * each subcollection costs one extra read per user per tick and buys immunity
@@ -242,6 +254,12 @@ interface PlanStats {
    * with the flag off (or nothing held) has exactly the summary it always had.
    */
   servedHeld?: number;
+  /**
+   * `end_ignores_gate`. Ends written this tick for a FIRED start while the
+   * readiness gate blocked the account (the 2026-10-05 stranded house).
+   * Present only when non-zero, for the same reason as `servedHeld`.
+   */
+  endsGateBypassed?: number;
   espnErrors: number;
   /**
    * Distinct ESPN URLs requested this tick — one request each, whatever the
@@ -389,6 +407,13 @@ export interface PlannerFlags {
    * (gameDayPreflight.decideServedSticky).
    */
   servedSticky: FlagScope | null;
+  /**
+   * `end_ignores_gate` (true or a uid list; default off). The END of a show
+   * this system FIRED is written while the account is allowlisted, whatever
+   * the readiness gate says this tick. Starts keep the gate. See the END
+   * block ("writeEnds") and the file header.
+   */
+  endIgnoresGate: FlagScope | null;
 }
 
 /** A forced P4b mode (tests, bench) in the production field's terms. */
@@ -406,7 +431,7 @@ function forcedLadderLit(v: LadderLitMode | string[] | undefined): LadderLitSett
 function warnMalformedFlags(data: Record<string, unknown> | undefined): void {
   for (const key of [
     "espn_college_slate", "track_started_by_id", "status_aware_cap", "payload_full_state",
-    "preflight_bridge_grace", "served_sticky",
+    "preflight_bridge_grace", "served_sticky", "end_ignores_gate",
   ]) {
     const v = data?.[key];
     if (v !== undefined && v !== false && flagScopeFrom(v) === null) {
@@ -441,6 +466,7 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       payloadFullState: flagScopeFrom(data?.payload_full_state),
       preflightBridgeGrace: bridgeGraceScopeFrom(data),
       servedSticky: servedStickyScopeFrom(data),
+      endIgnoresGate: flagScopeFrom(data?.end_ignores_gate),
     };
   } catch (err) {
     logger.warn("planGameDayFires: flag read failed; staying LOG-ONLY", err);
@@ -453,6 +479,7 @@ async function readPlannerFlags(db: admin.firestore.Firestore): Promise<PlannerF
       payloadFullState: null,
       preflightBridgeGrace: null,
       servedSticky: null,
+      endIgnoresGate: null,
     };
   }
 }
@@ -901,6 +928,8 @@ export async function runPlannerTick(
       preflightBridgeGrace?: boolean | string[];
       /** B2 sticky, `served_sticky`: `true` or a uid list. Default off. */
       servedSticky?: boolean | string[];
+      /** `end_ignores_gate`: `true` or a uid list. Default off. */
+      endIgnoresGate?: boolean | string[];
     };
   } = {}
 ): Promise<PlanStats & { logRows: Array<Record<string, unknown>> }> {
@@ -926,6 +955,7 @@ export async function runPlannerTick(
         payloadFullState: flagScopeFrom(opts.forceFlags?.payloadFullState),
         preflightBridgeGrace: flagScopeFrom(opts.forceFlags?.preflightBridgeGrace),
         servedSticky: flagScopeFrom(opts.forceFlags?.servedSticky),
+        endIgnoresGate: flagScopeFrom(opts.forceFlags?.endIgnoresGate),
       }
     : await readPlannerFlags(db);
   const policy: WriteJobsPolicy = flags.policy;
@@ -1039,6 +1069,18 @@ export async function runPlannerTick(
     // Log-only for THIS account when gated — the same shape the allowlist
     // produces, deliberately not a second mechanism.
     const writeJobs = allowlisted && gate.armed;
+    // `end_ignores_gate` (2026-10-06). On 2026-10-05 a start fired on the
+    // server path, the owner then added a bus, the readiness gate flipped to
+    // gated_ladder_bad, and every tick after the final logged `plan_end
+    // confirmed_final scopedOut:true` and wrote nothing: team colours stayed
+    // on the house for hours. The gate exists to stop a NEW show on a house
+    // whose base cannot be restored with certainty; it must never keep a show
+    // this system already started from ending. With the flag on for the
+    // account, the END of a FIRED start is written while the account is
+    // allowlisted, gate or no gate. Pre-flight and `served` never gated ends.
+    // Starts keep `writeJobs` exactly as before. "Fired" is GUARD 0b's test
+    // (`startJobConfirmsFired`), which runs before every end write below.
+    const writeEnds = writeJobs || (allowlisted && flagOnFor(flags.endIgnoresGate, uid));
 
     const priorGate = Array.isArray(udata.gameday_gate_blocking)
       ? (udata.gameday_gate_blocking as GateBlockingReason[])
@@ -1925,9 +1967,10 @@ export async function runPlannerTick(
             logRows.push({
               uid, teamSlug, eventId, action: "skip",
               reason: "end_suppressed_not_owner", owner: owner.teamSlug,
-              ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
+              ...(policy.enabled && !writeEnds ? { scopedOut: true } : {}),
+              ...(writeEnds && !writeJobs ? { gateBypassed: true } : {}),
             });
-            if (writeJobs) {
+            if (writeEnds) {
               await sRef.set(
                 {
                   endFiredAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1954,7 +1997,16 @@ export async function runPlannerTick(
           //    app's rule 5, handoffWinner.
           const winner = handoffWinner(windows, eventId, nowMs);
           let handoff: { payload: string; to: TeamWindow } | null = null;
-          if (winner !== null) {
+          // A hand-off lights the survivor's design: it is that team's START,
+          // and starts keep the gate. An end written past a blocking gate
+          // (end_ignores_gate) therefore restores base and never hands off.
+          const gateBypassed = writeEnds && !writeJobs;
+          if (winner !== null && gateBypassed) {
+            logRows.push({
+              uid, teamSlug, eventId, action: "skip",
+              reason: "handoff_refused:gate_blocking", handoffTo: winner.teamSlug,
+            });
+          } else if (winner !== null) {
             const built = buildGameDayPayload({
               config: configByEvent.get(winner.eventId) ?? {},
               participatingChannels: part.channels,
@@ -1986,7 +2038,8 @@ export async function runPlannerTick(
             uid, teamSlug, eventId, action: "plan_end",
             fireAt: new Date(nowMs).toISOString(), reason: decision.reason,
             ...(handoff ? { handoffTo: handoff.to.teamSlug } : {}),
-            ...(policy.enabled && !writeJobs ? { scopedOut: true } : {}),
+            ...(policy.enabled && !writeEnds ? { scopedOut: true } : {}),
+            ...(gateBypassed ? { gateBypassed: true } : {}),
             // Only the flagged paths add these, so a flags-off row is unchanged.
             ...(resolved.via === "tracked" ? { espnVia: "tracked" } : {}),
             ...(espnOn.statusAwareCap && decision.reason.startsWith("hard_cap")
@@ -2000,7 +2053,8 @@ export async function runPlannerTick(
                 }
               : {}),
           });
-          if (writeJobs) {
+          if (writeEnds) {
+            if (gateBypassed) stats.endsGateBypassed = (stats.endsGateBypassed ?? 0) + 1;
             // S4: the end fire returns the house to BASE, not to off — a
             // customer whose everyday schedule is warm white from sunset must
             // get warm white back, not darkness. See baseRestorePayload.
@@ -2055,6 +2109,7 @@ export async function runPlannerTick(
                   state: "scheduled",
                   attempts: 0,
                   ...(handoff ? { handoff_to: handoff.to.teamSlug } : {}),
+                  ...(gateBypassed ? { gate_bypassed: true } : {}),
                 },
               });
             }
@@ -2261,6 +2316,8 @@ export async function runPlannerTick(
     // B2 sticky: only on a tick that held someone, so every other tick's
     // summary is the one it always was.
     ...(stats.servedHeld ? { servedHeld: stats.servedHeld } : {}),
+    // end_ignores_gate: only on a tick that wrote an end past a blocking gate.
+    ...(stats.endsGateBypassed ? { endsGateBypassed: stats.endsGateBypassed } : {}),
     espnErrors: stats.espnErrors,
     // Distinct ESPN URLs requested — one request each (the per-tick cache).
     espnFetches: stats.espnFetches,
