@@ -12,7 +12,7 @@
  * Device-id contract (from deviceResolver):
  *   "lumina-main"        → the primary controller (customData.controllerId)
  *   "controller-<docId>" → that controller (customData.controllerId)
- *   "scene-<docId>" / "gameday-<slug>" → scene activation (customData.sceneId),
+ *   "scene-<docId>"      → scene activation (customData.sceneId),
  *                          unscoped → intentCore fans out to all controllers.
  *
  * Flag: every intent checks voice_control.enabled first (intentCore's
@@ -236,6 +236,7 @@ function voiceErrorToGoogle(code: VoiceErrorCode): string {
     case "not_enabled":
     case "cross_uid":
     case "no_target":
+    case "no_bridge":
     default:
       return "deviceOffline";
   }

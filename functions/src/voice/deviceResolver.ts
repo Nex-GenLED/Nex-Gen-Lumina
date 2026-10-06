@@ -69,7 +69,7 @@ function primaryNicknames(propertyName: string): string[] {
   return [propertyName, "outdoor lights", "house lights"];
 }
 
-interface ControllerRow {
+export interface ControllerRow {
   id: string;
   ip: string;
   name: string | null;
@@ -94,8 +94,11 @@ interface ControllerRow {
  * "lumina-main" to a different controller and churn device identity for every
  * linked household (forced re-link, lost rooms/routines). If you must change
  * the primary-selection key, treat it as a migration, not a refactor.
+ *
+ * Exported for alexaSmartHome (B-3c), which keys its "lumina-main" endpoint
+ * on the same primary.
  */
-async function loadControllersOldestFirst(
+export async function loadControllersOldestFirst(
   db: admin.firestore.Firestore,
   userId: string
 ): Promise<ControllerRow[]> {

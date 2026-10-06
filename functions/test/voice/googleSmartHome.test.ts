@@ -127,7 +127,7 @@ function baseStore(): Store {
   s.seed("config/voice_control", { enabled: true });
   s.seed(`users/${UID}`, { webhookUrl: WEBHOOK, propertyName: "My House" });
   s.seed(`users/${UID}/controllers/ctrlA`, {
-    ip: "192.168.1.50",
+    ip: "192.0.2.50",
     name: "Front",
     created_at: { toMillis: () => 1000 },
   });
@@ -205,7 +205,7 @@ test("EXECUTE OnOff → canonical setState doc (string payload) + SUCCESS", asyn
     userId: UID,
     type: "main",
     controllerId: "ctrlA",
-    controllerIp: "192.168.1.50",
+    controllerIp: "192.0.2.50",
   });
   const res = await handleExecute("r1", UID, payload, asDb(s), 1000);
   assert.deepEqual(res.payload.commands[0], {
@@ -220,7 +220,7 @@ test("EXECUTE OnOff → canonical setState doc (string payload) + SUCCESS", asyn
   assert.equal(c.payload, '{"on":true}');
   assert.equal(c.type, "setState");
   assert.equal(c.controllerId, "ctrlA");
-  assert.equal(c.controllerIp, "192.168.1.50");
+  assert.equal(c.controllerIp, "192.0.2.50");
   assert.equal(c.webhookUrl, WEBHOOK);
   assert.equal(c.source, "voice_google");
 });
@@ -234,7 +234,7 @@ test("EXECUTE BrightnessAbsolute(50) → {bri:128} canonical doc + SUCCESS", asy
         devices: [
           {
             id: "lumina-main",
-            customData: { userId: UID, controllerId: "ctrlA", controllerIp: "192.168.1.50" },
+            customData: { userId: UID, controllerId: "ctrlA", controllerIp: "192.0.2.50" },
           },
         ],
         execution: [

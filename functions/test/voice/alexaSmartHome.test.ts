@@ -1,15 +1,22 @@
 /**
  * alexaSmartHome.test.ts — zero-dependency tests for the Alexa Smart Home
  * fulfillment (node:test + node:assert; same fake-Firestore + autoOutcome
- * pattern as googleSmartHome.test.ts). Access tokens are the self-signed JWTs
- * issued by alexaToken (B-3b decision a), verified in-handler.
+ * pattern as googleSmartHome.test.ts). B-3c contract: the access token names
+ * only a link (`lid`); the link record names the user; the kill switch is
+ * checked on every directive; nothing identifying is sent to Amazon.
+ * The emulator suite (test/emulator/voiceAlexaLink.emulator.test.ts) drives
+ * the same handler through index.js against real Firestore.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { handleAlexaDirective } from "../../src/voice/alexaSmartHome";
-import { signAlexaJwt, verifyAlexaJwt } from "../../src/voice/alexaJwt";
+import {
+  opaqueEndpointKey,
+  signAlexaAccessToken,
+  verifyAlexaAccessToken,
+} from "../../src/voice/alexaJwt";
 
 // ---------------------------------------------------------------------------
 // In-memory Firestore fake with command auto-completion
@@ -23,6 +30,9 @@ class DocSnap {
   }
   data() {
     return this._data;
+  }
+  get(field: string) {
+    return this._data?.[field];
   }
 }
 
@@ -88,21 +98,30 @@ class DocRef {
 }
 
 class ColRef {
+  private filters: Array<[string, unknown]> = [];
   constructor(public store: Store, public path: string) {}
   doc(id?: string) {
     const r = id ?? this.store.nextAutoId();
     return new DocRef(this.store, `${this.path}/${r}`, r);
   }
+  where(field: string, _op: string, value: unknown) {
+    const c = new ColRef(this.store, this.path);
+    c.filters = [...this.filters, [field, value]];
+    return c;
+  }
+  limit(_n: number) {
+    return this;
+  }
   async get() {
     const prefix = this.path + "/";
     const docs: DocSnap[] = [];
     for (const [p, d] of this.store.docs) {
-      if (p.startsWith(prefix)) {
-        const rest = p.slice(prefix.length);
-        if (!rest.includes("/")) docs.push(new DocSnap(rest, d));
-      }
+      if (!p.startsWith(prefix)) continue;
+      const rest = p.slice(prefix.length);
+      if (rest.includes("/")) continue;
+      if (this.filters.every(([f, v]) => d[f] === v)) docs.push(new DocSnap(rest, d));
     }
-    return { docs };
+    return { docs, empty: docs.length === 0, size: docs.length };
   }
 }
 
@@ -111,22 +130,31 @@ class Fake {
   collection(n: string) {
     return new ColRef(this.store, n);
   }
+  async getAll(...refs: DocRef[]) {
+    return Promise.all(refs.map((r) => r.get()));
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const asDb = (s: Store): any => new Fake(s);
 
 const UID = "u1";
+const LID = "link-1";
 const WEBHOOK = "https://home.example.com/wled";
-const SECRET = "test-secret";
-const TOKEN = signAlexaJwt({ uid: UID, client_id: "lumina-alexa-client" }, SECRET);
+const SECRET = "node-test-jwt-secret-0000000000000000000000";
+const TOKEN = signAlexaAccessToken({ lid: LID }, SECRET);
+const FAR = { toMillis: () => Date.now() + 1e10 };
 
 function baseStore(): Store {
   const s = new Store();
-  s.seed("config/voice_control", { enabled: true });
+  s.seed("config/voice_control", { enabled: false, allowlistUids: [UID] });
+  s.seed(`oauth_refresh_tokens/${LID}`, {
+    userId: UID, provider: "alexa", iss: "lumina-alexa", aud: "cid", active: true, expiresAt: FAR,
+  });
+  s.seed(`users/${UID}/integrations/alexa`, { isLinked: true });
   s.seed(`users/${UID}`, { webhookUrl: WEBHOOK, propertyName: "My House" });
   s.seed(`users/${UID}/controllers/ctrlA`, {
-    ip: "192.168.1.50",
+    ip: "192.0.2.50",
     name: "Front",
     created_at: { toMillis: () => 1000 },
   });
@@ -141,8 +169,7 @@ function commandDocs(s: Store): Data[] {
   return out;
 }
 
-const COOKIE_MAIN = { userId: UID, type: "main", controllerId: "ctrlA", controllerIp: "192.168.1.50" };
-const COOKIE_SCENE = { userId: UID, type: "scene", sceneId: "scSys" };
+const SCENE_EP = `scn-${opaqueEndpointKey(SECRET, UID, "scn", "scLib")}`;
 
 function discovery(token: unknown) {
   return {
@@ -152,215 +179,178 @@ function discovery(token: unknown) {
     },
   };
 }
-function controlDirective(namespace: string, name: string, token: unknown, cookie: Data, payload: Data = {}) {
+function controlDirective(namespace: string, name: string, token: unknown, endpointId: string, payload: Data = {}) {
   return {
     directive: {
       header: { namespace, name, correlationToken: "ct1" },
-      endpoint: {
-        endpointId: cookie.type === "scene" ? "scene-scSys" : "lumina-main",
-        scope: { type: "BearerToken", token },
-        cookie,
-      },
+      endpoint: { endpointId, scope: { type: "BearerToken", token } },
       payload,
     },
   };
 }
-
-// ---------------------------------------------------------------------------
-// JWT verify path (decision a coverage)
-// ---------------------------------------------------------------------------
-test("alexaJwt: sign→verify round-trips; wrong secret / malformed rejected", () => {
-  const claims = verifyAlexaJwt(TOKEN, SECRET);
-  assert.ok(claims);
-  assert.equal(claims.uid, UID);
-  assert.equal(verifyAlexaJwt(TOKEN, "wrong-secret"), null);
-  assert.equal(verifyAlexaJwt("a.b.c", SECRET), null);
-  // expired token (exp in the past)
-  const expired = signAlexaJwt({ uid: UID }, SECRET, -10);
-  assert.equal(verifyAlexaJwt(expired, SECRET), null);
-});
-
-// ---------------------------------------------------------------------------
-// Discovery
-// ---------------------------------------------------------------------------
-test("Discovery: LIGHT endpoint (Power+Brightness) + SCENE endpoint (SceneController)", async () => {
-  const s = baseStore();
-  s.seed(`users/${UID}/scenes/scSys`, {
-    type: "system",
-    name: "Lights Off",
-    wled_payload: JSON.stringify({ on: false }),
-  });
-  // NOTE: system scenes are skipped by resolveScenes discovery; add a real one.
+function seedScene(s: Store) {
   s.seed(`users/${UID}/scenes/scLib`, {
     type: "library",
     name: "Aurora",
     brightness: 150,
     library_pattern: { colors: "[[0,255,0,0]]", effect_id: 1, speed: 100, intensity: 100 },
   });
+}
 
+// ---------------------------------------------------------------------------
+test("access token: names only the link; verify reports expired vs invalid", () => {
+  const r = verifyAlexaAccessToken(TOKEN, SECRET);
+  assert.ok(r.ok);
+  assert.equal(r.ok && r.claims.lid, LID);
+  assert.equal(r.ok && (r.claims as unknown as Data).uid, undefined);
+  assert.deepEqual(verifyAlexaAccessToken(TOKEN, "another-secret-000000000000000000000"), { ok: false, reason: "invalid" });
+  const old = signAlexaAccessToken({ lid: LID }, SECRET, Math.floor(Date.now() / 1000) - 7200);
+  assert.deepEqual(verifyAlexaAccessToken(old, SECRET), { ok: false, reason: "expired" });
+});
+
+test("Discovery: six required fields only, opaque ids, the user's own names", async () => {
+  const s = baseStore();
+  seedScene(s);
+  s.seed(`users/${UID}/scenes/scSys`, { type: "system", name: "Lights Off", wled_payload: "{}" });
   const res = await handleAlexaDirective(discovery(TOKEN), SECRET, asDb(s));
-  assert.equal(res.event.header.namespace, "Alexa.Discovery");
   assert.equal(res.event.header.name, "Discover.Response");
   const eps = res.event.payload.endpoints;
-
-  const main = eps.find((e: { endpointId: string }) => e.endpointId === "lumina-main");
-  assert.ok(main);
-  const ifaces = main.capabilities.map((c: { interface: string }) => c.interface);
-  assert.ok(ifaces.includes("Alexa.PowerController"));
-  assert.ok(ifaces.includes("Alexa.BrightnessController"));
-  assert.equal(main.friendlyName, "My House");
-  assert.equal(main.cookie.controllerId, "ctrlA");
-
-  const scene = eps.find((e: { endpointId: string }) => e.endpointId === "scene-scLib");
-  assert.ok(scene);
-  assert.ok(
-    scene.capabilities.some((c: { interface: string }) => c.interface === "Alexa.SceneController")
-  );
-  assert.equal(scene.cookie.sceneId, "scLib");
+  assert.deepEqual(eps.map((e: Data) => e.endpointId), ["lumina-main", SCENE_EP]);
+  for (const e of eps) {
+    assert.deepEqual(Object.keys(e).sort(), [
+      "capabilities", "description", "displayCategories", "endpointId", "friendlyName", "manufacturerName",
+    ]);
+  }
+  assert.equal(eps[0].friendlyName, "Front"); // never the property name
+  assert.equal(eps[1].friendlyName, "Aurora");
+  const text = JSON.stringify(res);
+  for (const leak of [UID, "ctrlA", "scLib", "192.0.2.50", "My House", WEBHOOK]) {
+    assert.ok(!text.includes(leak), `leaks ${leak}`);
+  }
 });
 
-test("Discovery: flag OFF → zero endpoints (non-unlinking)", async () => {
+test("kill switch OFF: Discover and control get INSUFFICIENT_PERMISSIONS, nothing written", async () => {
   const s = baseStore();
-  s.seed("config/voice_control", { enabled: false });
-  const res = await handleAlexaDirective(discovery(TOKEN), SECRET, asDb(s));
-  assert.equal(res.event.header.name, "Discover.Response");
-  assert.deepEqual(res.event.payload.endpoints, []);
-});
-
-// ---------------------------------------------------------------------------
-// Control directives → canonical command docs
-// ---------------------------------------------------------------------------
-test("PowerController TurnOn → canonical setState doc + Response(powerState ON)", async () => {
-  const s = baseStore();
-  s.autoOutcome = "completed";
-  const d = controlDirective("Alexa.PowerController", "TurnOn", TOKEN, COOKIE_MAIN);
-  const res = await handleAlexaDirective(d, SECRET, asDb(s), 1000);
-
-  assert.equal(res.event.header.namespace, "Alexa");
-  assert.equal(res.event.header.name, "Response");
-  assert.equal(res.event.header.correlationToken, "ct1");
-  assert.equal(res.event.endpoint.endpointId, "lumina-main");
-  assert.equal(res.context.properties[0].namespace, "Alexa.PowerController");
-  assert.equal(res.context.properties[0].value, "ON");
-
-  const c = commandDocs(s)[0];
-  assert.equal(typeof c.payload, "string"); // #84
-  assert.equal(c.payload, '{"on":true}');
-  assert.equal(c.type, "setState");
-  assert.equal(c.controllerId, "ctrlA");
-  assert.equal(c.controllerIp, "192.168.1.50");
-  assert.equal(c.webhookUrl, WEBHOOK);
-  assert.equal(c.source, "voice_alexa");
-});
-
-test("BrightnessController SetBrightness(50) → {bri:128} canonical doc + Response", async () => {
-  const s = baseStore();
-  s.autoOutcome = "completed";
-  const d = controlDirective("Alexa.BrightnessController", "SetBrightness", TOKEN, COOKIE_MAIN, {
-    brightness: 50,
-  });
-  const res = await handleAlexaDirective(d, SECRET, asDb(s), 1000);
-  assert.equal(res.event.header.name, "Response");
-  assert.equal(res.context.properties[0].namespace, "Alexa.BrightnessController");
-  assert.equal(res.context.properties[0].value, 50);
-  const c = commandDocs(s)[0];
-  assert.equal(typeof c.payload, "string");
-  assert.equal(c.payload, '{"bri":128}');
-});
-
-test("SceneController Activate → canonical applyJson doc (fanout) + ActivationStarted", async () => {
-  const s = baseStore();
-  s.autoOutcome = "completed";
-  s.seed(`users/${UID}/scenes/scSys`, {
-    type: "system",
-    name: "Lights Off",
-    wled_payload: JSON.stringify({ on: false }),
-  });
-  const d = controlDirective("Alexa.SceneController", "Activate", TOKEN, COOKIE_SCENE);
-  const res = await handleAlexaDirective(d, SECRET, asDb(s), 1000);
-  assert.equal(res.event.header.namespace, "Alexa.SceneController");
-  assert.equal(res.event.header.name, "ActivationStarted");
-  assert.equal(res.event.endpoint.endpointId, "scene-scSys");
-
-  const cmds = commandDocs(s);
-  assert.equal(cmds.length, 1); // fanned out to the one controller
-  assert.equal(cmds[0].type, "applyJson");
-  assert.equal(cmds[0].payload, '{"on":false}');
-  assert.equal(cmds[0].controllerId, "ctrlA");
-});
-
-// ---------------------------------------------------------------------------
-// Auth + flag + outcome mappings
-// ---------------------------------------------------------------------------
-test("malformed/expired token → INVALID_AUTHORIZATION_CREDENTIAL, nothing written", async () => {
-  const s = baseStore();
-  const garbage = await handleAlexaDirective(
-    controlDirective("Alexa.PowerController", "TurnOn", "not-a-jwt", COOKIE_MAIN),
-    SECRET,
-    asDb(s),
-    100
-  );
-  assert.equal(garbage.event.header.name, "ErrorResponse");
-  assert.equal(garbage.event.payload.type, "INVALID_AUTHORIZATION_CREDENTIAL");
-
-  const expiredTok = signAlexaJwt({ uid: UID }, SECRET, -10);
-  const expired = await handleAlexaDirective(
-    controlDirective("Alexa.PowerController", "TurnOn", expiredTok, COOKIE_MAIN),
-    SECRET,
-    asDb(s),
-    100
-  );
-  assert.equal(expired.event.payload.type, "INVALID_AUTHORIZATION_CREDENTIAL");
+  s.seed("config/voice_control", { enabled: false, allowlistUids: [] });
+  const d = await handleAlexaDirective(discovery(TOKEN), SECRET, asDb(s));
+  assert.equal(d.event.header.name, "ErrorResponse");
+  assert.equal(d.event.payload.type, "INSUFFICIENT_PERMISSIONS");
+  const c = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, "lumina-main"), SECRET, asDb(s), 50);
+  assert.equal(c.event.payload.type, "INSUFFICIENT_PERMISSIONS");
+  assert.equal(c.event.endpoint.endpointId, "lumina-main");
+  assert.equal(c.event.header.correlationToken, "ct1");
   assert.equal(commandDocs(s).length, 0);
 });
 
-test("control directive flag OFF → ENDPOINT_UNREACHABLE (never disables skill)", async () => {
+test("PowerController TurnOn → the app's command shape + Response(powerState ON)", async () => {
   const s = baseStore();
-  s.seed("config/voice_control", { enabled: false });
+  s.autoOutcome = "completed";
   const res = await handleAlexaDirective(
-    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, COOKIE_MAIN),
-    SECRET,
-    asDb(s),
-    100
-  );
-  assert.equal(res.event.header.name, "ErrorResponse");
+    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, "lumina-main"), SECRET, asDb(s), 1000);
+  assert.equal(res.event.header.name, "Response");
+  assert.equal(res.context.properties[0].value, "ON");
+  const docs = commandDocs(s);
+  assert.equal(docs.length, 1);
+  assert.deepEqual(Object.keys(docs[0]).sort(), [
+    "controllerId", "controllerIp", "createdAt", "payload", "source", "status", "type", "webhookUrl",
+  ]);
+  assert.equal(docs[0].type, "setState");
+  assert.equal(docs[0].payload, JSON.stringify({ on: true }));
+  assert.equal(docs[0].source, "voice_alexa");
+});
+
+test("BrightnessController SetBrightness(50) → {bri:128}", async () => {
+  const s = baseStore();
+  s.autoOutcome = "completed";
+  await handleAlexaDirective(
+    controlDirective("Alexa.BrightnessController", "SetBrightness", TOKEN, "lumina-main", { brightness: 50 }),
+    SECRET, asDb(s), 1000);
+  assert.equal(commandDocs(s)[0].payload, JSON.stringify({ bri: 128 }));
+});
+
+test("SceneController Activate → applyJson fan-out + ActivationStarted", async () => {
+  const s = baseStore();
+  seedScene(s);
+  s.seed(`users/${UID}/controllers/ctrlB`, { ip: "192.0.2.51", name: "Back", created_at: { toMillis: () => 2000 } });
+  s.autoOutcome = "completed";
+  const res = await handleAlexaDirective(
+    controlDirective("Alexa.SceneController", "Activate", TOKEN, SCENE_EP), SECRET, asDb(s), 1000);
+  assert.equal(res.event.header.name, "ActivationStarted");
+  const docs = commandDocs(s);
+  assert.equal(docs.length, 2);
+  assert.ok(docs.every((d) => d.type === "applyJson" && typeof d.payload === "string"));
+});
+
+test("bad token → INVALID; expired → EXPIRED; nothing written", async () => {
+  const s = baseStore();
+  const bad = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOn", "a.b.c", "lumina-main"), SECRET, asDb(s));
+  assert.equal(bad.event.payload.type, "INVALID_AUTHORIZATION_CREDENTIAL");
+  const old = signAlexaAccessToken({ lid: LID }, SECRET, Math.floor(Date.now() / 1000) - 7200);
+  const exp = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOn", old, "lumina-main"), SECRET, asDb(s));
+  assert.equal(exp.event.payload.type, "EXPIRED_AUTHORIZATION_CREDENTIAL");
+  assert.equal(commandDocs(s).length, 0);
+});
+
+test("unlinked (integration doc gone) or revoked record → INVALID", async () => {
+  const s = baseStore();
+  s.docs.delete(`users/${UID}/integrations/alexa`);
+  const a = await handleAlexaDirective(discovery(TOKEN), SECRET, asDb(s));
+  assert.equal(a.event.payload.type, "INVALID_AUTHORIZATION_CREDENTIAL");
+  const t = baseStore();
+  t.seed(`oauth_refresh_tokens/${LID}`, { ...(t.docs.get(`oauth_refresh_tokens/${LID}`) as Data), active: false });
+  const b = await handleAlexaDirective(discovery(TOKEN), SECRET, asDb(t));
+  assert.equal(b.event.payload.type, "INVALID_AUTHORIZATION_CREDENTIAL");
+});
+
+test("no signing key → INTERNAL_ERROR", async () => {
+  const res = await handleAlexaDirective(discovery(TOKEN), null, asDb(baseStore()));
+  assert.equal(res.event.payload.type, "INTERNAL_ERROR");
+});
+
+test("bridge mode without a paired bridge → ENDPOINT_UNREACHABLE, nothing queued", async () => {
+  const s = baseStore();
+  s.seed(`users/${UID}`, { webhookUrl: "" });
+  const res = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, "lumina-main"), SECRET, asDb(s), 50);
   assert.equal(res.event.payload.type, "ENDPOINT_UNREACHABLE");
   assert.equal(commandDocs(s).length, 0);
+
+  s.seed("bridge_registry/b1", { pairedUid: UID });
+  s.autoOutcome = "completed";
+  const ok = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, "lumina-main"), SECRET, asDb(s), 1000);
+  assert.equal(ok.event.header.name, "Response");
+  assert.equal(commandDocs(s).length, 1);
 });
 
-test("failed outcome → ErrorResponse (ENDPOINT_UNREACHABLE for offline, INTERNAL_ERROR otherwise)", async () => {
-  const s1 = baseStore();
-  s1.autoOutcome = "failed";
-  s1.autoError = "device offline";
-  const r1 = await handleAlexaDirective(
-    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, COOKIE_MAIN),
-    SECRET,
-    asDb(s1),
-    1000
-  );
-  assert.equal(r1.event.payload.type, "ENDPOINT_UNREACHABLE");
-
-  const s2 = baseStore();
-  s2.autoOutcome = "failed";
-  s2.autoError = "bad state";
-  const r2 = await handleAlexaDirective(
-    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, COOKIE_MAIN),
-    SECRET,
-    asDb(s2),
-    1000
-  );
-  assert.equal(r2.event.payload.type, "INTERNAL_ERROR");
+test("failed outcome → ENDPOINT_UNREACHABLE for offline, INTERNAL_ERROR otherwise", async () => {
+  const s = baseStore();
+  s.autoOutcome = "failed";
+  s.autoError = "controller offline";
+  const a = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, "lumina-main"), SECRET, asDb(s), 1000);
+  assert.equal(a.event.payload.type, "ENDPOINT_UNREACHABLE");
+  s.autoError = "bad payload";
+  const b = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOff", TOKEN, "lumina-main"), SECRET, asDb(s), 1000);
+  assert.equal(b.event.payload.type, "INTERNAL_ERROR");
 });
 
 test("optimistic (timeout) → success Response", async () => {
   const s = baseStore();
-  s.autoOutcome = null; // stays pending → awaitOutcome times out
   const res = await handleAlexaDirective(
-    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, COOKIE_MAIN),
-    SECRET,
-    asDb(s),
-    30
-  );
+    controlDirective("Alexa.PowerController", "TurnOff", TOKEN, "lumina-main"), SECRET, asDb(s), 30);
   assert.equal(res.event.header.name, "Response");
-  assert.equal(res.context.properties[0].value, "ON");
+});
+
+test("unknown or foreign endpoint id → NO_SUCH_ENDPOINT", async () => {
+  const s = baseStore();
+  const foreign = `ctl-${opaqueEndpointKey(SECRET, "someone-else", "ctl", "ctrlA")}`;
+  const res = await handleAlexaDirective(
+    controlDirective("Alexa.PowerController", "TurnOn", TOKEN, foreign), SECRET, asDb(s), 50);
+  assert.equal(res.event.payload.type, "NO_SUCH_ENDPOINT");
+  assert.equal(commandDocs(s).length, 0);
 });

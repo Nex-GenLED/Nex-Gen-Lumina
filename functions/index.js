@@ -1,5 +1,5 @@
 const { onCall, HttpsError, onRequest } = require("firebase-functions/v2/https");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineString } = require("firebase-functions/params");
 const admin = require("firebase-admin");
@@ -218,18 +218,18 @@ const db = admin.firestore();
 // through intentCore — see functions/src/voice/googleSmartHome.ts.
 const googleVoice = require("./lib/voice/googleSmartHome");
 
-// Voice: Alexa Smart Home fulfillment + the JWT access-token signer (B-3b) —
-// see functions/src/voice/alexaSmartHome.ts and alexaJwt.ts.
+// Voice: Alexa Smart Home fulfillment, the token endpoint and the link
+// lifecycle (B-3c) — see functions/src/voice/alexaSmartHome.ts, alexaLink.ts
+// and alexaJwt.ts. The access-token key is ALEXA_JWT_SECRET, read from the
+// function environment on each request; there is no fallback key.
 const alexaVoice = require("./lib/voice/alexaSmartHome");
-const { signAlexaJwt } = require("./lib/voice/alexaJwt");
+const alexaLink = require("./lib/voice/alexaLink");
+const { readAlexaJwtSecret } = require("./lib/voice/alexaJwt");
+const { readVoiceControlEnabled } = require("./lib/voice/intentCore");
 
 // Alexa OAuth configuration (add to .env file)
 const alexaClientId = defineString("ALEXA_CLIENT_ID");
 const alexaClientSecret = defineString("ALEXA_CLIENT_SECRET");
-// B-3b: HS256 signing secret for the Alexa access-token JWT. Falls back to the
-// existing ALEXA_CLIENT_SECRET when ALEXA_JWT_SECRET is not set in .env, so the
-// signer (alexaToken) and verifier (alexaSmartHome) always agree.
-const alexaJwtSecret = defineString("ALEXA_JWT_SECRET");
 
 // Google Home OAuth configuration (add to .env file)
 const googleClientId = defineString("GOOGLE_CLIENT_ID");
@@ -446,16 +446,27 @@ exports.generateAlexaAuthCode = onCall({ region: "us-central1" }, async (request
     throw new HttpsError("unauthenticated", "Authentication required");
   }
 
-  const { idToken, state } = request.data;
+  const { idToken, state, redirectUri } = request.data;
 
   if (!idToken || !state) {
     throw new HttpsError("invalid-argument", "Missing required parameters");
+  }
+  // B-3c: bind the code to the redirect URL it will be sent to (checked again
+  // at alexaToken, RFC 6749 §4.1.3). Only an allowlisted URL is accepted.
+  if (redirectUri !== undefined && !linkPage.isAllowedRedirect(
+    redirectUri, linkPage.alexaRedirectAllowlist(process.env.ALEXA_VENDOR_ID))) {
+    throw new HttpsError("invalid-argument", "Invalid redirect");
   }
 
   try {
     // Verify the ID token
     const decodedToken = await admin.auth().verifyIdToken(idToken);
     const userId = decodedToken.uid;
+
+    // B-3c kill switch: no new link unless config/voice_control allows this uid.
+    if (!(await readVoiceControlEnabled(db, userId))) {
+      throw new HttpsError("permission-denied", "Voice control isn't available for this account yet.");
+    }
 
     // SECURITY: Generate cryptographically secure authorization code
     const crypto = require("crypto");
@@ -465,6 +476,7 @@ exports.generateAlexaAuthCode = onCall({ region: "us-central1" }, async (request
     await db.collection("oauth_codes").doc(authCode).set({
       userId: userId,
       state: state,
+      ...(redirectUri !== undefined ? { redirectUri } : {}),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       expiresAt: admin.firestore.Timestamp.fromDate(
         new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
@@ -476,8 +488,9 @@ exports.generateAlexaAuthCode = onCall({ region: "us-central1" }, async (request
 
     return { code: authCode };
   } catch (error) {
+    if (error instanceof HttpsError) throw error;
     console.error("Error generating auth code:", error);
-    throw new HttpsError("internal", error.message);
+    throw new HttpsError("internal", "Could not start account linking.");
   }
 });
 // These endpoints implement OAuth 2.0 authorization code flow for Alexa
@@ -718,7 +731,8 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
         const generateCodeFunction = firebase.functions().httpsCallable('generateAlexaAuthCode');
         const result = await generateCodeFunction({
           idToken: idToken,
-          state: ${linkPage.scriptString(secureState)}
+          state: ${linkPage.scriptString(secureState)},
+          redirectUri: redirectUri
         });
 
         const authCode = result.data.code;
@@ -743,156 +757,18 @@ exports.alexaAuth = onRequest({ region: "us-central1" }, async (req, res) => {
 });
 
 /**
- * Alexa OAuth Token Endpoint
- *
- * Exchanges authorization code for access token.
- * Also handles refresh token requests.
- *
- * POST Body:
- * - grant_type: "authorization_code" or "refresh_token"
- * - code: The authorization code (for authorization_code grant)
- * - refresh_token: The refresh token (for refresh_token grant)
- * - client_id: Alexa skill client ID
- * - client_secret: Alexa skill client secret
+ * Alexa OAuth Token Endpoint — client authentication (HTTP Basic or body),
+ * authorization_code and refresh_token grants, hashed and expiring refresh
+ * tokens, link-state writes. All logic in functions/src/voice/alexaLink.ts.
  */
 exports.alexaToken = onRequest({ region: "us-central1" }, async (req, res) => {
   // SECURITY: Add security headers
   addSecurityHeaders(res);
-
-  // Only allow POST
-  if (req.method !== "POST") {
-    res.status(405).send("Method not allowed");
-    return;
-  }
-
-  const { grant_type, code, refresh_token, client_id, client_secret } = req.body;
-
-  // Validate client credentials
-  const expectedClientId = alexaClientId.value();
-  const expectedClientSecret = alexaClientSecret.value();
-
-  if (expectedClientId && expectedClientSecret) {
-    if (client_id !== expectedClientId || client_secret !== expectedClientSecret) {
-      console.error("Invalid client credentials");
-      res.status(401).json({ error: "invalid_client" });
-      return;
-    }
-  }
-
-  try {
-    if (grant_type === "authorization_code") {
-      // SECURITY: Look up authorization code from Firestore
-      const codeDoc = await db.collection("oauth_codes").doc(code).get();
-
-      if (!codeDoc.exists) {
-        console.error("Invalid authorization code");
-        res.status(400).json({ error: "invalid_grant", error_description: "Invalid authorization code" });
-        return;
-      }
-
-      const codeData = codeDoc.data();
-
-      // SECURITY: Validate the code hasn't been used
-      if (codeData.used) {
-        console.error("Authorization code already used");
-        res.status(400).json({ error: "invalid_grant", error_description: "Authorization code already used" });
-        return;
-      }
-
-      // SECURITY: Validate the code hasn't expired
-      if (Date.now() > codeData.expiresAt.toDate().getTime()) {
-        console.error("Authorization code expired");
-        res.status(400).json({ error: "invalid_grant", error_description: "Authorization code expired" });
-        return;
-      }
-
-      const userId = codeData.userId;
-
-      // Mark the code as used (one-time use only)
-      await codeDoc.ref.update({ used: true });
-
-      // B-3b(a): issue a self-signed short-lived JWT (uid + client claims)
-      // instead of a Firebase custom token — Amazon replays the access token on
-      // every directive and custom tokens cannot be verified server-side. The
-      // refresh-token rotation below is unchanged and format-independent.
-      const customToken = signAlexaJwt(
-        { uid: userId, client_id },
-        alexaJwtSecret.value() || alexaClientSecret.value()
-      );
-
-      // Store the link in Firestore
-      await db.collection("users").doc(userId).collection("integrations").doc("alexa").set({
-        isLinked: true,
-        linkedAt: admin.firestore.FieldValue.serverTimestamp(),
-        amazonUserId: client_id, // In reality, Alexa sends the user ID in directives
-      }, { merge: true });
-
-      console.log(`Alexa account linked for user ${userId}`);
-
-      // SECURITY: Generate cryptographically secure refresh token
-      const crypto = require("crypto");
-      const refreshToken = crypto.randomBytes(32).toString("base64url");
-
-      // Store refresh token in Firestore
-      await db.collection("oauth_refresh_tokens").doc(refreshToken).set({
-        userId: userId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        active: true,
-      });
-
-      // Return tokens
-      res.json({
-        access_token: customToken,
-        token_type: "Bearer",
-        expires_in: 3600,
-        refresh_token: refreshToken,
-      });
-
-    } else if (grant_type === "refresh_token") {
-      // SECURITY: Look up refresh token from Firestore
-      const tokenDoc = await db.collection("oauth_refresh_tokens").doc(refresh_token).get();
-
-      if (!tokenDoc.exists) {
-        console.error("Invalid refresh token");
-        res.status(400).json({ error: "invalid_grant", error_description: "Invalid refresh token" });
-        return;
-      }
-
-      const tokenData = tokenDoc.data();
-
-      // SECURITY: Validate token is still active
-      if (!tokenData.active) {
-        console.error("Refresh token revoked");
-        res.status(400).json({ error: "invalid_grant", error_description: "Refresh token revoked" });
-        return;
-      }
-
-      const userId = tokenData.userId;
-
-      // B-3b(a): re-issue the self-signed JWT on refresh (same format as the
-      // authorization_code grant; the refresh token itself is unchanged).
-      const customToken = signAlexaJwt(
-        { uid: userId, client_id },
-        alexaJwtSecret.value() || alexaClientSecret.value()
-      );
-
-      console.log(`Refreshed access token for user ${userId}`);
-
-      res.json({
-        access_token: customToken,
-        token_type: "Bearer",
-        expires_in: 3600,
-        refresh_token: refresh_token, // Return the same refresh token
-      });
-
-    } else {
-      res.status(400).json({ error: "unsupported_grant_type" });
-    }
-
-  } catch (error) {
-    console.error("Token exchange error:", error);
-    res.status(400).json({ error: "invalid_grant", error_description: error.message });
-  }
+  await alexaLink.handleAlexaTokenRequest(req, res, db, {
+    clientId: alexaClientId.value(),
+    clientSecret: alexaClientSecret.value(),
+    jwtSecret: readAlexaJwtSecret(),
+  });
 });
 
 /**
@@ -908,8 +784,7 @@ exports.alexaSmartHome = onRequest({ region: "us-central1" }, async (req, res) =
     return;
   }
   try {
-    const secret = alexaJwtSecret.value() || alexaClientSecret.value();
-    const response = await alexaVoice.handleAlexaDirective(req.body, secret, db);
+    const response = await alexaVoice.handleAlexaDirective(req.body, readAlexaJwtSecret(), db);
     res.json(response);
   } catch (error) {
     console.error("Alexa Smart Home directive error:", error);
@@ -917,6 +792,34 @@ exports.alexaSmartHome = onRequest({ region: "us-central1" }, async (req, res) =
     res.json(alexaVoice.internalError(req.body));
   }
 });
+
+/**
+ * Voice link lifecycle (B-3c). When a user's integrations/{alexa|google_home}
+ * doc is deleted — the app's Unlink button, the stale-intent sweep, or an
+ * account purge — revoke that provider's refresh tokens for the user, so the
+ * assistant's next refresh fails and outstanding Alexa access tokens stop at
+ * the per-directive link check. See functions/src/voice/alexaLink.ts.
+ */
+exports.onVoiceIntegrationDeleted = onDocumentDeleted(
+  { document: "users/{userId}/integrations/{provider}", region: "us-central1" },
+  async (event) => {
+    const { userId, provider } = event.params;
+    const revoked = await alexaLink.revokeVoiceLink(db, userId, provider);
+    console.log(`voice: ${provider} integration removed; revoked ${revoked} refresh token(s)`);
+  }
+);
+
+/**
+ * Daily: clear stuck "Pending" link intents (linkInitiated older than 24 h,
+ * never completed). Touches only users/{uid}/integrations/{alexa|google_home}.
+ */
+exports.sweepStaleVoiceLinks = onSchedule(
+  { schedule: "15 9 * * *", timeZone: "UTC", region: "us-central1" },
+  async () => {
+    const result = await alexaLink.sweepStalePendingLinks(db);
+    console.log(`voice: stale link-intent sweep ${JSON.stringify(result)}`);
+  }
+);
 
 /**
  * Alexa Account Unlink Notification

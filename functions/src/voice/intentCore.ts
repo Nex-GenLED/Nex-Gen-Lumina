@@ -9,7 +9,17 @@
  * toFirestore, lib/models/remote_command.dart:94-107):
  *
  *   { type, payload(STRING), controllerId, controllerIp, webhookUrl,
- *     createdAt(serverTimestamp), status, source, voiceRequestId }
+ *     createdAt(serverTimestamp), status, source }
+ *
+ * B-3c: exactly the app's seven fields plus `source` (voice_alexa /
+ * voice_google) for audit. Before anything is written, the SAME relay
+ * eligibility rule the app applies (relayEligibility.hasPairedBridge, the
+ * predicate executeWledCommand's fail-fast uses) decides whether a bridge-mode
+ * command can ever run: no paired bridge → nothing is queued and the caller
+ * gets `no_bridge`; a lookup error fails open, exactly as the trigger does.
+ * Whatever is queued then meets executeWledCommand's fail-fast like any app
+ * command. Voice never talks to a controller, never reads or writes Game Day
+ * data, and never writes the bridge registry.
  *
  * `payload` is ALWAYS a JSON string — the iOS Firestore SDK aborts on directly
  * nested arrays (#84; see cloud_relay_repository.dart:234-236), so every writer
@@ -27,6 +37,7 @@
 import * as admin from "firebase-admin";
 import { randomUUID, createHash } from "crypto";
 import { resolveScenes } from "./deviceResolver";
+import { hasPairedBridge } from "../relayEligibility";
 
 type Firestore = admin.firestore.Firestore;
 type DocumentReference = admin.firestore.DocumentReference;
@@ -45,6 +56,7 @@ export type VoiceErrorCode =
   | "cross_uid"
   | "unknown_controller"
   | "no_target"
+  | "no_bridge"
   | "unknown_scene"
   | "unsupported_intent";
 
@@ -75,16 +87,9 @@ export interface ActivatableScene {
   sceneId: string;
   /** Primary spoken/display name. */
   name: string;
-  /** Secondary name (saved_design_name for Game Day), when present. */
-  altName?: string;
   /** jsonEncoded WLED body — applied verbatim as an `applyJson` payload. */
   payloadString: string;
-  origin: "scene" | "game_day";
 }
-
-// Game Day scenes are addressed with this prefix so a raw Firestore scene
-// auto-id (20-char alnum, never contains "-") can never collide with one.
-const GAME_DAY_PREFIX = "gameday-";
 
 function err(code: VoiceErrorCode, message: string): VoiceError {
   return { ok: false, code, message };
@@ -106,7 +111,23 @@ export async function readVoiceControlEnabled(
 ): Promise<boolean> {
   try {
     const doc = await db.collection("config").doc("voice_control").get();
-    const data = (doc.data() ?? {}) as admin.firestore.DocumentData;
+    return voiceControlEnabledFromData(doc.data(), uid);
+  } catch (_e) {
+    return false;
+  }
+}
+
+/**
+ * The kill switch itself, on an already-read config/voice_control doc. Default
+ * OFF: a missing doc, a missing or non-boolean `enabled`, or a uid that is not
+ * on `allowlistUids` (empty by default) → false.
+ */
+export function voiceControlEnabledFromData(
+  raw: admin.firestore.DocumentData | undefined,
+  uid?: string
+): boolean {
+  {
+    const data = (raw ?? {}) as admin.firestore.DocumentData;
 
     // Precedence — lets the founder account run in isolation while the flag is
     // globally OFF, then a percentage ramp, before public:
@@ -130,8 +151,6 @@ export async function readVoiceControlEnabled(
     if (!uid) return false;
     //   7. stable per-uid bucket
     return stableBucket(uid) < pct;
-  } catch (_e) {
-    return false;
   }
 }
 
@@ -210,23 +229,6 @@ async function resolveScenePayload(
   uid: string,
   sceneId: string
 ): Promise<ScenePayload | null> {
-  // Game Day team → its stored, already-jsonEncoded design body (verbatim).
-  if (sceneId.startsWith(GAME_DAY_PREFIX)) {
-    const teamSlug = sceneId.slice(GAME_DAY_PREFIX.length);
-    const doc = await db
-      .collection("users")
-      .doc(uid)
-      .collection("game_day_autopilot")
-      .doc(teamSlug)
-      .get();
-    if (!doc.exists) return null;
-    const payload = doc.data()?.saved_design_payload;
-    if (typeof payload === "string" && payload.length > 0) {
-      return { payloadString: payload };
-    }
-    return { skip: `game_day ${teamSlug} has no saved_design_payload` };
-  }
-
   const doc = await db
     .collection("users")
     .doc(uid)
@@ -281,10 +283,9 @@ async function resolveScenePayload(
 /**
  * Enumerate every scene the user can activate by voice, each carrying its
  * executable payloadString. Wraps deviceResolver.resolveScenes for the /scenes
- * listing (reusing its system-scene skip), then appends Game Day teams that
- * have a saved design. Scenes/teams whose payload cannot be produced faithfully
- * are logged and excluded (never guessed) — voice v1 exposes only activatable
- * entries.
+ * listing (reusing its system-scene skip). Scenes whose payload cannot be
+ * produced faithfully are logged and excluded (never guessed) — voice exposes
+ * only activatable scenes. B-3c: Game Day designs are not exposed to voice.
  */
 export async function resolveActivatableScenes(
   db: Firestore,
@@ -307,39 +308,6 @@ export async function resolveActivatableScenes(
       sceneId,
       name: d.name.name,
       payloadString: payload.payloadString,
-      origin: "scene",
-    });
-  }
-
-  // Game Day teams with a saved design → activatable by team / design name.
-  const gdSnap = await db
-    .collection("users")
-    .doc(uid)
-    .collection("game_day_autopilot")
-    .get();
-  for (const doc of gdSnap.docs) {
-    const data = doc.data();
-    const payload = data.saved_design_payload;
-    if (typeof payload !== "string" || payload.length === 0) {
-      console.warn(
-        `voice: skipping Game Day "${doc.id}" — no saved_design_payload`
-      );
-      continue;
-    }
-    const teamName =
-      typeof data.team_name === "string" && data.team_name.length > 0
-        ? data.team_name
-        : doc.id;
-    const savedName =
-      typeof data.saved_design_name === "string" && data.saved_design_name.length > 0
-        ? data.saved_design_name
-        : undefined;
-    out.push({
-      sceneId: `${GAME_DAY_PREFIX}${doc.id}`,
-      name: teamName,
-      altName: savedName,
-      payloadString: payload,
-      origin: "game_day",
     });
   }
 
@@ -476,6 +444,21 @@ export async function executeIntent(p: ExecuteParams): Promise<ExecuteResult> {
   const userDoc = await db.collection("users").doc(p.uid).get();
   const webhookUrl = (userDoc.data()?.webhookUrl as string | undefined) || "";
 
+  // Relay eligibility — the app's rule and executeWledCommand's: a bridge-mode
+  // command needs a paired bridge or nothing can ever run it. Lookup errors
+  // fail open (queue it; the trigger's own check runs again).
+  if (webhookUrl === "") {
+    let paired = true;
+    try {
+      paired = await hasPairedBridge(db, p.uid);
+    } catch (e) {
+      console.warn("voice: relay eligibility lookup failed; queueing anyway", e);
+    }
+    if (!paired) {
+      return err("no_bridge", "No Lumina Bridge is paired to this account.");
+    }
+  }
+
   // One canonical RemoteCommand doc per target.
   const commandsRef = db.collection("users").doc(p.uid).collection("commands");
   const commandRefs: DocumentReference[] = [];
@@ -490,7 +473,6 @@ export async function executeIntent(p: ExecuteParams): Promise<ExecuteResult> {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       status: "pending",
       source: p.source,
-      voiceRequestId,
     });
     commandRefs.push(ref);
   }

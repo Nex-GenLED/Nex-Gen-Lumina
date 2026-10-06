@@ -1,523 +1,378 @@
-# Voice linking: plan to make Alexa account linking and voice commands work end to end
+# Voice linking: Alexa account linking and voice commands, end to end
 
-Written 2026-10-05. Scope: Alexa first. Google Home is noted where the same code serves it.
-Nothing in this plan has been deployed or written to production.
+Written 2026-10-05; updated the same evening for B-3c (`feat/voice-link-e2e`). Scope: Alexa.
+Google Home is noted where the same code serves it. **Nothing here is deployed.** No production
+doc, config, console or AWS resource has been written.
 
-## 0. Summary
+## 0. Status
 
-Alexa account linking has never worked for any account. Four problems block it, one behind
-another:
+| # | Wall | Fix | Branch |
+|---|------|-----|--------|
+| 0 | XSS + open redirect on the login pages | exact redirect allowlist, JSON-escaped values, nonce CSP | `fix/voice-auth-xss` `988c2d6`; ships alone (Phase 1) |
+| 1 | `firebase.functions is not a function` after sign-in | load `firebase-functions-compat.js` 10.7.1 | `fix/voice-link-page` `0b138bf`; ships only with B-3c |
+| 2 | `alexaToken` → 401 under HTTP Basic | accept Basic **and** body; missing and wrong refused identically | `feat/voice-link-e2e` (B-3c) |
+| 3 | every directive fails: a custom token used as access token | self-issued HS256 access token verified by `alexaSmartHome`; the Lambda is a secret-free shim | `feat/voice-link-e2e` (B-3c) |
 
-| # | Wall | Where | Fix | Status |
-|---|------|-------|-----|--------|
-| 0 | XSS + open redirect on the login page | `alexaAuth`, `googleAuth` | exact redirect allowlist, JSON-escaped values, CSP | **built**: `fix/voice-auth-xss` `988c2d6` |
-| 1 | `firebase.functions is not a function` after sign-in | both pages load no `firebase-functions-compat.js` | load it (10.7.1) | **built**: `fix/voice-link-page` `0b138bf` (stacked on 0) |
-| 2 | `alexaToken` → 401 | reads `client_id`/`client_secret` from the body only; Amazon recommends HTTP Basic | accept Basic **and** body (§2) | to build (B-3c) |
-| 3 | every directive fails | `alexaToken` returns a Firebase **custom** token; the Lambda calls `verifyIdToken`, which rejects custom tokens | B-3b's self-issued JWT, verified by `alexaSmartHome`; Lambda becomes a shim (§3) | B-3b built, hardening to build (B-3c) |
-
-Wall 0 ships alone, first. Walls 1–3 ship together, as one deploy. Wall 1 deployed alone only
-moves the failure to wall 2.
+B-3c also closes every B-3b defect found in review (§3).
 
 ## 1. Branches
 
-| Branch | Head | Base | Contents |
-|---|---|---|---|
-| `fix/voice-auth-xss` | `988c2d6` | `9be91a1` (release head) | security fix only |
-| `fix/voice-link-page` | `0b138bf` + this doc | `fix/voice-auth-xss` | one script tag per page, its tests, this plan |
-| `feat/voice-canonical-commands` (B-2..B-4) | `5489808` | `ca6cc13` — **755 commits behind release** | intentCore, Google rewire, Alexa Smart Home, JWT |
-| `feat/voice-link-e2e` (B-3c, **to create**) | — | `fix/voice-link-page` + merge of B-3b | §6 |
+| Branch | Head | Contents |
+|---|---|---|
+| `fix/voice-auth-xss` | `988c2d6` | security fix only, off release `9be91a1` |
+| `fix/voice-link-page` | `24b9ff3` | + compat tag (`0b138bf`) + the first version of this plan |
+| `feat/voice-canonical-commands` (B-2..B-4) | `5489808` | intentCore, Google rewire, Alexa Smart Home (B-3b) |
+| `feat/voice-link-e2e` (**B-3c**) | see the push | `996fa87` = B-3b merged onto `24b9ff3` **as written** (the negative-control baseline); then the B-3c fixes and this update |
 
-**B-3b lands cleanly on the release base (verified 2026-10-05, scratch merge, nothing kept).**
-Merging `5489808` onto `0b138bf` conflicts in three places, all mechanical:
+Merge notes (`996fa87`):
 
-- the `functions/index.js` require block: keep B-3b's requires, drop its `OPENAI_API_KEY` param,
-  which release removed;
-- `.gitignore`: keep both blocks;
-- `functions/package.json`: keep release's jest scripts and add B-3b's runner as `test:voice`.
+- three mechanical conflicts:
+  - the `index.js` require block (keep B-3b's requires, drop the `OPENAI_API_KEY` param release
+    removed);
+  - `.gitignore` (both blocks);
+  - `package.json` (release's jest scripts plus B-3b's runner as `test:voice`, narrowed to
+    `lib-test/test/voice/**`);
+- it also brings B-3b's `tsconfig.test.json` and `docs/VOICE_LAUNCH_CHECKLIST.md`.
 
-After that, `tsc` is clean, the unit suite is 820/820, and B-3b's own `node:test` voice tests are 36/36.
-Narrow `test:voice` to `lib-test/test/voice/**/*.test.js`. As written, the glob would also run the
-compiled emulator tests.
+Where that checklist disagrees with this plan, **this plan wins**: no client-secret fallback, no
+"INVALID makes Amazon refresh", Alexa kill-switch responses, and the Phase 2 order.
 
-> **Never deploy from `feat/voice-canonical-commands` or the `C:\Flutter Projects\lumina-voice`
-> worktree.** Its tree predates the relay fail-fast (`8b3bcdf`, deployed 2026-09-30). A
-> `firebase deploy --only functions` there reverts `executeWledCommand`. Deploy only from a
-> release-based branch, and only with `--only functions:<named list>`.
+> **Never deploy from `feat/voice-canonical-commands` or the `lumina-voice` worktree.** Its tree
+> predates the relay fail-fast (`8b3bcdf`); a functions deploy there reverts `executeWledCommand`.
+> Deploy only named functions, from the merged release head.
 
-## 2. Amazon's token flow, exactly
+## 2. Amazon's flow and client authentication
 
-Alexa uses the OAuth 2.0 **authorization code grant**:
+**Authorization code grant:**
 
-1. The user enables the skill in the Alexa app. The app opens the **Authorization URI**
-   (`alexaAuth`) with `client_id`, `response_type=code`, `state`, `scope` (if configured) and
-   `redirect_uri`. The redirect URI is one of the three regional URLs
+1. The Alexa app opens `alexaAuth` with `client_id`, `response_type=code`, `state`, `scope` and
+   `redirect_uri`. The redirect URI is one of
    `{https://pitangui.amazon.com | https://layla.amazon.com | https://alexa.amazon.co.jp}/api/skill/link/{vendorId}`.
-2. Our page signs the user in (Firebase Auth compat, email and password). It calls
-   `generateAlexaAuthCode({idToken, state})`, which stores `oauth_codes/{code}` (5 min, single use).
-   The page then redirects to `redirect_uri?state=…&code=…`.
-3. Amazon's servers POST `application/x-www-form-urlencoded` to the **Access Token URI**
-   (`alexaToken`): `grant_type=authorization_code`, `code`, `redirect_uri`, plus client
-   credentials in one of two forms. `HTTP_BASIC` sends
-   `Authorization: Basic base64(urlenc(client_id) ":" urlenc(client_secret))` (RFC 6749 §2.3.1).
-   `REQUEST_BODY_CREDENTIALS` sends `client_id` and `client_secret` as body fields.
-4. We answer `{access_token, token_type: "Bearer", expires_in, refresh_token}`.
-5. Amazon calls the skill endpoint, an **AWS Lambda ARN**, with each directive. It carries the
-   access token in `directive.payload.scope.token` (Discovery) or `directive.endpoint.scope.token`
-   (control and ReportState).
-6. Near expiry, Amazon POSTs `grant_type=refresh_token&refresh_token=…` to the same URI with the
-   same client authentication.
+2. The page signs the user in and calls `generateAlexaAuthCode({idToken, state, redirectUri})`.
+   That stores a 5-minute, single-use code bound to that redirect URL, then the page redirects
+   with `state` and `code`.
+3. Amazon POSTs `grant_type=authorization_code&code&redirect_uri` to `alexaToken`, with client
+   credentials as **HTTP Basic** (`Authorization: Basic base64(urlenc(id):urlenc(secret))`) or
+   **in the body** (`client_id`, `client_secret`).
+4. `alexaToken` answers `{access_token, token_type: "Bearer", expires_in: 3600, refresh_token}`
+   with `Cache-Control: no-store`.
+5. Directives reach the shim Lambda. The token is in `directive.payload.scope.token` (Discover),
+   `directive.payload.grantee.token` (AcceptGrant) or `directive.endpoint.scope.token`
+   (everything else).
+6. Amazon refreshes with `grant_type=refresh_token`, using the same client authentication.
 
-**The console setting to check.** Alexa developer console → the skill → **Build → Account
-Linking** → section **Security Provider Information** → **"Your Client Authentication Scheme"**.
+**Console setting to read, not change:** Alexa developer console → the skill → **Build →
+Account Linking → Security Provider Information → "Your Client Authentication Scheme"**.
 The options are **HTTP Basic (Recommended)** and **Credentials in request body** (SMAPI
-`accessTokenScheme`: `HTTP_BASIC` | `REQUEST_BODY_CREDENTIALS`). Write down which is selected.
-After B-3c, either works. On the same page, also read:
+`accessTokenScheme`). **B-3c accepts both.**
 
-- the **Alexa Redirect URLs**: the vendor id at the end is `ALEXA_VENDOR_ID`;
-- **Authorization URI** and **Access Token URI**: they must be the deployed `alexaAuth` and
-  `alexaToken` URLs;
-- **Domain List**;
-- **Scope**;
-- **Default Access Token Expiration Time**.
+`alexaToken` client authentication (`src/voice/oauthClientAuth.ts`):
 
-Google, for reference, sends credentials in the body by default and can be switched to Basic.
+- **Header present:** it must be well-formed Basic. Each half is form-urldecoded. Any body
+  `client_id`/`client_secret` must agree with it.
+- **No header:** the body must carry both fields.
+- **Comparison:** constant time (HMAC digests and `timingSafeEqual`, both halves always
+  compared).
+- **Missing, malformed or wrong credentials:** the identical refusal, `401
+  {"error":"invalid_client"}` with `WWW-Authenticate: Basic realm="lumina-alexa"` and no-store.
+  The code is not spent.
+- **Server not configured** (`ALEXA_CLIENT_ID`/`ALEXA_CLIENT_SECRET` empty): `500 server_error`,
+  never a skipped check.
 
-**alexaToken must accept both (B-3c).** Put the parsing in a pure module, e.g.
-`src/voice/oauthClientAuth.ts`:
+## 3. Tokens, keys and the B-3b fixes
 
-- **Header present** (`Authorization: Basic …`, scheme case-insensitive):
-  - base64-decode, split on the **first** `:`;
-  - form-urldecode each half (`+` → space, then `decodeURIComponent`);
-  - malformed → `invalid_client`.
-- **Body fields present** → use them.
-- **Both present and different** → `invalid_client`. Both equal → accept.
-- **Neither present** → `invalid_client`.
-- **Compare** id and secret in constant time: HMAC both sides, then `timingSafeEqual`.
-- **Fail closed.** If `ALEXA_CLIENT_ID` or `ALEXA_CLIENT_SECRET` is unset, answer 500
-  `server_error`. Today the check is skipped entirely when they are unset.
-- **401 `invalid_client`** carries `WWW-Authenticate: Basic realm="lumina"`.
-- **Every token response** carries `Cache-Control: no-store` and `Pragma: no-cache`
-  (RFC 6749 §5.1).
-- **Errors** never echo `error.message`. Today's catch-all returns it.
+| B-3c fix | What it does now | Where |
+|---|---|---|
+| 1. Dedicated key | `ALEXA_JWT_SECRET` from the function environment (`process.env`, so a deploy never prompts), ≥ 32 bytes. Missing or short: `alexaToken` → `500 server_error` before any code is spent; `alexaSmartHome` → `INTERNAL_ERROR`. **No fallback to `ALEXA_CLIENT_SECRET`.** | `alexaJwt.readAlexaJwtSecret` |
+| 2. Expiry everywhere | Access token: HS256 JWT `{lid, iss: "lumina-alexa", aud: "alexa-smart-home", iat, exp = iat + 3600}`. Verify pins header alg/typ; requires iss, aud, iat and exp; rejects a lifetime over 1 h and iat in the future. Refresh token: 32 random bytes, stored only as SHA-256 (`oauth_refresh_tokens/{lid}`) with `{userId, provider, iss, aud: <client id>, active, createdAt, lastUsedAt, expiresAt}`. 90 days, sliding on each use; a record without `expiresAt`, past it, revoked, or issued to another client is refused. | `alexaJwt.ts`, `alexaLink.validRefreshRecord` |
+| 3. Nothing identifying to Amazon | **The access token carries no uid**: the handler reads the uid from the refresh record. Discovery sends per endpoint exactly `endpointId, manufacturerName, description, friendlyName, displayCategories, capabilities`. No cookie, no additionalAttributes. Details below. | `alexaSmartHome.ts` |
+| 4. Both credential forms | §2 | `oauthClientAuth.ts` |
+| 5. Documented behaviour only | Expired but well-signed → `EXPIRED_AUTHORIZATION_CREDENTIAL`; anything else → `INVALID_AUTHORIZATION_CREDENTIAL`. Amazon documents the meaning of each type, not what Alexa does next; the code relies on no refresh behaviour (source cited in the code). | `alexaSmartHome.ts` header |
+| 6. The app's command queue | Commands are written to `users/{uid}/commands` with the app's seven fields plus `source`, and a string payload. Before writing, the **same relay-eligibility predicate** as the app and `executeWledCommand` runs (`relayEligibility.hasPairedBridge`): bridge mode with no paired bridge queues nothing and returns `ENDPOINT_UNREACHABLE`; a lookup error fails open, as the trigger does. Queued commands meet `executeWledCommand`'s fail-fast like any app command. No controller I/O, no Game Day reads or writes (Game Day designs are no longer voice-activatable), no bridge-registry writes, no rules change. | `intentCore.executeIntent` |
+| 7. Kill switch | `config/voice_control`; a missing doc is **OFF** with an empty allowlist. Read on **every** directive (one batched read with the link doc). A disabled or non-allowlisted account gets `INSUFFICIENT_PERMISSIONS` (Discover accepts it), message "Voice control is not enabled for this account.", and nothing else: no reads past that point, no writes. A **new link** is refused too (`generateAlexaAuthCode` → permission-denied; `alexaToken` code exchange → `invalid_grant`). **Refresh is not gated**, so switching off never breaks an existing link. | `alexaSmartHome.ts`, `alexaLink.ts`, `index.js` |
+| 8. Unlink and Pending | §4 | `alexaLink.ts`, `index.js` |
 
-## 3. The token the Lambda receives, and how it is verified
+**What Amazon receives, exactly.** Discovery returns per endpoint:
 
-**Decision: a JWT that our function issues and our function verifies. The Lambda verifies
-nothing; it becomes a ~30-line shim.** This is B-3b's design (token-format decision "a"), plus
-the hardening below.
+- **`endpointId`:** `lumina-main` (the primary controller: oldest by createdAt, the existing
+  deviceResolver contract), `ctl-<k>` (other controllers) or `scn-<k>` (activatable scenes).
+  `<k>` is a 24-character keyed hash (`HMAC(ALEXA_JWT_SECRET, uid|kind|id)`). It is never a
+  uid, controller doc id (MAC-shaped), IP or scene doc id.
+- **`friendlyName`:** the controller's or scene's own name as typed in the app; the API needs a
+  spoken name. An unnamed primary is "House Lights" and other unnamed controllers "Lights N".
+  The profile's `propertyName` (often an address) is never used.
+- **`manufacturerName` / `description`:** fixed strings.
+- **`displayCategories`:** `LIGHT` or `SCENE_TRIGGER`.
+- **`capabilities`:** Alexa, PowerController and BrightnessController, or Alexa and
+  SceneController.
 
-- `alexaToken` returns an HS256 JWT:
-  - claims `{uid, iss: "lumina-alexa", aud: "alexa-smart-home", iat, exp: iat + 3600}`;
-  - signed with `ALEXA_JWT_SECRET`, the only place the key lives (functions/.env).
-- Amazon puts that token in each directive. The shim Lambda forwards the directive JSON verbatim
-  to the `alexaSmartHome` HTTPS function and returns its response.
-  - It holds no secret, no service account and no Firebase SDK.
-  - B-4 checklist §4 has the shim; Smart Home skills only accept a Lambda ARN as endpoint.
-- `alexaSmartHome` verifies the token (`verifyAlexaJwt`), then checks
-  `users/{uid}/integrations/alexa.isLinked === true` (one read, see §4). Only then does it run
-  the directive through `intentCore`.
+Responses carry:
 
-**Why not "custom token exchanged server-side for an ID token":**
+- a header with a fresh `messageId` and Amazon's `correlationToken`;
+- the `endpointId` Amazon sent, only if it has one of our shapes;
+- `powerState`/`brightness` properties;
+- fixed `ErrorResponse` messages (Amazon uses them for logging only).
 
-1. The Lambda would need a Google service-account key in AWS to call `verifyIdToken` and write
-   Firestore. That is a long-lived, broad credential in a second cloud.
-2. A Firebase ID token is a general session credential. Amazon would hold a token that works
-   against Firestore as the user. In the other direction, any app ID token would pass the Lambda
-   (token confusion).
-3. It adds an Identity Toolkit call with the API key to every grant and refresh.
+Token responses carry `access_token` (no uid inside), `token_type`, `expires_in` and an opaque
+`refresh_token`.
 
-The JWT is audience-bound to one endpoint and useless anywhere else.
+**Key rotation note.** `ALEXA_JWT_SECRET` also keys endpoint ids. Rotating it invalidates every
+access token (Amazon refreshes, so links survive) and re-keys endpoint ids (devices re-discover as
+new; routines must be re-pointed). Rotate only as a planned operation.
 
-**Custom tokens are never accepted as ID tokens anywhere:**
+## 4. Unlinking and the Pending state
 
-- `alexaToken` stops minting them.
-- `verifyAlexaJwt` accepts only HS256 signed with our secret, so an RS256 custom token or ID
-  token fails the signature check.
-- The legacy Lambda code (`alexa-skill/lambda/utils/firebase.js` `verifyIdToken`, and handlers
-  writing the legacy `power`/`brightness` command shape) is retired, not repaired.
+- **Link.** A successful code exchange writes `integrations/alexa = {isLinked: true, linkedAt}`
+  and **deletes `linkInitiated`/`initiatedAt`** in the same batch, so Pending ends the moment a
+  link succeeds.
+- **Unlink from the Lumina app.** The Unlink button deletes the integration doc.
+  1. From that instant every directive fails the per-directive link check: `isLinked` must be
+     true and the token's refresh record valid. Result: `INVALID_AUTHORIZATION_CREDENTIAL`.
+  2. The new trigger **`onVoiceIntegrationDeleted`** (`users/{uid}/integrations/{provider}`
+     onDelete) sets `active: false` and `revokedAt` on every refresh token the user holds for
+     that provider: `oauth_refresh_tokens` for alexa, `google_oauth_refresh_tokens` for
+     google_home.
+  3. Amazon's next refresh gets `invalid_grant`.
 
-**Hardening B-3b needs before deploy (B-3c):**
+  The same trigger fires on account purge. **No app build is needed.**
+- **Disable in the Alexa app.** Amazon drops its tokens without telling us. The app keeps showing
+  Linked until the user taps Unlink. Known v1 gap; skill events (`SkillDisabled`) are v1.1.
+- **Stuck Pending.** The new daily **`sweepStaleVoiceLinks`** (09:15 UTC) scans
+  `users/*/integrations/{alexa|google_home}`:
+  - `linkInitiated` older than 24 h and nothing else in the doc → the doc is deleted (app shows
+    "Link Alexa Account");
+  - stale but other fields present (e.g. a Google DISCONNECT's `isLinked: false`) → the two flags
+    are removed;
+  - a linked doc with a leftover flag → the flag is removed;
+  - fresh intents (< 24 h) and other providers are untouched.
+- **The bench account's current Pending.** Its doc holds only `linkInitiated`/`initiatedAt` from
+  10-05, so it clears either way, with **no manual write**:
+  1. at the bench link (step 7 below), or
+  2. at the first `sweepStaleVoiceLinks` run after the Phase 2 deploy (09:15 UTC the next
+     morning).
 
-1. **No fallback to `ALEXA_CLIENT_SECRET`.** B-3b signs with
-   `ALEXA_JWT_SECRET || ALEXA_CLIENT_SECRET`, a key Amazon also holds. Require `ALEXA_JWT_SECRET`
-   of ≥ 32 random bytes. If it is missing or short, `alexaToken` answers `server_error` and
-   `alexaSmartHome` answers `INTERNAL_ERROR`, each with a log line.
-2. **Verify more than the signature:**
-   - header `alg === "HS256"` and `typ === "JWT"`;
-   - `iss === "lumina-alexa"` and `aud === "alexa-smart-home"`;
-   - **`exp` required** (B-3b accepts a token with no `exp` forever);
-   - `iat` not in the future (60 s skew).
-3. **Expired ≠ invalid.** An expired but well-signed token → `EXPIRED_AUTHORIZATION_CREDENTIAL`.
-   A bad signature, wrong claims or unlinked account → `INVALID_AUTHORIZATION_CREDENTIAL`.
-   B-3b returns INVALID for both and says that makes Amazon refresh. Amazon's error reference
-   does not say that; EXPIRED is the documented "access token expired" type.
-4. **Link check per directive** (§4), so an unlink takes effect immediately, not after up to 1 h.
-5. **Privacy in Discovery cookies.** B-3b copies `userId` and `controllerIp` into every
-   endpoint cookie, which Amazon stores. Drop both:
-   - the uid comes from the token;
-   - controller IPs are re-resolved server-side.
+## 5. Deploy order and windows
 
-   Check that the `deviceUserId` cross-uid guard still has what it needs, or derive it from the
-   token.
-6. **Optional link gate during rollout.** `generateAlexaAuthCode` refuses, with a plain message,
-   when `readVoiceControlEnabled(uid)` is false. Then a customer who finds a live skill cannot
-   link before rollout. Needed only if the skill is live (blocked item B4).
+**Hard gate:** nothing below runs until Prompt C has cleared. Every functions deploy:
 
-## 4. Refresh tokens, link state, unlinking, and the app
-
-**Storage.**
-
-- `oauth_refresh_tokens/{sha256(token)}` holds `{userId, provider: "alexa", createdAt,
-  lastUsedAt, active}`. Today the doc id is the raw token.
-- Hash now: production has **zero** refresh tokens, so there is nothing to migrate.
-- Clients cannot read or write `oauth_codes` or `oauth_refresh_tokens` (`firestore.rules`
-  `allow read, write: if false`). No rules change is needed.
-- Make the code redemption a **transaction**. Today two racing token requests can both see
-  `used: false`.
-- Store `redirect_uri` with the code. Compare it at redemption (RFC 6749 §4.1.3) when Amazon
-  sends it.
-
-**Link state written by the server** (`users/{uid}/integrations/alexa`):
-
-- On `authorization_code` success, write `{isLinked: true, linkedAt, linkInitiated: delete,
-  initiatedAt: delete}`.
-- Stop writing `amazonUserId: client_id`: it stores the skill's client id under a user-id name.
-
-**What the app shows.** Build 115 needs no change. The UI reads only this doc:
-
-| Doc state | App shows |
-|---|---|
-| no doc | "Link Alexa Account" button |
-| `linkInitiated: true` only | amber **Pending** + "Complete the setup in the Alexa app" (forever; nothing expires it) |
-| `isLinked: true` | green **Linked** + Rediscover + Unlink (checked first, so it wins over a stale `linkInitiated`) |
-
-**Unlinking.**
-
-- **From the Lumina app (Unlink button).**
-  - The app deletes the integration doc. Today nothing revokes the refresh token, so Amazon keeps
-    a working credential.
-  - B-3c adds a Firestore trigger `onAlexaIntegrationDeleted` (`users/{uid}/integrations/alexa`
-    onDelete). It sets `active: false` on that user's Alexa refresh tokens.
-  - Effect: the next directive fails the link check (INVALID); the next refresh gets
-    `invalid_grant`; Alexa then asks the user to re-link. **No app build is needed.**
-  - The same trigger fires on account purge (`recursiveDelete`). That closes the Alexa half of
-    debt D-3, which `purgeUserAccount` lists as not done.
-- **From the Alexa app (disable skill).**
-  - Amazon discards its tokens. We are not told unless the skill subscribes to **skill events**
-    (`SkillDisabled`, `SkillAccountLinked`; smart home skills support them, delivered to the
-    skill endpoint).
-  - In v1 our doc stays `isLinked: true`, and the app keeps showing Linked until the user taps
-    Unlink. This is a known gap; skill events are v1.1. The shim already forwards every request,
-    so v1.1 is server-only plus a manifest subscription.
-- **The existing `alexaUnlink` HTTP endpoint** expects a Firebase ID token and nothing calls it.
-  Leave it for now (no deploy); remove it in a later clean-up.
-
-**The bench account's stuck "linkInitiated".**
-
-- Do nothing manually. The first successful bench link writes `isLinked: true` (the UI shows
-  Linked at once) and B-3c deletes `linkInitiated`/`initiatedAt` in the same write. The bench run
-  then also tests the clearing.
-- If you want it gone before the bench: open `users/<bench uid>/integrations/alexa` in the
-  Firebase console. Confirm it holds only `linkInitiated` and `initiatedAt`, then delete the doc.
-  That is a production write and your call; the app has no button for it in the Pending state.
-
-## 5. Production touchpoints and deploys, in order
-
-Nothing below runs until Prompt C has cleared for the Falcons at Saints game. Every functions
-deploy:
-
-- runs from a clean worktree at the exact SHA, with `functions/.env` copied from the main tree;
+- runs from a clean worktree at the merged release SHA, with `functions/.env` copied from the
+  main tree;
 - uses `firebase deploy --only functions:<list> --project icrt6menwsv2d8all8oijs021b06s5`;
 - is read back, then gets a `docs/BUILD_LEDGER.md` row.
 
-**Game Day calendar to stay clear of:**
+**Avoid (Game Day):**
 
-- tonight's start fire window;
-- Thu 10-08 evening (TNF);
-- **Fri 10-09**: 08:00–11:00 is reserved for the ESPN-slate planner deploy, and the rehearsal
-  is at 18:00;
-- Sat and Sun 10-10 and 10-11.
+- Mon 10-05 evening;
+- Thu 10-08 from 17:30 CDT (TNF);
+- **all of Fri 10-09**: 08:00–11:00 is the ESPN planner deploy, 18:00 the rehearsal, and there is
+  a bridge gap ~08:49;
+- Sat–Sun 10-10/11;
+- Mon 10-12 evening.
 
-Predicted bench-bridge stale gaps (7 h 27 m cadence, ±1 h; check the watcher log for the
-latest): Tue 10-06 ~13:40, Wed 10-07 ~12:00, Thu 10-08 ~10:25 (all CDT). The bench voice steps
-go through the bridge; keep them outside a gap.
+Before each window, read (read-only) that day's `fire_jobs` / planner schedule to confirm no fire
+is due. Postseason MLB day games are the one weekday risk.
 
-### Phase 1: security fix only. Tue 10-06, 09:00–12:00 CDT
+**Predicted bench-bridge stale gaps** (7.46 h from 10-05 20:18Z, ±1 h):
 
-| Step | Touchpoint | Who |
+| UTC | CDT |
+|---|---|
+| 10-06 03:45 | Mon 22:45 |
+| 10-06 11:13 | Tue 06:13 |
+| 10-06 18:40 | Tue 13:40 |
+| 10-07 02:08 | Tue 21:08 |
+| 10-07 09:36 | Wed 04:36 |
+| 10-07 17:03 | Wed 12:03 |
+| 10-08 00:31 | Wed 19:31 |
+| 10-08 15:26 | Thu 10:26 |
+| 10-08 22:54 | Thu 17:54 |
+
+Bench voice steps go through the bridge; keep them outside these ±1 h windows.
+
+### Phase 1: security fix only. Tue 10-06, 09:00–11:30 CDT
+
+| Step | Action | Who |
 |---|---|---|
-| 1 | Add `ALEXA_VENDOR_ID=<vendor id>` to the main tree's `functions/.env` (from the console's Alexa Redirect URLs). Leave `GOOGLE_HOME_PROJECT_ID` unset: Google linking stays refused. | Tyler |
-| 2 | Deploy `functions:alexaAuth,functions:googleAuth` from `988c2d6` | Tyler / session on "approve deploy" |
-| 3 | Read back (GET only, no writes): `alexaAuth?client_id=<id>&redirect_uri=https://evil.example/?amazon.com&state=s` → 400, the fixed error page and the lock-down CSP. The same request with a real redirect URL → 200 with `Content-Security-Policy` containing `nonce-`. | session |
+| 1 | `ALEXA_VENDOR_ID=<vendor id>` into main `functions/.env` (from the console's Alexa Redirect URLs; never into the repo) | Tyler |
+| 2 | Deploy `functions:alexaAuth,functions:googleAuth` from `988c2d6` (or the merged release head carrying it) | on Tyler's word |
+| 3 | Read back (GET only): an `evil.example/?amazon.com` redirect → 400 fixed page with the lock-down CSP; a real redirect URL → 200 with `Content-Security-Policy: … 'nonce-…'` | session |
 
-- **User impact:** none. Linking is already broken one step later, at the missing script, so
-  nothing that worked can stop working.
-- **Rollback:** redeploy the two functions from `9be91a1`. That puts the XSS back; only do it if
-  the deploy itself failed.
+No user impact: linking already fails later. Rollback: the two functions from `9be91a1`.
 
-### Phase 2: linking + voice, as one change. Wed 10-07, 09:00–11:00 CDT
+### Phase 2: linking + voice, one change. Wed 10-07, deploy 08:30–09:30 CDT, bench 09:30–10:50 CDT
 
-Fallback: Tue 10-13, the same hours.
+The window avoids the Wed ~12:03 gap (11:03–13:03). Afternoon fallback: bench 13:15–16:00 CDT the
+same day. Next fallback: Thu 10-08, bench 11:30–16:30 CDT (after the 10:26 gap, before TNF).
 
-| Step | Touchpoint | Who |
+| Step | Action | Who |
 |---|---|---|
-| 1 | Merge `feat/voice-link-e2e` (B-3c) into release after review; gates as in §7 | session |
-| 2 | Add `ALEXA_JWT_SECRET=<≥32 random bytes, base64>` to the main tree's `functions/.env` | Tyler |
-| 3 | Firestore `config/voice_control` = `{enabled: false, allowlistUids: ["<bench uid>"]}` (B-3b's reader treats missing or garbage as false) | Tyler |
-| 4 | Deploy `functions:alexaAuth,functions:googleAuth,functions:generateAlexaAuthCode,functions:alexaToken,functions:alexaSmartHome,functions:onAlexaIntegrationDeleted`. **Not** `executeWledCommand`, `googleSmartHome`, `googleToken` or anything Game Day. | Tyler / session |
-| 5 | AWS: deploy the shim Lambda (Node 22, no dependencies, env `FULFILLMENT_URL=<alexaSmartHome URL>`, timeout 8 s) in the skill's region (NA → us-east-1). Add the **Alexa Smart Home** trigger with **skill ID verification** on. | Tyler |
-| 6 | Alexa console: skill endpoint (default) → the shim ARN. Check Account Linking per §2; add `www.gstatic.com`, `identitytoolkit.googleapis.com`, `securetoken.googleapis.com` and the functions host to Domain List. Keep the skill in **Development**. | Tyler |
+| 1 | Merge `feat/voice-link-e2e` into release after review; gates (§7) on the merge result | session on Tyler's word |
+| 2 | Main `functions/.env`: `ALEXA_JWT_SECRET=<48 random bytes, base64>` (e.g. `openssl rand -base64 48`), plus the step 1 vendor id if not already there | Tyler |
+| 3 | Firestore `config/voice_control` = `{enabled: false, allowlistUids: ["<bench uid>"]}`. Required **before** the bench link: new links are refused for non-allowlisted accounts. | Tyler |
+| 4 | Deploy `functions:alexaAuth,functions:googleAuth,functions:generateAlexaAuthCode,functions:alexaToken,functions:alexaSmartHome,functions:onVoiceIntegrationDeleted,functions:sweepStaleVoiceLinks`. **Not** `executeWledCommand`, `googleSmartHome`, `googleToken`, or anything Game Day / bridge. | on Tyler's word |
+| 5 | Read back: `alexaToken` with no credentials → `401 invalid_client` + `WWW-Authenticate`; `alexaSmartHome` with a garbage token → `INVALID_AUTHORIZATION_CREDENTIAL` envelope | session |
+| 6 | AWS: create the shim Lambda from `alexa-skill/shim/index.js` (Node 22, no dependencies, env `FULFILLMENT_URL=<alexaSmartHome URL>`, timeout 8 s) in the skill's region (NA → us-east-1); add the **Alexa Smart Home** trigger with **skill ID verification**. Alexa console: default endpoint → the shim ARN; Account Linking: Authorization URI = `alexaAuth`, Access Token URI = `alexaToken`, Domain List += `www.gstatic.com`, `identitytoolkit.googleapis.com`, `securetoken.googleapis.com`, the functions host. Keep the skill in **Development**. | Tyler |
 | 7 | Bench run (§8) | Tyler + session |
-| 8 | Ledger row; update the B-4 checklist Results slots | session |
+| 8 | Ledger row; B-4 checklist Results slots | session |
 
-- **Kill switch:** `config/voice_control.enabled=false` with an empty allowlist. Discovery
-  returns no endpoints and control returns `ENDPOINT_UNREACHABLE`; neither unlinks anyone.
+- **Kill switch:** delete `config/voice_control` (or empty the allowlist). Every directive then
+  gets `INSUFFICIENT_PERMISSIONS`; links survive.
 - **Rollback:**
-  - redeploy `alexaAuth` and `googleAuth` from `988c2d6`, so linking stops at the page again;
-  - redeploy `alexaToken` and `generateAlexaAuthCode` from `988c2d6`;
-  - leave `alexaSmartHome` and the shim in place, behind the flag.
+  - `alexaAuth`, `googleAuth`, `generateAlexaAuthCode` and `alexaToken` from `988c2d6`;
+  - the shim and `alexaSmartHome` stay behind the switch;
+  - the two new functions can stay (the trigger only revokes; the sweep only clears stale
+    intents) or be deleted.
 
-### Phase 3: later, separate approval
-
-- Percentage rollout (B-4 §5).
-- Skill events.
-- Google (needs a Google Home project, `GOOGLE_HOME_PROJECT_ID`, a decision on a Google token
-  format, and the app's placeholder URL fixed).
-- Certification.
-
-### Every production touchpoint, in one list
+### Every production touchpoint
 
 - **Functions:**
   - Phase 1: `alexaAuth`, `googleAuth`.
-  - Phase 2: `alexaAuth`, `googleAuth`, `generateAlexaAuthCode`, `alexaToken`, `alexaSmartHome`
-    (new), `onAlexaIntegrationDeleted` (new).
-- **Env (functions/.env, main tree):** `ALEXA_VENDOR_ID` (phase 1), `ALEXA_JWT_SECRET` (phase 2).
-- **Firestore config:** `config/voice_control` (phase 2).
-- **Firestore data written by the functions during the bench:** `oauth_codes`,
-  `oauth_refresh_tokens`, `users/<bench>/integrations/alexa`, `users/<bench>/commands`.
-- **AWS:** one Lambda (shim), its trigger.
+  - Phase 2: those two plus `generateAlexaAuthCode`, `alexaToken`, `alexaSmartHome` (new),
+    `onVoiceIntegrationDeleted` (new), `sweepStaleVoiceLinks` (new).
+- **Env:** `ALEXA_VENDOR_ID`, `ALEXA_JWT_SECRET`.
+- **Firestore config:** `config/voice_control`.
+- **Data written by the functions:** `oauth_codes`, `oauth_refresh_tokens`,
+  `users/<bench>/integrations/alexa`, `users/<bench>/commands`. Stale intents are deleted or
+  stripped by the sweep.
+- **AWS:** one Lambda + trigger.
 - **Alexa console:** endpoint ARN, account-linking fields.
-- **Rules, indexes, app build, bridge firmware, bridge registry:** none.
+- **Rules, indexes, app build, bridge firmware, bridge registry, Game Day:** none.
 
-## 6. Code work for B-3c (`feat/voice-link-e2e`)
+## 6. What changed in B-3c (files)
 
-Off `fix/voice-link-page`. Merge `5489808` (§1), then:
+- `functions/src/voice/`:
+  - `alexaJwt.ts`: rewritten; the key reader, no uid, claims, reasons, endpoint keys.
+  - `oauthClientAuth.ts`: new.
+  - `alexaLink.ts`: new; token endpoint, refresh records, revocation, sweep.
+  - `alexaSmartHome.ts`: rewritten handler.
+  - `intentCore.ts`: eligibility, app shape, no Game Day, pure kill-switch reader.
+  - `googleSmartHome.ts`: maps `no_bridge`.
+  - `deviceResolver.ts`: exports the oldest-first loader.
+- `functions/index.js`:
+  - `generateAlexaAuthCode`: kill switch, redirect binding, no error echo;
+  - the `alexaAuth` page passes `redirectUri`;
+  - `alexaToken` and `alexaSmartHome` wrappers;
+  - two new exports.
+- `alexa-skill/shim/`: the Lambda and its test.
+- Tests:
+  - `functions/test/emulator/voiceAlexaLink.emulator.test.ts` (new, 36);
+  - `functions/test/unit/voiceAlexaAuth.test.js` (new);
+  - `functions/test/voice/*` updated to the B-3c contract (fixture IPs now RFC 5737).
 
-1. `src/voice/oauthClientAuth.ts`: client-credential parsing (§2), unit-tested.
-2. `index.js` `alexaToken`:
-   - use (1), with no-store headers;
-   - hashed refresh tokens;
-   - transactional code use plus the `redirect_uri` match;
-   - the link write clears `linkInitiated`;
-   - no `amazonUserId`;
-   - no error echo;
-   - JWT via the hardened signer.
-3. `src/voice/alexaJwt.ts`: alg/typ/iss/aud/exp/iat checks; a `reason` (`expired` | `invalid`);
-   refuse a short or missing secret.
-4. `src/voice/alexaSmartHome.ts` and the `index.js` wrapper:
-   - EXPIRED vs INVALID;
-   - the `isLinked` read;
-   - no secret fallback;
-   - cookies without uid or IP.
-5. `generateAlexaAuthCode`: the optional link gate (§3.6). Optionally store `redirect_uri`
-   (the page passes it).
-6. New `onAlexaIntegrationDeleted` (`src/voice/alexaLinkLifecycle.ts`) and its export.
-7. `alexa-skill/shim/index.js`: the shim (B-4 §4), with a 7 s `AbortSignal` timeout and a
-   well-formed ErrorResponse on non-2xx or timeout; it never logs `scope.token`. Mark
-   `alexa-skill/lambda/` legacy in `alexa-skill/DEPLOYMENT.md`; that file still gives Firebase's
-   own auth handler and `securetoken` as the Authorization and Access Token URIs, which is wrong.
-8. `package.json` `test:voice` narrowed (§1).
-9. Docs: this plan's status; the B-4 checklist corrections (secret fallback removed, INVALID vs
-   EXPIRED, the console steps).
+## 7. Test results (2026-10-05)
 
-## 7. Test plan
+- **Unit (jest):** 888/888, 29 suites.
+- **Voice (`npm run test:voice`, node:test):** 43/43.
+- **Shim (`node --test alexa-skill/shim/index.test.js`):** 4/4.
+- **Emulator** (`--testTimeout=120000`, firestore + auth): 456/458; the only failures are the two
+  known #119 cases.
+- **New B-3c emulator file:** 36/36.
+- **Negative control:** the same 36-case emulator file run against `996fa87` (B-3b as written):
+  **30 fail**, every fix block included. The 6 that pass cover behaviour B-3b already had right:
+  - body credentials accepted;
+  - webhook-mode queueing;
+  - `executeWledCommand` fail-fast on a voice command;
+  - no Game Day / controller / registry writes in that run;
+  - refresh still working with the switch off;
+  - an allowlisted account works.
 
-**Unit (jest, `test/unit`, against `lib/`)**
-
-- **oauthClientAuth:**
-  - Basic valid;
-  - Basic with `:`, `%` and `+` in the secret;
-  - lowercase `basic`;
-  - no colon;
-  - bad base64;
-  - body only;
-  - both equal;
-  - both different;
-  - neither;
-  - wrong secret → 401 with `WWW-Authenticate`;
-  - server unconfigured → 500.
-- **alexaJwt:**
-  - round trip;
-  - tampered payload and signature;
-  - `alg: none`;
-  - RS256 header;
-  - a real-shaped Firebase custom token and ID token (synthetic) → invalid;
-  - missing `exp` → invalid;
-  - expired → `expired`;
-  - wrong iss and aud;
-  - future iat;
-  - short secret → throws.
-- **alexaSmartHome:**
-  - expired → EXPIRED;
-  - bad → INVALID;
-  - unlinked uid → INVALID;
-  - flag off → empty Discovery and ENDPOINT_UNREACHABLE;
-  - cookies carry no uid or IP.
-- **B-3b's 36 node:test cases** via `npm run test:voice`, added to the gate.
-- **Link pages:** the existing `oauthLinkPage.test.js` (202) stays green.
-
-**Shim (node:test, `alexa-skill/shim`)** with a fake `fetch`:
-
-- forwards the body byte-for-byte;
-- returns the JSON;
-- non-2xx and timeout → ErrorResponse with the request's `correlationToken`;
-- the token never appears in logs.
-
-**Emulator (firestore + auth; recipe in memory/README; `--testTimeout=120000`)**
-
-- **Full chain:**
-  1. seed a user and controllers;
-  2. `generateAlexaAuthCode` → `oauth_codes` doc;
-  3. drive the real `alexaToken` handler with Basic → JWT + refresh token;
-  4. check the integration doc: `isLinked` true, no `linkInitiated`;
-  5. the refresh token is stored hashed;
-  6. repeat with body credentials.
-- **Rejections:**
-  - code reuse → `invalid_grant`;
-  - an expired code → `invalid_grant`;
-  - two concurrent redemptions → exactly one succeeds.
-- **Refresh:** a new JWT; then delete the integration doc → trigger → refresh → `invalid_grant`.
-- **alexaSmartHome with the minted JWT:**
-  - Discovery lists the seeded controllers (allowlisted uid);
-  - TurnOn writes one canonical command (`type setState`, string payload, `source
-    voice_alexa`); mark it completed → `Alexa.Response`;
-  - with the doc deleted → INVALID.
-- **Gate:** the full emulator suite, where only the two #119 cases may fail.
+  The Game Day half of fix 6 fails on B-3b in the static-scan case and in the node:test
+  "Game Day designs are not voice-activatable" case.
 
 **Before deploy, in a browser (no sign-in):**
 
-- Serve `alexaAuth` from the functions emulator.
-- Open it in desktop Chrome with DevTools: **zero CSP violations at load**, three SDK scripts
-  loaded.
-- Do not submit the form: the page holds production Firebase config.
-- Mobile Safari and Chrome initialise the auth iframe proactively. Expect one swallowed CSP
-  report for `apis.google.com`; email and password sign-in does not need it.
-- If the project enforces reCAPTCHA for email/password, the bench will show a CSP block on
-  `www.google.com/recaptcha`; add those origins then.
+- Serve `alexaAuth` from the functions emulator and check there are zero CSP violations at load.
+- Expect one swallowed report for `apis.google.com` on mobile; email and password sign-in does
+  not need it.
+- A reCAPTCHA-enforcing project would need `www.google.com/recaptcha` added.
 
-## 8. Bench end-to-end (test Alexa developer account only)
+## 8. Bench end to end (test Alexa developer account only)
 
 **Who and what:**
 
-- the Amazon **test developer account** that owns the Development-stage skill (or one beta
-  tester it invites); **no customer Amazon accounts**;
-- the **bench Lumina account** only;
-- the bench controller through the bench bridge;
-- no customer devices.
+- the Amazon **test developer account** that owns the Development-stage skill, with no customer
+  Amazon accounts;
+- the **bench Lumina account** (allowlisted);
+- the bench controller through the bench bridge.
 
-Avoid `.150` for scene steps unless the scene payload has been checked for `psave`/`pdel`.
-Power and brightness are fine.
+Avoid scene steps on `.150` unless the scene payload is checked for `psave`/`pdel`.
 
-1. **Link.** Alexa app (signed in to the test account) → Skills → Your Skills → **Dev** → the
-   skill → Enable.
-   - The `alexaAuth` page loads. Sign in with the bench Lumina account.
-   - Alexa reports success.
+1. **Link.** Alexa app → Skills → Your Skills → Dev → the skill → Enable → sign in on the
+   `alexaAuth` page.
    - **Pass:**
-     - logs show `generateAlexaAuthCode` 200 and `alexaToken` 200 (no 401);
-     - `integrations/alexa` = `isLinked: true`, no `linkInitiated`;
+     - `generateAlexaAuthCode` 200, `alexaToken` 200 (never 401);
+     - `integrations/alexa` = `{isLinked, linkedAt}` with no `linkInitiated`;
      - the app shows **Linked**;
-     - there is one hashed refresh-token doc.
-2. **Discover.** "Alexa, discover devices" → the bench endpoints appear.
-3. **Control.**
-   - **Commands:** "turn on <name>" / "set <name> to 50 percent" / "turn off <name>".
+     - there is one hashed refresh record.
+2. **Discover.**
    - **Pass:**
-     - each writes one `users/<bench>/commands` doc (`source: voice_alexa`, string payload);
+     - `lumina-main`, any `ctl-…` and `scn-…` endpoints with the app's names;
+     - nothing else in the response.
+3. **"Turn on / set 50 percent / turn off <name>".**
+   - **Pass:**
+     - one `users/<bench>/commands` doc per command (`source: voice_alexa`, string payload);
      - the bridge completes it;
-     - the light changes;
-     - Alexa says OK.
-   - **Record:** p50 and p95 command round trip, and how often the 4 s wait ends `optimistic`
-     (B-4 §5 Results).
-4. **Refresh.** Wait 70 minutes, then run any command.
-   - **Pass:** the logs show one `refresh_token` grant 200, then the command succeeds.
-5. **Unlink from the app.** Tap Unlink.
-   - The doc is deleted and the trigger revokes the tokens.
-   - "Turn on" fails, with no light change.
-   - Within a refresh cycle, the Alexa app asks to re-link.
-6. **Re-link, then disable the skill in the Alexa app.** Expected v1 gap: the app still shows
-   Linked. Tap Unlink to clean up.
-7. **Negative.** A second Lumina account that is not allowlisted links (if the gate is off)
-   → Discovery returns nothing, and control returns ENDPOINT_UNREACHABLE.
+     - the light changes.
+   - **Record:** p50/p95 and how often the 4 s wait ends optimistic.
+4. **Refresh.** After 70 minutes, any command.
+   - **Pass:** one `refresh_token` grant 200, then success.
+5. **Kill switch.** Empty the allowlist.
+   - **Pass:** the next command fails (logs show `INSUFFICIENT_PERMISSIONS`); no command doc.
+     Note what Alexa actually says; Amazon does not document the spoken text.
+   - Restore the allowlist.
+6. **Unlink in the app.**
+   - **Pass:**
+     - the next command fails;
+     - the refresh record shows `active: false`;
+     - Alexa asks to re-link within a refresh cycle.
+7. **Re-link**, then disable the skill in the Alexa app. Expected v1 gap: the app shows Linked
+   until Unlink.
 
-**Abort** on any 5xx loop, any command to a non-bench controller, or any write outside the bench
-uid. Then flip the kill switch and roll back per Phase 2.
+**Abort** on any 5xx loop, a command to a non-bench controller, or a write outside the bench uid.
+Then use the kill switch and roll back.
 
 ## 9. Game Day and the bridge
 
-- **Linking** (`alexaAuth`, `generateAlexaAuthCode`, `alexaToken`, the trigger) touches neither
-  Game Day nor the bridge.
-- **Voice commands** use the **existing relay data path as a consumer**:
-  - they write canonical `setState`/`applyJson` command docs to `users/{uid}/commands`, the same
-    shape `applySyncPattern` writes;
-  - `executeWledCommand` (unchanged, not redeployed) forwards webhook-mode ones and fails
-    bridge-less accounts fast;
-  - the paired bridge picks up the rest exactly as it does app commands.
-- **No change** to bridge firmware, the bridge registry, `bridge_status`, the bridge rules
-  deployed 10-05, or the bridge pairing flow.
-- **Game Day:** a "gameday-<team>" voice scene reads
-  `users/{uid}/game_day_autopilot/{team}.saved_design_payload` and applies it once. It never
-  writes Game Day docs and never involves the planner, dispatcher, sweeper or leases. No Game Day
-  function is in any deploy above.
-- **Behavioural overlap:** a voice "turn off" during a served fire turns the lights off, the same
-  as the app's power button.
+- **Linking** touches neither Game Day nor the bridge.
+- **Voice commands** are consumers of the existing relay path, exactly like app commands: the same
+  queue, document shape, eligibility rule and fail-fast trigger.
+- **No change** to bridge firmware, bridge registry, bridge rules, pairing, or any Game Day
+  function or data. Voice no longer reads Game Day designs.
 
 ## 10. App side
 
-- **Bench and Phase 2: no build.** Linking starts in the Alexa app. The app only reads
-  `integrations/alexa`, and the server now keeps it correct (link clears Pending; app Unlink
-  triggers revocation).
+- **No build for Phase 2 or the bench.**
 - **Next build, not blocking:**
-  1. **Android 11+.** The manifest's `<queries>` has no VIEW intent for `https` or `alexa`. The
-     `alexa://` attempt has no iOS `LSApplicationQueriesSchemes` entry either. So "Link Alexa
-     Account" may silently do nothing on Android: it writes Pending and returns `false`, which
-     the UI ignores. Add the queries, or launch without `canLaunchUrl`.
-  2. Treat a `linkInitiated` older than 24 h as not linked, or offer Cancel in Pending.
-  3. Show an error when the launch fails.
-  4. If a **new** skill is created rather than re-pointing the existing one,
-     `alexa_service.dart` `skillId` changes, which needs a build. The bench can enable the dev
-     skill from the Alexa app directly, so it is not blocked by this.
-  5. Google: `google_home_service.dart` still launches a `000000YOUR_PROJECT_ID` placeholder.
+  - Android 11+ `<queries>` / iOS `LSApplicationQueriesSchemes` for the Link button;
+  - show a launch failure;
+  - optional Cancel in Pending (the sweep now clears it within a day);
+  - `skillId` changes only if a new skill is created;
+  - Google's placeholder URL.
 
 ## 11. Blocked on the owner
 
-- **B1:** Alexa console, Build → Account Linking. Report:
-  - the **Client Authentication Scheme** value;
-  - the **vendor id** from Alexa Redirect URLs (it goes into `functions/.env` only, never the
-    repo);
-  - whether Authorization URI and Access Token URI are the `alexaAuth` and `alexaToken` URLs.
-- **B2:** the skill's **type and endpoint**: Smart Home? which Lambda ARN? what code runs there
-  now?
-- **B3:** a **test Alexa developer account** (Amazon) with the skill in Development, plus a phone
-  with the Alexa app signed in to it.
-- **B4:** whether the skill is **live or Development-only**. This decides whether the link gate
-  (§3.6) is required.
-- **B5:** approval to deploy Phase 1, and later Phase 2, in the windows above. You also make the
-  `.env` and `config/voice_control` writes and the AWS and console steps.
+- **B1:** Account Linking page values:
+  - Client Authentication Scheme (either works now);
+  - the vendor id;
+  - the Authorization and Access Token URIs.
+- **B2:** skill type (Smart Home?), current endpoint ARN, and what code runs there.
+- **B3:** a test Alexa developer account + a phone with the Alexa app signed into it.
+- **B4:** whether the skill is live or Development-only. New links are now gated by the kill
+  switch either way.
+- **B5:** the go for each phase, plus the `.env`, `config/voice_control`, AWS and console steps.
 
 ## 12. Sources
 
-- Amazon, "Account Linking Schemas" (SMAPI): authorization-code redirect URI
-  `{baseUrl}/api/skill/link/{vendorId}`, valid baseUrls pitangui/layla/alexa.amazon.co.jp, and
-  `accessTokenScheme` `HTTP_BASIC` | `REQUEST_BODY_CREDENTIALS`:
+- Amazon, Account Linking Schemas (redirect URI format, `accessTokenScheme`):
   https://developer.amazon.com/en-US/docs/alexa/smapi/account-linking-schemas.html
-- Amazon, "Configure an Authorization Code Grant" (console Account Linking page, Security
-  Provider Information):
+- Amazon, Configure an Authorization Code Grant:
   https://developer.amazon.com/en-US/docs/alexa/account-linking/configure-authorization-code-grant.html
-- Amazon, "Alexa.ErrorResponse" (EXPIRED vs INVALID_AUTHORIZATION_CREDENTIAL):
+- Amazon, Alexa.ErrorResponse (EXPIRED vs INVALID_AUTHORIZATION_CREDENTIAL,
+  INSUFFICIENT_PERMISSIONS; messages are for logging):
   https://developer.amazon.com/en-US/docs/alexa/device-apis/alexa-errorresponse.html
-- Amazon, "Use Skill Events" (SkillDisabled and others, all skill models):
+- Amazon, Alexa.Discovery (endpoint fields; Discover error types):
+  https://developer.amazon.com/en-US/docs/alexa/device-apis/alexa-discovery.html
+- Amazon, Use Skill Events:
   https://developer.amazon.com/en-US/docs/alexa/smapi/skill-events-in-alexa-skills.html
-- Google Home Developers, "OAuth 2.0 authorization" (redirect URIs
-  `oauth-redirect[-sandbox].googleusercontent.com/r/{project}`; body credentials by default):
+- Google Home Developers, OAuth 2.0 authorization:
   https://developers.home.google.com/cloud-to-cloud/project/authorization
-- RFC 6749 §2.3.1 (client password, Basic encoding), §4.1.3 (redirect_uri at the token endpoint),
-  §5.1 (no-store).
+- RFC 6749 §2.3.1, §4.1.3, §5.1, §5.2.

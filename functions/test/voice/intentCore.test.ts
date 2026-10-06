@@ -37,6 +37,8 @@ class DocSnap {
 }
 
 class Store {
+  reads: string[] = [];
+  registryThrows = false;
   docs = new Map<string, Data>();
   listeners = new Map<number, { path: string; cb: (s: DocSnap) => void }>();
   private autoCounter = 0;
@@ -87,21 +89,35 @@ class DocRef {
 }
 
 class ColRef {
+  private filters: Array<[string, unknown]> = [];
   constructor(public store: Store, public path: string) {}
   doc(id?: string) {
     const realId = id ?? this.store.nextAutoId();
     return new DocRef(this.store, `${this.path}/${realId}`, realId);
   }
+  where(field: string, _op: string, value: unknown) {
+    const c = new ColRef(this.store, this.path);
+    c.filters = [...this.filters, [field, value]];
+    return c;
+  }
+  limit(_n: number) {
+    return this;
+  }
   async get() {
+    if (this.path === "bridge_registry" && this.store.registryThrows) {
+      throw new Error("registry unavailable");
+    }
+    this.store.reads.push(this.path);
     const prefix = this.path + "/";
     const docs: DocSnap[] = [];
     for (const [p, d] of this.store.docs) {
       if (p.startsWith(prefix)) {
         const rest = p.slice(prefix.length);
-        if (!rest.includes("/")) docs.push(new DocSnap(rest, d));
+        if (rest.includes("/")) continue;
+        if (this.filters.every(([f, v]) => (d as Data)[f] === v)) docs.push(new DocSnap(rest, d));
       }
     }
-    return { docs };
+    return { docs, empty: docs.length === 0 };
   }
 }
 
@@ -127,7 +143,7 @@ function baseStore(): Store {
   s.seed("config/voice_control", { enabled: true });
   s.seed(`users/${UID}`, { webhookUrl: WEBHOOK, propertyName: "My House" });
   s.seed(`users/${UID}/controllers/ctrlA`, {
-    ip: "192.168.1.50",
+    ip: "192.0.2.50",
     name: "Front",
     created_at: { toMillis: () => 1000 },
   });
@@ -160,12 +176,16 @@ test("POWER_ON writes a canonical setState doc with a STRING payload", async () 
   assert.equal(cmd.payload, '{"on":true}');
   assert.equal(cmd.type, "setState");
   assert.equal(cmd.controllerId, "ctrlA");
-  assert.equal(cmd.controllerIp, "192.168.1.50");
+  assert.equal(cmd.controllerIp, "192.0.2.50");
   assert.equal(cmd.webhookUrl, WEBHOOK);
   assert.equal(cmd.status, "pending");
   assert.equal(cmd.source, "voice_google");
-  assert.equal(cmd.voiceRequestId, "vr-1");
+  assert.equal(res.voiceRequestId, "vr-1");
   assert.notEqual(cmd.createdAt, undefined);
+  // B-3c: exactly the app's fields plus source.
+  assert.deepEqual(Object.keys(cmd).sort(), [
+    "controllerId", "controllerIp", "createdAt", "payload", "source", "status", "type", "webhookUrl",
+  ]);
 });
 
 test("POWER_OFF writes {on:false}", async () => {
@@ -285,25 +305,25 @@ test("system scene payload is the stored wled_payload verbatim", async () => {
 // ---------------------------------------------------------------------------
 // 3. Game Day activation (saved_design_payload verbatim)
 // ---------------------------------------------------------------------------
-test("Game Day team activates via gameday- id with verbatim saved payload", async () => {
+test("Game Day designs are not voice-activatable and are never read", async () => {
   const s = baseStore();
-  const savedPayload = '{"on":true,"bri":255,"seg":[{"id":0,"fx":17}]}';
   s.seed(`users/${UID}/game_day_autopilot/mlb_royals`, {
     team_name: "Kansas City Royals",
-    saved_design_name: "Royals Twinkle",
-    saved_design_payload: savedPayload,
-    design_mode: "saved",
-    enabled: true,
+    saved_design_payload: '{"on":true,"bri":255}',
   });
-  assert.equal(await activateAndReadPayload(s, "gameday-mlb_royals"), savedPayload);
-
-  // and it appears in the activatable-scenes discovery list
+  const res = await executeIntent({
+    uid: UID,
+    controllerId: "ctrlA",
+    intent: { kind: "ACTIVATE_SCENE", sceneId: "gameday-mlb_royals" },
+    source: "voice_google",
+    db: asDb(s),
+  });
+  assert.ok(!res.ok);
+  assert.equal(!res.ok && res.code, "unknown_scene");
   const scenes = await resolveActivatableScenes(asDb(s), UID);
-  const gd = scenes.find((x) => x.sceneId === "gameday-mlb_royals");
-  assert.ok(gd);
-  assert.equal(gd.name, "Kansas City Royals");
-  assert.equal(gd.altName, "Royals Twinkle");
-  assert.equal(gd.origin, "game_day");
+  assert.ok(!scenes.some((x) => x.name === "Kansas City Royals"));
+  assert.ok(!s.reads.some((p) => p.includes("autopilot")));
+  assert.ok(![...s.docs.keys()].some((p) => p.includes("/commands/")));
 });
 
 // ---------------------------------------------------------------------------
@@ -311,8 +331,8 @@ test("Game Day team activates via gameday- id with verbatim saved payload", asyn
 // ---------------------------------------------------------------------------
 test("scene activation with no controller fans out to ALL controllers", async () => {
   const s = baseStore();
-  s.seed(`users/${UID}/controllers/ctrlB`, { ip: "192.168.1.51", created_at: { toMillis: () => 2000 } });
-  s.seed(`users/${UID}/controllers/ctrlC`, { ip: "192.168.1.52", created_at: { toMillis: () => 3000 } });
+  s.seed(`users/${UID}/controllers/ctrlB`, { ip: "192.0.2.51", created_at: { toMillis: () => 2000 } });
+  s.seed(`users/${UID}/controllers/ctrlC`, { ip: "192.0.2.52", created_at: { toMillis: () => 3000 } });
   s.seed(`users/${UID}/scenes/sc_sys`, {
     type: "system",
     name: "Lights Off",
@@ -330,7 +350,7 @@ test("scene activation with no controller fans out to ALL controllers", async ()
   assert.equal(res.commandRefs.length, 3); // ctrlA + ctrlB + ctrlC
 
   const ips = res.commandRefs.map((r) => readCmd(s, r).controllerIp).sort();
-  assert.deepEqual(ips, ["192.168.1.50", "192.168.1.51", "192.168.1.52"]);
+  assert.deepEqual(ips, ["192.0.2.50", "192.0.2.51", "192.0.2.52"]);
   for (const r of res.commandRefs) {
     assert.equal(readCmd(s, r).payload, '{"on":false}');
   }
@@ -459,4 +479,51 @@ test("awaitOutcome resolves optimistic on timeout and cleans up", async () => {
   const outcome = await awaitOutcome(ref, 30);
   assert.deepEqual(outcome, { status: "optimistic" });
   assert.equal(s.listenerCount, 0);
+});
+
+// ---------------------------------------------------------------------------
+// B-3c: relay eligibility before queueing (bridge mode)
+// ---------------------------------------------------------------------------
+async function powerOnBridgeMode(s: Store) {
+  s.seed(`users/${UID}`, { webhookUrl: "" });
+  return executeIntent({
+    uid: UID,
+    controllerId: "ctrlA",
+    intent: { kind: "POWER_ON" },
+    source: "voice_alexa",
+    db: asDb(s),
+  });
+}
+
+test("bridge mode, no paired bridge → no_bridge and nothing queued", async () => {
+  const s = baseStore();
+  const res = await powerOnBridgeMode(s);
+  assert.ok(!res.ok);
+  assert.equal(!res.ok && res.code, "no_bridge");
+  assert.ok(![...s.docs.keys()].some((p) => p.includes("/commands/")));
+});
+
+test("bridge mode, paired bridge → queued with an empty webhookUrl", async () => {
+  const s = baseStore();
+  s.seed("bridge_registry/b1", { pairedUid: UID });
+  const res = await powerOnBridgeMode(s);
+  assert.ok(res.ok);
+  assert.equal(readCmd(s, res.ok && res.commandRefs[0]).webhookUrl, "");
+});
+
+test("bridge mode, registry lookup error → fail open (queued), like executeWledCommand", async () => {
+  const s = baseStore();
+  s.registryThrows = true;
+  const res = await powerOnBridgeMode(s);
+  assert.ok(res.ok);
+});
+
+test("webhook mode never consults the registry", async () => {
+  const s = baseStore();
+  s.registryThrows = true;
+  const res = await executeIntent({
+    uid: UID, controllerId: "ctrlA", intent: { kind: "POWER_OFF" }, source: "voice_alexa", db: asDb(s),
+  });
+  assert.ok(res.ok);
+  assert.ok(!s.reads.includes("bridge_registry"));
 });
