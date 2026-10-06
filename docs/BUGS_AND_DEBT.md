@@ -2826,6 +2826,74 @@ commit — merging `main` into this tree will collide with the untracked copies.
     from it (or make them config values), and consider a second signal for "dead" that does
     not wait on the heartbeat, such as the bridge's registry `lastSeen` and command pickup.
 
+- [ ] **#177 — The readiness gate withheld the END of a show the server had already started:
+  team colours stayed on a house for hours (2026-10-05)**
+  - Status: **FIX BUILT `dde45b3` — behind `end_ignores_gate` (`true` or a uid list), default
+    OFF; NOT deployed** · Severity: **P1** · Evidence: **verified-by-live-data** (the bench plan
+    log: every tick after the final logged `plan_end confirmed_final scopedOut:true`) +
+    **verified-by-source**
+  - A start minted in the morning fired on the server path at 18:46 CDT (the dispatcher does not
+    consult the gate). At 15:50 CDT the owner had added a fourth controller bus, so
+    `base_ladder_asserts_segments` went false and the gate flipped to `gated_ladder_bad`. ESPN's
+    final was seen at 22:30 CDT. `writeJobs = allowlisted && gate.armed` guarded the end write,
+    so the end job was never created. Pre-flight never gated ends; the gate did.
+  - **The fix.** With the flag on for the account, the END of a FIRED start is written while the
+    account is allowlisted, whatever the gate says: confirmed final, hard cap, status-aware cap
+    and ceiling alike. "Fired" is GUARD 0b's test, unchanged: the start job (the team's own
+    `_start`, or the relinquisher's `_end` for a team lit by hand-off) is `dispatched` or
+    `completed`. A start that is `scheduled`, `cancelled`, `expired`, `skipped`, `failed` or
+    missing never commanded the controller, so no end is written, as before. Starts keep the
+    gate. A hand-off under a blocking gate is refused (`handoff_refused:gate_blocking`) and the
+    end restores base. Rows gain `gateBypassed`, the summary `endsGateBypassed`, the scorecard
+    `end.gate_bypassed`, only when it acted.
+  - **Defined, and tested:** an account removed from `uid_allowlist` after its start fired, or
+    `write_jobs:false`, still gets no end (`plan_end … scopedOut:true`, log-only). Remove an
+    account from the allowlist only when it has no session with `startPlannedAt` and no
+    `endFiredAt`.
+  - Tests: `plannerEndGate.test.js`. With the flag absent the flags-off golden and the bench
+    regression snapshot are unchanged.
+  - **Close when** the flag is `true` fleet-wide (deploy plan §6c). Until then the 10-05 shape
+    can recur on any allowlisted account whose gate flips mid-game.
+
+- [ ] **#178 — A team disabled or deleted while its show is lit is never ended by the server**
+  - Status: **OPEN — found in the 2026-10-06 end-path audit** · Severity: **P2** · Evidence:
+    **verified-by-source**
+  - `planGameDayFires.ts` reads `game_day_autopilot` with `enabled == true`; an account with no
+    enabled config takes the `configs.empty` branch and `continue`s, so a session that this
+    system started is never evaluated for its end, final or cap. `teardownTeamFires` (on the
+    config DELETE) cancels only still-`scheduled` jobs and writes no restore. Toggling a team
+    off, or removing it, after its start fired therefore leaves the house in its colours until
+    the owner acts.
+  - **Fix shape:** evaluate the END for every open session (`startPlannedAt`, no `endFiredAt`)
+    regardless of the config's `enabled`; and on a config delete, when that team's session is
+    open and its start fired, write a base-restore end instead of only cancelling.
+
+- [ ] **#179 — An end job that exhausts its retry budget is never minted again: the session
+  already says it ended**
+  - Status: **OPEN — found in the 2026-10-06 end-path audit** · Severity: **P2** · Evidence:
+    **verified-by-source**
+  - The planner sets `endFiredAt` when it CREATES the end job, and GUARD 3 (`already_fired`)
+    then refuses every later end for that session. The dispatcher retries an end for 15 minutes
+    (`END_RETRY_WINDOW_MS`); after `retry_budget_exhausted` the job is terminal `expired` or
+    `failed` and nothing re-mints it. A bridge silent for more than 15 minutes at the final (the
+    #174 dead-bridge case, or a longer #171 gap) strands the house in team colours.
+  - **Fix shape:** on a tick where the session has `endFiredAt` and the end job is terminal and
+    not `completed`, mint a new end (`_end_2`, same restore payload, a fresh 15-minute budget)
+    and record it; or make the planner, not the dispatcher, own the end's retry.
+
+- [ ] **#180 — Three narrower ways a lit house is not ended: a `failed` start, a vanished
+  controller document, and unusable participation facts (#161)**
+  - Status: **OPEN — recorded from the 2026-10-06 end-path audit** · Severity: **P3** ·
+    Evidence: **verified-by-source**
+  - A start job the bridge reported `failed` (WLED refused it, or a stuck termination) reads as
+    never fired, so no end follows; a refusal after a partial apply leaves whatever was applied.
+  - A controller document that disappears mid-game takes the `no_controller` branch and
+    `continue`s before the end is evaluated.
+  - Participation facts that become unusable mid-game `continue` before the end (#161).
+  - **Fix shape:** for a session with `startPlannedAt`, skip only the START on these and let
+    the END path run; treat a `failed` start as fired for the purpose of a base restore (an
+    identical-state preset load is visually silent).
+
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
   - Status: OPEN (filed 2026-08-19) · Severity: **P2 — UX, installer-facing**

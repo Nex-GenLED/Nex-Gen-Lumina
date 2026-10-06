@@ -1,6 +1,6 @@
 # Game Day ESPN slate fix — deploy plan and college rehearsal
 
-**Date:** 2026-10-02 · **Branch:** `fix/gameday-espn-slate`, on `fix/gameday-server-ab` `309a5d9` (A+B, DEPLOYED 2026-10-02 as planner rev 00016 from `d2e0f6e`) · **Status:** BUILT, NOT DEPLOYED. Nothing here has been run. **Updated 2026-10-05:** the same deploy now also carries the two bridge write-gap fixes (B2 `served_sticky`, A `preflight_bridge_grace`); see §6b and §10. Every write below is the owner's, after the owner's approval.
+**Date:** 2026-10-02 · **Branch:** `fix/gameday-espn-slate`, on `fix/gameday-server-ab` `309a5d9` (A+B, DEPLOYED 2026-10-02 as planner rev 00016 from `d2e0f6e`) · **Status:** BUILT, NOT DEPLOYED. Nothing here has been run. **Updated 2026-10-05:** the same deploy now also carries the two bridge write-gap fixes (B2 `served_sticky`, A `preflight_bridge_grace`); see §6b and §10. **Updated 2026-10-06:** and `end_ignores_gate`, the fix for the house left in team colours on 10-05 (§0, §6c, §11). Every write below is the owner's, after the owner's approval.
 
 **Code commits:**
 
@@ -15,10 +15,11 @@
 | `2c15e27` | no start for a postponed game (#158) |
 | `08b2596` | `payload_full_state` |
 | `3dfce14` | the bridge write gap: `served_sticky` (B2) and `preflight_bridge_grace` (A) |
+| `dde45b3` | `end_ignores_gate`: the end of a fired start is written past a blocking readiness gate |
 
 Public-repo rule: no customer or bench identifiers appear here. `<BENCH_UID>` is the bench account's uid; take it from the owner's private notes.
 
-**The plan in one line:** deploy `planGameDayFires` only, **Fri 10-09 08:00–11:00 CDT**, after the A+B code has run the Sat 10-03, Sun 10-04 and Thu 10-08 bench games. Rehearse the same evening on **Louisville vs Florida State, 18:00 CDT**, bench account only, with uid-list flags. The friendlies are allowlisted **Sat 10-10 only after the rehearsal is clean**. The two bridge write-gap flags go on for the bench the same morning (§6b), and fleet-wide **before** any friendly is allowlisted.
+**The plan in one line:** deploy `planGameDayFires` only, **Fri 10-09 08:00–11:00 CDT**, after the A+B code has run the Sat 10-03, Sun 10-04 and Thu 10-08 bench games. Rehearse the same evening on **Louisville vs Florida State, 18:00 CDT**, bench account only, with uid-list flags. The friendlies are allowlisted **Sat 10-10 only after the rehearsal is clean**. The two bridge write-gap flags go on for the bench the same morning (§6b), and fleet-wide **before** any friendly is allowlisted. So does `end_ignores_gate` (§6c): **all three** on and verified before the allowlist widens.
 
 ## 0. The defect and the fix
 
@@ -29,6 +30,7 @@ The server read ESPN's featured college list, so an FBS team that was not featur
 - **URL cache:** each ESPN URL is fetched once per tick.
 - **Ride-alongs:** P4b (#146); the first served app build is 114 (#150); `payload_full_state` (the multichannel audit §4.1).
 - **Bridge write gap (added 2026-10-05):** firmware-1.2 bridges stop landing Firestore writes for about ten minutes at a time, a few times a day, with no reboot. The bench bridge does it about every 7.5 h, and the same gap was seen on three other fleet bridges at other houses. Each gap fails pre-flight P2 (heartbeat under 5 minutes old) on one or two planner ticks. Each of those ticks published `served:false`, which app builds 114 and 115 read as "not served": an app open on the home network during those minutes can arm the phone lease (a preset save plus a timer row). **B2, `served_sticky`:** `served` stays true until P2 has failed for 30 minutes without a break. **A, `preflight_bridge_grace`:** P2's window is 15 minutes instead of 5. See §6b for the turn-on and §10 for what the app sees.
+- **The house left in team colours (added 2026-10-06):** on 10-05 a start minted in the morning fired on the server path at 18:46 CDT. The owner had added a fourth controller bus at 15:50 CDT, so the readiness gate flipped to `gated_ladder_bad`. ESPN's final was seen at 22:30 CDT, and every tick after it logged `plan_end confirmed_final scopedOut:true` and wrote nothing: `writeJobs = allowlisted && gate.armed` guarded the end as well as the start. Pre-flight never gated ends; the gate did. **`end_ignores_gate`:** the end of a start this system FIRED is written while the account is allowlisted, whatever the gate says, by every end path (confirmed final, hard cap, status-aware cap and ceiling). Starts keep the gate. See §6c and §11.
 
 Every behaviour sits behind a flag, and every flag is off until the owner writes it.
 
@@ -37,12 +39,13 @@ Every behaviour sits behind a flag, and every flag is off until the owner writes
 | Kind | Name | Change |
 |---|---|---|
 | function | `planGameDayFires` | The only function deployed. With every flag absent, it plans exactly as rev 00016 does (golden-tested, §6). The visible differences: one ESPN request per URL per tick instead of one per sport/team pair, a new `espnFetches` key in the tick summary, and P7's informational `lease_hygiene_unknown` naming builds below 114. |
-| config | `config/gameday_planner` | New optional keys, all off when absent: `espn_college_slate`, `track_started_by_id`, `status_aware_cap`, `preflight_ladder_lit`, `payload_full_state`, and (2026-10-05) `served_sticky`, `preflight_bridge_grace`. **No write is part of the deploy.** |
+| config | `config/gameday_planner` | New optional keys, all off when absent: `espn_college_slate`, `track_started_by_id`, `status_aware_cap`, `preflight_ladder_lit`, `payload_full_state`, and (2026-10-05) `served_sticky`, `preflight_bridge_grace`, and (2026-10-06) `end_ignores_gate`. **No write is part of the deploy.** |
 | data | `users/{uid}.gameday_server.stale_since` | New optional field. Written only for an account with `served_sticky` on, while P2 is failing; removed on the first tick P2 passes. The app's parser reads named keys only and ignores it. On a tick that holds someone, the plan log gains a `served_held` row and the tick summary a `servedHeld` count; when a hold runs out, a `served_hold_expired` row. None of these exist with the flag absent. |
+| data | `end_ignores_gate` traces | No new document or field. On a tick where it acted: `gateBypassed: true` on the `plan_end` row, a `handoff_refused:gate_blocking` row when a hand-off was refused, `endsGateBypassed` in the tick summary, and `gate_bypassed: true` under the scorecard entry's `end`. None of these exist with the flag absent. |
 | index | none | Query #8 (`game_day_sessions` where `gameStartMs >=`) is a COLLECTION-scope single-field range, which uses the automatic index. It runs only for accounts with `track_started_by_id` or `status_aware_cap` on. |
 | rules | none | — |
 
-Not affected: `dispatchFireJobs` imports only unchanged exports from `gameDayPreflight` (the scorecard ids and `publishServerStatusFrom`), so it is not redeployed. The functions diff against `309a5d9` touches exactly `espnClient.ts`, `gameDayPlanning.ts`, `gameDayPreflight.ts` and `planGameDayFires.ts`, plus their tests. Outside `functions/`: `scripts/_gameday_preflight_dryrun.js` (follows P4b per uid) and these docs. The 2026-10-05 write-gap change stays inside `gameDayPreflight.ts` and `planGameDayFires.ts`, with two new test files (`gameDayBridgeStale.test.js`, `plannerBridgeStale.test.js`); the dry-run script now also follows `preflight_bridge_grace` per uid and reports what a tick would publish as `served`.
+Not affected: `dispatchFireJobs` imports only unchanged exports from `gameDayPreflight` (the scorecard ids and `publishServerStatusFrom`), so it is not redeployed. The functions diff against `309a5d9` touches exactly `espnClient.ts`, `gameDayPlanning.ts`, `gameDayPreflight.ts` and `planGameDayFires.ts`, plus their tests. Outside `functions/`: `scripts/_gameday_preflight_dryrun.js` (follows P4b per uid) and these docs. The 2026-10-05 write-gap change stays inside `gameDayPreflight.ts` and `planGameDayFires.ts`, with two new test files (`gameDayBridgeStale.test.js`, `plannerBridgeStale.test.js`); the dry-run script now also follows `preflight_bridge_grace` per uid and reports what a tick would publish as `served`. The 2026-10-06 end-gate change is inside `planGameDayFires.ts` alone, with one new test file (`plannerEndGate.test.js`).
 
 ## 2. The flags — shapes and exact writes
 
@@ -57,6 +60,7 @@ Not affected: `dispatchFireJobs` imports only unchanged exports from `gameDayPre
 | `payload_full_state` | Start and hand-off payloads state every participating segment field the app sends: `fx sx ix pal grp:1 spc:0 bri:255 frz:false`, three colour slots. An excluded segment becomes `{id, on:false, frz:false}`. Never geometry. 3 buses: 263 B → 431 B. **Not to be turned on before this weekend's bench games finish**, and not during the rehearsal (one variable at a time). |
 | `served_sticky` | **B2.** `gameday_server.served` stays true through a P2 failure (`preflight_bridge_stale`) shorter than 30 minutes, so a bridge write gap no longer publishes `served:false`. The hold needs all of: the stale bridge is the ONLY failing reason; the stored `served` is already true; under 30 minutes since `gameday_server.stale_since` (the tick P2 first failed in this unbroken run). `teams` and `next_fire` are published as on a good tick, `checked_at` is written every tick, and `preflight` carries the real `ok:false` and reason. **No start is minted on a held tick**, and ends are never gated. |
 | `preflight_bridge_grace` | **A.** P2's heartbeat window is 15 minutes instead of 5 for the account: 14:59 old passes, 15:01 is `preflight_bridge_stale`. A ten-minute gap therefore fails nothing, and a start due inside it is minted. No heartbeat document at all is still stale. |
+| `end_ignores_gate` | The END of a FIRED start is written while the account is allowlisted, even when the readiness gate blocks the account (`gated_ladder_bad`, `gated_no_facts`, `gated_no_floor`). Every end path: confirmed final, hard cap, status-aware cap and its ceiling. **Fired** is GUARD 0b's test, unchanged: the start job (the team's own `_start`, or the relinquisher's `_end` for a team lit by hand-off) is `dispatched` or `completed`. A start that is `scheduled`, `cancelled`, `expired`, `skipped`, `failed` or missing never commanded the controller, so no end is written, as before. **Starts keep the gate.** A hand-off (the survivor's start) is refused under a blocking gate and the end restores base. An account removed from `uid_allowlist`, or `write_jobs:false`, still gets no end: the planner logs `plan_end … scopedOut:true` and commands nothing. |
 
 **The write** — from the repo root with ADC credentials. It changes only the named fields:
 ```
@@ -71,6 +75,10 @@ Replace `{FIELDS}` with one of:
 | Bridge write gap, bench only — both in one write | `{served_sticky:['<BENCH_UID>'], preflight_bridge_grace:['<BENCH_UID>']}` |
 | **Bridge write gap, everyone** | `{served_sticky:true, preflight_bridge_grace:true}` — before any account is added to `uid_allowlist` (§6b) |
 | Bridge write gap, **remove** (= rev 00016 behaviour) | `{served_sticky:a.firestore.FieldValue.delete(), preflight_bridge_grace:a.firestore.FieldValue.delete()}` |
+| **End gate, bench only** | `{end_ignores_gate:['<BENCH_UID>']}` |
+| **End gate, everyone** | `{end_ignores_gate:true}` — before any account is added to `uid_allowlist` (§6c) |
+| **All three, everyone** (the S3 write) | `{served_sticky:true, preflight_bridge_grace:true, end_ignores_gate:true}` |
+| End gate, **remove** | `{end_ignores_gate:a.firestore.FieldValue.delete()}` — never while an allowlisted account has a lit session and a blocking gate (§7) |
 | **Bench-only rehearsal (Fri 10-09)** | `{espn_college_slate:['<BENCH_UID>'], track_started_by_id:['<BENCH_UID>']}` |
 | Fleet-wide, after the rehearsal | `{track_started_by_id:true}`, then `{status_aware_cap:true}`, then `{espn_college_slate:true}` |
 | Full-state payload, bench first | `{payload_full_state:['<BENCH_UID>']}` (not before this weekend's bench games finish) |
@@ -140,7 +148,7 @@ firebase --config <scratch>/firebase.json emulators:exec --only firestore,auth -
 # 262 of 264: only the two #119 commercialRules cross-dealer cases may fail
 ```
 
-4.4 **No new key is in the config.** Read `config/gameday_planner` (§2) and confirm all seven keys are absent: the five ESPN-slate keys, `served_sticky` and `preflight_bridge_grace`.
+4.4 **No new key is in the config.** Read `config/gameday_planner` (§2) and confirm all eight keys are absent: the five ESPN-slate keys, `served_sticky`, `preflight_bridge_grace` and `end_ignores_gate`.
 
 4.5 **Secrets.** Copy `functions/.env` from the MAIN checkout into this worktree; delete it after the deploy.
 
@@ -154,10 +162,10 @@ FUNCTIONS_DISCOVERY_TIMEOUT=180 firebase deploy --project icrt6menwsv2d8all8oijs
 
 ## 6. Verification reads (flags still absent) — within 10 minutes, two ticks
 
-- **Delivery.** Download the deployed source zip, not just the `updateTime`. `lib/planGameDayFires.js` contains `espnFlagsFrom` and `openSessionsByTeam`. `lib/espnClient.js` contains `fetchCollegeSlateGame` and `defaultScoreboardAnswered`. `lib/gameDayPlanning.js` contains `flagScopeFrom`, `decideEndWithoutEspn` and `gameDayPaletteFor`. `lib/gameDayPreflight.js` has `MIN_SERVED_APP_BUILD = 114`, and (2026-10-05) contains `decideServedSticky` and `BRIDGE_STALE_GRACE_MS`; `lib/planGameDayFires.js` contains `servedStickyScopeFrom` and `served_hold_expired`. No `.env` in the zip.
+- **Delivery.** Download the deployed source zip, not just the `updateTime`. `lib/planGameDayFires.js` contains `espnFlagsFrom` and `openSessionsByTeam`. `lib/espnClient.js` contains `fetchCollegeSlateGame` and `defaultScoreboardAnswered`. `lib/gameDayPlanning.js` contains `flagScopeFrom`, `decideEndWithoutEspn` and `gameDayPaletteFor`. `lib/gameDayPreflight.js` has `MIN_SERVED_APP_BUILD = 114`, and (2026-10-05) contains `decideServedSticky` and `BRIDGE_STALE_GRACE_MS`; `lib/planGameDayFires.js` contains `servedStickyScopeFrom`, `served_hold_expired` and (2026-10-06) `endsGateBypassed` and `handoff_refused:gate_blocking`. No `.env` in the zip.
 - **`gameday_plan_log/<UTC date>.lastSummary`.** `espnFetches` is present and equals the number of distinct sports with an enabled config fleet-wide (a handful, against ~10 requests before). `espnErrors: 0`, `errors: 0`. `skipped`/`endSkipped` match the last pre-deploy tick, moving only as games cross the horizon.
-- **None of the new rows:** `team_not_on_slate`, `cap_held_live`, `cap_held_unavailable`, `espn_unavailable`, `game_not_played`, `preflight_ladder_dark`, `served_held` or `served_hold_expired`.
-- **Bench.** `gameday_server.served`/`preflight` are unchanged, and no new job. No `stale_since` under `gameday_server`, and no `servedHeld` key in any tick summary.
+- **None of the new rows:** `team_not_on_slate`, `cap_held_live`, `cap_held_unavailable`, `espn_unavailable`, `game_not_played`, `preflight_ladder_dark`, `served_held`, `served_hold_expired` or `handoff_refused:gate_blocking`, and no row carrying `gateBypassed`.
+- **Bench.** `gameday_server.served`/`preflight` are unchanged, and no new job. No `stale_since` under `gameday_server`, and no `servedHeld` or `endsGateBypassed` key in any tick summary.
 - **A bench `preflight_skip` naming `preflight_bridge_stale` during these reads is the known write gap, not a deploy fault.** It recurs about every 7 h 28 min (§6b says how to place the next one). With the flags absent it flips `served` false for one or two ticks, exactly as rev 00016 does.
 - **Logs.** The planner's stats line carries `espnFetches`. No WARNING+, in particular no "malformed" flag warning.
 
@@ -169,13 +177,13 @@ Why "unchanged" is a strong claim: `functions/test/unit/fixtures/plannerFlagsOff
 
 Only after §6 is clean with every flag absent. Each step is one `update()` (§2) and a read-back. No deploy is involved.
 
-**Order.** B2 first and alone, so that one real gap is seen HELD. Then A. Then both fleet-wide. **Friendlies are allowlisted only after both flags are on (`true`) and verified.** An account added to `uid_allowlist` while the flags are bench-only gets rev 00016's behaviour on its first gap.
+**Order.** B2 first and alone, so that one real gap is seen HELD. Then A. Then both fleet-wide. **Friendlies are allowlisted only after all three flags (`served_sticky`, `preflight_bridge_grace`, `end_ignores_gate`) are on (`true`) and verified** (§6c for the third). An account added to `uid_allowlist` while the flags are bench-only gets rev 00016's behaviour on its first gap.
 
 | Step | `{FIELDS}` (§2) | When |
 |---|---|---|
 | S1 | `{served_sticky:['<BENCH_UID>']}` | Fri 10-09, after §6, before 11:00 |
 | S2 | `{preflight_bridge_grace:['<BENCH_UID>']}` | after S1's gap read below; not between the rehearsal's 17:30 fire and prompt C |
-| S3 | `{served_sticky:true, preflight_bridge_grace:true}` | after S2's gap read; before `uid_allowlist` changes (Sat 10-10) |
+| S3 | `{served_sticky:true, preflight_bridge_grace:true, end_ignores_gate:true}` | after S2's gap read and §6c's E1 read; before `uid_allowlist` changes (Sat 10-10) |
 
 **The predicted gap (bench).** The bench bridge's write gap recurs about every 7.46 h. The planner saw P2 fail on these ticks: 10-03 at 01:10, 08:40, 16:05 and 23:30Z; 10-04 at 07:00, 14:30 and 21:55Z; 10-05 at 05:25 and 12:50Z. That is nine ticks, each 7 h 25 min or 7 h 30 min after the one before. Carried forward from the 10-04 21:55Z tick (the 10-05 ticks give the same times to within two minutes):
 
@@ -229,10 +237,31 @@ So a real held gap reads: `served:true` with `preflight.ok:false`, `stale_since`
 
 **If a gap cannot be waited for** because the window is closing: the reads that need no gap (read-back, dry run, healthy ticks unchanged) are the minimum, and the gap behaviour then rests on `plannerBridgeStale.test.js`. That is the owner's call, and it goes in the ledger row.
 
+## 6c. `end_ignores_gate` — turn-on and verification reads
+
+**What it changes.** Nothing, until an allowlisted account's readiness gate blocks it while a start this system fired is still on the house. Then the end (final, hard cap, status-aware cap or ceiling) is written instead of logged `scopedOut`. The flag never mints a start, never overrides the allowlist or `write_jobs`, and never ends a show whose start was not dispatched (§2's definition of fired).
+
+| Step | `{FIELDS}` (§2) | When |
+|---|---|---|
+| E1 | `{end_ignores_gate:['<BENCH_UID>']}` | Fri 10-09, with S1, after §6 and before 11:00. It does not depend on a gap. |
+| E2 | part of S3: `{served_sticky:true, preflight_bridge_grace:true, end_ignores_gate:true}` | before `uid_allowlist` changes (Sat 10-10) |
+
+**E1 reads (bench).** No incident is needed to verify that the flag is read; the behaviour itself is pinned by `plannerEndGate.test.js`.
+- Config read-back: `end_ignores_gate` is an array holding exactly the bench uid string. No "malformed" warning in the planner log.
+- The next tick's summary is unchanged: no `endsGateBypassed` key, `errors: 0`.
+- The rehearsal's own end (prompt C, gate armed): the `plan_end` row has neither `scopedOut` nor `gateBypassed`. The flag is inert while the gate is armed.
+
+**Optional live proof during the rehearsal (owner's call; one bench-only Firestore write).** After prompt A (the start completed) and at least 15 minutes before the expected final, set `base_ladder_asserts_segments: false` on the bench controller document. Expect on the next tick: a `gate` row `gated_ladder_bad`, `users/<BENCH_UID>.gameday_gate_blocking` = `["gated_ladder_bad"]`, `gameday_server.served: false` with `preflight.reasons` containing `preflight_ladder_bad` and `preflight_gated`. At prompt C: the end job exists with `{"ps":1}`, the `plan_end` row carries `gateBypassed: true` and no `scopedOut`, `lastSummary.endsGateBypassed: 1`, the scorecard entry's `end.gate_bypassed: true`, and `.150` reads back preset 1. After C, set the field back to `true` (or let the app's on-connect healer republish it the next time the app is opened on the home network). While the gate blocks, no NEW start is minted for the bench, which the rehearsal does not need. **Stop sign:** at C the row says `scopedOut: true` although the flag reads back as the list: the flag is not read; check the value's type and do not go on to S3.
+
+**If the 10-05 shape recurs without the flag:** `plan_end … scopedOut:true` every five minutes for a lit house. Restore by hand on the LAN with the 10-01 plan's recovery (`/json/state`, `{"ps":1}` after sunset, never a preset save), then write E1/E2.
+
+**The allowlist, defined.** Removing an account from `uid_allowlist` (or setting `write_jobs:false`) while it has a session with `startPlannedAt` and no `endFiredAt` leaves that house to its owner: the planner logs the end decision `scopedOut` and commands nothing, flag or no flag. Change the allowlist only when no allowlisted session is open, or after its end has completed.
+
 ## 7. Rollback
 - **Behaviour:** remove the flags (§2 "Remove"). That takes effect next tick, with no deploy.
 - **Code:** redeploy `planGameDayFires` from **`309a5d9`** (`fix/gameday-server-ab`, source == rev 00016), with `.env` copied in. **Never from release `a35e30e`**: that rolls back A+B's planner (pre-flight, `gameday_server`, scorecard, `on_time_override`).
 - **Bridge write-gap flags:** remove `served_sticky` and `preflight_bridge_grace` (§2 "remove"). From the next tick P2 is 5 minutes again and `served` follows every verdict. Leave the new code live for at least one tick after removing `served_sticky`: a served account is written every tick, and that write deletes any `gameday_server.stale_since`.
+- **`end_ignores_gate`:** remove it (§2). From the next tick the gate blocks ends again, exactly as rev 00016. **Do not remove it while an allowlisted account has a lit session and a blocking gate**: that house is then stranded exactly as on 10-05. Nothing to clean: the flag writes no new document type or field; its traces are plan-log rows and the scorecard's `end.gate_bypassed`.
 - **Nothing to clean up.** The flagged paths write no new document types; the new reasons are plan-log rows only. The one new field is `gameday_server.stale_since`. If the code is rolled back to `309a5d9` while one is still stored, it is inert: rev 00016 and the app both ignore it.
 
 ## 8. Rehearsal — Fri 10-09, Louisville vs Florida State, bench account only
@@ -341,7 +370,8 @@ Every R3/A/B/C expectation is met, the stop-sign list is empty, the end came fro
 - [ ] §6 verified; the five ESPN-slate keys were absent until R2.
 - [ ] §6b S1: `served_sticky` on for the bench, read back; the next gap HELD (`served_held` row, `served` never false, `stale_since` set then removed).
 - [ ] §6b S2: `preflight_bridge_grace` on for the bench, read back; the following gap shows no `preflight_skip`.
-- [ ] §6b S3: both `true`, read back, BEFORE `uid_allowlist` changes.
+- [ ] §6c E1: `end_ignores_gate` on for the bench, read back; the rehearsal's `plan_end` row has neither `scopedOut` nor `gateBypassed`; (optional) the gate-flip proof showed `gateBypassed: true` and the end job.
+- [ ] §6b S3: all three `true`, read back, BEFORE `uid_allowlist` changes.
 - [ ] R0: event 401858254, Louisville = 97, kickoff 18:00 CDT, NOT on the featured list today.
 - [ ] R1: the team doc is exactly §8.4; the profile lists are appended.
 - [ ] R2: both flags read back as `['<BENCH_UID>']`.
@@ -357,6 +387,7 @@ Every R3/A/B/C expectation is met, the stop-sign list is empty, the end came fro
 - **#146 and #150 keep the 114 branch's numbers.** They are fixed here in `6fe971d`; mark them FIXED when the branches meet.
 - **This branch's debt is #156–#162.** `fix/115-multichannel-and-design-card` holds #151–#155. #157 and #159 are fixed here; #158 is partly fixed (the mint-time skip); #161 and #162 are new.
 - **The 2026-10-05 write-gap entries are #171–#174** (the release line and `fix/116` hold #163–#170). #172 is fixed here behind `served_sticky` and stays open until the flag is on fleet-wide; #171 (the cause of the gap), #173 and #174 are open.
+- **The 2026-10-06 end-gate entries are #177–#180** (`fix/118-controller-selection` holds #175–#176). #177 is fixed here behind `end_ignores_gate` and stays open until the flag is `true` fleet-wide; #178, #179 and #180 are open (§11).
 - **Rollback target unchanged:** flags removed first; code from `309a5d9`, never `a35e30e`.
 
 ## 10. What the app sees across a ten-minute gap — before and after
@@ -382,3 +413,24 @@ Before: about ten minutes of "Phone" per gap, roughly three times a day per hous
 **The definition of `gameday_server.stale_since`.** The clock of the planner tick on which P2 first failed in the current unbroken run of failing ticks. It is set on the first failing tick, carried unchanged while P2 keeps failing, and removed on the first tick P2 passes. The hold applies when all of these are true: the flag is on for the account; pre-flight is what withheld the start (enforce mode); `preflight_bridge_stale` is the only failing reason; the stored `served` is true; and less than 30 minutes have passed since `stale_since`. Any other failing reason flips `served` at once, as before, and an account that was not served is never made served by a hold.
 
 **The cost, stated (#173, #174).** While `served` is held the phone stands down. A start that first falls due inside a held gap, and whose fire time passes before the bridge writes again, is fired by nobody. That needs the game to become plannable less than about ten minutes before its fire time, which a normal game (planned six hours ahead) never does. A bridge that is really dead keeps the phone standing down for the length of the hold.
+
+## 11. Where else an end or a restore can be withheld (audit, 2026-10-06)
+
+Read against the branch at `dde45b3`. "Strand" means a house left in team colours with no server end coming.
+
+| Where | What withholds | Can it strand a lit house? |
+|---|---|---|
+| `planGameDayFires.ts:1071` `writeJobs = allowlisted && gate.armed`, used at the end write `:2056` and the not-owner record `:1973` | the readiness gate | **Yes — the 10-05 incident.** Fixed behind `end_ignores_gate` (`writeEnds`, `:1083`). |
+| `planGameDayFires.ts:331` `writesJobsFor` → `allowlisted` | the account leaves `uid_allowlist`, or `write_jobs` is false | **Yes, by design** (§6c). The end is logged `scopedOut`; the owner restores. Change the allowlist only with no open session. |
+| `planGameDayFires.ts:1015` `configs.empty` → `continue`; `teardownTeamFires.ts:52–83` cancels only `scheduled` jobs on a config delete | the team is disabled or deleted mid-game | **Yes.** The session is never evaluated again; the teardown writes no restore. **#178.** |
+| `planGameDayFires.ts:1461` `no_controller` → `continue` | the controller document is gone | **Yes**, rare. **#180.** |
+| `planGameDayFires.ts:1517–1523` participation unusable → `continue` | participation facts aged out or cleared mid-game | **Yes** until they are usable again. **#161 / #180.** |
+| `planGameDayFires.ts:1492` `no_game` → `continue` | ESPN drops the game from the scoreboard with `track_started_by_id` and `status_aware_cap` off | **Yes** until the game reappears: neither the final nor the hard cap is evaluated. The ESPN slate fix (this branch) ends it by id and on the clock once those flags are on. |
+| `planGameDayFires.ts:1937` GUARD 0b (`gameDayPlanning.ts:453`) | the start job is `scheduled`, `cancelled`, `expired`, `skipped`, `failed` or missing | **No** for all but `failed`: nothing was lit. A `failed` start after a partial apply is the one case. **#180.** |
+| `planGameDayFires.ts:1964` `end:not_owner` | a higher-ranked lit team is still playing | **No** by itself: that team's end restores. Chains with any row above. |
+| `planGameDayFires.ts:2007` `handoff_refused:gate_blocking` (new) | the gate blocks at a hand-off | **No**: the end restores base instead of lighting the survivor. |
+| `planGameDayFires.ts:2092` `endFiredAt` set when the end JOB is created; `gameDayPlanning.ts:588` `already_fired`; `fireJobs.ts:502` 15-minute end budget, `:638` `retry_budget_exhausted`; `dispatchFireJobs.ts:392` terminal `expired`/`failed` | the bridge is silent for more than 15 minutes at the end | **Yes.** The end job goes terminal and nothing re-mints it. **#179.** |
+| `dispatchFireJobs.ts:628` one in flight per controller; A1/A3 (`:622` stuck claims cleared, `sweepExpiredCommands.ts:251` stuck pass at 180 s) | a stuck or pending command in front of the end | **No**: a delay inside the retry budget, not a withholding. Combined with the row above, yes. |
+| `gameDayPlanning.ts:488` `cap_held_live` (status-aware cap) | ESPN says the game is still live | **No**: the ceiling fires on the clock (#159). |
+| pre-flight (any reason), `served:false`, a stale bridge heartbeat | — | **No.** None of them gates an end (`plannerPreflight.test.js`, `plannerBridgeStale.test.js`, `plannerEndGate.test.js`). |
+| hierarchy deferral (`startDecision`) | a lower team never started | **No**: nothing was lit; its end is `no_start`. |
