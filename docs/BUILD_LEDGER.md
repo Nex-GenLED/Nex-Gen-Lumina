@@ -156,6 +156,30 @@ goes on a NEW bump + tag (never rewrite a public tag).
 
 ## Operational flags
 
+### +116 — build-116 tagged 2026-10-07 02:27Z (the evening of 2026-10-06 CDT) (Codemagic build number: pending) — compact Recent Patterns card, and the selected controller belongs to the account that chose it
+
+| item | value |
+|---|---|
+| Tag | `build-116` = `d103d84` (the `--no-ff` merge of `release-candidate/116` @ `684b8db` into `release/store-submission-consolidated`; the bump 2.5.10+116 rides on the branch as `684b8db`; this row lands after, outside the tag) |
+| Base | `9be91a1` (= `build-115` `e055540` + its ledger row + the bridge-rules merge and its ledger row) |
+| Contents — Recent Patterns (fix/117, in full) | Explore's Recent Patterns card keeps its 120 dp width and drops from 100 to a 66 dp MINIMUM height (it grows at Larger Text instead of overlapping, as the old fixed card did at 2.0x). A new line names the effect a tap plays, from the #167 catalog (12 Fade, 52 Running Dual, 63 Pride 2015, …; an entry with no effect reads "Solid", which is what a tap sends). One semantics button per card; a tooltip carries the full name. Tapping is unchanged (same payload, same "recent" use); viewing writes nothing (`890073f`, `b0f02be`, merged as `d57bb34`). |
+| Contents — controller selection (fix/118, commit 1 of 3 ONLY) | The owner's trigger: after signing out of one account and into another on the same phone, nothing worked until "Set as Active". The selected address now belongs to the account that chose it: any change away from a signed-in account (sign-out, another account, an installer entering or leaving a customer) drops it, so the new account's own controller is selected with its record id, and the #92 identity check runs before the first write. Deleting the active controller releases its address (`99a95b0`, cherry-picked from `7339314`). Commits 2 (`8a74ac9`, select by record id, re-resolved on every change) and 3 (`cbe4e82`, "Use this controller", the "Which controller" prompt, the stale-selection sentence) are NOT in this build: they stay on `fix/118-controller-selection` for a later build after a device walk. Debt #175 partly done, #176 open (`7f37781`). |
+| Gates on `d103d84` | Carried from the gated branch tip: `git diff --stat release-candidate/116 d103d84` is EMPTY and the trees are equal, so the `684b8db` results in the next row are the tag's results. PII scan of every added line and commit message `9be91a1..684b8db` clean. |
+| Branch gates (`684b8db`, after `flutter clean`) | local 3.41.2: analyze 0 / 12 / 355 · 5,228 pass / 37 skip / 0 fail (re-run; the first local run had one failure, `live_score_badge_refresh_test` "UPDATES on a score change", a 60 ms wall-clock wait under heavy load — 5/5 in isolation, untouched by this build) — 3.47.5 `TZ=UTC0`: 0 / 12 / 360 · 5,228 / 37 / 0, lock + yaml restored · guard + 118 account-switch + 117 together 24 / 0, golden byte-identical · functions/ + rules byte-identical · branch pushed (branch only) |
+| Functions | No deploy: `functions/` and `firestore.rules` byte-identical to `9be91a1`. No rules, indexes or config changed. |
+| Config | None. |
+| Check-run | GitHub check-run `112606113687` "iOS Release" on `d103d84`: completed / **success** 2026-10-07 02:27:25Z → 02:46:22Z (19 min; opened as `112601372500`, which stays `in_progress` — the result arrived under the new id, as with +109, +112, +114 and +115). Every step OK: Preparing build machine 0:20 · Fetching app sources 0:05 · Installing SDKs 0:53 · keychain/signing 0:05 · **Test and analyze (build gate) 11:35** · Set build number 0:00 · Install CocoaPods 0:15 · Build IPA 3:37 · Dump signed entitlements 0:02 · **Publishing 1:58** · Cleaning up 0:01. |
+| iOS build number | pending |
+| Android | NOT built (#125). The next Android artifact must be ≥ versionCode 116. |
+| Rollback | below |
+
+**Rollback: what persists if build 116 is expired and testers go back to 115.** This build writes nothing new to Firestore, to the phone's storage or to any controller; nothing needs cleaning up.
+1. **Recent Patterns** goes back to the taller card with no effect line. Recent entries, favorites and designs are unchanged (viewing never wrote anything).
+2. **Controller selection.** On 115 the previous account's controller address survives a sign-out again, so after switching accounts on a shared phone a tester may need Settings → Set as Active once more. Nothing is stored either way (the selection is held in memory only).
+
+**Tester text (return to 115):**
+> Build 116 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install 2.5.10 (115). Your schedules, teams, designs and favorites stay. Two things go back to how they were: the Recent Patterns cards on Explore are taller again and don't name their effect, and if you sign out and into a different account on the same phone you may need Settings → System & Device Management → Controllers → Set as Active before the lights respond. If you see anything wrong after switching, tell us the date and time.
+
 ### RULES DEPLOY — shared bridge identity limited to firmware 1.2's operations — 2026-10-05
 
 | item | value |
