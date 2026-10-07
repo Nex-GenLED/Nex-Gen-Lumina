@@ -344,13 +344,22 @@ export const CANCELLED_REASON_TEAM_DELETED = "team_deleted";
  * command document — the fire is in flight and cancelling the job row would
  * misreport what actually happened. Terminal states are history and are never
  * rewritten.
+ *
+ * NEVER AN END (2026-10-06, #178). A scheduled `end` exists only because a
+ * start was fired and the house is in team colours. Deleting the team must not
+ * cancel the one job that puts the house back; the planner re-mints a
+ * cancelled end anyway (`end_ignores_gate`), but the retraction is wrong at
+ * source. `seq` is read from the job; a job without one (the legacy shape) is
+ * treated as a start.
  */
 export function shouldRetractForTeam(args: {
   eventId: unknown;
   state: unknown;
   teamSlug: string;
+  seq?: unknown;
 }): boolean {
   if (args.state !== "scheduled") return false;
+  if (args.seq === "end") return false;
   return teamSlugFromEventId(args.eventId) === args.teamSlug;
 }
 
@@ -502,6 +511,21 @@ export const START_RETRY_AFTER_KICKOFF_MS = 15 * 60_000;
 export const END_RETRY_WINDOW_MS = 15 * 60_000;
 
 /**
+ * The end's budget with `end_ignores_gate` on (2026-10-06, #179): 90 minutes.
+ *
+ * WHY 90. The bridge's known write gap is about ten minutes; a power-cycle or
+ * router restart recovers in a few; a residential ISP outage runs tens of
+ * minutes. Fifteen minutes covered the first of those and nothing else, and a
+ * restore that goes terminal is never re-attempted by the dispatcher. A late
+ * base restore costs nothing: it loads a preset the house would show anyway
+ * (an identical-state load is visually silent), and the only thing it changes
+ * is how long the team colours stay up — which is the defect. A late START is
+ * wrong; a late END is merely late. Beyond 90 minutes the planner re-mints
+ * (gameDayPlanning.decideEndRemint), each new job with this same budget.
+ */
+export const END_RETRY_WINDOW_GUARANTEED_MS = 90 * 60_000;
+
+/**
  * Only these sequence steps retry. Celebrations (S5b, not built) must NEVER be
  * retried — a celebration a minute late is a non-event, not a recovery — and a
  * new seq has to opt in here deliberately.
@@ -531,9 +555,12 @@ export function startRetryUntilMs(args: {
   return Math.max(budget, args.fireAtMs + MAX_FIRE_LATENESS_MS);
 }
 
-/** The end's budget: 15 minutes after it was first due. */
-export function endRetryUntilMs(fireAtMs: number): number {
-  return fireAtMs + END_RETRY_WINDOW_MS;
+/**
+ * The end's budget: `windowMs` after it was first due — 15 minutes as shipped,
+ * END_RETRY_WINDOW_GUARANTEED_MS when the planner passes it (`end_ignores_gate`).
+ */
+export function endRetryUntilMs(fireAtMs: number, windowMs: number = END_RETRY_WINDOW_MS): number {
+  return fireAtMs + windowMs;
 }
 
 /** What a terminal command means for a fire, and whether trying again can help. */

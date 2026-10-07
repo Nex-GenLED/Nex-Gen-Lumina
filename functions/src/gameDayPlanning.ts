@@ -454,6 +454,80 @@ export function startJobConfirmsFired(startJobState: unknown): boolean {
   return startJobState === "dispatched" || startJobState === "completed";
 }
 
+/**
+ * The end guarantee's wider question (`end_ignores_gate`, 2026-10-06): could
+ * this start have changed the house at all? `dispatched` and `completed` as
+ * GUARD 0b, plus `failed`: the bridge reported the command failed, which
+ * covers a WLED refusal after a partial apply as well as a clean refusal. A
+ * base restore to a house the start never touched is visually silent, so the
+ * cost of ending a `failed` start that lit nothing is nil, and the cost of
+ * not ending one that lit something is the defect.
+ */
+export function startJobMayHaveLit(startJobState: unknown): boolean {
+  return startJobConfirmsFired(startJobState) || startJobState === "failed";
+}
+
+// ---------------------------------------------------------------------------
+// The end guarantee — re-minting an end that went terminal (#179)
+// ---------------------------------------------------------------------------
+
+/** How many times the planner re-mints an end whose job went terminal. */
+export const END_REMINT_MAX = 6;
+/** No two mints of the same end closer than this. */
+export const END_REMINT_MIN_GAP_MS = 10 * 60_000;
+/**
+ * No end is minted or re-minted for a game that started longer ago than this.
+ * The same bound the session query uses (planGameDayFires.TRACK_LOOKBACK_MS):
+ * a session older than it is not read at all.
+ */
+export const END_REMINT_HORIZON_MS = 12 * 3600_000;
+
+export type EndRemintDecision =
+  | { kind: "completed" }
+  | { kind: "in_progress"; state: string }
+  | { kind: "remint"; n: number; priorState: string }
+  | { kind: "too_soon"; waitMs: number }
+  | { kind: "ceiling"; reason: "max_remints" | "horizon" };
+
+/**
+ * PURE. A fired start whose session already carries `endFiredAt`: is its end
+ * done, still being tried, or dead and due another job?
+ *
+ *   completed            → nothing to do
+ *   scheduled|dispatched → the dispatcher is on it (a held command, a retry)
+ *   expired|failed|skipped|cancelled, or no job document → terminal without a
+ *                           restore: re-mint, unless the ceiling says stop or
+ *                           the last mint is less than END_REMINT_MIN_GAP_MS
+ *                           ago
+ * The ceiling is END_REMINT_MAX mints, and END_REMINT_HORIZON_MS after the
+ * game's start. Six re-mints at ten-minute spacing, each job carrying a
+ * 90-minute budget, cover an outage of hours; the horizon stops a session
+ * from being chased for days.
+ */
+export function decideEndRemint(args: {
+  endJobState: unknown;
+  remints: unknown;
+  lastMintMs: number | null;
+  nowMs: number;
+  gameStartMs: number;
+}): EndRemintDecision {
+  const s = typeof args.endJobState === "string" ? args.endJobState : "missing";
+  if (s === "completed") return { kind: "completed" };
+  if (s === "scheduled" || s === "dispatched") return { kind: "in_progress", state: s };
+  const n =
+    typeof args.remints === "number" && Number.isFinite(args.remints) && args.remints > 0
+      ? Math.floor(args.remints)
+      : 0;
+  if (n >= END_REMINT_MAX) return { kind: "ceiling", reason: "max_remints" };
+  if (args.nowMs > args.gameStartMs + END_REMINT_HORIZON_MS) {
+    return { kind: "ceiling", reason: "horizon" };
+  }
+  if (args.lastMintMs !== null && args.nowMs - args.lastMintMs < END_REMINT_MIN_GAP_MS) {
+    return { kind: "too_soon", waitMs: END_REMINT_MIN_GAP_MS - (args.nowMs - args.lastMintMs) };
+  }
+  return { kind: "remint", n: n + 1, priorState: s };
+}
+
 export interface EndSignalDecision {
   fireEnd: boolean;
   reason: string;

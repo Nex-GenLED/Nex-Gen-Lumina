@@ -159,15 +159,36 @@ describe("retractTeamFires — the deleted team's fires are retracted", () => {
     expect(updates).toEqual([]);
   });
 
-  test("retracts EVERY scheduled fire for the team, start and end alike", async () => {
+  test("retracts EVERY scheduled START for the team; a scheduled END is never retracted (#178)", async () => {
     const jobs = {
-      gd_mlb_royals_401816580_start: { eventId: "gd_mlb_royals_401816580", state: "scheduled" },
-      gd_mlb_royals_401816580_end: { eventId: "gd_mlb_royals_401816580", state: "scheduled" },
-      gd_mlb_royals_401816599_start: { eventId: "gd_mlb_royals_401816599", state: "scheduled" },
+      gd_mlb_royals_401816580_start: { eventId: "gd_mlb_royals_401816580", seq: "start", state: "scheduled" },
+      gd_mlb_royals_401816580_end: { eventId: "gd_mlb_royals_401816580", seq: "end", state: "scheduled" },
+      gd_mlb_royals_401816580_end_r1: { eventId: "gd_mlb_royals_401816580", seq: "end", state: "scheduled" },
+      gd_mlb_royals_401816599_start: { eventId: "gd_mlb_royals_401816599", seq: "start", state: "scheduled" },
     };
     const { db } = makeDb(jobs);
     const out = await retractTeamFires({ db, uid: "u1", teamSlug: "mlb_royals" });
-    expect(out).toHaveLength(3);
-    for (const row of Object.values(jobs)) expect(row.state).toBe("cancelled");
+    expect(out.sort()).toEqual(["gd_mlb_royals_401816580_start", "gd_mlb_royals_401816599_start"]);
+    expect(jobs.gd_mlb_royals_401816580_start.state).toBe("cancelled");
+    expect(jobs.gd_mlb_royals_401816599_start.state).toBe("cancelled");
+    // The end is the restore of a house the start lit: it stays scheduled.
+    expect(jobs.gd_mlb_royals_401816580_end.state).toBe("scheduled");
+    expect(jobs.gd_mlb_royals_401816580_end_r1.state).toBe("scheduled");
+  });
+
+  test("a legacy job with no seq is treated as a start (retractable), as before", async () => {
+    const jobs = { gd_mlb_royals_401816580_start: { eventId: "gd_mlb_royals_401816580", state: "scheduled" } };
+    const { db } = makeDb(jobs);
+    expect(await retractTeamFires({ db, uid: "u1", teamSlug: "mlb_royals" })).toHaveLength(1);
+  });
+});
+
+describe("shouldRetractForTeam × seq (#178)", () => {
+  test("a scheduled end is never retractable; a scheduled start is; the legacy shape without seq is", () => {
+    const base = { eventId: "gd_mlb_royals_401816580", state: "scheduled", teamSlug: "mlb_royals" };
+    expect(shouldRetractForTeam({ ...base, seq: "end" })).toBe(false);
+    expect(shouldRetractForTeam({ ...base, seq: "start" })).toBe(true);
+    expect(shouldRetractForTeam(base)).toBe(true);
+    expect(shouldRetractForTeam({ ...base, seq: "end", state: "dispatched" })).toBe(false);
   });
 });

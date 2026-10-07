@@ -220,7 +220,10 @@ describe("the 2026-10-05 incident, replayed", () => {
       payload: BASE_ON, state: "scheduled", source: "game_day",
     });
     expect(end.fireAt.toMillis()).toBe(FINAL2);
-    expect(end.retryUntil.toMillis()).toBe(FINAL2 + 15 * MIN);
+    // The end guarantee's budget (#179): 90 minutes, and the command is held
+    // pickable for the whole of it.
+    expect(end.retryUntil.toMillis()).toBe(FINAL2 + 90 * MIN);
+    expect(end.holdUntil.toMillis()).toBe(FINAL2 + 90 * MIN);
     expect(end).not.toHaveProperty("handoffTo");
 
     const s = await read(f, SESSION());
@@ -325,7 +328,18 @@ describe("'fired' is GUARD 0b's definition: a start that never commanded the con
     }
   });
 
-  test.each(["scheduled", "cancelled", "expired", "skipped", "failed"])(
+  test("a start the bridge reported FAILED: flag on → the end is written (a partial apply is lit enough); flag absent → no end, as before", async () => {
+    const on = world();
+    const { r2 } = await incident(on, FLAG, { startState: "failed" });
+    expect(await read(on, JOB("end"))).toMatchObject({ payload: BASE_ON });
+    expect(planEnd(r2)).toMatchObject({ reason: "confirmed_final", gateBypassed: true });
+    const off = world();
+    const o = await incident(off, ARMED, { startState: "failed" });
+    expect(await read(off, JOB("end"))).toBeUndefined();
+    expect(o.r2.endSkipped).toEqual({ "end:start_never_dispatched": 1 });
+  });
+
+  test.each(["scheduled", "cancelled", "expired", "skipped"])(
     "start job %s + gate blocking + flag on: end_skipped_start_never_dispatched, no job",
     async (state) => {
       const f = world();
@@ -597,9 +611,31 @@ describe("flag absent = the planner as it was", () => {
     }
     const off = await run(ARMED);
     const on = await run(FLAG);
-    expect(on).toEqual(off);
+    // With the gate armed the flag changes exactly three things, all additive
+    // and all on the end it wrote: the longer retry budget, the command hold,
+    // and the session's pointer to its end job. Nothing else moves.
+    const endPath = JOB("end");
+    const sessionPath = SESSION();
+    const strip = (snap) => {
+      const out = JSON.parse(JSON.stringify(snap));
+      delete out[endPath].retryUntil;
+      delete out[endPath].holdUntil;
+      delete out[sessionPath].endJobId;
+      for (const p of Object.keys(out)) {
+        if (p.startsWith("gameday_scorecard/") && out[p].end) delete out[p].end.retry_until;
+      }
+      return out;
+    };
+    expect(strip(on)).toEqual(strip(off));
+    expect(on[endPath].retryUntil).toEqual({ __ts: FINAL2 + 90 * MIN });
+    expect(on[endPath].holdUntil).toEqual({ __ts: FINAL2 + 90 * MIN });
+    expect(off[endPath].retryUntil).toEqual({ __ts: FINAL2 + 15 * MIN });
+    expect(off[endPath]).not.toHaveProperty("holdUntil");
+    expect(on[sessionPath].endJobId).toBe(`${EVENT}_end`);
+    expect(off[sessionPath]).not.toHaveProperty("endJobId");
     expect(JSON.stringify(on)).not.toContain("gateBypassed");
     expect(JSON.stringify(on)).not.toContain("endsGateBypassed");
+    expect(JSON.stringify(on)).not.toContain("session_sweep");
     expect(JSON.stringify(on)).toContain('"end"'); // the end was written on both runs
   });
 });

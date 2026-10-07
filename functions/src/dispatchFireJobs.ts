@@ -48,6 +48,7 @@ import {
   rollup,
   teamSlugFromEventId,
   toMillisOrNull,
+  FIRE_GRACE_MS,
 } from "./fireJobs";
 import {
   SCORECARD_COLLECTION,
@@ -638,6 +639,15 @@ export async function runDispatchTick(
         const fireAtMs = (job.fireAt as { toMillis(): number }).toMillis();
         const commandId = fireJobDocId(jobSnap.id, Math.floor(fireAtMs / 1000));
 
+        // `holdUntil` (2026-10-06, #179): an END job the planner wrote under
+        // `end_ignores_gate` carries the instant until which its command must
+        // stay pickable. The command's `expiresAt` is set there, so the sweeper
+        // (which honours an explicit expiresAt) never expires it while the job
+        // is within budget, and a bridge that comes back an hour later finds
+        // the restore still waiting. The bridge checks no expiry itself. A job
+        // without the field, or one whose hold is already past, gets the
+        // 90-second grace exactly as before.
+        const holdUntilMs = toMillisOrNull(jobSnap.get("holdUntil"));
         const { doc, expiresAtMs } = buildFireCommand({
           type: job.type as FireType,
           payload: String(job.payload ?? "{}"),
@@ -646,6 +656,9 @@ export async function runDispatchTick(
           jobId: jobSnap.id,
           eventId: String(job.eventId ?? ""),
           dispatchAtMs: nowMs,
+          ...(holdUntilMs !== null && holdUntilMs - nowMs > FIRE_GRACE_MS
+            ? { graceMs: holdUntilMs - nowMs }
+            : {}),
         });
 
         const cmdRef = db

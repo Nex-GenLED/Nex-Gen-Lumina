@@ -60,17 +60,34 @@
  * See gameDayPreflight (decideServedSticky). With both absent nothing here
  * reads or writes anything it did not before.
  *
- * ─── END FLAG (2026-10-06, default OFF, `true` | uid list) ──────────────────
- *   end_ignores_gate        the END of a start this system FIRED (GUARD 0b:
- *                           the start job `dispatched` or `completed`) is
- *                           written while the account is allowlisted, even
- *                           when the readiness gate blocks the account. The
- *                           hard cap and the status-aware cap use the same
- *                           path. Starts keep the gate; a hand-off (a start
- *                           for the survivor) is refused under a blocking
- *                           gate and the end restores base instead. Rows gain
- *                           `gateBypassed`, the summary `endsGateBypassed`,
- *                           only when it acted.
+ * ─── THE END GUARANTEE (2026-10-06, default OFF, `true` | uid list) ────────
+ *   end_ignores_gate        one promise: a start this system fired gets its
+ *                           end, while the account is allowlisted. In full:
+ *     1. the readiness gate does not withhold it (the 10-05 house). Starts
+ *        keep the gate; a hand-off under a blocking gate is refused and the
+ *        end restores base. Rows gain `gateBypassed`, the summary
+ *        `endsGateBypassed`.
+ *     2. no early exit withholds it. After the config loop a per-account
+ *        SWEEP (sweepFiredSessionEnds) reads every session started in the
+ *        last 12 h and ends any fired start the loop did not decide this
+ *        tick — because the team was disabled or deleted, the controller
+ *        document was gone, its participation facts were unusable, the
+ *        daylight rule skipped the config, or ESPN no longer listed the game.
+ *        The restore is base ON after sunset / base OFF before it; never a
+ *        hand-off. Rows carry `via: "session_sweep"` and the `cause`; the
+ *        summary `endsSwept`.
+ *     3. "fired" widens to a start the bridge reported `failed`
+ *        (gameDayPlanning.startJobMayHaveLit): a partial apply is lit enough.
+ *     4. the end job's retry budget is 90 min, not 15, and its command stays
+ *        pickable for the whole budget (`holdUntil` → the dispatcher sets the
+ *        command's expiresAt, which the sweeper honours).
+ *     5. an end job that goes terminal without completing is RE-MINTED
+ *        (`<event>_end_r<n>`, gameDayPlanning.decideEndRemint): at most six
+ *        times, ten minutes apart, within 12 h of the game's start. The
+ *        session carries `endJobId`, `endRemints`, `endRemintedAt`; the
+ *        summary `endsReminted`.
+ *   With the flag absent none of this runs, reads or writes: the planner is
+ *   byte-identical to rev 00016 plus the ESPN slate fix.
  *
  * **NO collection-group query is used anywhere in this file.** That is a
  * deliberate constraint, not a coincidence: iterating users and then reading
@@ -100,9 +117,11 @@ import {
 import {
   assertPayloadIsFireSafe,
   endRetryUntilMs,
+  END_RETRY_WINDOW_GUARANTEED_MS,
   FIRE_JOBS_COLLECTION,
   startRetryUntilMs,
   teamSlugFromEventId,
+  toMillisOrNull,
 } from "./fireJobs";
 import {
   LadderLitMode,
@@ -141,7 +160,10 @@ import {
   buildParticipatingSegArray,
   buildFullPartitionSegArray,
   decideEndSignal,
+  decideEndRemint,
+  END_REMINT_HORIZON_MS,
   startJobConfirmsFired,
+  startJobMayHaveLit,
   estimatedDurationMs,
   isDaylightOnlyGame,
   savedDesignUsable,
@@ -260,6 +282,10 @@ interface PlanStats {
    * Present only when non-zero, for the same reason as `servedHeld`.
    */
   endsGateBypassed?: number;
+  /** The end guarantee: ends written by the per-account sweep this tick. */
+  endsSwept?: number;
+  /** The end guarantee: terminal end jobs re-minted this tick (#179). */
+  endsReminted?: number;
   espnErrors: number;
   /**
    * Distinct ESPN URLs requested this tick — one request each, whatever the
@@ -903,6 +929,308 @@ async function stepP6(a: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The end guarantee — the per-account sweep (`end_ignores_gate`, 2026-10-06)
+// ---------------------------------------------------------------------------
+
+interface EndSweepCtx {
+  db: admin.firestore.Firestore;
+  uid: string;
+  user: admin.firestore.DocumentSnapshot;
+  nowMs: number;
+  espnOn: EspnFlagsForUid;
+  espnCache: EspnCache;
+  /** Per tick, per sport/game: the by-id lookup made for a swept session. */
+  byIdCache: Map<string, ResolvedGame>;
+  /** The account's controller document id this tick, or null when it is gone. */
+  controllerId: string | null;
+  /** The slugs of the account's ENABLED configs this tick. */
+  configSlugs: Set<string>;
+  /** Events whose END the config loop decided this tick (reached decideEndSignal). */
+  endReached: Set<string>;
+  /** Why the loop left an event before its END: participation_*, daylight_game. */
+  loopExit: Map<string, string>;
+  /** The loop's own ESPN resolution for an event, when it made one. */
+  resolvedByEvent: Map<string, ResolvedGame>;
+  stats: PlanStats;
+  logRows: Array<Record<string, unknown>>;
+}
+
+/**
+ * Every session of this account started in the last END_REMINT_HORIZON_MS
+ * whose start MAY HAVE LIT the house (gameDayPlanning.startJobMayHaveLit):
+ *
+ *   (a) no end yet, and the config loop did not decide its end this tick →
+ *       decide it here from the session alone (its sport, kickoff and ESPN id;
+ *       ESPN by id, else the clock) and write a BASE restore. Never a hand-off:
+ *       lighting another team is a start, and starts keep every gate.
+ *   (b) an end already planned → if its job went terminal without completing,
+ *       re-mint it (gameDayPlanning.decideEndRemint).
+ *
+ * Runs only with `end_ignores_gate` on for an allowlisted account, after the
+ * config loop (so a session the loop handled with its full logic — hierarchy,
+ * hand-off — is left alone), and also for an account with no enabled config at
+ * all, which the loop never enters. One session query per account per tick.
+ */
+async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
+  const { db, uid, nowMs, stats, logRows } = c;
+  let open: admin.firestore.QuerySnapshot;
+  try {
+    open = await db
+      .collection("users").doc(uid).collection(SESSION_COLLECTION)
+      .where("gameStartMs", ">=", nowMs - END_REMINT_HORIZON_MS) // COLLECTION scope → automatic index
+      .get();
+  } catch (err) {
+    logger.warn(`planGameDayFires: end-sweep session read failed for ${uid}; nothing swept`, err);
+    return;
+  }
+  const lat = c.user.get("latitude");
+  const lon = c.user.get("longitude");
+  const restoreNow = () =>
+    baseRestorePayload({
+      nowMs,
+      latitude: typeof lat === "number" ? lat : null,
+      longitude: typeof lon === "number" ? lon : null,
+      tzOffsetHours: -5,
+    });
+  const jobs = db.collection("users").doc(uid).collection(FIRE_JOBS_COLLECTION);
+  const budgetUntil = () => endRetryUntilMs(nowMs, END_RETRY_WINDOW_GUARANTEED_MS);
+
+  for (const d of open.docs) {
+    const s = d.data() as Record<string, unknown>;
+    const eventId = d.id;
+    if (s.startPlannedAt === null || s.startPlannedAt === undefined) continue;
+    const teamSlug =
+      teamSlugFromEventId(eventId) ?? (typeof s.teamSlug === "string" ? s.teamSlug : "");
+    const gameId = teamSlug ? eventId.slice(`gd_${teamSlug}_`.length) : "";
+    const sport = typeof s.sport === "string" ? s.sport : "";
+    const gameStartMs = typeof s.gameStartMs === "number" ? s.gameStartMs : null;
+    if (gameStartMs === null) continue;
+    const hasEnd = s.endFiredAt !== null && s.endFiredAt !== undefined;
+    // No end yet and the loop decided this event this tick: that decision
+    // stands, whatever it was. (A planned end still gets (b) below.)
+    if (!hasEnd && c.endReached.has(eventId)) continue;
+
+    try {
+      // The job that lit this team: its own start, or the relinquisher's end.
+      const startJobId =
+        typeof s.startJobId === "string" && s.startJobId.length > 0 ? s.startJobId : `${eventId}_start`;
+      const startJob = await jobs.doc(startJobId).get();
+      const startState = startJob.data()?.state;
+      if (!startJobMayHaveLit(startState)) {
+        // Nothing was lit: a scheduled, cancelled, expired or skipped start.
+        // Legible once per day; never an end.
+        if (!hasEnd) {
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip", reason: "end_sweep_start_not_fired",
+            startJobState: startJob.exists ? String(startState) : "missing",
+          });
+        }
+        continue;
+      }
+      const startCtrl = startJob.get("controllerId");
+      const controllerId =
+        typeof startCtrl === "string" && startCtrl.length > 0 ? startCtrl : c.controllerId;
+      const sRef = sessionRef(db, uid, eventId);
+      const scorecardKey = typeof s.scorecard_key === "string" ? s.scorecard_key : null;
+
+      // ── (b) an end is planned: is its job alive? (#179) ─────────────────
+      if (hasEnd) {
+        const endJobId =
+          typeof s.endJobId === "string" && s.endJobId.length > 0 ? s.endJobId : `${eventId}_end`;
+        const endJob = await jobs.doc(endJobId).get();
+        const dec = decideEndRemint({
+          endJobState: endJob.exists ? endJob.get("state") : undefined,
+          remints: s.endRemints,
+          lastMintMs: toMillisOrNull(s.endRemintedAt) ?? toMillisOrNull(s.endFiredAt),
+          nowMs,
+          gameStartMs,
+        });
+        if (dec.kind === "remint") {
+          if (!controllerId) {
+            logRows.push({ uid, teamSlug, eventId, action: "skip", reason: "end_remint_no_controller_id" });
+            continue;
+          }
+          const newId = `${eventId}_end_r${dec.n}`;
+          const until = budgetUntil();
+          await jobs.doc(newId)
+            .create({
+              eventId, seq: "end",
+              controllerId,
+              fireAt: admin.firestore.Timestamp.fromMillis(nowMs),
+              type: "applyJson",
+              payload: restoreNow().payload,
+              state: "scheduled",
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              source: "game_day",
+              retryUntil: admin.firestore.Timestamp.fromMillis(until),
+              holdUntil: admin.firestore.Timestamp.fromMillis(until),
+              remintOf: endJobId,
+              remint: dec.n,
+            })
+            .catch((e) => {
+              if (e.code !== 6 && e.code !== "already-exists") throw e;
+            });
+          await sRef.set(
+            { endJobId: newId, endRemints: dec.n, endRemintedAt: admin.firestore.Timestamp.fromMillis(nowMs) },
+            { merge: true }
+          );
+          if (scorecardKey) {
+            await mergeScorecard(db, scorecardKey, uid, eventId, {
+              end: {
+                job_id: newId, state: "scheduled", attempts: 0,
+                remints: dec.n, reminted_from: endJobId, prior_outcome: dec.priorState,
+                fire_at: admin.firestore.Timestamp.fromMillis(nowMs),
+                retry_until: admin.firestore.Timestamp.fromMillis(until),
+              },
+            });
+          }
+          logRows.push({
+            uid, teamSlug, eventId, action: "plan_end_remint",
+            fireAt: new Date(nowMs).toISOString(), n: dec.n,
+            priorJob: endJobId, priorState: dec.priorState,
+          });
+          stats.endsReminted = (stats.endsReminted ?? 0) + 1;
+        } else if (dec.kind === "ceiling") {
+          // Constant fields: one row per session per day.
+          logRows.push({
+            uid, teamSlug, eventId, action: "skip",
+            reason: `end_remint_ceiling:${dec.reason}`,
+          });
+        }
+        continue;
+      }
+
+      // ── (a) a fired start with no end, not decided by the loop this tick ──
+      let resolved: ResolvedGame | null = c.resolvedByEvent.get(eventId) ?? null;
+      if (!resolved) {
+        const key = `${sport}/${gameId}`;
+        if (!c.byIdCache.has(key)) {
+          const clock: EspnGame = {
+            gameId, startMs: gameStartMs, isFinal: false, isInProgress: false,
+            statusName: "", statusState: "", homeTeamId: "", awayTeamId: "",
+          };
+          const r = sport && gameId
+            ? await fetchEventById(sport, gameId, c.espnCache)
+            : ({ kind: "error" } as const);
+          if (r.kind === "found") c.byIdCache.set(key, { game: r.game, via: "tracked" });
+          else if (r.kind === "absent") c.byIdCache.set(key, { game: clock, via: "tracked", espnState: "silent" });
+          else {
+            stats.espnErrors++;
+            c.byIdCache.set(key, { game: clock, via: "tracked", espnState: "unavailable" });
+          }
+        }
+        resolved = c.byIdCache.get(key) ?? null;
+      }
+      if (!resolved || !resolved.game) continue;
+      const game = resolved.game;
+      const decision = decideEndSignal({
+        espnIsFinal: game.isFinal,
+        state: {
+          consecutiveFinalPolls: s.consecutiveFinalPolls,
+          endFiredAt: s.endFiredAt,
+          gameStartMs,
+          startPlannedAt: s.startPlannedAt,
+        },
+        sport,
+        nowMs,
+        ...(c.espnOn.statusAwareCap
+          ? {
+              cap: {
+                statusAware: true,
+                espnLive: espnReportsLive(game),
+                espnUnavailable: resolved.espnState === "unavailable",
+              },
+            }
+          : {}),
+      });
+      const finalSeenAtMs =
+        decision.nextConsecutive > 0
+          ? typeof s.finalSeenAtMs === "number" ? s.finalSeenAtMs : nowMs
+          : null;
+      await sRef.set(
+        { consecutiveFinalPolls: decision.nextConsecutive, finalSeenAtMs },
+        { merge: true }
+      );
+      if (!decision.fireEnd) {
+        if (decision.reason !== "not_final" && decision.reason !== "already_fired") {
+          bump(stats.endSkipped, `end:${decision.reason.split(":")[0]}`);
+          logRows.push({ uid, teamSlug, eventId, action: "skip", reason: decision.reason, via: "session_sweep" });
+        }
+        continue;
+      }
+      const cause =
+        c.loopExit.get(eventId) ??
+        (!c.configSlugs.has(teamSlug)
+          ? "config_disabled_or_deleted"
+          : c.controllerId === null
+            ? "no_controller"
+            : "no_game");
+      if (!controllerId) {
+        logRows.push({ uid, teamSlug, eventId, action: "skip", reason: "end_sweep_no_controller_id", cause });
+        continue;
+      }
+      const until = budgetUntil();
+      logRows.push({
+        uid, teamSlug, eventId, action: "plan_end",
+        fireAt: new Date(nowMs).toISOString(), reason: decision.reason,
+        via: "session_sweep", cause,
+        ...(resolved.espnState ? { capStatus: resolved.espnState } : {}),
+      });
+      await jobs.doc(`${eventId}_end`)
+        .create({
+          eventId, seq: "end",
+          controllerId,
+          fireAt: admin.firestore.Timestamp.fromMillis(nowMs),
+          type: "applyJson",
+          payload: restoreNow().payload,
+          state: "scheduled",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          source: "game_day",
+          retryUntil: admin.firestore.Timestamp.fromMillis(until),
+          holdUntil: admin.firestore.Timestamp.fromMillis(until),
+          endVia: "session_sweep",
+        })
+        .catch((e) => {
+          if (e.code !== 6 && e.code !== "already-exists") throw e;
+        });
+      await sRef.set(
+        {
+          endFiredAt: admin.firestore.FieldValue.serverTimestamp(),
+          endJobId: `${eventId}_end`,
+          endVia: "session_sweep",
+          endCause: cause,
+        },
+        { merge: true }
+      );
+      if (scorecardKey) {
+        await mergeScorecard(db, scorecardKey, uid, eventId, {
+          end: {
+            job_id: `${eventId}_end`,
+            reason: decision.reason,
+            espn_final_seen_at:
+              finalSeenAtMs !== null ? admin.firestore.Timestamp.fromMillis(finalSeenAtMs) : null,
+            fire_at: admin.firestore.Timestamp.fromMillis(nowMs),
+            retry_until: admin.firestore.Timestamp.fromMillis(until),
+            state: "scheduled",
+            attempts: 0,
+            via: "session_sweep",
+            cause,
+          },
+        });
+      }
+      stats.endsPlanned++;
+      stats.endsSwept = (stats.endsSwept ?? 0) + 1;
+      if (decision.reason === "hard_cap" || decision.reason === "hard_cap_ceiling") {
+        stats.hardCapsPlanned++;
+      }
+    } catch (err) {
+      stats.errors++;
+      logger.error(`planGameDayFires: end sweep failed for ${uid}/${eventId}`, err);
+    }
+  }
+}
+
 export async function runPlannerTick(
   db: admin.firestore.Firestore,
   nowMs: number,
@@ -1036,6 +1364,21 @@ export async function runPlannerTick(
           /* a failed status write must never stop planning */
         }
       }
+      // The end guarantee: a team disabled or deleted mid-game (#178) leaves
+      // its session behind with no enabled config. The loop never sees it;
+      // the sweep does, and ends it from the session alone.
+      if (allowlisted && flagOnFor(flags.endIgnoresGate, uid)) {
+        await sweepFiredSessionEnds({
+          db, uid, user: u, nowMs, espnOn, espnCache,
+          byIdCache: new Map(),
+          controllerId: null,
+          configSlugs: new Set(),
+          endReached: new Set(),
+          loopExit: new Map(),
+          resolvedByEvent: new Map(),
+          stats, logRows,
+        });
+      }
       continue;
     }
     stats.usersScanned++;
@@ -1080,7 +1423,16 @@ export async function runPlannerTick(
     // allowlisted, gate or no gate. Pre-flight and `served` never gated ends.
     // Starts keep `writeJobs` exactly as before. "Fired" is GUARD 0b's test
     // (`startJobConfirmsFired`), which runs before every end write below.
-    const writeEnds = writeJobs || (allowlisted && flagOnFor(flags.endIgnoresGate, uid));
+    const endGuarantee = allowlisted && flagOnFor(flags.endIgnoresGate, uid);
+    const writeEnds = writeJobs || endGuarantee;
+    // The end guarantee's wider budget for ends written this tick (#179), and
+    // the per-tick bookkeeping the post-loop sweep reads: which events the
+    // loop decided an END for, why it left an event early, and the ESPN
+    // resolution it already made for an event.
+    const endWindowMs = endGuarantee ? END_RETRY_WINDOW_GUARANTEED_MS : undefined;
+    const endReached = new Set<string>();
+    const loopExit = new Map<string, string>();
+    const resolvedByEvent = new Map<string, ResolvedGame>();
 
     const priorGate = Array.isArray(udata.gameday_gate_blocking)
       ? (udata.gameday_gate_blocking as GateBlockingReason[])
@@ -1297,6 +1649,7 @@ export async function runPlannerTick(
         const session = (await sessionRef(db, uid, eventId).get()).data() ?? {};
         sessionByEvent.set(eventId, session);
         configByEvent.set(eventId, c);
+        resolvedByEvent.set(eventId, resolvedPre);
         // The daylight filter, decided once here; the loop reads the flag.
         // The user doc carries no tz offset; US Central is the fleet's
         // reality today and a ±1 h error only matters within 30 min of
@@ -1520,6 +1873,7 @@ export async function runPlannerTick(
             uid, teamSlug, eventId, action: "skip",
             reason: `participation_${part.reason}`,
           });
+          loopExit.set(eventId, `participation_${part.reason}`);
           continue;
         }
 
@@ -1549,6 +1903,7 @@ export async function runPlannerTick(
             uid, teamSlug, eventId, action: "skip", reason: "daylight_game",
             fireAt: new Date(game.startMs).toISOString(),
           });
+          loopExit.set(eventId, "daylight_game");
           continue;
         }
 
@@ -1847,6 +2202,8 @@ export async function runPlannerTick(
               }
             : {}),
         });
+        // The end guarantee's sweep leaves this event alone: the loop decided it.
+        endReached.add(eventId);
 
         if (decision.reason === "cap_held_unavailable" || decision.reason === "espn_unavailable") {
           // #159. Constant fields, so one row per reason per day: ESPN could
@@ -1934,7 +2291,10 @@ export async function runPlannerTick(
             .collection("users").doc(uid)
             .collection(FIRE_JOBS_COLLECTION).doc(startJobId)
             .get();
-          if (!startJobConfirmsFired(startJob.data()?.state)) {
+          // The end guarantee widens "fired" to a start the bridge reported
+          // failed (gameDayPlanning.startJobMayHaveLit); GUARD 0b otherwise.
+          const startState = startJob.data()?.state;
+          if (!(endGuarantee ? startJobMayHaveLit(startState) : startJobConfirmsFired(startState))) {
             bump(stats.endSkipped, "end:start_never_dispatched");
             logRows.push({
               uid, teamSlug, eventId, action: "skip",
@@ -2076,8 +2436,13 @@ export async function runPlannerTick(
                 state: "scheduled",
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 source: "game_day",
-                // A2: an end retries for 15 min (fireJobs.endRetryUntilMs).
-                retryUntil: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs)),
+                // A2: an end retries for 15 min (fireJobs.endRetryUntilMs) —
+                // 90 min under the end guarantee, with the command held
+                // pickable for the whole budget (`holdUntil`, #179).
+                retryUntil: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs, endWindowMs)),
+                ...(endGuarantee
+                  ? { holdUntil: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs, endWindowMs)) }
+                  : {}),
                 // Audit: an `end` whose payload is a design rather than a
                 // preset load must say which team it lit.
                 ...(handoff
@@ -2091,6 +2456,8 @@ export async function runPlannerTick(
               {
                 endFiredAt: admin.firestore.FieldValue.serverTimestamp(),
                 ...(handoff ? { handedOffTo: handoff.to.eventId } : {}),
+                // The end guarantee's re-mint reads this (#179).
+                ...(endGuarantee ? { endJobId: `${eventId}_end` } : {}),
               },
               { merge: true }
             );
@@ -2105,7 +2472,7 @@ export async function runPlannerTick(
                       ? admin.firestore.Timestamp.fromMillis(finalSeenAtMs)
                       : null,
                   fire_at: admin.firestore.Timestamp.fromMillis(nowMs),
-                  retry_until: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs)),
+                  retry_until: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs, endWindowMs)),
                   state: "scheduled",
                   attempts: 0,
                   ...(handoff ? { handoff_to: handoff.to.teamSlug } : {}),
@@ -2187,6 +2554,20 @@ export async function runPlannerTick(
         stats.errors++;
         logger.error(`planGameDayFires: ${uid}/${teamSlug} failed`, err);
       }
+    }
+
+    // ── The end guarantee: the per-account sweep ─────────────────────────
+    // After the loop, so a session the loop decided keeps that decision; it
+    // ends what the loop could not reach, and re-mints a dead end job.
+    if (endGuarantee) {
+      await sweepFiredSessionEnds({
+        db, uid, user: u, nowMs, espnOn, espnCache,
+        byIdCache: new Map(),
+        controllerId: controller ? controller.id : null,
+        configSlugs: new Set(configs.docs.map((d) => d.id)),
+        endReached, loopExit, resolvedByEvent,
+        stats, logRows,
+      });
     }
 
     // ── B2: users/{uid}.gameday_server ──────────────────────────────────
@@ -2316,8 +2697,11 @@ export async function runPlannerTick(
     // B2 sticky: only on a tick that held someone, so every other tick's
     // summary is the one it always was.
     ...(stats.servedHeld ? { servedHeld: stats.servedHeld } : {}),
-    // end_ignores_gate: only on a tick that wrote an end past a blocking gate.
+    // end_ignores_gate: only on a tick that wrote an end past a blocking gate,
+    // swept one the loop could not reach, or re-minted a dead end job.
     ...(stats.endsGateBypassed ? { endsGateBypassed: stats.endsGateBypassed } : {}),
+    ...(stats.endsSwept ? { endsSwept: stats.endsSwept } : {}),
+    ...(stats.endsReminted ? { endsReminted: stats.endsReminted } : {}),
     espnErrors: stats.espnErrors,
     // Distinct ESPN URLs requested — one request each (the per-tick cache).
     espnFetches: stats.espnFetches,

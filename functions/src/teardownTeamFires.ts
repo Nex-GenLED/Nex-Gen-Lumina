@@ -68,6 +68,8 @@ export async function retractTeamFires(args: {
         eventId: doc.get("eventId"),
         state: doc.get("state"),
         teamSlug: args.teamSlug,
+        // #178: a scheduled END is never retracted — it is the restore.
+        seq: doc.get("seq"),
       })
     ) {
       continue;
