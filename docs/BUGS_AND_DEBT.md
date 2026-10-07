@@ -4472,6 +4472,37 @@ commit — merging `main` into this tree will collide with the untracked copies.
     the controller connecting finishes a leftover marker — to the captured state, the base look
     when the capture was lost, OFF staying off; a server-run team is left to the server.
 
+- [ ] **#175 — AFTER AN ACCOUNT SWITCH THE PHONE KEPT THE PREVIOUS ACCOUNT'S CONTROLLER ADDRESS,
+  and drove it with no identity check**
+  - Status: **PARTLY DONE — commit 1 of 3 in `release-candidate/116` (`99a95b0`, cherry-picked from
+    `7339314`); commits 2 (`8a74ac9`) and 3 (`cbe4e82`) PENDING: they stay on
+    `fix/118-controller-selection` for a later build, after a device walk** · Severity: **P2** ·
+    Evidence: **owner report** (one controller; "Set as Active" needed after signing out of one
+    account and into another — test, reviewer, installer — on the same phone) +
+    **verified-by-test** (`controller_selection_account_switch_test.dart`: 6 of 7 fail on the
+    old code).
+  - Cause: the selection was an in-memory address (`selectedDeviceIpProvider`) that auto-connect
+    filled only while it was EMPTY, from the newest record. Nothing reset it on sign-out, an
+    account switch or an installer leaving a customer, and the record id was then found by
+    matching that address. Account B kept account A's address; B has no record there, so the id
+    was null: on the home network the repository was built with no identity expectation (the #92
+    check skipped — a write could reach A's controller on a shared network), and away from home
+    no relay was built (nothing sent at all).
+  - In this build (commit 1): any change away from a signed-in account (sign-out, another
+    account, an installer entering or leaving a customer) drops the previous account's address,
+    so auto-connect selects the new account's own record and its id; deleting the active
+    controller releases its address.
+  - Still open until commits 2 and 3 ship: a record's address changed on another phone
+    (installer re-add, discovery re-save) and the old address read from the local cache on a
+    cold start are not followed; a newest record with no address selects nothing; the record id
+    is still found by address match, so it is lost while the controller list reloads (a
+    repository built then carries no identity expectation). Commit 2 selects by record id at its
+    CURRENT address, re-resolved on every change; commit 3 adds "Use this controller" (two or
+    more records only) and the "Which controller should this phone use?" prompt.
+  - Production (read-only, 2026-10-05, bench excluded): 24 accounts × one record each; no
+    duplicates, no empty addresses; relay commands all targeted the current record — a stale
+    selection sends nothing, so it never showed server-side.
+
 ---
 
 ## P3 — debt (no launch relevance)
@@ -4645,6 +4676,21 @@ commit — merging `main` into this tree will collide with the untracked copies.
   - Fix: clear the 11 warnings, then tighten the gate to `--no-fatal-infos` only. The 370
     infos are a separate, larger cleanup and are NOT part of this item.
   - Files: `codemagic.yaml`, the 8 source files above. Related: **P1-46** (green-main gate).
+
+- [ ] **#176 — "REMOTE ACCESS ISN'T SET UP" / "REQUIRES A LUMINA BRIDGE" WAS SHOWN FOR A STALE
+  CONTROLLER SELECTION**
+  - Status: **OPEN in this build — fix built in commit 3 (`cbe4e82`), PENDING on
+    `fix/118-controller-selection` for a later build after a device walk** · Severity: **P3**
+    (copy — it sends customers to Remote Access and bridge setup) · Evidence:
+    **verified-by-test** on that branch (`apply_blocked_stale_selection_test.dart`).
+  - Cause: away from home, an address matching none of the account's records gives the relay no
+    record id; `applyBlockedReasonProvider` reads the missing repository as a missing bridge or
+    missing remote access. Commit 1 (in this build) removes the account-switch way of getting
+    there; the other stale cases in #175 still reach it.
+  - Fix (commit 3): `notThisAccount` — "This phone is set to a controller that isn't on your
+    account. Choose your controller in Settings → System & Device Management → Controllers." —
+    checked after offline and before the away-from-home reasons; `chooseController` when two or
+    more controllers answered and none is chosen yet. Related: #175.
 
 ## Features promised (post-cleanup)
 
