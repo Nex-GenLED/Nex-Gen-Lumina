@@ -199,6 +199,12 @@ class FactsPublishOutcome {
   /// second interpretation of it.
   final LadderRestoreVerdict? ladderRestore;
 
+  /// R2 as published on this connect (`base_ladder_asserts_segments`):
+  /// true, false, or null when unmeasured. #183 — the repair acts on a
+  /// false here too: a bus added outside the app leaves the restore verdict
+  /// fine while preset 1 or 2 never names the new bus.
+  final bool? ladderAssertsSegments;
+
   /// The participating buses [ladderRestore] was measured against. Null when
   /// participation did not resolve (and then [ladderRestore] is null too).
   final List<int>? participating;
@@ -208,6 +214,7 @@ class FactsPublishOutcome {
     required this.baseBoundariesOffered,
     required this.wrote,
     this.ladderRestore,
+    this.ladderAssertsSegments,
     this.participating,
   });
 

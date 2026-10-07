@@ -68,8 +68,10 @@ import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart'
-    show ladderAssertsSegments;
+    show kBaseRestorePresetIds, ladderAssertsSegments, presetAssertsAllChannels;
 import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
+import 'package:nexgen_command/features/wled/base_look.dart'
+    show baseLookSegmentFields, kBaseLookEffectId;
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
     show deviceChannelsFromConfig;
@@ -316,11 +318,36 @@ String ladderSlotName(int presetId) => presetId == kLadderOffPresetId
 
 /// PURE. The dry run: one step per PRESENT bad slot, ascending. A missing slot
 /// is never created here — schedule sync owns creating the ladder.
-List<LadderRepairStep> planLadderRepair(LadderRestoreVerdict verdict) => [
-      for (final p in verdict.presets)
-        if (p.present && !p.ok)
-          LadderRepairStep(p.presetId, ladderSlotName(p.presetId), p.faults),
-    ];
+///
+/// A slot is bad when the restore verdict says it does not light (or does not
+/// darken), AND — for the two presets a server restore can load, 1 and 2 —
+/// when it does not STATE `on` for every live bus ([presetAssertsAllChannels],
+/// the server gate's R2). That second rule is the bus-change case (#183): a
+/// bus added outside the app leaves preset 2 killing the master, so it still
+/// "darkens every bus" and the restore verdict is fine, while the server gate
+/// reads a preset that never names the new bus and blocks the account. Given
+/// [presets] and [deviceChannelIds], such a slot is planned with
+/// [LadderFault.channelUnstated]; without them the plan is the verdict's alone.
+List<LadderRepairStep> planLadderRepair(
+  LadderRestoreVerdict verdict, {
+  Map<int, Map<String, dynamic>>? presets,
+  List<int> deviceChannelIds = const [],
+}) {
+  final out = <LadderRepairStep>[];
+  for (final p in verdict.presets) {
+    if (!p.present) continue;
+    final faults = [...p.faults];
+    if (presets != null &&
+        deviceChannelIds.isNotEmpty &&
+        kBaseRestorePresetIds.contains(p.presetId) &&
+        !presetAssertsAllChannels(presets[p.presetId], deviceChannelIds)) {
+      faults.add(LadderFault.channelUnstated);
+    }
+    if (faults.isEmpty) continue;
+    out.add(LadderRepairStep(p.presetId, ladderSlotName(p.presetId), faults));
+  }
+  return out;
+}
 
 /// PURE. Does a dry run have something new to record?
 ///
@@ -362,15 +389,103 @@ bool dryRunRecordDiffers({
   return dark.join(',') != darkChannels.join(',');
 }
 
-/// PURE. The state a slot is rewritten with — the builders' output, nothing
-/// hand-written here.
-Map<String, dynamic> ladderRepairState(
-    int presetId, Map<String, dynamic>? liveState) {
+/// PURE. The state a slot is rewritten with: one segment entry per LIVE BUS,
+/// built from the controller's bus list, not from the live segments.
+///
+/// The builders in schedule_sync walk the live `seg` array; after a bus is
+/// added the live array can still hold the OLD segment count until the
+/// geometry gate re-splits it, and a preset built from it would again fail to
+/// name the new bus — the exact fault being repaired. The bus list is the
+/// ground truth the server gate reads, so the shape is built from it.
+///
+/// The shape is the manual repair procedure's, exactly (owner, 2026-10-06):
+///   ON (1/3/4/5): root `on:true`, `bri` 200/51/102/153, `ib:true`; per bus
+///                 `on:true`, Solid (fx 0), colour slot 1 Lumina Blue
+///                 `[0,212,255,0]`, slots 2 and 3 black.
+///   OFF (2):      root `on:false`, `ib:true`; per bus `on:false`, Solid,
+///                 every slot black.
+/// `ib:true` makes the firmware persist the root state. The live state is no
+/// longer an input, so a mock or relay repository changes nothing here.
+Map<String, dynamic> ladderRepairState(int presetId, List<int> busIds) {
+  final ids = [...busIds]..sort();
   if (presetId == kLadderOffPresetId) {
-    return ScheduleSyncService.buildNglOffPresetState(liveState);
+    return <String, dynamic>{
+      'on': false,
+      'ib': true,
+      'seg': [
+        for (final id in ids)
+          <String, dynamic>{
+            'id': id,
+            'on': false,
+            'fx': kBaseLookEffectId,
+            'col': <List<int>>[
+              <int>[0, 0, 0, 0],
+              <int>[0, 0, 0, 0],
+              <int>[0, 0, 0, 0],
+            ],
+          },
+      ],
+    };
   }
   final spec = ScheduleSyncService.kOnPresetSpecs[presetId]!;
-  return ScheduleSyncService.buildNglOnPresetState(spec.bri, liveState);
+  return <String, dynamic>{
+    'on': true,
+    'bri': spec.bri,
+    'ib': true,
+    'seg': [
+      for (final id in ids)
+        <String, dynamic>{'id': id, 'on': true, ...baseLookSegmentFields()},
+    ],
+  };
+}
+
+bool _sameInts(Object? a, Object? b) {
+  if (a is! List || b is! List || a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    final x = a[i], y = b[i];
+    if (x is num && y is num) {
+      if (x.toInt() != y.toInt()) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// PURE. Did the controller store what the repair sent? Read back after each
+/// psave: a 2xx is not persistence on this firmware.
+///
+/// Root keys must match (`ib` is a request flag the firmware never stores,
+/// and `n` is the name). Every sent segment must be present by id with the
+/// same `on`; a lit segment must also hold the sent effect and colour slot 1.
+bool ladderSlotStored(
+    Map<String, dynamic>? stored, Map<String, dynamic> sent) {
+  if (stored == null) return false;
+  for (final e in sent.entries) {
+    if (e.key == 'ib' || e.key == 'seg' || e.key == 'n') continue;
+    if (stored[e.key] != e.value) return false;
+  }
+  final raw = stored['seg'];
+  final byId = <int, Map>{};
+  if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      final s = raw[i];
+      if (s is Map) byId[s['id'] is int ? s['id'] as int : i] = s;
+    }
+  }
+  for (final s in (sent['seg'] as List).cast<Map>()) {
+    final got = byId[s['id'] as int];
+    if (got == null || got['on'] != s['on']) return false;
+    if (s['on'] == true) {
+      if (got['fx'] != s['fx']) return false;
+      final want = (s['col'] as List).first;
+      final have = got['col'];
+      if (have is! List || have.isEmpty || !_sameInts(have.first, want)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 // ── Outcome ──────────────────────────────────────────────────────────────────
@@ -399,6 +514,9 @@ enum LadderRepairOutcome {
 
   /// No planned slot reads back good.
   failed,
+
+  /// The caller cancelled (the account changed) before the first write.
+  cancelled,
 }
 
 /// What one consideration did.
@@ -410,12 +528,17 @@ class LadderRepairRun {
   final List<int> repairedIds;
   final List<int> stillBadIds;
 
+  /// The slot whose save or read-back failed and stopped the run, if any.
+  /// Every later planned slot was left untouched.
+  final int? stoppedAtId;
+
   const LadderRepairRun(
     this.outcome,
     this.reason, {
     this.plan = const [],
     this.repairedIds = const [],
     this.stillBadIds = const [],
+    this.stoppedAtId,
   });
 
   bool get wrote =>
@@ -440,12 +563,20 @@ class LadderRepairStatus {
   final List<int> stillBadIds;
   final DateTime at;
 
+  /// The customer asked for it ("Repair base lighting"), not a connect.
+  final bool userInitiated;
+
+  /// See [LadderRepairRun.stoppedAtId].
+  final int? stoppedAtId;
+
   const LadderRepairStatus({
     required this.controllerId,
     required this.outcome,
     required this.repairedIds,
     required this.stillBadIds,
     required this.at,
+    this.userInitiated = false,
+    this.stoppedAtId,
   });
 
   Map<String, Object?> toJson() => {
@@ -454,6 +585,8 @@ class LadderRepairStatus {
         'repairedIds': repairedIds,
         'stillBadIds': stillBadIds,
         'at': at.toIso8601String(),
+        'userInitiated': userInitiated,
+        if (stoppedAtId != null) 'stoppedAtId': stoppedAtId,
       };
 
   static LadderRepairStatus? fromJson(Object? raw) {
@@ -461,12 +594,15 @@ class LadderRepairStatus {
     try {
       final outcome = LadderRepairOutcome.values
           .firstWhere((o) => o.name == raw['outcome']);
+      final stopped = raw['stoppedAtId'];
       return LadderRepairStatus(
         controllerId: raw['controllerId'] as String,
         outcome: outcome,
         repairedIds: (raw['repairedIds'] as List).cast<int>(),
         stillBadIds: (raw['stillBadIds'] as List).cast<int>(),
         at: DateTime.parse(raw['at'] as String),
+        userInitiated: raw['userInitiated'] == true,
+        stoppedAtId: stopped is num ? stopped.toInt() : null,
       );
     } catch (_) {
       return null;
@@ -482,9 +618,16 @@ abstract class LadderRepairStore {
   Future<bool> hasRun(String controllerId);
   Future<bool> markRan(String controllerId, Map<String, Object?> record);
 
+  /// Re-arms the one-time repair (the bus list changed, #183).
+  Future<void> clearRan(String controllerId);
+
   /// Must return true only when the backup is durably stored — the repair
   /// aborts otherwise.
   Future<bool> saveBackup(String controllerId, String backupJson);
+
+  /// The last backup saved for [controllerId], or null. What
+  /// [BaseLadderRepairRunner.restoreFromBackup] puts back.
+  Future<String?> readBackup(String controllerId);
 
   Future<void> saveStatus(LadderRepairStatus status);
 }
@@ -538,6 +681,15 @@ class LadderRepairDeps {
   /// set() can wait for the network indefinitely.
   final Duration recordTimeout;
 
+  /// True when the run must stop: the signed-in account changed under it.
+  /// Checked before the first write and before every psave; a run that has
+  /// already saved something stops where it is and restores the live look.
+  final bool Function()? cancelled;
+
+  /// Progress for a user-initiated run: `backup`, `capture`, `save:<id>`,
+  /// `verify:<id>`, `restore`, `done`.
+  final void Function(String step)? onProgress;
+
   const LadderRepairDeps({
     required this.svc,
     required this.controllerId,
@@ -557,6 +709,8 @@ class LadderRepairDeps {
     this.readinessTimeout = const Duration(minutes: 2),
     this.readinessPoll = const Duration(seconds: 5),
     this.recordTimeout = const Duration(seconds: 10),
+    this.cancelled,
+    this.onProgress,
   });
 }
 
@@ -596,13 +750,22 @@ class BaseLadderRepairRunner {
   }
 
   /// Consider a repair after a connect whose published verdict was
-  /// [atConnect]. Never throws.
-  Future<LadderRepairRun> consider(LadderRestoreVerdict? atConnect) async {
-    if (atConnect == null || atConnect.restoreLit) {
+  /// [atConnect] and whose R2 verdict was [assertsSegments]. Never throws.
+  Future<LadderRepairRun> consider(
+    LadderRestoreVerdict? atConnect, {
+    bool? assertsSegments,
+  }) async {
+    if (atConnect == null) {
       return const LadderRepairRun(
-          LadderRepairOutcome.notNeeded, 'ladder lights (or unmeasured)');
+          LadderRepairOutcome.notNeeded, 'ladder unmeasured');
     }
-    if (planLadderRepair(atConnect).isEmpty) {
+    // R2 false alone is a reason (#183): the restore verdict can be fine while
+    // preset 1 or 2 never names a bus the server gate counts.
+    if (atConnect.restoreLit && assertsSegments != false) {
+      return const LadderRepairRun(LadderRepairOutcome.notNeeded,
+          'ladder lights and states every bus (or unmeasured)');
+    }
+    if (assertsSegments != false && planLadderRepair(atConnect).isEmpty) {
       return LadderRepairRun(LadderRepairOutcome.notNeeded,
           'only missing slots ${atConnect.missingPresetIds} — schedule sync creates those');
     }
@@ -622,6 +785,95 @@ class BaseLadderRepairRunner {
     }
   }
 
+  /// The customer's own "Repair base lighting" (#183). The tap is the
+  /// consent: the fleet mode (`connect_repair`) and the one-time marker do not
+  /// apply. Everything else holds — the LAN service, the Game Day / timer /
+  /// clock guards, backup, capture, verify, restore. The kill switch
+  /// `enabled:false` still means off. Never throws.
+  Future<LadderRepairRun> repairNow() async {
+    if (!_inFlight.add(d.controllerId)) {
+      return const LadderRepairRun(
+          LadderRepairOutcome.inFlight, 'a repair is already running');
+    }
+    try {
+      final mode = await d.mode();
+      if (mode == LadderRepairMode.off) {
+        return const LadderRepairRun(
+            LadderRepairOutcome.modeOff, 'config/base_ladder_repair says off');
+      }
+      final activity = await _awaitGameDay();
+      final fresh = await _freshReads();
+      if (fresh == null) {
+        return const LadderRepairRun(LadderRepairOutcome.aborted,
+            'presets, cfg or bus list unreadable on the fresh read');
+      }
+      final plan = _plan(fresh);
+      if (plan.isEmpty) {
+        return const LadderRepairRun(LadderRepairOutcome.notNeeded,
+            'every ladder preset lights and states every bus — nothing to repair');
+      }
+      final gate = _gate(fresh, activity);
+      if (!gate.allowed) {
+        return LadderRepairRun(LadderRepairOutcome.deferred, gate.toString(),
+            plan: plan);
+      }
+      final run = await _execute(fresh, plan, userInitiated: true);
+      _log('user repair: $run');
+      return run;
+    } catch (e) {
+      _log('user repair threw: $e');
+      return LadderRepairRun(LadderRepairOutcome.aborted, 'threw: $e');
+    } finally {
+      _inFlight.remove(d.controllerId);
+    }
+  }
+
+  /// Puts back the presets this phone backed up before its last repair of
+  /// this controller — the "Restore previous settings" offer after a repair
+  /// that failed. Each stored body is psaved under its own name with its
+  /// geometry stripped (a backup carries the bounds of its time, and a psave
+  /// must never re-bound a channel). Never throws.
+  Future<LadderRepairRun> restoreFromBackup() async {
+    if (!_inFlight.add(d.controllerId)) {
+      return const LadderRepairRun(
+          LadderRepairOutcome.inFlight, 'a repair is already running');
+    }
+    try {
+      final run = await _restoreFromBackup();
+      _log('backup restore: $run');
+      return run;
+    } catch (e) {
+      _log('backup restore threw: $e');
+      return LadderRepairRun(LadderRepairOutcome.aborted, 'threw: $e');
+    } finally {
+      _inFlight.remove(d.controllerId);
+    }
+  }
+
+  bool _cancelled() => d.cancelled?.call() ?? false;
+  void _progress(String step) => d.onProgress?.call(step);
+
+  /// Every bus participates unless the caller resolved a narrower set.
+  List<int> _participating(List<int> busIds) =>
+      d.participating.isEmpty ? busIds : d.participating;
+
+  List<LadderRepairStep> _plan(_FreshReads f) => planLadderRepair(
+        f.verdict,
+        presets: f.presets,
+        deviceChannelIds: f.deviceChannelIds,
+      );
+
+  /// Wait for Game Day state to load — unknown is a refusal, not a pass.
+  Future<GameDayActivity> _awaitGameDay() async {
+    var activity = await d.gameDay();
+    final deadline = d.now().add(d.readinessTimeout);
+    while (!activity.known && d.now().isBefore(deadline)) {
+      await Future<void>.delayed(d.readinessPoll);
+      activity = await d.gameDay();
+    }
+    return activity;
+  }
+
   Future<LadderRepairRun> _consider() async {
     final mode = await d.mode();
     if (mode == LadderRepairMode.off) {
@@ -634,13 +886,7 @@ class BaseLadderRepairRunner {
           'one-time repair already ran for this controller');
     }
 
-    // ── Wait for Game Day state to load — unknown is a refusal, not a pass.
-    var activity = await d.gameDay();
-    final deadline = d.now().add(d.readinessTimeout);
-    while (!activity.known && d.now().isBefore(deadline)) {
-      await Future<void>.delayed(d.readinessPoll);
-      activity = await d.gameDay();
-    }
+    final activity = await _awaitGameDay();
 
     // ── 1. Dry run on FRESH reads.
     final fresh = await _freshReads();
@@ -649,17 +895,16 @@ class BaseLadderRepairRunner {
           'presets, cfg or bus list unreadable on the fresh read');
     }
     final verdict = fresh.verdict;
-    if (verdict.restoreLit) {
-      return const LadderRepairRun(
-          LadderRepairOutcome.notNeeded, 'ladder lights on the fresh read');
-    }
-    final plan = planLadderRepair(verdict);
+    final plan = _plan(fresh);
     if (plan.isEmpty) {
-      return const LadderRepairRun(
-          LadderRepairOutcome.notNeeded, 'nothing present to rewrite');
+      return LadderRepairRun(
+          LadderRepairOutcome.notNeeded,
+          verdict.restoreLit
+              ? 'ladder lights on the fresh read'
+              : 'nothing present to rewrite');
     }
 
-    var gate = _gate(fresh, activity);
+    final gate = _gate(fresh, activity);
     final planJson = [for (final s in plan) s.toJson()];
 
     // Dry run writes nothing to the controller, so the guards do not stop it:
@@ -699,8 +944,29 @@ class BaseLadderRepairRunner {
       return LadderRepairRun(LadderRepairOutcome.deferred, gate.toString(),
           plan: plan);
     }
+    return _execute(fresh, plan, userInitiated: false);
+  }
+
+  /// Steps 2–6: backup, record, capture, a final check, one gated psave per
+  /// planned slot — each READ BACK before the next, stopping at the first
+  /// that does not persist — restore the live look, record, republish the
+  /// ladder facts, and (for a connect) the one-time marker.
+  Future<LadderRepairRun> _execute(
+    _FreshReads fresh,
+    List<LadderRepairStep> plan, {
+    required bool userInitiated,
+  }) async {
+    final verdict = fresh.verdict;
+    final planJson = [for (final s in plan) s.toJson()];
+
+    if (_cancelled()) {
+      return LadderRepairRun(LadderRepairOutcome.cancelled,
+          'the account changed before the first write',
+          plan: plan);
+    }
 
     // ── 2. Backup — local is REQUIRED.
+    _progress('backup');
     final backupJson = jsonEncode({
       'version': kLadderRepairVersion,
       'at': d.now().toIso8601String(),
@@ -711,23 +977,27 @@ class BaseLadderRepairRunner {
     });
     if (!await d.store.saveBackup(d.controllerId, backupJson)) {
       return LadderRepairRun(LadderRepairOutcome.aborted,
-          'local backup failed — nothing written', plan: plan);
+          'local backup failed — nothing written',
+          plan: plan);
     }
     await _record({
       'version': kLadderRepairVersion,
       'state': 'started',
       'plan': planJson,
       'dark_channels': verdict.darkChannels,
+      'user_initiated': userInitiated,
       // A STRING: preset bodies hold arrays of arrays, which Firestore refuses
       // (#84).
       'backup_json': backupJson,
     });
 
     // ── 3. Capture — REQUIRED.
+    _progress('capture');
     final live = await d.svc.getState();
     if (live == null) {
       return LadderRepairRun(LadderRepairOutcome.aborted,
-          'live state unreadable — nothing written', plan: plan);
+          'live state unreadable — nothing written',
+          plan: plan);
     }
 
     // ── Last look before the first write, on a SECOND fresh read. The steps
@@ -735,10 +1005,11 @@ class BaseLadderRepairRunner {
     // moved or a preset rewritten in the meantime must be seen, not assumed
     // from the first read. Still the same controller; every planned slot
     // still holds exactly what was planned (and backed up); the guards still
-    // pass on the clock as it is NOW.
+    // pass on the clock as it is NOW; the account is still the one that asked.
     if (!d.stillConnected()) {
       return LadderRepairRun(LadderRepairOutcome.deferred,
-          'controller changed before the first write', plan: plan);
+          'controller changed before the first write',
+          plan: plan);
     }
     final recheck = await _freshReads();
     if (recheck == null) {
@@ -750,17 +1021,29 @@ class BaseLadderRepairRunner {
       if (jsonEncode(recheck.presets[step.presetId]) !=
           jsonEncode(fresh.presets[step.presetId])) {
         return LadderRepairRun(LadderRepairOutcome.deferred,
-            'preset ${step.presetId} changed during the repair', plan: plan);
+            'preset ${step.presetId} changed during the repair',
+            plan: plan);
       }
     }
-    gate = _gate(recheck, await d.gameDay());
+    final gate = _gate(recheck, await d.gameDay());
     if (!gate.allowed) {
       return LadderRepairRun(LadderRepairOutcome.deferred, gate.toString(),
           plan: plan);
     }
+    if (_cancelled()) {
+      return LadderRepairRun(LadderRepairOutcome.cancelled,
+          'the account changed before the first write',
+          plan: plan);
+    }
 
-    // ── 4. One psave per bad preset, gated, no retry pass.
+    // ── 4. One psave per planned slot, gated, read back, stopping at the
+    // first failure. The shape is built from the FRESH bus list, never from
+    // the live segments (see ladderRepairState).
+    final busIds = recheck.deviceChannelIds;
     final saved = <int>[];
+    final verified = <int>[];
+    int? stoppedAt;
+    var cancelledMidway = false;
     // Any save that was ATTEMPTED may have applied live — a psave applies its
     // state before it persists, and a save that timed out or returned false
     // may still have landed. So the restore keys off attempts, not successes.
@@ -769,9 +1052,13 @@ class BaseLadderRepairRunner {
     d.pausePolling?.call();
     try {
       final expected = await _expectedShape();
-      for (var i = 0; i < plan.length; i++) {
-        final step = plan[i];
-        if (i > 0) await Future<void>.delayed(d.settle);
+      for (final step in plan) {
+        if (_cancelled()) {
+          cancelledMidway = true;
+          break;
+        }
+        final state = ladderRepairState(step.presetId, busIds);
+        _progress('save:${step.presetId}');
         final out = await gatedPresetSave(
           presetId: step.presetId,
           presetName: step.name,
@@ -783,13 +1070,30 @@ class BaseLadderRepairRunner {
             attempted = true;
             return d.svc.savePreset(
               presetId: step.presetId,
-              state: ladderRepairState(step.presetId, live),
+              state: state,
               presetName: step.name,
             );
           },
         );
-        if (out.saved) saved.add(step.presetId);
-        if (!out.saved) _log('p${step.presetId} not saved: ${out.message}');
+        if (!out.saved) {
+          _log('p${step.presetId} not saved: ${out.message}');
+          stoppedAt = step.presetId;
+          break;
+        }
+        saved.add(step.presetId);
+        // Read back before the next save: a 2xx is not persistence on this
+        // firmware (the healer's measured settle), and a slot that did not
+        // take stops the run — the rest stays as it was, backed up.
+        _progress('verify:${step.presetId}');
+        await Future<void>.delayed(d.settle);
+        final back = await d.svc.readPresets();
+        if (!back.isKnown ||
+            !ladderSlotStored(back.presets[step.presetId], state)) {
+          _log('p${step.presetId} did not read back as saved');
+          stoppedAt = step.presetId;
+          break;
+        }
+        verified.add(step.presetId);
       }
 
       // ── 5. Restore the house exactly as it was captured — every psave
@@ -797,6 +1101,7 @@ class BaseLadderRepairRunner {
       // stays off (master `on:false` restored), a lit house gets its look back
       // (master bri, every segment's on/colour/effect/palette/opacity/freeze).
       if (attempted) {
+        _progress('restore');
         restore = await _restoreLive(live) ? 'ok' : 'failed';
       }
     } finally {
@@ -808,23 +1113,29 @@ class BaseLadderRepairRunner {
     final afterVerdict = after.isKnown
         ? evaluateLadderRestore(
             presets: after.presets,
-            participating: d.participating,
-            deviceChannelIds: fresh.deviceChannelIds,
+            participating: _participating(busIds),
+            deviceChannelIds: busIds,
           )
         : null;
+    final afterPlan = afterVerdict == null
+        ? null
+        : planLadderRepair(afterVerdict,
+            presets: after.presets, deviceChannelIds: busIds);
     final repaired = <int>[];
     final stillBad = <int>[];
     for (final step in plan) {
-      final p = afterVerdict?.presets
-          .where((v) => v.presetId == step.presetId)
-          .firstOrNull;
-      (p != null && p.ok ? repaired : stillBad).add(step.presetId);
+      final good = verified.contains(step.presetId) &&
+          afterPlan != null &&
+          !afterPlan.any((s) => s.presetId == step.presetId);
+      (good ? repaired : stillBad).add(step.presetId);
     }
-    final outcome = stillBad.isEmpty
-        ? LadderRepairOutcome.repaired
-        : repaired.isEmpty
-            ? LadderRepairOutcome.failed
-            : LadderRepairOutcome.partial;
+    final outcome = cancelledMidway && !attempted
+        ? LadderRepairOutcome.cancelled
+        : stillBad.isEmpty
+            ? LadderRepairOutcome.repaired
+            : repaired.isEmpty
+                ? LadderRepairOutcome.failed
+                : LadderRepairOutcome.partial;
 
     final record = <String, Object?>{
       'version': kLadderRepairVersion,
@@ -833,23 +1144,27 @@ class BaseLadderRepairRunner {
       'repaired': repaired,
       'still_bad': stillBad,
       'restore': restore,
+      'user_initiated': userInitiated,
+      if (stoppedAt != null) 'stopped_at': stoppedAt,
+      if (cancelledMidway) 'cancelled': true,
     };
     await _record(record);
-    await d.store.markRan(d.controllerId, record);
+    if (!userInitiated) await d.store.markRan(d.controllerId, record);
     await d.store.saveStatus(LadderRepairStatus(
       controllerId: d.controllerId,
       outcome: outcome,
       repairedIds: repaired,
       stillBadIds: stillBad,
       at: d.now(),
+      userInitiated: userInitiated,
+      stoppedAtId: stoppedAt,
     ));
     if (after.isKnown) {
       try {
         await d
             .republish(
               ladderAssertsSegments(
-                  presets: after.presets,
-                  deviceChannelIds: fresh.deviceChannelIds),
+                  presets: after.presets, deviceChannelIds: busIds),
               afterVerdict,
             )
             .timeout(d.recordTimeout);
@@ -857,9 +1172,133 @@ class BaseLadderRepairRunner {
         _log('republish failed: $e');
       }
     }
-    return LadderRepairRun(outcome,
-        'wrote ${saved.length} of ${plan.length} planned preset(s)',
-        plan: plan, repairedIds: repaired, stillBadIds: stillBad);
+    _progress('done');
+    return LadderRepairRun(
+      outcome,
+      cancelledMidway
+          ? 'stopped: the account changed — wrote ${saved.length} of '
+              '${plan.length}'
+          : 'wrote ${saved.length} of ${plan.length} planned preset(s)'
+              '${stoppedAt == null ? '' : ', stopped at preset $stoppedAt'}',
+      plan: plan,
+      repairedIds: repaired,
+      stillBadIds: stillBad,
+      stoppedAtId: stoppedAt,
+    );
+  }
+
+  Future<LadderRepairRun> _restoreFromBackup() async {
+    final raw = await d.store.readBackup(d.controllerId);
+    if (raw == null) {
+      return const LadderRepairRun(
+          LadderRepairOutcome.aborted, 'no backup on this phone');
+    }
+    final decoded = jsonDecode(raw);
+    final stored = decoded is Map ? decoded['presets'] : null;
+    final bodies = <int, Map<String, dynamic>>{};
+    if (stored is Map) {
+      for (final e in stored.entries) {
+        final id = int.tryParse('${e.key}');
+        final body = e.value;
+        if (id != null && body is Map) {
+          bodies[id] = Map<String, dynamic>.from(body);
+        }
+      }
+    }
+    if (bodies.isEmpty) {
+      return const LadderRepairRun(
+          LadderRepairOutcome.aborted, 'the backup holds no presets');
+    }
+    if (!d.stillConnected()) {
+      return const LadderRepairRun(LadderRepairOutcome.deferred,
+          'controller changed — nothing put back');
+    }
+    _progress('capture');
+    final live = await d.svc.getState();
+    if (live == null) {
+      return const LadderRepairRun(LadderRepairOutcome.aborted,
+          'live state unreadable — nothing put back');
+    }
+
+    final ids = bodies.keys.toList()..sort();
+    final putBack = <int>[];
+    final failed = <int>[];
+    var attempted = false;
+    var restore = 'not_needed';
+    d.pausePolling?.call();
+    try {
+      for (final id in ids) {
+        if (_cancelled()) break;
+        if (attempted) await Future<void>.delayed(d.settle);
+        final body = stripGeometry(Map<String, dynamic>.from(bodies[id]!));
+        final name = body.remove('n');
+        // `ib` persists the root state the body carries; a body that carries
+        // none must not have the live root pinned onto it.
+        if (body.containsKey('on') || body.containsKey('bri')) {
+          body['ib'] = true;
+        }
+        _progress('save:$id');
+        attempted = true;
+        var ok = false;
+        try {
+          ok = await d.svc.savePreset(
+            presetId: id,
+            state: body,
+            presetName: name is String ? name : null,
+          );
+        } catch (e) {
+          _log('backup restore p$id threw: $e');
+        }
+        (ok ? putBack : failed).add(id);
+      }
+      if (attempted) {
+        _progress('restore');
+        restore = await _restoreLive(live) ? 'ok' : 'failed';
+      }
+    } finally {
+      d.resumePolling?.call();
+    }
+
+    await _record({
+      'version': kLadderRepairVersion,
+      'state': 'backup_restored',
+      'restored': putBack,
+      'failed': failed,
+      'restore': restore,
+    });
+    final after = await d.svc.readPresets();
+    final info = await d.svc.fetchClockInfo();
+    final busIds = info?.hardware == null
+        ? const <int>[]
+        : deviceChannelsFromConfig(info!.hardware!).map((c) => c.id).toList();
+    if (after.isKnown && busIds.isNotEmpty) {
+      try {
+        await d
+            .republish(
+              ladderAssertsSegments(
+                  presets: after.presets, deviceChannelIds: busIds),
+              evaluateLadderRestore(
+                presets: after.presets,
+                participating: _participating(busIds),
+                deviceChannelIds: busIds,
+              ),
+            )
+            .timeout(d.recordTimeout);
+      } catch (e) {
+        _log('republish failed: $e');
+      }
+    }
+    _progress('done');
+    return LadderRepairRun(
+      failed.isEmpty
+          ? LadderRepairOutcome.repaired
+          : putBack.isEmpty
+              ? LadderRepairOutcome.failed
+              : LadderRepairOutcome.partial,
+      'put back ${putBack.length} of ${ids.length} saved preset(s)',
+      repairedIds: putBack,
+      stillBadIds: failed,
+    );
   }
 
   /// PURE. The payload that puts [live] (a `/json/state` capture) back.
@@ -915,7 +1354,7 @@ class BaseLadderRepairRunner {
     if (!read.isKnown) return null;
     final verdict = evaluateLadderRestore(
       presets: read.presets,
-      participating: d.participating,
+      participating: _participating(buses),
       deviceChannelIds: buses,
     );
     if (verdict == null) return null;
