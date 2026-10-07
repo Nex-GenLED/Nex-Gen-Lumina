@@ -2994,8 +2994,8 @@ commit — merging `main` into this tree will collide with the untracked copies.
     retry then restored base over it. At `948ce7a` nothing on the end's path asked whether the
     house still belonged to its game.
   - **The fix:** before an end is dispatched, retried, swept or re-minted, a START on the same
-    controller (a hand-off end counts) `dispatched` or `completed` since the end was FIRST due
-    closes the end: terminal, `skipReason: superseded_by_later_start`, `supersededBy` naming the
+    controller (a hand-off end counts) COMPLETED since the end was FIRST due — `dispatched` is
+    not enough, revised at `efd3a7a` (#185) — closes the end: terminal, `skipReason: superseded_by_later_start`, `supersededBy` naming the
     start; the session gains `endSuperseded`, `endSupersededBy`; the rows
     `end_sweep_skipped:superseded_by_later_start` and `end_remint_skipped:…`; the scorecard's
     `end.superseded_by`. "First due" is the original end's `fireAt` (kept as `firstFireAt`
@@ -3022,6 +3022,33 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `holdUntil`, no `endGuarantee` marker, so the dispatcher's config gate applies to it as to any
     start. The base-restore end keeps the guarantee.
   - **Close when** the flag covers every allowlisted account.
+
+- [ ] **#185 — A start dispatched into a bridge that is away closed the earlier team's end for
+  good: nothing lit, and nothing pending when the bridge returned**
+  - Status: **FIX BUILT `efd3a7a` — behind `end_ignores_gate` (the job's `endGuarantee` marker);
+    NOT deployed** · Severity: **P2** · Evidence: **verified-by-test** (the delta review of
+    `31751b2` reproduced it in two composed runs; `plannerEndToEnd.test.js` S1 (re-mint path),
+    S2 (sweep path), S3 (control: a COMPLETED B still closes A); `dispatchSupersede.test.js` the
+    dispatcher's two sites — all five failed on the 31751b2 sources and pass on the fix)
+  - `startSupersedesEnd` (#183, `1495a95`) counted a start in state `dispatched` as owning the
+    house. The dispatcher's use was recoverable (the next re-mint re-checks); the planner's was
+    not: the re-mint path wrote `endSuperseded: true` on the session, the sweep path wrote it
+    together with `endFiredAt`, and every later tick skipped the session on that field. Team B's
+    start dispatched while the bridge was away, B's command expired at its budget, nothing ever
+    lit B, team A's colours stayed up, and no restore was pending when the bridge returned.
+  - **The fix:** supersession closes an end only when the later start COMPLETED, at all four
+    sites (dispatch, retry, sweep, re-mint); both readers query `state == "completed"`. A
+    dispatched start with a pending command already holds the end back transiently through the
+    dispatcher's one-in-flight guard, which re-checks every tick; a start that then expires or
+    fails never lit anything, and the end fires into the free slot. The planner never writes
+    `endSuperseded`, nor the session close, for a merely dispatched start. Two anchors made one:
+    the swept end's `firstDueAt` is the sweep's own anchor (this team's start dispatch) and the
+    re-mint reads the prior job's `firstDueAt` before the session's `endFiredAt`, so a B that was
+    dispatched before the sweep and completed after it still closes the swept end at dispatch,
+    and the planner then closes the session instead of re-minting (S3). Marker gating unchanged:
+    a job without `endGuarantee` takes exactly the rev 00005 path (the 309a5d9 dispatcher,
+    fireJobs, sweeper and teardown tests 120/120 on this build; golden and bench unchanged).
+  - **Close when** the flag covers every allowlisted account and `dispatchFireJobs` is deployed.
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
