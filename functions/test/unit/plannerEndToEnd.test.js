@@ -12,12 +12,17 @@
 //      retried when a second team's start on the same controller completes,
 //      and its next attempt restores base over that start (the review saw it
 //      land 3 minutes after the second start). The fix skips an end, terminal
-//      and named, when a later start on the same controller was dispatched or
-//      completed since the end was first due — at dispatch, at retry, and at
+//      and named, when a later start on the same controller COMPLETED since
+//      the end was first due — at dispatch, at retry, at the sweep and at
 //      re-mint.
 //   4. The teardown rule (a scheduled end is never retracted) is unconditional.
 //      Pinned: without the guarantee, a deleted team's scheduled end is skipped
 //      `config_missing_or_disabled` at the dispatcher and produces no command.
+//   5. (delta review of 31751b2) A start merely DISPATCHED must never close the
+//      earlier end: dispatched into a bridge that is away, its command expires
+//      and nothing was lit, yet the planner had closed the session for good.
+//      Supersession needs the later start completed; a dispatched one defers
+//      the end transiently through the one-in-flight guard (S1, S2, S3 below).
 //
 // Times: Sunday 2026-10-11 → Monday 2026-10-12 UTC. All ids synthetic; the
 // controller address is RFC 5737.
@@ -46,6 +51,9 @@ const FINAL1 = KICK + 3 * H + 20 * MIN; // 03:35Z
 const FINAL2 = FINAL1 + 5 * MIN; // 03:40Z
 const B_KICK = KICK + 4 * H + 15 * MIN; // 04:30Z — the second game, same controller
 const B_FIRE = B_KICK - 30 * MIN; // 04:00Z
+const HOLD_END = FINAL2 + 90 * MIN; // 05:10Z — A's end command is held pickable until here
+const B_KICK_LATE = KICK + 5 * H + 15 * MIN; // 05:30Z — the second game when it kicks off after the hold
+const B_FIRE_LATE = B_KICK_LATE - 30 * MIN; // 05:00Z
 
 const UID = "u_e2e";
 const CTRL = "ctrl_e2e";
@@ -90,14 +98,14 @@ function world({ second = false } = {}) {
 }
 
 /** ESPN: team A in `aState`; team B (if listed) in `bState`. By-id answers the same. */
-function espn(aState = "scheduled", bState = "scheduled") {
+function espn(aState = "scheduled", bState = "scheduled", bKick = B_KICK) {
   const shape = (t, kick, s) => ({
     gameId: t.game, startMs: kick, homeTeamId: t.espn, awayTeamId: "0",
     isFinal: s === "final", isInProgress: s === "live",
     statusName: s === "final" ? "STATUS_FINAL" : s === "live" ? "STATUS_IN_PROGRESS" : "STATUS_SCHEDULED",
     statusState: s === "final" ? "post" : s === "live" ? "in" : "pre",
   });
-  const games = { [A.espn]: shape(A, KICK, aState), [B.espn]: shape(B, B_KICK, bState) };
+  const games = { [A.espn]: shape(A, KICK, aState), [B.espn]: shape(B, bKick, bState) };
   const byId = { [A.game]: games[A.espn], [B.game]: games[B.espn] };
   fetchTeamGame.mockImplementation(async (_s, id) => games[id] ?? null);
   fetchEventById.mockImplementation(async (_s, id) => (byId[id] ? { kind: "found", game: byId[id] } : { kind: "error" }));
@@ -379,6 +387,166 @@ describe("an end never fires into the next game", () => {
     expect(await read(f, JOB(`${EVENT(A)}_end`))).toBeUndefined();
     expect(p).not.toHaveProperty("endsSwept");
     expect(p.logRows.find((x) => x.reason === "end_sweep_skipped:superseded_by_later_start")).toMatchObject({ eventId: EVENT(A) });
+    expect((await read(f, SESSION(A))).endSuperseded).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("a dispatched start that never lights the house does not close the earlier end (delta review of 31751b2)", () => {
+  /**
+   * The finding: `startSupersedesEnd` counted a start in state `dispatched` as
+   * owning the house. The dispatcher's use was recoverable (the next re-mint
+   * re-checks); the planner's was not — the re-mint path wrote
+   * `endSuperseded: true`, the sweep path wrote it with `endFiredAt`, and every
+   * later tick skipped the session on that field. A start dispatched while the
+   * bridge is away, whose command then expires, lit nothing: team A's colours
+   * stayed up with no restore pending when the bridge returned. Supersession
+   * now needs the later start COMPLETED; a merely dispatched one defers the end
+   * transiently through the one-in-flight guard.
+   */
+  const CMD = (id) => `users/${UID}/commands/${id}`;
+
+  test("S1 — re-mint path: A's held end expires, B dispatches into the free slot while the bridge is away, B expires; A's end is re-minted and runs when the bridge returns", async () => {
+    const f = world({ second: true });
+    espn("scheduled", "scheduled", B_KICK_LATE);
+    await aStartFired(f, FLAG);
+    espn("final", "scheduled", B_KICK_LATE);
+    await plan(f, FINAL1, FLAG);
+    await plan(f, FINAL2, FLAG);
+    await completeProbes(f);
+    const endId = `${EVENT(A)}_end`;
+    const bStart = `${EVENT(B)}_start`;
+    expect(await read(f, JOB(endId))).toMatchObject({ state: "scheduled", endGuarantee: true });
+    expect(await read(f, JOB(bStart))).toMatchObject({ state: "scheduled" });
+
+    // A's end is dispatched and held to 05:10Z. From here the bridge is away.
+    await dispatch(f, FINAL2 + 30 * SEC);
+    const [c1] = await fireCommands(f, endId);
+    expect(c1.status).toBe("pending");
+    expect(c1.expiresAt.toMillis()).toBe(HOLD_END);
+
+    // B's start falls due at 05:00Z behind the held end: deferred, not dispatched.
+    await sweep(f, B_FIRE_LATE);
+    let d = await dispatch(f, B_FIRE_LATE + 10 * SEC);
+    expect(d.skippedTransient).toMatchObject({ in_flight: 1 });
+    expect(await fireCommands(f, bStart)).toHaveLength(0);
+
+    // 05:10Z: the hold runs out. The sweeper expires A's command, the dispatcher
+    // terminalises A's end (budget exhausted) and dispatches B into the free slot.
+    await sweep(f, HOLD_END + 30 * SEC);
+    expect((await read(f, CMD(c1.id))).status).toBe("expired");
+    await dispatch(f, HOLD_END + 60 * SEC);
+    expect((await read(f, JOB(endId))).state).toBe("expired");
+    const [bc] = await fireCommands(f, bStart);
+    expect(bc.status).toBe("pending");
+    expect((await read(f, JOB(bStart))).state).toBe("dispatched");
+
+    // The planner's next tick: A's end is terminal. B has NOT lit the house —
+    // its command is pending on a bridge that is away. A must not be closed.
+    const p = await plan(f, HOLD_END + 5 * MIN, FLAG);
+    expect((await read(f, SESSION(A))).endSuperseded).not.toBe(true);
+    expect(p.logRows.find((x) => x.reason === "end_remint_skipped:superseded_by_later_start")).toBeUndefined();
+    expect(await read(f, JOB(`${endId}_r1`))).toMatchObject({ state: "scheduled", endGuarantee: true });
+
+    // B runs out of its budget (kickoff 05:30Z) with the bridge still away: it
+    // never lit anything. A's re-minted end takes the free slot and is held.
+    await sweep(f, B_KICK_LATE + 2 * MIN);
+    await dispatch(f, B_KICK_LATE + 3 * MIN);
+    expect((await read(f, JOB(bStart))).state).toBe("expired");
+    const [rc] = await fireCommands(f, `${endId}_r1`);
+    expect(rc.status).toBe("pending");
+
+    // The bridge returns: a restore is waiting, and it runs.
+    bridgeCompletes(f, rc.id, B_KICK_LATE + 30 * MIN);
+    await dispatch(f, B_KICK_LATE + 31 * MIN);
+    expect((await read(f, JOB(`${endId}_r1`))).state).toBe("completed");
+    const again = await plan(f, B_KICK_LATE + 35 * MIN, FLAG);
+    expect(again).not.toHaveProperty("endsReminted");
+    expect((await read(f, SESSION(A))).endSuperseded).not.toBe(true);
+  });
+
+  test("S2 — sweep path: A's team deleted, ESPN by-id down, B dispatched while the bridge is away; ESPN returns and the sweep decides A's end while B is dispatched; A's end runs when the bridge returns", async () => {
+    const f = world({ second: true });
+    espn("scheduled", "scheduled");
+    await aStartFired(f, FLAG);
+    await f.db.doc(CONFIG(A)).delete();
+    espn("final", "scheduled");
+    fetchEventById.mockImplementation(async () => ({ kind: "error" }));
+    await plan(f, FINAL1, FLAG); // A: clock-only, not final
+    await plan(f, B_FIRE + 20 * SEC, FLAG); // B's start mints
+    await completeProbes(f);
+    const bStart = `${EVENT(B)}_start`;
+    await dispatch(f, B_FIRE + 40 * SEC);
+    const [bc] = await fireCommands(f, bStart);
+    expect(bc.status).toBe("pending"); // the bridge is away: nothing runs it
+
+    // ESPN is back and says A is final (confirmed on the second poll). The
+    // sweep decides A's end while B is merely dispatched: A must not be
+    // closed, its end must be written.
+    espn("final", "scheduled");
+    await plan(f, B_FIRE + 5 * MIN, FLAG);
+    const p = await plan(f, B_FIRE + 10 * MIN, FLAG);
+    const endId = `${EVENT(A)}_end`;
+    expect((await read(f, SESSION(A))).endSuperseded).not.toBe(true);
+    expect(p.logRows.find((x) => x.reason === "end_sweep_skipped:superseded_by_later_start")).toBeUndefined();
+    expect(await read(f, JOB(endId))).toMatchObject({ state: "scheduled", endGuarantee: true, endVia: "session_sweep" });
+
+    // A's end waits behind B's pending command, transiently.
+    let d = await dispatch(f, B_FIRE + 11 * MIN);
+    expect(d.skippedTransient).toMatchObject({ in_flight: 1 });
+    expect(await fireCommands(f, endId)).toHaveLength(0);
+
+    // B runs out of its budget (kickoff 04:30Z) with the bridge still away:
+    // expired, never lit. A's end is dispatched into the free slot and held.
+    await sweep(f, B_KICK + 2 * MIN);
+    await dispatch(f, B_KICK + 3 * MIN);
+    expect((await read(f, JOB(bStart))).state).toBe("expired");
+    const [ac] = await fireCommands(f, endId);
+    expect(ac.status).toBe("pending");
+    expect(ac.expiresAt.toMillis()).toBe(B_FIRE + 10 * MIN + 90 * MIN); // held to the sweep's mint + 90 min
+
+    // The bridge returns: the restore is pending, and it runs.
+    bridgeCompletes(f, ac.id, B_KICK + 30 * MIN);
+    await dispatch(f, B_KICK + 31 * MIN);
+    expect((await read(f, JOB(endId))).state).toBe("completed");
+    const again = await plan(f, B_KICK + 35 * MIN, FLAG);
+    expect(again).not.toHaveProperty("endsReminted");
+    expect((await read(f, SESSION(A))).endSuperseded).not.toBe(true);
+  });
+
+  test("S3 — control, sweep path: B merely dispatched at the sweep, then the bridge returns and COMPLETES B first; A's swept end is closed at dispatch as superseded by B, and the planner closes the session instead of re-minting", async () => {
+    const f = world({ second: true });
+    espn("scheduled", "scheduled");
+    await aStartFired(f, FLAG);
+    await f.db.doc(CONFIG(A)).delete();
+    espn("final", "scheduled");
+    fetchEventById.mockImplementation(async () => ({ kind: "error" }));
+    await plan(f, FINAL1, FLAG);
+    await plan(f, B_FIRE + 20 * SEC, FLAG);
+    await completeProbes(f);
+    const bStart = `${EVENT(B)}_start`;
+    await dispatch(f, B_FIRE + 40 * SEC);
+    const [bc] = await fireCommands(f, bStart);
+    espn("final", "scheduled");
+    await plan(f, B_FIRE + 5 * MIN, FLAG);
+    await plan(f, B_FIRE + 10 * MIN, FLAG); // the final, confirmed: the sweep writes A's end
+    const endId = `${EVENT(A)}_end`;
+    expect(await read(f, JOB(endId))).toMatchObject({ state: "scheduled" });
+
+    // The bridge returns and runs B's start first (it was pending first): B lit
+    // the house. A's end, judged from the instant A's own start lit the house,
+    // is superseded by a COMPLETED later start — closed, no command.
+    bridgeCompletes(f, bc.id, B_FIRE + 11 * MIN);
+    await dispatch(f, B_FIRE + 12 * MIN);
+    expect((await read(f, JOB(bStart))).state).toBe("completed");
+    expect(await read(f, JOB(endId))).toMatchObject({ state: "skipped", skipReason: "superseded_by_later_start", supersededBy: bStart });
+    expect(await fireCommands(f, endId)).toHaveLength(0);
+
+    // The planner then closes the session rather than re-minting (the chain's
+    // first-due instant is the one the sweep used, not the sweep's own time).
+    const p = await plan(f, B_FIRE + 21 * MIN, FLAG);
+    expect(await read(f, JOB(`${endId}_r1`))).toBeUndefined();
+    expect(p.logRows.find((x) => x.reason === "end_remint_skipped:superseded_by_later_start")).toMatchObject({ eventId: EVENT(A) });
     expect((await read(f, SESSION(A))).endSuperseded).toBe(true);
   });
 });

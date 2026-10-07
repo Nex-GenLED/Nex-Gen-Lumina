@@ -348,19 +348,25 @@ export interface LaterStartCandidate {
 }
 
 /**
- * PURE. Has a start on this controller been DISPATCHED since the end was first
- * due? Then the house is in a newer team's colours and this end — a restore to
- * base — would wipe it. The check is made at dispatch, at retry and at re-mint
- * (the review reproduced a base restore landing three minutes after a second
- * team's start completed, from a retryable failure inside the 90-minute
- * budget).
+ * PURE. Has a start on this controller COMPLETED since the end was first due?
+ * Then the house is in a newer team's colours and this end — a restore to
+ * base — would wipe it. The check is made at dispatch, at retry, at the sweep
+ * and at re-mint (the review reproduced a base restore landing three minutes
+ * after a second team's start completed, from a retryable failure inside the
+ * 90-minute budget).
  *
- * "Dispatched or completed": a command exists for the start. "Since first
- * due": `dispatchedAt` strictly after the end's first due instant — a start
- * dispatched BEFORE the end was due is the game this end belongs to.
- * A hand-off end (`handoffTo` set) is the survivor's start and counts. The
- * end's own game (`exceptEventId`) never supersedes itself: a swept end is
- * anchored on its own start's dispatch, which is not "later".
+ * "Completed", not "dispatched" (the delta review of 31751b2): a start that
+ * is merely dispatched has lit nothing yet — its command may be pending on a
+ * bridge that is away and then expire. Closing the end on it stranded the
+ * house: the planner wrote the session closed, the start never ran, and no
+ * restore was pending when the bridge returned. A dispatched start already
+ * holds the end back transiently through the dispatcher's one-in-flight
+ * guard, which re-checks every tick; that is the right amount of deference.
+ * "Since first due": `dispatchedAt` strictly after the end's first due
+ * instant — a start dispatched BEFORE the end was due is the game this end
+ * belongs to. A hand-off end (`handoffTo` set) is the survivor's start and
+ * counts. The end's own game (`exceptEventId`) never supersedes itself: a
+ * swept end is anchored on its own start's dispatch, which is not "later".
  */
 export function startSupersedesEnd(args: {
   jobs: LaterStartCandidate[];
@@ -373,7 +379,7 @@ export function startSupersedesEnd(args: {
     const isStart = j.seq === "start" || (j.seq === "end" && typeof j.handoffTo === "string");
     if (!isStart) continue;
     if (args.exceptEventId !== undefined && j.eventId === args.exceptEventId) continue;
-    if (j.state !== "dispatched" && j.state !== "completed") continue;
+    if (j.state !== "completed") continue;
     if (typeof j.controllerId !== "string" || j.controllerId !== args.controllerId) continue;
     const at = toMillisOrNull(j.dispatchedAt);
     if (at === null || at <= args.endFirstDueMs) continue;

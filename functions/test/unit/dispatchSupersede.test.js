@@ -4,10 +4,13 @@
 // An END the planner wrote under the end guarantee (`endGuarantee: true`) can
 // outlive its game: a 90-minute budget, a held command, re-mints. Before such
 // an end is dispatched or retried, the dispatcher asks whether a START on the
-// same controller has been dispatched since the end was first due. If so the
-// house is a newer team's and a base restore would wipe it: the end is skipped,
-// terminal, `superseded_by_later_start`, naming the start. A job without the
-// marker (the flag absent) is dispatched and retried exactly as rev 00005 does.
+// same controller has COMPLETED since the end was first due. If so the house
+// is a newer team's and a base restore would wipe it: the end is skipped,
+// terminal, `superseded_by_later_start`, naming the start. A start that is
+// merely dispatched (its command pending) has lit nothing yet: it defers the
+// end transiently through the one-in-flight guard and never closes it (the
+// delta review of 31751b2). A job without the marker (the flag absent) is
+// dispatched and retried exactly as rev 00005 does.
 
 const { makeFakeFirestore } = require("./support/fakeFirestore");
 const { runDispatchTick } = require("../../lib/dispatchFireJobs");
@@ -95,15 +98,24 @@ describe("at dispatch: a guaranteed end is skipped when a later start lit the co
     expect((await read(f, JOB(END))).state).toBe("dispatched");
   });
 
-  test("a later start still `dispatched` (its command pending) supersedes just the same", async () => {
+  test("a later start merely `dispatched` (its command pending) does NOT close the end: the in-flight guard defers it, and it fires once that start's command expires having lit nothing", async () => {
     const f = world();
     bStarted(f, END_DUE + 12 * M, CTRL, { state: "dispatched" });
     // Its command is still pending on the bridge (a dispatched job always has one).
     f.put(CMD("cmd_b_start"), {
       fireJobId: B_START, uid: UID, controllerId: CTRL, status: "pending", createdAt: f.ts(END_DUE + 12 * M),
     });
-    await tick(f);
-    expect((await read(f, JOB(END))).skipReason).toBe(SUPERSEDED_BY_START_REASON);
+    const d = await tick(f);
+    const end = await read(f, JOB(END));
+    expect(end.state).toBe("scheduled");
+    expect(end).not.toHaveProperty("skipReason");
+    expect(d.skippedTransient).toMatchObject({ in_flight: 1 });
+    // The bridge is away: B's command expires and B never lit the house.
+    f.patch(CMD("cmd_b_start"), { status: "expired" });
+    f.patch(JOB(B_START), { state: "expired" });
+    await tick(f, NOW + M);
+    expect((await read(f, JOB(END))).state).toBe("dispatched");
+    expect(await commandsFor(f, END)).toHaveLength(1);
   });
 
   test("a hand-off END that lit the survivor counts as that team's start", async () => {
@@ -171,6 +183,20 @@ describe("at retry: a failed guaranteed end is not retried into the next game", 
     expect(end).not.toHaveProperty("rescheduledAt");
     expect(r.skippedTerminal).toMatchObject({ [SUPERSEDED_BY_START_REASON]: 1 });
     expect(await commandsFor(f, END)).toHaveLength(1); // the one that failed; no second
+  });
+
+  test("a later start merely dispatched (not completed): the same failure is rescheduled, not closed", async () => {
+    const f = world();
+    failedOnce(f);
+    bStarted(f, NOW - 90 * S, CTRL, { state: "dispatched" });
+    f.put(CMD("cmd_b_start"), {
+      fireJobId: B_START, uid: UID, controllerId: CTRL, status: "pending", createdAt: f.ts(NOW - 90 * S),
+    });
+    await tick(f);
+    const end = await read(f, JOB(END));
+    expect(end.state).toBe("scheduled");
+    expect(end.retries).toBe(1);
+    expect(end).not.toHaveProperty("skipReason");
   });
 
   test("the normal case, no later start: the same failure is rescheduled on the A2 backoff", async () => {

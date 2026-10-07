@@ -282,8 +282,10 @@ export async function runDispatchTick(
 
     // An end never fires into the next game (2026-10-07 review). Before an
     // END is dispatched, retried or (in the planner) re-minted: has a start on
-    // the same controller been dispatched since this end was first due? Then
-    // the house is a newer team's, and a base restore would wipe it. One read
+    // the same controller COMPLETED since this end was first due? Then the
+    // house is a newer team's, and a base restore would wipe it. A start that
+    // is merely dispatched has lit nothing yet; it holds the end back through
+    // the one-in-flight guard below, transiently, and never closes it. One read
     // per end checked; ends are a handful a night. Only for an end the planner
     // wrote under the end guarantee (`endGuarantee: true`): the 90-minute
     // budget and the re-mints are what let an end outlive its game. A job
@@ -302,7 +304,7 @@ export async function runDispatchTick(
       if (typeof ctrl !== "string" || ctrl.length === 0 || due === null) return null;
       const q = await db
         .collection("users").doc(uid).collection(FIRE_JOBS_COLLECTION)
-        .where("state", "in", ["dispatched", "completed"]) // COLLECTION scope → automatic index
+        .where("state", "==", "completed") // COLLECTION scope → automatic index
         .get();
       const ownEvent = jobSnap.get("eventId");
       const r = startSupersedesEnd({

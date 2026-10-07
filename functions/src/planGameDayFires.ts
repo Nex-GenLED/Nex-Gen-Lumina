@@ -957,7 +957,7 @@ interface EndSweepCtx {
   resolvedByEvent: Map<string, ResolvedGame>;
   stats: PlanStats;
   logRows: Array<Record<string, unknown>>;
-  /** The account's dispatched or completed fire jobs, read once on first use. */
+  /** The account's COMPLETED fire jobs, read once on first use (a dispatched start has lit nothing yet). */
   laterStarts: () => Promise<LaterStartCandidate[]>;
 }
 
@@ -971,7 +971,7 @@ function laterStartsLoader(
     if (pending === null) {
       pending = db
         .collection("users").doc(uid).collection(FIRE_JOBS_COLLECTION)
-        .where("state", "in", ["dispatched", "completed"]) // COLLECTION scope → automatic index
+        .where("state", "==", "completed") // COLLECTION scope → automatic index
         .get()
         .then((q) =>
           q.docs.map((d) => ({
@@ -1082,8 +1082,13 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
             continue;
           }
           // An end never fires into the next game: a start on this controller
-          // dispatched since this end chain was first due closes the chain.
-          const firstDue = toMillisOrNull(s.endFiredAt) ?? nowMs;
+          // COMPLETED since this end chain was first due closes the chain. A
+          // merely dispatched start has lit nothing: the re-mint is written and
+          // the dispatcher holds it behind that start's pending command. The
+          // chain's first-due instant is the prior job's `firstDueAt` (a swept
+          // end is anchored on its own start's dispatch), else the session's.
+          const firstDue =
+            toMillisOrNull(endJob.get("firstDueAt")) ?? toMillisOrNull(s.endFiredAt) ?? nowMs;
           const sup = startSupersedesEnd({
             jobs: await c.laterStarts(), controllerId, endFirstDueMs: firstDue, exceptEventId: eventId,
           });
@@ -1224,14 +1229,16 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
         continue;
       }
       // An end never fires into the next game: a start on this controller
-      // dispatched since THIS team's start lit it owns the house now (the game
+      // COMPLETED since THIS team's start lit it owns the house now (the game
       // may have ended while ESPN was unreachable, so "since the final was
       // seen" is too late an anchor). The session is closed as superseded; a
-      // restore would wipe that team.
+      // restore would wipe that team. A merely dispatched start has lit
+      // nothing: the end is written and the dispatcher holds it behind that
+      // start's pending command. The anchor travels with the job as
+      // `firstDueAt`, so the dispatcher and the re-mint judge by the same one.
+      const endAnchorMs = toMillisOrNull(startJob.get("dispatchedAt")) ?? finalSeenAtMs ?? nowMs;
       const sup = startSupersedesEnd({
-        jobs: await c.laterStarts(), controllerId,
-        endFirstDueMs: toMillisOrNull(startJob.get("dispatchedAt")) ?? finalSeenAtMs ?? nowMs,
-        exceptEventId: eventId,
+        jobs: await c.laterStarts(), controllerId, endFirstDueMs: endAnchorMs, exceptEventId: eventId,
       });
       if (sup.superseded) {
         logRows.push({
@@ -1261,7 +1268,7 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
           eventId, seq: "end",
           controllerId,
           fireAt: admin.firestore.Timestamp.fromMillis(nowMs),
-          firstDueAt: admin.firestore.Timestamp.fromMillis(nowMs),
+          firstDueAt: admin.firestore.Timestamp.fromMillis(endAnchorMs),
           type: "applyJson",
           payload: restoreNow().payload,
           state: "scheduled",
