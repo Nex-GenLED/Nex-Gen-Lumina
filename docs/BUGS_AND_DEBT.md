@@ -2995,7 +2995,8 @@ commit — merging `main` into this tree will collide with the untracked copies.
     house still belonged to its game.
   - **The fix:** before an end is dispatched, retried, swept or re-minted, a START on the same
     controller (a hand-off end counts) COMPLETED since the end was FIRST due — `dispatched` is
-    not enough, revised at `efd3a7a` (#185) — closes the end: terminal, `skipReason: superseded_by_later_start`, `supersededBy` naming the
+    not enough, revised at `efd3a7a` (#185); judged per team at `319e654` (#186) — closes the
+    end: terminal, `skipReason: superseded_by_later_start`, `supersededBy` naming the
     start; the session gains `endSuperseded`, `endSupersededBy`; the rows
     `end_sweep_skipped:superseded_by_later_start` and `end_remint_skipped:…`; the scorecard's
     `end.superseded_by`. "First due" is the original end's `fireAt` (kept as `firstFireAt`
@@ -3048,6 +3049,51 @@ commit — merging `main` into this tree will collide with the untracked copies.
     and the planner then closes the session instead of re-minting (S3). Marker gating unchanged:
     a job without `endGuarantee` takes exactly the rev 00005 path (the 309a5d9 dispatcher,
     fireJobs, sweeper and teardown tests 120/120 on this build; golden and bench unchanged).
+  - **Close when** the flag covers every allowlisted account and `dispatchFireJobs` is deployed.
+
+- [ ] **#186 — A hand-off that RE-LIT a team read as "a later start" and superseded that team's
+  own end: the house stayed in its colours with no restore pending**
+  - Status: **FIX BUILT `319e654` — behind `end_ignores_gate` (the job's `endGuarantee` marker);
+    NOT deployed** · Severity: **P2** · Evidence: **verified-by-test** (the second delta review
+    of `2334b7f`, S6, reproduced on those sources with the exact row
+    `end_sweep_skipped:superseded_by_later_start` naming the hand-off end; now
+    `plannerEndToEnd.test.js` S6 mints and sends A's end; `dispatchSupersede.test.js` pins the
+    shapes — four failed on 2334b7f, the two controls pass on both builds)
+  - `startSupersedesEnd` (#183, #185) counted any completed end with `handoffTo` set as a
+    start. A hand-off end TO team A carries the relinquisher's event id and A as `handoffTo`
+    (the survivor's event id, plus `handoffToTeam`); with the sweep's anchor at A's own start
+    dispatch, the hand-off that re-lit A read as later than A's start and superseded A's own
+    swept end. B's own start (before the hand-off) would have done the same next. The planner
+    wrote `endSuperseded` and `endFiredAt`, minted no end, and every later tick skipped the
+    session.
+  - **The rule, stated** (judged for the end of team T over the account's COMPLETED jobs on
+    the same controller): CAN supersede — a start of a different team; a hand-off end to a
+    different team (each lit another team). CANNOT — a hand-off end TO T (it re-lit T; T's own
+    start in effect); a start of T itself, this game or any other. A different team's job
+    supersedes only when its `dispatchedAt` is after the later of the end's first-due anchor
+    and the last instant T was lit; jobs that lit T raise that instant instead. The lit team of
+    a job is one function, `fireJobs.litTeamOf` (a start → its event's team; a hand-off end →
+    `handoffToTeam`, else the team of the `handoffTo` event id, else the raw slug an older job
+    stored; a plain end → nobody). Identical at all four sites: the dispatcher passes the end's
+    team from its event id (dispatch, retry); the sweep and the re-mint pass the session's
+    team. Marker gating unchanged (flag absent = rev 00005; the 309a5d9 dispatcher, fireJobs,
+    sweeper and teardown tests 120/120 on this build; golden and bench unchanged).
+  - **Reviewed for the same blind spot**, every derivation of a start or a lit team from job
+    state: the predicate and its two feeders (`supersedingStart`, `laterStartsLoader`, both
+    now carrying `handoffToTeam`); GUARD 0b's `startJobConfirmsFired` / `startJobMayHaveLit`
+    (the session's OWN start job by id — the team's `_start` or the relinquisher's `_end` —
+    never "later"); the sweep's anchor (that job's `dispatchedAt`); `decideEndRemint` (the END
+    job's state); the dispatcher's scorecard mirroring of a hand-off end onto the survivor's
+    entry (keyed by the `handoffTo` event id; consistent); the teardown predicate (seq and
+    state); the in-flight guard (commands, not jobs). Starts are never re-minted (no
+    `_start_r` ids exist); a retried start keeps its id and moves its own `dispatchedAt`, which
+    only raises its own team's anchor. Plan-log rows and the scorecard carry the survivor's SLUG
+    as `handoffTo` while the JOB carries the event id plus `handoffToTeam`; `litTeamOf` reads
+    both.
+  - **Stated residual:** a start of T for a LATER game never supersedes T's earlier end, so an
+    end chain still alive when the same team's next game is lit restores base over it (a
+    same-team back-to-back on a dead bridge). Only the planner's own later start is visible to
+    the server at all (#182).
   - **Close when** the flag covers every allowlisted account and `dispatchFireJobs` is deployed.
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
