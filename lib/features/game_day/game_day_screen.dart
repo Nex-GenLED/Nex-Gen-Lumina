@@ -6,6 +6,7 @@ import 'package:nexgen_command/features/schedule/widgets/ladder_repair_banner.da
 import 'package:nexgen_command/features/autopilot/base_layer_gate.dart';
 import 'package:nexgen_command/features/game_day/gate_status.dart';
 import 'package:nexgen_command/features/game_day/gate_status_banner.dart';
+import 'package:nexgen_command/features/game_day/ladder_repair_action.dart';
 import 'package:nexgen_command/features/game_day/game_day_run_mode.dart';
 import 'package:nexgen_command/features/game_day/game_day_server_status_provider.dart';
 import 'package:nexgen_command/features/game_day/gate_status_provider.dart';
@@ -108,6 +109,10 @@ class GameDayScreen extends ConsumerWidget {
                 // +114 — what the on-connect ladder repair did. The ladder is
                 // what a Game Day END restores to, so it is news here too.
                 const LadderRepairBanner(),
+                // #183 — the customer's own repair, offered when the readiness
+                // status says the base ladder needs it (a bus added outside
+                // the app). The tap is the consent the fleet flag withholds.
+                const LadderRepairActionCard(),
                 // Hero description
                 _buildHeroCard(context),
                 const SizedBox(height: 20),
