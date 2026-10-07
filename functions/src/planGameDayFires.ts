@@ -976,7 +976,8 @@ function laterStartsLoader(
         .then((q) =>
           q.docs.map((d) => ({
             id: d.id, eventId: d.get("eventId"), seq: d.get("seq"), state: d.get("state"),
-            controllerId: d.get("controllerId"), dispatchedAt: d.get("dispatchedAt"), handoffTo: d.get("handoffTo"),
+            controllerId: d.get("controllerId"), dispatchedAt: d.get("dispatchedAt"),
+            handoffTo: d.get("handoffTo"), handoffToTeam: d.get("handoffToTeam"),
           }))
         );
     }
@@ -1090,7 +1091,7 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
           const firstDue =
             toMillisOrNull(endJob.get("firstDueAt")) ?? toMillisOrNull(s.endFiredAt) ?? nowMs;
           const sup = startSupersedesEnd({
-            jobs: await c.laterStarts(), controllerId, endFirstDueMs: firstDue, exceptEventId: eventId,
+            jobs: await c.laterStarts(), controllerId, endFirstDueMs: firstDue, endTeamSlug: teamSlug,
           });
           if (sup.superseded) {
             logRows.push({
@@ -1236,9 +1237,12 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
       // nothing: the end is written and the dispatcher holds it behind that
       // start's pending command. The anchor travels with the job as
       // `firstDueAt`, so the dispatcher and the re-mint judge by the same one.
+      // A hand-off that RE-LIT this team after its own start raises the
+      // anchor inside the predicate (second delta review, S6): it is this
+      // team's start in effect, never a later team's.
       const endAnchorMs = toMillisOrNull(startJob.get("dispatchedAt")) ?? finalSeenAtMs ?? nowMs;
       const sup = startSupersedesEnd({
-        jobs: await c.laterStarts(), controllerId, endFirstDueMs: endAnchorMs, exceptEventId: eventId,
+        jobs: await c.laterStarts(), controllerId, endFirstDueMs: endAnchorMs, endTeamSlug: teamSlug,
       });
       if (sup.superseded) {
         logRows.push({

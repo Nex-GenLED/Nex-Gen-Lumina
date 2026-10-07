@@ -118,10 +118,11 @@ describe("at dispatch: a guaranteed end is skipped when a later start lit the co
     expect(await commandsFor(f, END)).toHaveLength(1);
   });
 
-  test("a hand-off END that lit the survivor counts as that team's start", async () => {
+  test("a hand-off END to a DIFFERENT team lit that team: it supersedes", async () => {
     const f = world();
     f.put(JOB(`gd_nfl_relinquisher_9800003_end`), {
-      eventId: "gd_nfl_relinquisher_9800003", seq: "end", controllerId: CTRL, handoffTo: B,
+      eventId: "gd_nfl_relinquisher_9800003", seq: "end", controllerId: CTRL,
+      handoffTo: EVENT_B, handoffToTeam: B, // the planner's shape: the survivor's event id and slug
       fireAt: f.ts(END_DUE + 10 * M), type: "applyJson", payload: '{"ps":7}',
       state: "completed", source: "game_day", commandId: "cmd_handoff", dispatchedAt: f.ts(END_DUE + 10 * M),
     });
@@ -145,6 +146,66 @@ describe("at dispatch: a guaranteed end is skipped when a later start lit the co
     bStarted(f, END_DUE + 12 * M); // before the re-mint's own fireAt, after the chain's first due
     await tick(f);
     expect((await read(f, JOB(`${EVENT_A}_end_r1`))).skipReason).toBe(SUPERSEDED_BY_START_REASON);
+  });
+});
+
+describe("which later completed jobs supersede (second delta review, S6): only a job that lit a DIFFERENT team", () => {
+  const RELINQ = "gd_nfl_relinquisher_9800003";
+  const handoff = (f, to, toTeam, atMs, id = `${RELINQ}_end`) =>
+    f.put(JOB(id), {
+      eventId: RELINQ, seq: "end", controllerId: CTRL, handoffTo: to, handoffToTeam: toTeam,
+      fireAt: f.ts(atMs), type: "applyJson", payload: '{"ps":7}', state: "completed",
+      source: "game_day", commandId: `cmd_${id}`, dispatchedAt: f.ts(atMs),
+    });
+
+  test("a hand-off end TO the team whose end is judged re-lit that team: it never supersedes, the end fires", async () => {
+    const f = world();
+    handoff(f, EVENT_A, A, END_DUE + 10 * M);
+    await tick(f);
+    const end = await read(f, JOB(END));
+    expect(end.state).toBe("dispatched");
+    expect(end).not.toHaveProperty("skipReason");
+    expect(await commandsFor(f, END)).toHaveLength(1);
+  });
+
+  test("an older job that stored the survivor's SLUG in handoffTo is read the same way", async () => {
+    const f = world();
+    handoff(f, A, undefined, END_DUE + 10 * M);
+    await tick(f);
+    expect((await read(f, JOB(END))).state).toBe("dispatched");
+  });
+
+  test("a start of the SAME team (another game, or a re-minted id) never supersedes its own end", async () => {
+    const f = world();
+    f.put(JOB(`gd_${A}_9800009_start_r1`), {
+      eventId: `gd_${A}_9800009`, seq: "start", controllerId: CTRL,
+      fireAt: f.ts(END_DUE + 12 * M), type: "applyJson", payload: '{"ps":7}', state: "completed",
+      source: "game_day", commandId: "cmd_a_again", dispatchedAt: f.ts(END_DUE + 12 * M),
+    });
+    await tick(f);
+    const end = await read(f, JOB(END));
+    expect(end.state).toBe("dispatched");
+    expect(end).not.toHaveProperty("skipReason");
+  });
+
+  test("a different team's start completed BEFORE the hand-off that re-lit this team does not supersede: the team was lit again after it", async () => {
+    const f = world();
+    bStarted(f, END_DUE + 5 * M); // B lit the house…
+    handoff(f, EVENT_A, A, END_DUE + 20 * M); // …then a hand-off re-lit A
+    await tick(f);
+    const end = await read(f, JOB(END));
+    expect(end.state).toBe("dispatched");
+    expect(end).not.toHaveProperty("skipReason");
+  });
+
+  test("a different team's start completed AFTER the hand-off that re-lit this team supersedes", async () => {
+    const f = world();
+    handoff(f, EVENT_A, A, END_DUE + 5 * M); // a hand-off re-lit A…
+    bStarted(f, END_DUE + 20 * M); // …then B lit the house
+    await tick(f);
+    const end = await read(f, JOB(END));
+    expect(end.state).toBe("skipped");
+    expect(end.supersededBy).toBe(B_START);
   });
 });
 

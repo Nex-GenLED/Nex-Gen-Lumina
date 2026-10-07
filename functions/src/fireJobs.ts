@@ -343,47 +343,90 @@ export interface LaterStartCandidate {
   state?: unknown;
   controllerId?: unknown;
   dispatchedAt?: unknown;
-  /** A hand-off end lights a team: it counts as that team's start. */
+  /** A hand-off end lights a team: the survivor's EVENT id (the planner's shape). */
   handoffTo?: unknown;
+  /** The survivor's team slug, written beside `handoffTo`. */
+  handoffToTeam?: unknown;
 }
 
 /**
- * PURE. Has a start on this controller COMPLETED since the end was first due?
- * Then the house is in a newer team's colours and this end — a restore to
- * base — would wipe it. The check is made at dispatch, at retry, at the sweep
- * and at re-mint (the review reproduced a base restore landing three minutes
- * after a second team's start completed, from a retryable failure inside the
- * 90-minute budget).
+ * PURE. The team a COMPLETED fire job lit, or null when it lit none: a start
+ * lights its own team (from the event id); a hand-off end lights the survivor
+ * (`handoffToTeam`, else the team of the `handoffTo` event id, else the raw
+ * value for an older job that stored the slug); a plain end, a job that is
+ * not completed, or anything else lit nobody.
+ */
+export function litTeamOf(j: LaterStartCandidate): string | null {
+  if (j.state !== "completed") return null;
+  if (j.seq === "start") return teamSlugFromEventId(j.eventId);
+  if (j.seq === "end") {
+    if (typeof j.handoffToTeam === "string" && j.handoffToTeam.length > 0) return j.handoffToTeam;
+    if (typeof j.handoffTo === "string" && j.handoffTo.length > 0) {
+      return teamSlugFromEventId(j.handoffTo) ?? j.handoffTo;
+    }
+  }
+  return null;
+}
+
+/**
+ * PURE. Has a DIFFERENT team been lit on this controller since THIS team was
+ * last lit? Then the house is in that team's colours and this end — a restore
+ * to base — would wipe it. The check is made at dispatch, at retry, at the
+ * sweep and at re-mint (the review reproduced a base restore landing three
+ * minutes after a second team's start completed, from a retryable failure
+ * inside the 90-minute budget).
+ *
+ * THE RULE, judged for the end of team T (`endTeamSlug`), over the account's
+ * COMPLETED jobs on the same controller:
+ *   - CAN supersede: a start of a different team; a hand-off end to a
+ *     different team. Each lit another team.
+ *   - CANNOT: a hand-off end TO T (it re-lit T; it is T's own start in
+ *     effect); a start of T itself, for this game or any other. Each lit T,
+ *     and instead RAISES the instant T was last lit.
+ * A different team's job supersedes only when its `dispatchedAt` is strictly
+ * after the later of the end's first-due anchor and the last instant T was
+ * lit. So a team that was re-lit by a hand-off after another team's start is
+ * not superseded by that earlier start (the second delta review's S6: a
+ * hand-off end carries the relinquisher's event id and the survivor as
+ * `handoffTo`, and read as "a later start" it superseded the survivor's own
+ * swept end, whose anchor was the survivor's first start).
  *
  * "Completed", not "dispatched" (the delta review of 31751b2): a start that
  * is merely dispatched has lit nothing yet — its command may be pending on a
- * bridge that is away and then expire. Closing the end on it stranded the
- * house: the planner wrote the session closed, the start never ran, and no
- * restore was pending when the bridge returned. A dispatched start already
- * holds the end back transiently through the dispatcher's one-in-flight
- * guard, which re-checks every tick; that is the right amount of deference.
- * "Since first due": `dispatchedAt` strictly after the end's first due
- * instant — a start dispatched BEFORE the end was due is the game this end
- * belongs to. A hand-off end (`handoffTo` set) is the survivor's start and
- * counts. The end's own game (`exceptEventId`) never supersedes itself: a
- * swept end is anchored on its own start's dispatch, which is not "later".
+ * bridge that is away and then expire. A dispatched start holds the end back
+ * transiently through the dispatcher's one-in-flight guard, which re-checks
+ * every tick; that is the right amount of deference.
+ *
+ * Stated residual: a start of T for a LATER game never supersedes T's earlier
+ * end (the rule above), so an end chain still alive when the same team's next
+ * game is lit restores base over it. Only the planner's own later start is
+ * visible to the server at all.
  */
 export function startSupersedesEnd(args: {
   jobs: LaterStartCandidate[];
   controllerId: string;
   endFirstDueMs: number;
-  exceptEventId?: string;
+  /** The team whose end is being judged. */
+  endTeamSlug: string;
 }): { superseded: false } | { superseded: true; by: string; dispatchedAtMs: number } {
-  let best: { by: string; dispatchedAtMs: number } | null = null;
+  let lastLitMs = args.endFirstDueMs;
+  const others: Array<{ by: string; at: number }> = [];
   for (const j of args.jobs) {
-    const isStart = j.seq === "start" || (j.seq === "end" && typeof j.handoffTo === "string");
-    if (!isStart) continue;
-    if (args.exceptEventId !== undefined && j.eventId === args.exceptEventId) continue;
-    if (j.state !== "completed") continue;
     if (typeof j.controllerId !== "string" || j.controllerId !== args.controllerId) continue;
+    const team = litTeamOf(j);
+    if (team === null) continue;
     const at = toMillisOrNull(j.dispatchedAt);
-    if (at === null || at <= args.endFirstDueMs) continue;
-    if (best === null || at > best.dispatchedAtMs) best = { by: j.id, dispatchedAtMs: at };
+    if (at === null) continue;
+    if (team === args.endTeamSlug) {
+      if (at > lastLitMs) lastLitMs = at;
+      continue;
+    }
+    others.push({ by: j.id, at });
+  }
+  let best: { by: string; dispatchedAtMs: number } | null = null;
+  for (const o of others) {
+    if (o.at <= lastLitMs) continue;
+    if (best === null || o.at > best.dispatchedAtMs) best = { by: o.by, dispatchedAtMs: o.at };
   }
   return best === null ? { superseded: false } : { superseded: true, ...best };
 }

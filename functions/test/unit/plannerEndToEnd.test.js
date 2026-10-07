@@ -23,6 +23,11 @@
 //      and nothing was lit, yet the planner had closed the session for good.
 //      Supersession needs the later start completed; a dispatched one defers
 //      the end transiently through the one-in-flight guard (S1, S2, S3 below).
+//   6. (second delta review) A hand-off end TO team A re-lit A: it carries the
+//      relinquisher's event id and A as `handoffTo`, and read as "a later
+//      start" it superseded A's own swept end (anchored at A's first start).
+//      The rule is judged per team: a job that lit A never supersedes A's end,
+//      it raises the instant A was last lit (S6 below).
 //
 // Times: Sunday 2026-10-11 → Monday 2026-10-12 UTC. All ids synthetic; the
 // controller address is RFC 5737.
@@ -54,6 +59,10 @@ const B_FIRE = B_KICK - 30 * MIN; // 04:00Z
 const HOLD_END = FINAL2 + 90 * MIN; // 05:10Z — A's end command is held pickable until here
 const B_KICK_LATE = KICK + 5 * H + 15 * MIN; // 05:30Z — the second game when it kicks off after the hold
 const B_FIRE_LATE = B_KICK_LATE - 30 * MIN; // 05:00Z
+const B_KICK_EARLY = KICK + 15 * MIN; // 00:30Z — B's game overlapping A's, B outranking A (S6)
+const B_FIRE_EARLY = B_KICK_EARLY - 30 * MIN; // 00:00Z, after A's 23:45Z start
+const B_FINAL1 = B_KICK_EARLY + 2 * H + 30 * MIN; // 03:00Z — B's final, A still live
+const B_FINAL2 = B_FINAL1 + 5 * MIN; // 03:05Z — confirmed: B's end hands the house to A
 
 const UID = "u_e2e";
 const CTRL = "ctrl_e2e";
@@ -78,11 +87,11 @@ const teamConfig = (t) => ({
   intensity: 128, brightness: 200,
 });
 
-function world({ second = false } = {}) {
+function world({ second = false, priority = [A.slug, B.slug] } = {}) {
   const f = makeFakeFirestore({ now: T0 - H });
   f.put(USER, {
     owner_id: UID, time_zone: "America/Chicago", latitude: 39.0, longitude: -95.0,
-    ...(second ? { game_day_team_priority: [A.slug, B.slug] } : {}),
+    ...(second ? { game_day_team_priority: priority } : {}),
   });
   f.put(CONTROLLER, {
     ip: IP, participating_channels: [0, 1], participating_channels_device_ids: [0, 1],
@@ -548,5 +557,79 @@ describe("a dispatched start that never lights the house does not close the earl
     expect(await read(f, JOB(`${endId}_r1`))).toBeUndefined();
     expect(p.logRows.find((x) => x.reason === "end_remint_skipped:superseded_by_later_start")).toMatchObject({ eventId: EVENT(A) });
     expect((await read(f, SESSION(A))).endSuperseded).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("a hand-off that re-lit the team is that team's own start, not a later one (second delta review, S6)", () => {
+  /**
+   * B outranks A. A's own start lights the house at 23:45Z; B's start at
+   * 00:00Z takes it (B is higher); B's final at 03:00Z hands the house back
+   * to A, still live — a hand-off END carrying B's event id and A as
+   * `handoffTo`, completed at 03:05Z. A's team is then deleted, and A's final
+   * is seen at 03:35Z: the sweep judges A's end from A's own start (23:45Z).
+   * On 2334b7f the hand-off, and B's start, both read as "a later start" and
+   * A was closed as superseded — no end minted, A's colours left up. The
+   * hand-off re-lit A: it raises the instant A was last lit, and B's start
+   * (before it) does not count either.
+   */
+  async function fire(f, jobId, ms) {
+    await dispatch(f, ms);
+    const [c] = await fireCommands(f, jobId);
+    expect(c.status).toBe("pending");
+    bridgeCompletes(f, c.id, ms + 2 * SEC);
+    await dispatch(f, ms + 60 * SEC);
+    expect((await read(f, JOB(jobId))).state).toBe("completed");
+    return c;
+  }
+
+  test("S6 — the swept end of a team re-lit by a hand-off is minted and sent", async () => {
+    const f = world({ second: true, priority: [B.slug, A.slug] });
+    espn("scheduled", "scheduled", B_KICK_EARLY);
+    await plan(f, T0, FLAG);
+    await completeProbes(f);
+    const aStart = `${EVENT(A)}_start`;
+    const bStart = `${EVENT(B)}_start`;
+    expect(await read(f, JOB(aStart))).toMatchObject({ state: "scheduled" });
+    await fire(f, aStart, FIRE + 10 * SEC); // A lit, alone
+
+    espn("live", "scheduled", B_KICK_EARLY);
+    await plan(f, FIRE + 2 * MIN, FLAG); // B's start mints (B's fire 00:00Z is 13 min away)
+    await completeProbes(f);
+    expect(await read(f, JOB(bStart))).toMatchObject({ state: "scheduled" });
+    await fire(f, bStart, B_FIRE_EARLY + 10 * SEC); // B lit (outranks A)
+
+    // B's final with A still live: B's end is a hand-off TO A.
+    espn("live", "final", B_KICK_EARLY);
+    await plan(f, B_FINAL1, FLAG);
+    const h = await plan(f, B_FINAL2, FLAG);
+    expect(h.handoffsPlanned).toBe(1);
+    const bEnd = `${EVENT(B)}_end`;
+    expect(await read(f, JOB(bEnd))).toMatchObject({ state: "scheduled", handoffTo: EVENT(A), handoffToTeam: A.slug });
+    expect(await read(f, JOB(bEnd))).not.toHaveProperty("endGuarantee");
+    await fire(f, bEnd, B_FINAL2 + 30 * SEC); // A re-lit by the hand-off, 03:05Z
+    // A had fired its own start, so its session keeps that start as its anchor.
+    expect((await read(f, SESSION(A))).startJobId ?? aStart).toBe(aStart);
+
+    // A's team is deleted; A's final is seen. The sweep judges A's end.
+    await f.db.doc(CONFIG(A)).delete();
+    espn("final", "final", B_KICK_EARLY);
+    await plan(f, FINAL1, FLAG);
+    const p = await plan(f, FINAL2, FLAG);
+    const endId = `${EVENT(A)}_end`;
+    expect(p.logRows.find((x) => x.reason === "end_sweep_skipped:superseded_by_later_start")).toBeUndefined();
+    expect((await read(f, SESSION(A))).endSuperseded).not.toBe(true);
+    expect(await read(f, JOB(endId))).toMatchObject({ state: "scheduled", endGuarantee: true, endVia: "session_sweep", payload: BASE_ON });
+    expect(p.endsSwept).toBe(1);
+
+    // …and it is dispatched and sent: the house goes back to base.
+    await dispatch(f, FINAL2 + 30 * SEC);
+    const [ce] = await fireCommands(f, endId);
+    expect(ce.status).toBe("pending");
+    bridgeCompletes(f, ce.id, FINAL2 + 40 * SEC);
+    await dispatch(f, FINAL2 + 90 * SEC);
+    expect((await read(f, JOB(endId))).state).toBe("completed");
+    const again = await plan(f, FINAL2 + 15 * MIN, FLAG);
+    expect(again).not.toHaveProperty("endsReminted");
   });
 });

@@ -306,15 +306,18 @@ export async function runDispatchTick(
         .collection("users").doc(uid).collection(FIRE_JOBS_COLLECTION)
         .where("state", "==", "completed") // COLLECTION scope → automatic index
         .get();
-      const ownEvent = jobSnap.get("eventId");
+      // The team whose end this is: a job that lit IT never supersedes it.
+      const endTeamSlug = teamSlugFromEventId(jobSnap.get("eventId"));
+      if (endTeamSlug === null) return null;
       const r = startSupersedesEnd({
         jobs: q.docs.map((d) => ({
           id: d.id, eventId: d.get("eventId"), seq: d.get("seq"), state: d.get("state"),
-          controllerId: d.get("controllerId"), dispatchedAt: d.get("dispatchedAt"), handoffTo: d.get("handoffTo"),
+          controllerId: d.get("controllerId"), dispatchedAt: d.get("dispatchedAt"),
+          handoffTo: d.get("handoffTo"), handoffToTeam: d.get("handoffToTeam"),
         })),
         controllerId: ctrl,
         endFirstDueMs: due,
-        ...(typeof ownEvent === "string" ? { exceptEventId: ownEvent } : {}),
+        endTeamSlug,
       });
       return r.superseded ? { by: r.by, dispatchedAtMs: r.dispatchedAtMs } : null;
     };
