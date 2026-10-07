@@ -2852,15 +2852,21 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `endFiredAt`.
   - Tests: `plannerEndGate.test.js`. With the flag absent the flags-off golden and the bench
     regression snapshot are unchanged.
-  - **Close when** the flag is `true` fleet-wide (deploy plan §6c). Until then the 10-05 shape
+  - **Close when** the flag covers every allowlisted account (it stays a uid list, deploy plan
+    §6c). Until then the 10-05 shape
     can recur on any allowlisted account whose gate flips mid-game.
   - **Extended the same day (`948ce7a`):** the flag now carries the whole end guarantee — the
     sweep past every early exit (#178, #180, #161), the 90-minute budget and held command plus
     re-minting (#179), a `failed` start counting as lit (#180). Deploy plan §0, §2, §6c, §11.
 
 - [ ] **#178 — A team disabled or deleted while its show is lit is never ended by the server**
-  - Status: **FIX BUILT `948ce7a` — behind `end_ignores_gate`; NOT deployed** · Severity: **P2** ·
-    Evidence: **verified-by-source** + **verified-by-test** (`plannerEndGuarantee.test.js`, part 3)
+  - Status: **FIX BUILT `1495a95` — behind `end_ignores_gate`; NOT deployed** (the `948ce7a`
+    fix was NOT end to end: the review of 2026-10-07, below) · Severity: **P2** ·
+    Evidence: **verified-by-source** + **verified-by-test** (`plannerEndToEnd.test.js` "#178 end
+    to end": the real planner, dispatcher and sweeper ticks composed on one fake Firestore — a
+    deleted team and a disabled team each get their end COMMAND, the bridge completes it, no
+    re-mint follows, a re-minted end is dispatched too; `plannerEndGuarantee.test.js` part 3 for
+    the planner half alone)
   - `planGameDayFires.ts` reads `game_day_autopilot` with `enabled == true`; an account with no
     enabled config takes the `configs.empty` branch and `continue`s, so a session that this
     system started is never evaluated for its end, final or cap. `teardownTeamFires` (on the
@@ -2873,7 +2879,19 @@ commit — merging `main` into this tree will collide with the untracked copies.
     after sunset, `{"ps":2}` before), never a hand-off. `teardownTeamFires` no longer retracts a
     scheduled END (`shouldRetractForTeam` reads `seq`; unconditional). A session whose start
     never fired is left alone (`end_sweep_start_not_fired`).
-  - **Close when** the flag is `true` fleet-wide and `teardownTeamFires` is deployed.
+  - **Not fixed at `948ce7a` (independent review, 2026-10-07).** The sweep's end and every
+    re-mint keep the event id `gd_<slug>_<id>`, and `dispatchFireJobs`' #99 config gate
+    (`checkTeamConfigGate`) re-reads the team config when the job comes due, so each was skipped
+    `config_missing_or_disabled` and no command ever reached the bridge. **The fix:** the planner
+    stamps `endGuarantee: true` on every end it writes under the flag (loop, sweep, re-mint;
+    never a hand-off), and the dispatcher exempts such an end from the config gate. Starts, and
+    ends written with the flag absent, are gated exactly as before.
+  - **The one unconditional change, stated:** `teardownTeamFires` never retracts a scheduled END,
+    flag or no flag. With the flag ABSENT that end reaches the dispatcher and is skipped there
+    `config_missing_or_disabled` — zero commands, the pre-guarantee outcome by a different route
+    (pinned: `plannerEndToEnd.test.js`, "the unconditional teardown rule").
+  - **Close when** the flag covers every allowlisted account (it stays a uid list, deploy plan
+    §6c) and `teardownTeamFires` and `dispatchFireJobs` are deployed.
 
 - [ ] **#179 — An end job that exhausts its retry budget is never minted again: the session
   already says it ended**
@@ -2896,8 +2914,12 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `<event>_end_r<n>`, six at most, ten minutes apart, within twelve hours of kickoff; the
     session carries `endJobId`, `endRemints`, `endRemintedAt`).
   - **Residual:** past the ceiling the house waits for the bridge to run the last held command,
-    or for the owner. A held command occupies the controller's one in-flight slot (#181).
-  - **Close when** the flag is `true` fleet-wide and `dispatchFireJobs` is deployed.
+    or for the owner. The chain — the first end and up to six re-mints, each held 90 minutes,
+    re-minted while kickoff is less than twelve hours past — runs to about kickoff + 12.3 to
+    13.5 h (deploy plan §11, corrected 2026-10-07; not "three hours"). An end that long-lived can
+    outlive its game: #183. A held command occupies the controller's one in-flight slot (#181).
+  - **Close when** the flag covers every allowlisted account (a uid list, deploy plan §6c) and
+    `dispatchFireJobs` is deployed.
 
 - [ ] **#180 — Three narrower ways a lit house is not ended: a `failed` start, a vanished
   controller document, and unusable participation facts (#161)**
@@ -2914,7 +2936,8 @@ commit — merging `main` into this tree will collide with the untracked copies.
     The daylight rule is covered the same way. The END path itself was not moved: the loop's
     early exits stand (byte-identical with the flag absent) and the sweep runs after the loop,
     so a session the loop decided keeps that decision.
-  - **Close when** the flag is `true` fleet-wide. #161's own fix shape (let the END run on the
+  - **Close when** the flag covers every allowlisted account (a uid list, deploy plan §6c).
+    #161's own fix shape (let the END run on the
     participation exit) remains the cleaner long-term form.
 
 - [ ] **#181 — A held end command occupies the controller's one in-flight slot for up to 90
@@ -2945,9 +2968,60 @@ commit — merging `main` into this tree will collide with the untracked copies.
     (`END_REMINT_HORIZON_MS`, the same bound as the tracked-session query). An older session with
     no completed end — the 10-05 one, for instance — is never touched; the owner closes it by
     hand (set `endFiredAt`, or leave it: it is inert).
+  - **Why the horizon stays twelve hours (asked 2026-10-07).** The cost of a longer one is small:
+    one more session document per extra game per account per tick, and re-mint commands for a
+    bridge dead for days. The risk is real: a late base restore can overwrite a look the customer
+    applied since, and the dispatcher cannot tell the two apart. It has no read of WLED state —
+    the bridge executes a command blind and reports only the HTTP outcome — and the server's
+    only controller facts are the app-published participation and ladder facts and the bridge
+    heartbeat. Inside twelve hours a restore is what the customer expects of Game Day; beyond it
+    nobody can say what is on the house. The supersede rule (#183) covers the one later change
+    the server CAN see: its own later start.
   - **Fix shape:** give the sweep the account's windows (the pre-pass already builds them) and
     reuse `outrankedBy`/`handoffWinner`; and a one-off admin script to close pre-guarantee
     sessions.
+
+- [ ] **#183 — An end under the guarantee could fire INTO THE NEXT GAME: a base restore landed
+  three minutes after a second team's start completed**
+  - Status: **FIX BUILT `1495a95` — behind `end_ignores_gate` (the job's `endGuarantee` marker);
+    NOT deployed** · Severity: **P2** · Evidence: **verified-by-test** (the independent review of
+    `65cb3e4` reproduced it; `plannerEndToEnd.test.js` "an end never fires into the next game"
+    carries the exact reproduction, the retry-path variant, the sweep variant and the normal case
+    with no later start; `dispatchSupersede.test.js` the dispatcher alone)
+  - The guarantee's 90-minute budget, held command and re-mints (#179) let an end outlive its
+    game. Two teams on one controller, the first game's end failing retryably (`ERROR: HTTP -1`)
+    while the bridge was away: the second team's start fired and completed, and the first end's
+    retry then restored base over it. At `948ce7a` nothing on the end's path asked whether the
+    house still belonged to its game.
+  - **The fix:** before an end is dispatched, retried, swept or re-minted, a START on the same
+    controller (a hand-off end counts) `dispatched` or `completed` since the end was FIRST due
+    closes the end: terminal, `skipReason: superseded_by_later_start`, `supersededBy` naming the
+    start; the session gains `endSuperseded`, `endSupersededBy`; the rows
+    `end_sweep_skipped:superseded_by_later_start` and `end_remint_skipped:…`; the scorecard's
+    `end.superseded_by`. "First due" is the original end's `fireAt` (kept as `firstFireAt`
+    across retries) or the chain's `firstDueAt` on a re-mint; the swept end is anchored on its
+    own start's dispatch, because the game may have ended while ESPN was unreachable. The end's
+    own game never supersedes itself. Pure predicate `fireJobs.startSupersedesEnd`; one read per
+    account per tick in the planner, only when an end is about to be written or re-minted.
+  - **Residual, stated:** only an end carrying `endGuarantee: true` is checked; with the flag
+    absent the dispatcher retries an end inside its 15-minute budget exactly as rev 00005, so the
+    shipped shape (two games back to back on one controller inside 15 minutes) is unchanged. The
+    server cannot see a look the customer applied by hand (#182).
+  - **Close when** the flag covers every allowlisted account and `dispatchFireJobs` is deployed.
+
+- [ ] **#184 — A hand-off end got the 90-minute hold, so a survivor's START could have landed
+  up to 90 minutes late**
+  - Status: **FIX BUILT `1495a95` — behind `end_ignores_gate`; NOT deployed** · Severity: **P3** ·
+    Evidence: **verified-by-source** (the review of `65cb3e4`) + **verified-by-test**
+    (`plannerEndGate.test.js`, the hand-off control: no `holdUntil`, no `endGuarantee`,
+    `retryUntil` = fireAt + 15 min)
+  - At `948ce7a` the loop's end write gave every end the guaranteed budget and `holdUntil`,
+    including a hand-off end — the job that LIGHTS the surviving team. A survivor's start would
+    have waited behind a 90-minute hold instead of a start's 15-minute budget.
+  - **The fix:** a hand-off keeps a start's urgency — `endRetryUntilMs(now)` (15 min), no
+    `holdUntil`, no `endGuarantee` marker, so the dispatcher's config gate applies to it as to any
+    start. The base-restore end keeps the guarantee.
+  - **Close when** the flag covers every allowlisted account.
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
