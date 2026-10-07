@@ -2523,6 +2523,14 @@ commit — merging `main` into this tree will collide with the untracked copies.
     release.
   - Files: `android/gradle/wrapper/gradle-wrapper.properties`, `android/settings.gradle`,
     `android/gradle.properties`. Related: BUILD_LEDGER convention 5, **#126**, **#127**.
+  - **Correction 2026-10-07 (Android +116 build, read from both SDKs' `DependencyVersionChecker.kt`):**
+    Flutter 3.47.5 refuses Gradle < 8.14.0 **and AGP < 8.11.1 and Kotlin < 2.2.20** (warns below
+    9.1.0 / 9.0.1 / 2.3.20); the project pins 8.12 / 8.7.3 / 2.1.0, so all three must move, not just
+    the wrapper (AGP 8.11 itself needs Gradle ≥ 8.13), and the 3.47.5 `pubspec.lock` would have to be
+    committed for an Android build. Flutter 3.41.2 errors below 8.3.0 / 8.1.1 / 1.8.10 and warns
+    below 8.7.0 / 8.6.0 / 2.1.0, so the project builds silently there: the +116 AAB was built with
+    3.41.2 again (ledger, ANDROID +116). Remove the stale `buildscript` classpath for AGP 8.3.2 in
+    `android/build.gradle` (overridden by the plugins DSL) in the same bump.
 
 - [ ] **#126 — FIREBASE ANDROID APP ID MISMATCH: the app initialises the legacy Dreamflow-era Android
   registration while the package is `com.nexgenled.lumina`**
