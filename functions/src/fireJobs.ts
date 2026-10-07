@@ -328,6 +328,69 @@ export function teamSlugFromEventId(eventId: unknown): string | null {
 /** `cancelled_reason` written when a team is deleted out from under its fires. */
 export const CANCELLED_REASON_TEAM_DELETED = "team_deleted";
 
+// ---------------------------------------------------------------------------
+// An end never fires into the next game (2026-10-07 review of the end guarantee)
+// ---------------------------------------------------------------------------
+
+/** `skipReason` on an end that a later start on the same controller overtook. */
+export const SUPERSEDED_BY_START_REASON = "superseded_by_later_start";
+
+/** The fields of a fire job the supersede check reads. */
+export interface LaterStartCandidate {
+  id: string;
+  eventId?: unknown;
+  seq?: unknown;
+  state?: unknown;
+  controllerId?: unknown;
+  dispatchedAt?: unknown;
+  /** A hand-off end lights a team: it counts as that team's start. */
+  handoffTo?: unknown;
+}
+
+/**
+ * PURE. Has a start on this controller been DISPATCHED since the end was first
+ * due? Then the house is in a newer team's colours and this end — a restore to
+ * base — would wipe it. The check is made at dispatch, at retry and at re-mint
+ * (the review reproduced a base restore landing three minutes after a second
+ * team's start completed, from a retryable failure inside the 90-minute
+ * budget).
+ *
+ * "Dispatched or completed": a command exists for the start. "Since first
+ * due": `dispatchedAt` strictly after the end's first due instant — a start
+ * dispatched BEFORE the end was due is the game this end belongs to.
+ * A hand-off end (`handoffTo` set) is the survivor's start and counts. The
+ * end's own game (`exceptEventId`) never supersedes itself: a swept end is
+ * anchored on its own start's dispatch, which is not "later".
+ */
+export function startSupersedesEnd(args: {
+  jobs: LaterStartCandidate[];
+  controllerId: string;
+  endFirstDueMs: number;
+  exceptEventId?: string;
+}): { superseded: false } | { superseded: true; by: string; dispatchedAtMs: number } {
+  let best: { by: string; dispatchedAtMs: number } | null = null;
+  for (const j of args.jobs) {
+    const isStart = j.seq === "start" || (j.seq === "end" && typeof j.handoffTo === "string");
+    if (!isStart) continue;
+    if (args.exceptEventId !== undefined && j.eventId === args.exceptEventId) continue;
+    if (j.state !== "dispatched" && j.state !== "completed") continue;
+    if (typeof j.controllerId !== "string" || j.controllerId !== args.controllerId) continue;
+    const at = toMillisOrNull(j.dispatchedAt);
+    if (at === null || at <= args.endFirstDueMs) continue;
+    if (best === null || at > best.dispatchedAtMs) best = { by: j.id, dispatchedAtMs: at };
+  }
+  return best === null ? { superseded: false } : { superseded: true, ...best };
+}
+
+/** The instant an end chain was first due: the original job's, carried across retries and re-mints. */
+export function endFirstDueMs(job: {
+  firstDueAt?: unknown;
+  firstFireAt?: unknown;
+  fireAt?: unknown;
+}): number | null {
+  return toMillisOrNull(job.firstDueAt) ?? toMillisOrNull(job.firstFireAt) ?? toMillisOrNull(job.fireAt);
+}
+
 /**
  * Does this fire job belong to [teamSlug], and is it still live enough to
  * retract? Pure; the caller supplies the docs.

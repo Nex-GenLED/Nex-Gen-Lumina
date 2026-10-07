@@ -513,6 +513,11 @@ describe("hand-off under a blocking gate: the survivor's start is refused, the e
     expect(planEnd(r)).toMatchObject({ handoffTo: LOWER });
     expect(planEnd(r)).not.toHaveProperty("gateBypassed");
     expect(r.handoffsPlanned).toBe(1);
+    // A hand-off is the survivor's START: it keeps a start's urgency. No
+    // 90-minute hold, the shipped 15-minute budget, and the config gate.
+    expect(end).not.toHaveProperty("holdUntil");
+    expect(end).not.toHaveProperty("endGuarantee");
+    expect(end.retryUntil.toMillis()).toBe(FINAL2 + 15 * MIN);
   });
 
   test("gate BLOCKING + flag on: the end is written as the base restore, the hand-off is refused and named", async () => {
@@ -611,15 +616,17 @@ describe("flag absent = the planner as it was", () => {
     }
     const off = await run(ARMED);
     const on = await run(FLAG);
-    // With the gate armed the flag changes exactly three things, all additive
+    // With the gate armed the flag changes exactly four things, all additive
     // and all on the end it wrote: the longer retry budget, the command hold,
-    // and the session's pointer to its end job. Nothing else moves.
+    // the dispatcher's config-gate exemption marker, and the session's pointer
+    // to its end job. Nothing else moves.
     const endPath = JOB("end");
     const sessionPath = SESSION();
     const strip = (snap) => {
       const out = JSON.parse(JSON.stringify(snap));
       delete out[endPath].retryUntil;
       delete out[endPath].holdUntil;
+      delete out[endPath].endGuarantee;
       delete out[sessionPath].endJobId;
       for (const p of Object.keys(out)) {
         if (p.startsWith("gameday_scorecard/") && out[p].end) delete out[p].end.retry_until;
@@ -631,6 +638,8 @@ describe("flag absent = the planner as it was", () => {
     expect(on[endPath].holdUntil).toEqual({ __ts: FINAL2 + 90 * MIN });
     expect(off[endPath].retryUntil).toEqual({ __ts: FINAL2 + 15 * MIN });
     expect(off[endPath]).not.toHaveProperty("holdUntil");
+    expect(on[endPath].endGuarantee).toBe(true);
+    expect(off[endPath]).not.toHaveProperty("endGuarantee");
     expect(on[sessionPath].endJobId).toBe(`${EVENT}_end`);
     expect(off[sessionPath]).not.toHaveProperty("endJobId");
     expect(JSON.stringify(on)).not.toContain("gateBypassed");

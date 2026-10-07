@@ -119,7 +119,10 @@ import {
   endRetryUntilMs,
   END_RETRY_WINDOW_GUARANTEED_MS,
   FIRE_JOBS_COLLECTION,
+  LaterStartCandidate,
   startRetryUntilMs,
+  startSupersedesEnd,
+  SUPERSEDED_BY_START_REASON,
   teamSlugFromEventId,
   toMillisOrNull,
 } from "./fireJobs";
@@ -954,6 +957,31 @@ interface EndSweepCtx {
   resolvedByEvent: Map<string, ResolvedGame>;
   stats: PlanStats;
   logRows: Array<Record<string, unknown>>;
+  /** The account's dispatched or completed fire jobs, read once on first use. */
+  laterStarts: () => Promise<LaterStartCandidate[]>;
+}
+
+/** One read per account per tick, and only when an end is about to be written or re-minted. */
+function laterStartsLoader(
+  db: admin.firestore.Firestore,
+  uid: string
+): () => Promise<LaterStartCandidate[]> {
+  let pending: Promise<LaterStartCandidate[]> | null = null;
+  return () => {
+    if (pending === null) {
+      pending = db
+        .collection("users").doc(uid).collection(FIRE_JOBS_COLLECTION)
+        .where("state", "in", ["dispatched", "completed"]) // COLLECTION scope → automatic index
+        .get()
+        .then((q) =>
+          q.docs.map((d) => ({
+            id: d.id, eventId: d.get("eventId"), seq: d.get("seq"), state: d.get("state"),
+            controllerId: d.get("controllerId"), dispatchedAt: d.get("dispatchedAt"), handoffTo: d.get("handoffTo"),
+          }))
+        );
+    }
+    return pending;
+  };
 }
 
 /**
@@ -1036,6 +1064,8 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
 
       // ── (b) an end is planned: is its job alive? (#179) ─────────────────
       if (hasEnd) {
+        // Closed by the supersede rule: a later start owns the house.
+        if (s.endSuperseded === true) continue;
         const endJobId =
           typeof s.endJobId === "string" && s.endJobId.length > 0 ? s.endJobId : `${eventId}_end`;
         const endJob = await jobs.doc(endJobId).get();
@@ -1051,6 +1081,25 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
             logRows.push({ uid, teamSlug, eventId, action: "skip", reason: "end_remint_no_controller_id" });
             continue;
           }
+          // An end never fires into the next game: a start on this controller
+          // dispatched since this end chain was first due closes the chain.
+          const firstDue = toMillisOrNull(s.endFiredAt) ?? nowMs;
+          const sup = startSupersedesEnd({
+            jobs: await c.laterStarts(), controllerId, endFirstDueMs: firstDue, exceptEventId: eventId,
+          });
+          if (sup.superseded) {
+            logRows.push({
+              uid, teamSlug, eventId, action: "skip",
+              reason: `end_remint_skipped:${SUPERSEDED_BY_START_REASON}`, supersededBy: sup.by,
+            });
+            await sRef.set({ endSuperseded: true, endSupersededBy: sup.by }, { merge: true });
+            if (scorecardKey) {
+              await mergeScorecard(db, scorecardKey, uid, eventId, {
+                end: { state: "skipped", outcome: SUPERSEDED_BY_START_REASON, superseded_by: sup.by },
+              });
+            }
+            continue;
+          }
           const newId = `${eventId}_end_r${dec.n}`;
           const until = budgetUntil();
           await jobs.doc(newId)
@@ -1058,6 +1107,8 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
               eventId, seq: "end",
               controllerId,
               fireAt: admin.firestore.Timestamp.fromMillis(nowMs),
+              // The chain's first due instant, for the dispatcher's own check.
+              firstDueAt: admin.firestore.Timestamp.fromMillis(firstDue),
               type: "applyJson",
               payload: restoreNow().payload,
               state: "scheduled",
@@ -1065,6 +1116,8 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
               source: "game_day",
               retryUntil: admin.firestore.Timestamp.fromMillis(until),
               holdUntil: admin.firestore.Timestamp.fromMillis(until),
+              // Exempt from the dispatcher's config gate: a restore, not a show.
+              endGuarantee: true,
               remintOf: endJobId,
               remint: dec.n,
             })
@@ -1170,6 +1223,32 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
         logRows.push({ uid, teamSlug, eventId, action: "skip", reason: "end_sweep_no_controller_id", cause });
         continue;
       }
+      // An end never fires into the next game: a start on this controller
+      // dispatched since THIS team's start lit it owns the house now (the game
+      // may have ended while ESPN was unreachable, so "since the final was
+      // seen" is too late an anchor). The session is closed as superseded; a
+      // restore would wipe that team.
+      const sup = startSupersedesEnd({
+        jobs: await c.laterStarts(), controllerId,
+        endFirstDueMs: toMillisOrNull(startJob.get("dispatchedAt")) ?? finalSeenAtMs ?? nowMs,
+        exceptEventId: eventId,
+      });
+      if (sup.superseded) {
+        logRows.push({
+          uid, teamSlug, eventId, action: "skip",
+          reason: `end_sweep_skipped:${SUPERSEDED_BY_START_REASON}`, supersededBy: sup.by, cause,
+        });
+        await sRef.set(
+          { endSuperseded: true, endSupersededBy: sup.by, endFiredAt: admin.firestore.FieldValue.serverTimestamp(), endVia: "session_sweep", endCause: cause },
+          { merge: true }
+        );
+        if (scorecardKey) {
+          await mergeScorecard(db, scorecardKey, uid, eventId, {
+            end: { state: "skipped", outcome: SUPERSEDED_BY_START_REASON, superseded_by: sup.by, via: "session_sweep", cause },
+          });
+        }
+        continue;
+      }
       const until = budgetUntil();
       logRows.push({
         uid, teamSlug, eventId, action: "plan_end",
@@ -1182,6 +1261,7 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
           eventId, seq: "end",
           controllerId,
           fireAt: admin.firestore.Timestamp.fromMillis(nowMs),
+          firstDueAt: admin.firestore.Timestamp.fromMillis(nowMs),
           type: "applyJson",
           payload: restoreNow().payload,
           state: "scheduled",
@@ -1189,6 +1269,8 @@ async function sweepFiredSessionEnds(c: EndSweepCtx): Promise<void> {
           source: "game_day",
           retryUntil: admin.firestore.Timestamp.fromMillis(until),
           holdUntil: admin.firestore.Timestamp.fromMillis(until),
+          // Exempt from the dispatcher's config gate: the team may be gone.
+          endGuarantee: true,
           endVia: "session_sweep",
         })
         .catch((e) => {
@@ -1377,6 +1459,7 @@ export async function runPlannerTick(
           loopExit: new Map(),
           resolvedByEvent: new Map(),
           stats, logRows,
+          laterStarts: laterStartsLoader(db, uid),
         });
       }
       continue;
@@ -2438,10 +2521,19 @@ export async function runPlannerTick(
                 source: "game_day",
                 // A2: an end retries for 15 min (fireJobs.endRetryUntilMs) —
                 // 90 min under the end guarantee, with the command held
-                // pickable for the whole budget (`holdUntil`, #179).
-                retryUntil: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs, endWindowMs)),
-                ...(endGuarantee
-                  ? { holdUntil: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs, endWindowMs)) }
+                // pickable for the whole budget (`holdUntil`, #179). NOT for a
+                // hand-off: that end lights the survivor, so it is a START and
+                // keeps a start's urgency, its 15-minute budget and the
+                // dispatcher's config gate (2026-10-07 review, item 3).
+                retryUntil: admin.firestore.Timestamp.fromMillis(
+                  endRetryUntilMs(nowMs, handoff ? undefined : endWindowMs)
+                ),
+                ...(endGuarantee && !handoff
+                  ? {
+                      holdUntil: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs, endWindowMs)),
+                      // Exempt from the dispatcher's config gate: a restore.
+                      endGuarantee: true,
+                    }
                   : {}),
                 // Audit: an `end` whose payload is a design rather than a
                 // preset load must say which team it lit.
@@ -2472,7 +2564,9 @@ export async function runPlannerTick(
                       ? admin.firestore.Timestamp.fromMillis(finalSeenAtMs)
                       : null,
                   fire_at: admin.firestore.Timestamp.fromMillis(nowMs),
-                  retry_until: admin.firestore.Timestamp.fromMillis(endRetryUntilMs(nowMs, endWindowMs)),
+                  retry_until: admin.firestore.Timestamp.fromMillis(
+                    endRetryUntilMs(nowMs, handoff ? undefined : endWindowMs)
+                  ),
                   state: "scheduled",
                   attempts: 0,
                   ...(handoff ? { handoff_to: handoff.to.teamSlug } : {}),
@@ -2567,6 +2661,7 @@ export async function runPlannerTick(
         configSlugs: new Set(configs.docs.map((d) => d.id)),
         endReached, loopExit, resolvedByEvent,
         stats, logRows,
+        laterStarts: laterStartsLoader(db, uid),
       });
     }
 

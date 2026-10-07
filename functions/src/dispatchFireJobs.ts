@@ -41,6 +41,9 @@ import {
   appendSamples,
   buildFireCommand,
   checkTeamConfigGate,
+  endFirstDueMs,
+  startSupersedesEnd,
+  SUPERSEDED_BY_START_REASON,
   classifyFireOutcome,
   decideDispatch,
   decideRetry,
@@ -277,6 +280,43 @@ export async function runDispatchTick(
       throw err;
     }
 
+    // An end never fires into the next game (2026-10-07 review). Before an
+    // END is dispatched, retried or (in the planner) re-minted: has a start on
+    // the same controller been dispatched since this end was first due? Then
+    // the house is a newer team's, and a base restore would wipe it. One read
+    // per end checked; ends are a handful a night. Only for an end the planner
+    // wrote under the end guarantee (`endGuarantee: true`): the 90-minute
+    // budget and the re-mints are what let an end outlive its game. A job
+    // without the marker is dispatched and retried exactly as rev 00005 does.
+    const supersedingStart = async (
+      uid: string,
+      jobSnap: admin.firestore.QueryDocumentSnapshot
+    ): Promise<{ by: string; dispatchedAtMs: number } | null> => {
+      if (jobSnap.get("endGuarantee") !== true) return null;
+      const ctrl = jobSnap.get("controllerId");
+      const due = endFirstDueMs({
+        firstDueAt: jobSnap.get("firstDueAt"),
+        firstFireAt: jobSnap.get("firstFireAt"),
+        fireAt: jobSnap.get("fireAt"),
+      });
+      if (typeof ctrl !== "string" || ctrl.length === 0 || due === null) return null;
+      const q = await db
+        .collection("users").doc(uid).collection(FIRE_JOBS_COLLECTION)
+        .where("state", "in", ["dispatched", "completed"]) // COLLECTION scope → automatic index
+        .get();
+      const ownEvent = jobSnap.get("eventId");
+      const r = startSupersedesEnd({
+        jobs: q.docs.map((d) => ({
+          id: d.id, eventId: d.get("eventId"), seq: d.get("seq"), state: d.get("state"),
+          controllerId: d.get("controllerId"), dispatchedAt: d.get("dispatchedAt"), handoffTo: d.get("handoffTo"),
+        })),
+        controllerId: ctrl,
+        endFirstDueMs: due,
+        ...(typeof ownEvent === "string" ? { exceptEventId: ownEvent } : {}),
+      });
+      return r.superseded ? { by: r.by, dispatchedAtMs: r.dispatchedAtMs } : null;
+    };
+
     for (const jobSnap of dispatchedSnap.docs) {
       try {
         const uid = jobSnap.ref.parent.parent?.id;
@@ -349,6 +389,31 @@ export async function runDispatchTick(
           outcome: cls,
           nowMs,
         });
+        if (retry.retry && jobSeq === "end") {
+          const sup = await supersedingStart(uid, jobSnap);
+          if (sup) {
+            await jobSnap.ref.update({
+              state: "skipped",
+              skipReason: SUPERSEDED_BY_START_REASON,
+              supersededBy: sup.by,
+              outcome,
+              outcomeClass: cls.outcome,
+              commandError: cmdError.slice(0, 300),
+              reconciledAt: admin.firestore.FieldValue.serverTimestamp(),
+              skippedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            stats.reconciled++;
+            bump(stats.skippedTerminal, SUPERSEDED_BY_START_REASON);
+            if (observed) {
+              await observers.scorecard(uid, jobEventId as string, {
+                [`${jobSeq}.state`]: "skipped",
+                [`${jobSeq}.outcome`]: SUPERSEDED_BY_START_REASON,
+                [`${jobSeq}.superseded_by`]: sup.by,
+              });
+            }
+            continue;
+          }
+        }
         if (retry.retry && retry.nextFireAtMs !== undefined) {
           const nextFireAtMs = retry.nextFireAtMs;
           // Transactional, and only if the job is STILL dispatched on THIS
@@ -542,7 +607,35 @@ export async function runDispatchTick(
         // Reading the config first would spend a Firestore read per tick on
         // every future job in the table to answer a question that only matters
         // for the ones about to fire.
-        const gate = await checkTeamConfigGate({ db, uid, eventId: job.eventId });
+        // An END written by the end guarantee (`endGuarantee: true`) is a
+        // restore for a house this system lit: it is exempt from the config
+        // gate, which was written for STARTS (a deleted team must not fire a
+        // new show; it must still get its old one put back). Any other end,
+        // and every start, is gated exactly as before.
+        if (job.seq === "end") {
+          const sup = await supersedingStart(uid, jobSnap);
+          if (sup) {
+            await jobSnap.ref.update({
+              state: "skipped",
+              skipReason: SUPERSEDED_BY_START_REASON,
+              supersededBy: sup.by,
+              skippedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            bump(stats.skippedTerminal, SUPERSEDED_BY_START_REASON);
+            if (GameDayObservers.isGameDayFire(job.eventId, job.seq)) {
+              await observers.scorecard(uid, job.eventId, {
+                [`${job.seq}.state`]: "skipped",
+                [`${job.seq}.outcome`]: SUPERSEDED_BY_START_REASON,
+                [`${job.seq}.superseded_by`]: sup.by,
+              });
+            }
+            continue;
+          }
+        }
+        const endGuaranteed = job.seq === "end" && jobSnap.get("endGuarantee") === true;
+        const gate = endGuaranteed
+          ? { ok: true as const }
+          : await checkTeamConfigGate({ db, uid, eventId: job.eventId });
         if (!gate.ok) {
           await jobSnap.ref.update({
             state: "skipped",
