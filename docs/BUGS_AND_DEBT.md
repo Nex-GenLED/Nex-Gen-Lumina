@@ -2854,45 +2854,100 @@ commit — merging `main` into this tree will collide with the untracked copies.
     regression snapshot are unchanged.
   - **Close when** the flag is `true` fleet-wide (deploy plan §6c). Until then the 10-05 shape
     can recur on any allowlisted account whose gate flips mid-game.
+  - **Extended the same day (`948ce7a`):** the flag now carries the whole end guarantee — the
+    sweep past every early exit (#178, #180, #161), the 90-minute budget and held command plus
+    re-minting (#179), a `failed` start counting as lit (#180). Deploy plan §0, §2, §6c, §11.
 
 - [ ] **#178 — A team disabled or deleted while its show is lit is never ended by the server**
-  - Status: **OPEN — found in the 2026-10-06 end-path audit** · Severity: **P2** · Evidence:
-    **verified-by-source**
+  - Status: **FIX BUILT `948ce7a` — behind `end_ignores_gate`; NOT deployed** · Severity: **P2** ·
+    Evidence: **verified-by-source** + **verified-by-test** (`plannerEndGuarantee.test.js`, part 3)
   - `planGameDayFires.ts` reads `game_day_autopilot` with `enabled == true`; an account with no
     enabled config takes the `configs.empty` branch and `continue`s, so a session that this
     system started is never evaluated for its end, final or cap. `teardownTeamFires` (on the
     config DELETE) cancels only still-`scheduled` jobs and writes no restore. Toggling a team
     off, or removing it, after its start fired therefore leaves the house in its colours until
     the owner acts.
-  - **Fix shape:** evaluate the END for every open session (`startPlannedAt`, no `endFiredAt`)
-    regardless of the config's `enabled`; and on a config delete, when that team's session is
-    open and its start fired, write a base-restore end instead of only cancelling.
+  - **The fix:** the per-account sweep (`sweepFiredSessionEnds`) runs for an account with no
+    enabled config too, and ends any session whose start fired from the session alone: its
+    sport, kickoff and ESPN id (looked up by id, else the clock), a base restore (`{"ps":1}`
+    after sunset, `{"ps":2}` before), never a hand-off. `teardownTeamFires` no longer retracts a
+    scheduled END (`shouldRetractForTeam` reads `seq`; unconditional). A session whose start
+    never fired is left alone (`end_sweep_start_not_fired`).
+  - **Close when** the flag is `true` fleet-wide and `teardownTeamFires` is deployed.
 
 - [ ] **#179 — An end job that exhausts its retry budget is never minted again: the session
   already says it ended**
-  - Status: **OPEN — found in the 2026-10-06 end-path audit** · Severity: **P2** · Evidence:
-    **verified-by-source**
+  - Status: **FIX BUILT `948ce7a` — behind `end_ignores_gate`; NOT deployed** · Severity: **P2** ·
+    Evidence: **verified-by-source** + **verified-by-test** (`plannerEndGuarantee.test.js` part 2,
+    `dispatchHoldUntil.test.js`, `endGuarantee.test.js`)
   - The planner sets `endFiredAt` when it CREATES the end job, and GUARD 3 (`already_fired`)
     then refuses every later end for that session. The dispatcher retries an end for 15 minutes
     (`END_RETRY_WINDOW_MS`); after `retry_budget_exhausted` the job is terminal `expired` or
     `failed` and nothing re-mints it. A bridge silent for more than 15 minutes at the final (the
     #174 dead-bridge case, or a longer #171 gap) strands the house in team colours.
-  - **Fix shape:** on a tick where the session has `endFiredAt` and the end job is terminal and
-    not `completed`, mint a new end (`_end_2`, same restore payload, a fresh 15-minute budget)
-    and record it; or make the planner, not the dispatcher, own the end's retry.
+  - **The fix, three parts.** (1) The end's budget is 90 minutes (`END_RETRY_WINDOW_GUARANTEED_MS`;
+    15 as shipped): the known write gap is ~10 min, a power-cycle a few, an ISP outage tens of
+    minutes, and a late base restore costs nothing (an identical-state preset load is visually
+    silent; the only thing it changes is how long the colours stay up, which is the defect). (2)
+    The end job carries `holdUntil` = that budget; the dispatcher sets the command's `expiresAt`
+    there, and the sweeper honours an explicit `expiresAt`, so the command stays pickable and a
+    bridge back an hour later runs it at once (the bridge checks no expiry). (3) A job that still
+    goes terminal without completing is re-minted by the planner (`gameDayPlanning.decideEndRemint`:
+    `<event>_end_r<n>`, six at most, ten minutes apart, within twelve hours of kickoff; the
+    session carries `endJobId`, `endRemints`, `endRemintedAt`).
+  - **Residual:** past the ceiling the house waits for the bridge to run the last held command,
+    or for the owner. A held command occupies the controller's one in-flight slot (#181).
+  - **Close when** the flag is `true` fleet-wide and `dispatchFireJobs` is deployed.
 
 - [ ] **#180 — Three narrower ways a lit house is not ended: a `failed` start, a vanished
   controller document, and unusable participation facts (#161)**
-  - Status: **OPEN — recorded from the 2026-10-06 end-path audit** · Severity: **P3** ·
-    Evidence: **verified-by-source**
+  - Status: **FIX BUILT `948ce7a` — behind `end_ignores_gate`; NOT deployed** · Severity: **P3** ·
+    Evidence: **verified-by-source** + **verified-by-test** (`plannerEndGuarantee.test.js`, part 1)
   - A start job the bridge reported `failed` (WLED refused it, or a stuck termination) reads as
     never fired, so no end follows; a refusal after a partial apply leaves whatever was applied.
   - A controller document that disappears mid-game takes the `no_controller` branch and
     `continue`s before the end is evaluated.
   - Participation facts that become unusable mid-game `continue` before the end (#161).
-  - **Fix shape:** for a session with `startPlannedAt`, skip only the START on these and let
-    the END path run; treat a `failed` start as fired for the purpose of a base restore (an
-    identical-state preset load is visually silent).
+  - **The fix:** `startJobMayHaveLit` (dispatched, completed OR failed) replaces GUARD 0b's test
+    under the flag; the sweep ends a session whose controller document is gone (targeting the
+    controller the start lit) or whose participation facts are unusable, with the base restore.
+    The daylight rule is covered the same way. The END path itself was not moved: the loop's
+    early exits stand (byte-identical with the flag absent) and the sweep runs after the loop,
+    so a session the loop decided keeps that decision.
+  - **Close when** the flag is `true` fleet-wide. #161's own fix shape (let the END run on the
+    participation exit) remains the cleaner long-term form.
+
+- [ ] **#181 — A held end command occupies the controller's one in-flight slot for up to 90
+  minutes**
+  - Status: **OPEN — a stated trade of the end guarantee (`948ce7a`)** · Severity: **P3** ·
+    Evidence: **verified-by-source** (`controllerHealth.hasInFlightCommand`: a `pending` command
+    is never age-capped, by design)
+  - With `end_ignores_gate` on, an end command written while the bridge is away stays `pending`
+    until its `expiresAt` (= the 90-minute budget). The dispatcher dispatches nothing else for
+    that controller while it is pending: a start for a second game on the same controller, or a
+    P6 probe, waits behind it. When the bridge returns it runs the restore first, then the next
+    fire — the right order. A dead bridge would have fired neither. The cost is only to a start
+    due inside the hold whose bridge comes back late: it fires late, within its own retry budget,
+    or `too_late` past kickoff + 15 min.
+  - **Fix shape:** let the dispatcher replace a held end command with a newer fire for the same
+    controller by writing the two as one ordered batch, or let the bridge accept an ordered pair.
+
+- [ ] **#182 — The sweep restores base without the hierarchy, and never reaches a session older
+  than twelve hours**
+  - Status: **OPEN — stated limits of the end guarantee (`948ce7a`)** · Severity: **P3** ·
+    Evidence: **verified-by-source** (`sweepFiredSessionEnds`)
+  - The sweep ends from the session alone, so it knows nothing of the account's other teams: it
+    never hands the house to a still-live lower team (that team's start stays gated) and never
+    suppresses for a higher lit team (`end:not_owner`). With two lit teams and one of them
+    disabled mid-game, the swept end restores base under the other team's colours. The loop's
+    full logic still applies to every session it can reach.
+  - The sweep reads sessions whose `gameStartMs` is within the last twelve hours
+    (`END_REMINT_HORIZON_MS`, the same bound as the tracked-session query). An older session with
+    no completed end — the 10-05 one, for instance — is never touched; the owner closes it by
+    hand (set `endFiredAt`, or leave it: it is inert).
+  - **Fix shape:** give the sweep the account's windows (the pre-pass already builds them) and
+    reuse `outrankedBy`/`handoffWinner`; and a one-off admin script to close pre-guarantee
+    sessions.
 
 - [ ] **#107 — installer wizard has NO back/previous navigation; any input error forces a
   full restart**
