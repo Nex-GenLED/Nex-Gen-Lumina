@@ -1,0 +1,723 @@
+IN-APP HELP / INSTRUCTIONAL COPY INVENTORY — C:\Flutter Projects\lumina-docs-overhaul @ c283d62 (read-only; all paths relative to lib/)
+Format: file:line | widget/screen | audience | summary | KEY STRING. Strings that span several Dart literals are joined into one string. "$x" is a runtime value. "[…]" means I shortened it. Email, phone, IP and credential values are withheld (see section S3).
+
+======================================================================
+A. HELP CENTER / FAQ / SUPPORT / CONTACT / VERSION
+======================================================================
+features/site/help_center_screen.dart:35 | HelpCenterScreen (/settings/help) | customer | App-bar title | KEY STRING: "Help Center"
+features/site/help_center_screen.dart:39 | HelpCenterScreen | customer | Section header | KEY STRING: "Troubleshooting & FAQ"
+features/site/help_center_screen.dart:12 | FAQ #1 | customer | Lights not responding | KEY STRING: "Lights are not responding." -> "Ensure controller is powered (green LED). Try unplugging for 10 seconds to reboot."
+features/site/help_center_screen.dart:16 | FAQ #2 | customer | Resetting Wi-Fi. The menu path it names does not exist in the app. | KEY STRING: "How to reset Wi-Fi?" -> "Go to Device Setup > Select Controller > Wi-Fi Settings. You may need to connect to the controller's AP (Lumina-XXXX) first."
+features/site/help_center_screen.dart:20 | FAQ #3 | customer | Cutting strips | KEY STRING: "Can I cut the strips?" -> "Yes, at the copper pads marked with cut lines. Ensure power is off first."
+features/site/help_center_screen.dart:24 | FAQ #4 | customer | Schedule did not run. Hardware Config has no Time & Macro section (that setting is in the controller's web UI). | KEY STRING: "Schedule didn't run." -> "Check 'Time & Macro' settings in Hardware Config to ensure your time zone is correct."
+features/site/settings_page.dart:445 | _SupportResourcesCard (expandable) | customer | Card header | KEY STRING: "Support & Resources"
+features/site/settings_page.dart:463 | Support tile | customer | Opens the contact sheet | KEY STRING: "Contact Nex-Gen Support" / "Email us or submit an in-app request."
+features/site/settings_page.dart:472 | FAQ tile -> /settings/help | customer | Self-serve help | KEY STRING: "Troubleshooting & FAQ" / "Self-serve solutions for common issues."
+features/site/settings_page.dart:481 | Video tile -> external YouTube | customer | Tutorials link | KEY STRING: "Video Tutorials" / "Step-by-step guides for creating patterns and scheduling."
+features/site/settings_page.dart:766 | _TakeTourTile | customer | Restarts the feature tour overlay | KEY STRING: "Take the Tour" / "Learn about all Lumina features."
+features/site/settings_page.dart:795 | _WelcomeTutorialTile -> /welcome | customer | Re-runs the permissions wizard | KEY STRING: "Welcome Tutorial" / "Review app permissions and initial setup."
+features/site/settings_page.dart:511 | Privacy tile (external URL :514) | customer | Privacy link | KEY STRING: "Privacy Policy"
+features/site/settings_page.dart:377 | _openSupportSheet | customer | Contact sheet title | KEY STRING: "Contact Nex-Gen Support"
+features/site/settings_page.dart:382 | Support sheet "Email Us" | customer | Shows the corporate email constant and opens mailto with subject "Nex-Gen Support Request" (:385). Always corporate, never the dealer. | KEY STRING: "Email Us" + Text(kNexGenCorporateEmail) [value withheld]
+features/site/settings_page.dart:392 | Support sheet | customer | In-app request entry | KEY STRING: "Submit Support Request" / "Send a request without email"
+features/site/settings_page.dart:1445 | SupportRequestFormSheet | customer | Form intro | KEY STRING: "Prefer not to email? Send your request here, and our team will follow up."
+features/site/settings_page.dart:1466 | SupportRequestFormSheet | customer | Category options (:1466-1469) | KEY STRING: "Technical issue" / "Billing" / "Feature request" / "Other"
+features/site/settings_page.dart:1417 | SupportRequestFormSheet | customer | Success snackbar | KEY STRING: "Support request submitted. We'll be in touch soon."
+features/site/settings_page.dart:1477 | SupportRequestFormSheet | customer | Validators (:1477, :1485) | KEY STRING: "Subject is required" / "Message is required"
+features/site/settings_page.dart:423 | _safeLaunch | customer | Link-open failures (:423, :426) | KEY STRING: "Could not open link" / "Failed to launch: $e"
+features/site/settings_page.dart:631 | _VersionTile | customer | HARD-CODED version. It does not read kAppVersion. | KEY STRING: "Version 1.6.0" / "Build 2026.01"
+features/auth/login_page.dart:544 | Login footer | customer | Version from app_version.dart. It disagrees with Settings. | KEY STRING: "v$kAppVersionName" (renders v2.5.10)
+app_version.dart:22 | kAppVersion | internal | Version source of truth | KEY STRING: "2.5.10+116"
+features/site/settings_page.dart:605 | _VersionTile installer exit | installer | Exit affordance | KEY STRING: "Installer Mode Active" / "Tap to exit installer mode"
+features/site/settings_page.dart:675 | _SalesModeEntry | installer | Sales-mode exit | KEY STRING: "Sales Mode Active" / "Tap to exit sales mode"
+features/site/settings_page.dart:702 | Footer (:702, :739) | customer | Branding | KEY STRING: "Powered by Nex-Gen" / "© 2026 Nex-Gen Lighting Systems"
+features/auth/support_contact.dart:14 | kNexGenCorporatePhone/Email/Website (:14-16) | customer | Single source for corporate contact | KEY STRING: [phone withheld] / [email withheld] / "Nex-GenLED.com"
+features/auth/support_contact.dart:57 | kNexGenCorporateContact / dealerContactFromProfile (:73) | customer | Contact name fallbacks | KEY STRING: "Nex-Gen LED" / "Your Nex-Gen dealer"
+features/auth/link_account_screen.dart:21 | LinkAccountScreen.explanation | customer | Why the account is not linked | KEY STRING: "Your account isn't linked to a lighting system yet.\n\nNex-Gen LED systems are installed by a professional, and your installer links your account when […]"
+features/auth/link_account_screen.dart:258 | Contact card header | customer | Dealer or corporate contact | KEY STRING: "Finding your installer…" / "Your installer" / "Get in touch"
+features/auth/link_account_screen.dart:295 | Contact card (corporate fallback) | customer | Hint text | KEY STRING: "Ask about a system for your home, or about linking an account for lights you already have."
+features/auth/link_account_screen.dart:317 | Contact buttons (:317, :342, :355) | customer | tel / mailto / web | KEY STRING: "Call ${c.phone}" / "Email ${c.email}" / "Visit ${c.website}"
+features/auth/link_account_screen.dart:233 | Contact launch failure | customer | Error | KEY STRING: "Couldn't open that. Reach them at $shown."
+features/auth/link_account_screen.dart:118 | Invite entry | customer | Family-member join | KEY STRING: "Joining a family member's system? Enter your invitation code"
+features/auth/link_account_screen.dart:147 | Professional access (:147, :172) | installer | Staff entry | KEY STRING: "Nex-Gen Professional Access" / "Installer"
+features/auth/link_account_screen.dart:388 | Demo prompt (:388-417) | customer | Demo offer | KEY STRING: "Just looking?" / "Try the demo: a sample house you can light up, no system […]" / "Explore the demo"
+features/site/lumina_studio_screen.dart:276 | LuminaStudioScreen quote step | customer | Explains the quote email (mailto dealer, else corporate, :77) | KEY STRING: "We will open your email client to send details to your dealer. A copy of your request is also stored in the app."
+features/site/settings_page.dart:955 | _GrowthCard (:955, :967) | customer | Referral and store | KEY STRING: "Refer a Friend" / "Share Lumina and earn rewards." / "Shop Nex-Gen Store" / "Design upgrades in the virtual showroom."
+features/site/referral_program_screen.dart:420 | Referral disclosure | customer | Reward terms | KEY STRING: "Referral rewards are subject to approval by your local Nex-Gen dealer. Visa gift card rewards are limited to $599 per calendar year per participant. […]"
+features/site/referral_program_screen.dart:105 | SMS share body | customer | Referral link text | KEY STRING: "Check out Lumina Lighting. Use my code $code for a discount! https://nex-genled.com/r/$code"
+features/site/referral_program_screen.dart:297 | Referral empty states (:297, :395) | customer | Empty states | KEY STRING: "No referrals yet. Share your code to get started." / "Rewards appear here after your referral's install is complete"
+(aggregate) "contact support" copy with no in-flow link | customer | Sites: schedule/widgets/ladder_repair_banner.dart:74,83; schedule/schedule_sync.dart:1142,1420,1855,2496; services/account_deletion_service.dart:190; installer/installer_setup_wizard.dart:891,910,916,926,1450; installer/media_access_code_screen.dart:345 | KEY STRING: "contact support" (no link; the only contact UI is Settings > Support & Resources and the Link Account card)
+
+======================================================================
+B. VOICE ASSISTANTS (Alexa / Google / Siri / Home Assistant)
+======================================================================
+features/site/settings_page.dart:857 | _VoiceAssistantsCard -> /settings/voice-assistants | customer | Entry card with a permanent "New" badge (:871) | KEY STRING: "Voice Assistants" / "Set up Siri, Google, or Alexa control"
+features/voice/voice_assistant_guide_screen.dart:26 | VoiceAssistantGuideScreen | customer | Title | KEY STRING: "Voice Assistants"
+features/voice/voice_assistant_guide_screen.dart:87 | Hero | customer | Headline | KEY STRING: "Control Your Lights with Voice"
+features/voice/voice_assistant_guide_screen.dart:93 | Hero | customer | Example phrases | KEY STRING: "Say \"Hey Siri, set my lights to game day mode\" or \"Alexa, turn on the house lights\"."
+features/voice/voice_assistant_guide_screen.dart:134 | Siri card (:134-155) | customer | Header and badge | KEY STRING: "Siri Shortcuts" / "Recommended for iPhone" | "For iPhone users" / "Built-in"
+features/voice/voice_assistant_guide_screen.dart:169 | Siri card (secondary, shown on Android) | customer | Cross-platform note | KEY STRING: "Siri Shortcuts are available on iOS devices. If you have an iPhone, open the app there to set up Siri voice commands."
+features/voice/voice_assistant_guide_screen.dart:176 | Siri step 1 | customer | How-to | KEY STRING: "Save Your Scenes" — "Go to Explore Patterns and save your favorite lighting setups as scenes."
+features/voice/voice_assistant_guide_screen.dart:182 | Siri step 2 | customer | How-to | KEY STRING: "Add to Siri" — "Tap the \"Add to Siri\" button on any scene to record a custom voice phrase."
+features/voice/voice_assistant_guide_screen.dart:188 | Siri step 3 | customer | How-to | KEY STRING: "Use Your Voice" — "Say \"Hey Siri, [your phrase]\" to activate the scene instantly."
+features/voice/voice_assistant_guide_screen.dart:217 | Siri scenes empty state (:196 "Your Scenes"; :235 error) | customer | Empty state | KEY STRING: "Save some scenes first to add them to Siri." / "Could not load scenes"
+features/voice/voice_assistant_guide_screen.dart:253 | Siri tip | customer | Tip | KEY STRING: "Tip: Use short, memorable phrases like \"Game day\" or \"Movie time\"."
+features/voice/voice_assistant_guide_screen.dart:299 | Google card header (badges "Linked" :322, "Pending" :337) | customer | Header | KEY STRING: "Google Home" / "Smart Home Action"
+features/voice/voice_assistant_guide_screen.dart:361 | Google card (secondary, shown on iOS) | customer | Summary | KEY STRING: "Google Home works with any device that has Google Assistant. Link your account to control lights from any Google Home speaker or the app."
+features/voice/voice_assistant_guide_screen.dart:396 | Google linked state (buttons "Sync Devices" :410, "Unlink" :439) | customer | Confirmation | KEY STRING: "Google Home is connected! Control your lights from any Google Assistant device."
+features/voice/voice_assistant_guide_screen.dart:419 | Unlink Google dialog | customer | Unlink instructions | KEY STRING: "Unlink Google Home?" / "You can re-link at any time. You should also unlink in the Google Home app."
+features/voice/voice_assistant_guide_screen.dart:454 | Google steps 1-3 (repeated in the error state :557-570) | customer | How-to. Assumes a published "Nex-Gen Lumina" Works-with-Google action. | KEY STRING: "Open the Google Home app on your phone." / "Tap + → Set up device → Works with Google → Search for \"Nex-Gen Lumina\"." / "Sign in with your Lumina account to connect."
+features/voice/voice_assistant_guide_screen.dart:475 | Google link button | customer | CTA | KEY STRING: "Link Google Home"
+features/voice/voice_assistant_guide_screen.dart:497 | Google pending | customer | Status | KEY STRING: "Linking in progress. Complete the setup in the Google Home app."
+features/voice/voice_assistant_guide_screen.dart:511 | Android App Shortcuts box (:511-540) | customer | Alternative | KEY STRING: "Quick Alternative (Android)" / "App Shortcuts" / "Long-press the Lumina app icon to access quick shortcuts without linking. You can also say \"Hey Google, turn on the lights in Lumina\"."
+features/voice/voice_assistant_guide_screen.dart:612 | Alexa card header | customer | Header | KEY STRING: "Amazon Alexa" / "Smart Home Skill"
+features/voice/voice_assistant_guide_screen.dart:703 | Alexa linked state (buttons "Rediscover Devices" :717, "Unlink" :746) | customer | Confirmation | KEY STRING: "Alexa is connected! Your lights and scenes are ready to control."
+features/voice/voice_assistant_guide_screen.dart:726 | Unlink Alexa dialog | customer | Unlink instructions | KEY STRING: "Unlink Alexa?" / "You can re-link at any time. You should also disable the skill in the Alexa app."
+features/voice/voice_assistant_guide_screen.dart:761 | Alexa steps 1-3 (repeated in the error state :822-835) | customer | How-to | KEY STRING: "Enable the Skill" — "Open the Alexa app and search for \"Nex-Gen Lumina\" in Skills." / "Link Your Account" — "Sign in with your Lumina account to connect." / "Discover Devices" — "Say \"Alexa, discover my devices\" to find your lights and scenes."
+features/voice/voice_assistant_guide_screen.dart:782 | Alexa link button | customer | CTA | KEY STRING: "Link Alexa Account"
+features/voice/voice_assistant_guide_screen.dart:804 | Alexa pending | customer | Status | KEY STRING: "Linking in progress. Complete the setup in the Alexa app."
+features/voice/voice_assistant_guide_screen.dart:873 | Home Assistant card (:873-928) | customer | Advanced option with a "Pro" badge | KEY STRING: "For the most advanced smart home experience, connect your lights to Home Assistant. This enables native light entity integration with full color and effect control."
+features/voice/voice_assistant_guide_screen.dart:910 | Home Assistant feature list and requirements (:910-921) | customer | Bullets | KEY STRING: "Native LED controller integration" / "Works with any voice assistant" / […] / "Raspberry Pi, NAS, or always-on computer" / "Basic technical setup (one-time)"
+features/voice/voice_assistant_guide_screen.dart:928 | Home Assistant external guide button | customer | Link (:926) | KEY STRING: "View Integration Guide"
+features/voice/alexa_service.dart:199 | getExampleCommands (the guide shows the first 3) | customer | Example phrases | KEY STRING: "Alexa, turn on the house lights" / "Alexa, turn off house lights" / "Alexa, set house lights to 50%" / "Alexa, dim the house lights" / "Alexa, turn on [scene name]"
+features/voice/google_home_service.dart:196 | getExampleCommands (the guide shows the first 3) | customer | Example phrases | KEY STRING: "\"Hey Google, turn on the house lights\"" / "\"Hey Google, turn off the lights\"" / "\"Hey Google, set the lights to 50%\"" / "\"Hey Google, dim the house lights\"" / "\"Hey Google, activate [scene name]\""
+features/voice/google_home_service.dart:32 | setupWebUrl | internal | Placeholder Google project URL. The Google action may not be real. | KEY STRING: "https://assistant.google.com/services/invoke/uid/000000YOUR_PROJECT_ID"
+features/voice/widgets/siri_button.dart:72 | SiriButton / SiriShortcutCard (:72, :85, :141, :149, :162, :192) | customer | Add-to-Siri UI | KEY STRING: "Add to Siri" / "Siri Shortcut" / "Activate with your voice" / "\"Hey Siri, ${scene.name}\"" / "Siri"
+features/voice/widgets/siri_button.dart:44 | SiriButton success | customer | Snackbar | KEY STRING: "Added \"${widget.scene.name}\" to Siri!"
+features/voice/siri_shortcut_service.dart:41 | Siri donations (:41, :58-60, :84) | customer | Suggested phrases | KEY STRING: "Set lights to ${scene.name}" / "Turn on my lights" / "Turn off my lights" / "Set lights to $colorName"
+features/voice/dashboard_voice_control.dart:60 | Dashboard voice fallback | customer | Hint on no match | KEY STRING: "I didn't understand \"$command\". Try saying \"Turn on\", \"Warm white\", or \"Turn off at 10pm\"."
+features/voice/dashboard_voice_control.dart:301 | Voice timer | customer | Time-phrase hint (:301, :314) | KEY STRING: "I couldn't understand the time. Try saying \"Turn off at 10pm\"" / "✓ I'll $action at $timeStr. You can edit this in the Schedule tab."
+features/voice/dashboard_voice_control.dart:428 | Voice scenes (:428, :435, :444, :450) | customer | Scene hints | KEY STRING: "No scenes found. Create scenes in the Explore tab." / "I couldn't understand which scene to apply. Try saying \"Turn on Christmas\""
+features/voice/dashboard_voice_control.dart:181 | Voice errors (:181, :202, :238, :278) | customer | No controller or unreachable | KEY STRING: "No controller connected" / "I couldn't reach your lights — warm white wasn't applied"
+features/installer/handoff_screen.dart:544 | Handoff Simple-mode features | installer | Mentions voice | KEY STRING: "Voice assistant setup guides"
+
+======================================================================
+C. ONBOARDING / WELCOME / FIRST RUN / TOUR / DEMO
+======================================================================
+features/permissions/welcome_wizard.dart:175 | WelcomeWizardPage (/welcome) | customer | Title | KEY STRING: "Welcome"
+features/permissions/welcome_wizard.dart:182 | Network step | customer | Permission rationale | KEY STRING: "Local Network Access" — "To find your Nex-Gen Controller, we need access to your local network.\n\nAndroid: We request Location and Nearby Wi‑Fi.\niOS: You'll see a Local Network prompt when we start discovery."
+features/permissions/welcome_wizard.dart:192 | Camera step | customer | Permission rationale | KEY STRING: "Camera Access" — "To map your home for effects, we use the camera in AR." / "Grant Camera"
+features/permissions/welcome_wizard.dart:139 | Permission errors (:139, :156) | customer | Errors | KEY STRING: "Failed to request network permissions" / "Failed to request camera permission"
+features/onboarding/first_run_screen.dart:190 | FirstRunScreen (/first-run) | customer | Greeting | KEY STRING: "Welcome to Lumina, $firstName!"
+features/onboarding/first_run_screen.dart:203 | First run intro | customer | Where to turn on Autopilot | KEY STRING: "Your lights are ready to go. Autopilot can take over your schedule with seasonal themes, game day colors, and holiday displays — turn it on with the […]"
+features/onboarding/first_run_screen.dart:231 | First run password help | customer | Reset link | KEY STRING: "Forgot password? Send reset email"
+features/onboarding/first_run_screen.dart:337 | Location step (:337-376) | customer | Location rationale | KEY STRING: "Welcome Home Detection" — "Lumina uses your location to detect when you're on your home WiFi network — this lets your app control lights locally without going through the cloud, […]"
+features/onboarding/first_run_screen.dart:410 | Location skipped | customer | Consequence | KEY STRING: "Some features like home network detection won't work without location access. You can enable it later in Settings."
+features/onboarding/first_run_screen.dart:438 | Location denied dialog | customer | How to re-enable | KEY STRING: "Location Permission Disabled" / "You've previously denied location access. To enable home network detection and Welcome Home automation, open Settings and grant location access."
+features/onboarding/first_run_screen.dart:488 | Completion | customer | Wrap-up and where things live | KEY STRING: "You're all set!" / "Your installer has set up your preferences. You can adjust them from the System tab, and turn on Autopilot with the switch on the Lumina AI card in the Schedule tab […]"
+features/onboarding/feature_tour.dart:479 | Tour step "welcome" | customer | Tour copy | KEY STRING: "Welcome to Lumina" — "Let's take a quick tour of your new lighting control system. This will only take a minute and will help you get the most out of your premium outdoor lighting."
+features/onboarding/feature_tour.dart:490 | Tour step "power" | customer | Tour copy | KEY STRING: "Power Control" — "Tap the power button to turn your lights on or off instantly. The button glows cyan when your system is on."
+features/onboarding/feature_tour.dart:500 | Tour step "brightness" | customer | Tour copy | KEY STRING: "Brightness Slider" — "Drag the brightness slider to adjust the intensity of your lights. Changes apply in real-time so you can find the perfect level."
+features/onboarding/feature_tour.dart:512 | Tour step "favorites" | customer | Favorites how-to | KEY STRING: "My Favorites" — "Your favorite looks live under My Favorites on Home. Tap one to put it on your lights.\n\nTo add a look, tap the heart on it in Explore."
+features/onboarding/feature_tour.dart:523 | Tour step "design_studio" | customer | Tour copy | KEY STRING: "Design Studio" — "Create your own custom lighting designs with precise per-LED color control. Paint colors directly onto your light strips, choose effects, and save your creations."
+features/onboarding/feature_tour.dart:533 | Tour step "zone_control" | customer | Tour copy | KEY STRING: "Lighting Areas" — "Fine-tune individual lighting areas around your home. Adjust colors, effects, speed, and intensity for each area independently."
+features/onboarding/feature_tour.dart:543 | Tour step "schedule" | customer | Tour copy | KEY STRING: "Smart Scheduling" — "Set up automatic schedules so your lights turn on and off at the right times. Supports sunrise/sunset timing that adjusts throughout the year."
+features/onboarding/feature_tour.dart:553 | Tour step "lumina_ai" | customer | AI example prompts | KEY STRING: "Meet Lumina" — "Your AI lighting assistant. Just tell Lumina what you want:\n\n\"Set my lights to Chiefs colors\"\n\"Make it look like Christmas\"\n\"Something warm and relaxing\"[…]"
+features/onboarding/feature_tour.dart:567 | Tour step "channels" | customer | Channel chips how-to | KEY STRING: "Choose Your Channels" — "The channel chips on Home choose which parts of your roofline a change goes to. Leave them all selected to change the whole house, or pick one to change just […]"
+features/onboarding/feature_tour.dart:578 | Tour step "complete" | customer | Tour copy | KEY STRING: "You're All Set!" — "You now know the essentials of controlling your Lumina lighting system. Explore the app to discover more features, and remember - Lumina AI is always here to help.[…]"
+features/onboarding/feature_tour.dart:391 | Tour chrome (:391, :436, :448, :461, :607-611) | customer | Navigation | KEY STRING: "Step ${stepIndex + 1} of $totalSteps" / "Skip Tour" / "Back" / "Get Started" | "Next" / "Take the Tour" / "Learn about all Lumina features"
+features/ble/controller_setup_wizard.dart:117 | ControllerSetupWizard (/setup/wizard) | customer | BLE setup intro (:117-139) | KEY STRING: "Let's Connect Your System." / "Ensure your Nex-Gen Controller is powered on and you are within 10 feet." / "Start Scanning"
+features/ble/controller_setup_wizard.dart:70 | Permissions dialog (:70-87) | customer | Why Bluetooth/Location | KEY STRING: "Bluetooth is required to discover your Nex-Gen Controller." / "Location helps with Bluetooth scanning and nearby device discovery."
+features/autopilot/screens/first_week_reveal_screen.dart:142 | FirstWeekRevealScreen (:142, :166, :175, :284) | customer | Autopilot reveal | KEY STRING: "Tap any block to review or edit it." / "Building your schedule…" / "Looks Good! Activate Autopilot"
+features/whites/preferred_white_selection_page.dart:143 | Whites onboarding (:143-205) | customer | Choosing a preferred white | KEY STRING: "How do you like your whites?" / "Most homes run white lighting daily — let's make sure yours looks exactly right." / "Tap a swatch to preview on your lights."
+features/demo/demo_welcome_screen.dart:135 | DemoWelcomeScreen (/demo) | customer | Demo intro (:135-156) | KEY STRING: "See how the Lumina app transforms your home with permanent smart LED lighting."
+features/demo/demo_code_screen.dart:181 | DemoCodeScreen | customer | Code guidance (:98, :181, :283; link :292) | KEY STRING: "Get your code from a Nex-Gen LED specialist" / "Invalid code — ask your Nex-Gen specialist for a valid code" / "Don't have a code? Request a consultation at"
+features/demo/demo_photo_screen.dart:317 | DemoPhotoScreen | customer | Photo tip (:143, :317) | KEY STRING: "Tip: For best results, capture your home's roofline during daylight from across the street."
+features/demo/demo_roofline_screen.dart:130 | DemoRooflineScreen | customer | Approximation disclaimer | KEY STRING: "This is an approximation. In the full app, a Nex-Gen […]"
+features/demo/demo_profile_screen.dart:239 | DemoProfileScreen | customer | Privacy note | KEY STRING: "Your information is secure and will only be used to help you get started with Nex-Gen lighting."
+features/demo/demo_completion_screen.dart:145 | DemoCompletionScreen (:145, :310) | customer | What happens next | KEY STRING: "A Nex-Gen lighting specialist will contact you within 24 hours."
+features/demo/widgets/demo_scaffold.dart:143 | Exit-demo dialog | customer | Exit note | KEY STRING: "Your progress will not be saved. You can always start the demo again from the login screen."
+features/dashboard/main_scaffold.dart:353 | Demo banner and CTA (:353-467) | customer | Demo mode | KEY STRING: "Demo mode — simulated lighting" / "Ready for your own lights?" / "Talk to a Nex-Gen dealer about your home" / "Request a free consultation"
+
+======================================================================
+D. WHY AN APPLY IS BLOCKED / CONNECTION / RECONNECT / ERROR COPY
+======================================================================
+shared/apply_blocked_reason.dart:86 | ApplyBlock.noController | customer | Blocked reason | KEY STRING: "No controller is set up yet. Add your controller in Settings to control your lights."
+shared/apply_blocked_reason.dart:94 | ApplyBlock.offline | customer | Blocked reason | KEY STRING: "Your phone is offline. Connect to Wi-Fi or mobile data and try again."
+shared/apply_blocked_reason.dart:66 | ApplyBlock.noBridge = kNoBridgeAwayMessage (used :105) | customer | Away from home, no bridge | KEY STRING: "You're away from home. Control from anywhere requires a Lumina Bridge. Connect to your home Wi-Fi to control your lights."
+shared/apply_blocked_reason.dart:110 | ApplyBlock.remoteNotSetUp | customer | Blocked reason | KEY STRING: "You're away from home and remote access isn't set up for this controller. Connect to your home Wi-Fi, or set up Remote Access in Settings."
+shared/apply_blocked_reason.dart:117 | ApplyBlock.connecting | customer | Transient | KEY STRING: "Still connecting to your lights. Try again in a moment."
+shared/apply_blocked_reason.dart:129 | ApplyBlock.channelsLoading (remote :129, local :130) | customer | Transient | KEY STRING: "Still getting your channels from home. Try again in a moment." / "Still reading your controller. Try again in a moment."
+shared/apply_blocked_reason.dart:136 | ApplyBlock.homeNotAnswering | customer | Blocked reason | KEY STRING: "Couldn't reach your home from here, so your lights weren't changed. Check that your bridge and controller are powered on and online, then try again."
+shared/apply_blocked_reason.dart:142 | ApplyBlock.controllerUnreadable | customer | Blocked reason | KEY STRING: "Couldn't read your controller's channels, so your lights weren't changed. Check that it's powered on and on this Wi-Fi network."
+shared/apply_blocked_reason.dart:152 | ApplyBlock.nothingSelected | customer | Blocked reason | KEY STRING: "No channels are selected. Choose a channel on the Home screen, or switch back to All Channels."
+shared/apply_blocked_reason.dart:158 | ApplyBlock.allLeftOut | customer | Blocked reason | KEY STRING: "The selected channels are all set to be left out. Include a channel on the Home screen to control it."
+shared/apply_blocked_reason.dart:181 | kApplyBlockedFallback | customer | Fallback | KEY STRING: "Your lights weren't changed. Try again in a moment."
+features/wled/wled_providers.dart:144 | kLanOnlyMessage. Commercial wording, but it is also shown at system_management_screen.dart:480 for homes. | customer | LAN-only control disabled | KEY STRING: "Connect to venue Wi-Fi to change hardware settings"
+features/wled/wled_providers.dart:172 | kLanUnreachableMessage | customer | On LAN but controller unreachable | KEY STRING: "Can't reach your controller on this network"
+features/wled/wled_providers.dart:2176 | _kUnreachableMessage | customer | Write failed | KEY STRING: "Couldn't reach your lights — check your connection"
+features/wled/wled_providers.dart:2233 | DDP streaming block | customer | Blocked write | KEY STRING: "Your lights are showing a live stream right now, so this change wasn't sent."
+services/bridge_pairing.dart:227 | relayUnreachableMessage | customer | Stale bridge named as the cause | KEY STRING: "Your Lumina Bridge hasn't checked in for ${describeAge(age)}. Check that it's powered on and online at home."
+features/dashboard/wled_dashboard_page.dart:135 | kNowPlayingUnreachable + "Reconnect" button (:1790) | customer | Now Playing bar | KEY STRING: "Can't reach your lights" / "Reconnect"
+features/dashboard/wled_dashboard_page.dart:444 | No-controller MaterialBanner (:444-462) | customer | Empty state | KEY STRING: "No controller is set up yet. Set one up to control your lights." / "Set Up Controller"
+features/dashboard/wled_dashboard_page.dart:731 | Hero state label | customer | Status | KEY STRING: "Syncing..." | "Last Known State"
+features/dashboard/wled_dashboard_page.dart:1472 | Tonight row empty | customer | Empty state | KEY STRING: "No schedule — tap to add one"
+features/dashboard/wled_dashboard_page.dart:780 | No-home empty | customer | Empty state | KEY STRING: "Add Your Home"
+widgets/connection_status_indicator.dart:515 | Connection status sheet titles (:515-525; chips :255-285) | customer | State table | KEY STRING: "Excellent Connection" / "Good Connection" / "Slow Connection" / "Reconnecting..." / "System Offline" / "Connected via Cloud"
+widgets/connection_status_indicator.dart:533 | Description: excellent/good | customer | Explains state | KEY STRING: "Your lighting system is responding normally. Commands will be applied instantly."
+widgets/connection_status_indicator.dart:535 | Description: slow | customer | Explains state | KEY STRING: "Connection is slower than usual. Commands may take a moment to apply. Check your WiFi signal strength."
+widgets/connection_status_indicator.dart:537 | Description: reconnecting | customer | Explains state | KEY STRING: "Temporarily lost connection to your lighting system. Attempting to reconnect automatically."
+widgets/connection_status_indicator.dart:539 | Description: offline | customer | Explains state | KEY STRING: "Cannot reach your lighting system. Check that your controller is powered on and connected to WiFi."
+widgets/connection_status_indicator.dart:541 | Description: cloud | customer | Explains state | KEY STRING: "You're connected via cloud relay. Commands are sent securely through the internet."
+widgets/connection_status_indicator.dart:380 | Sheet rows (:380-436) | customer | Details | KEY STRING: "Mode" Cloud Relay | Direct (Local) / "System State" Responsive | Not Responding / "Retry Connection"
+features/wled/device_write_reporter.dart:34 | DeviceWriteReporter | customer | Reconnect and lost-reach messages | KEY STRING: "Reconnected — your lights are following the $what again." / "Can't reach your lights — they are NOT showing this $what."
+shared/controller_targeting.dart:118 | Multi-controller partial failure | customer | Error | KEY STRING: "Couldn't reach your other controller" / "Couldn't reach $missed of your other $total controllers"
+features/wled/pattern_tweak_sender.dart:21 | kAdjustmentFailedMessage | customer | Error | KEY STRING: "Your lights didn't take that change — check your connection and try again."
+features/wled/pattern_tweak_sender.dart:31 | directionLanOnlyMessage | customer | Direction is LAN-only | KEY STRING: "Direction can only be changed on the venue's Wi-Fi." | "Direction can only be changed when your phone is on your home Wi-Fi."
+widgets/pattern_adjustment_panel.dart:736 | kTurnOnFailedMessage + LightsOffNotice (:764, :772) | customer | Controls disabled while lights are off | KEY STRING: "Couldn't turn your lights on — check your connection." / "Your lights are off. Turn them on to adjust them." / "Turn on"
+features/dashboard/widgets/route_path_badge.dart:30 | RoutePathBadge (:30-31, :52, :104-115) | customer | How the last command was routed | KEY STRING: "Last command went directly to your controller" / "Last command went through the bridge" / "Direct" | "Via Bridge" / "Command routing"
+features/dashboard/widgets/channel_selector_bar.dart:184 | Channel bar (:184-185, :236, :256, :409, :445) | customer | Channel scope state | KEY STRING: "All $zoneTerm · ${n} of $totalCount in shows" / "CACHED — UNREACHABLE" / "FILTERED" / "All Channels On"
+features/dashboard/widgets/channel_selector_bar.dart:537 | Left-out channel sheet (:537-575, :494, :606) | customer | Explains channel exclusion | KEY STRING: "Patterns, colours and designs skip this channel — including when you apply to All Zones. Its power switch still works."
+features/dashboard/widgets/channel_selector_bar.dart:547 | Left-out channel sheet (buttons "Include in Shows" / "Leave it out") | customer | Why the channel is excluded | KEY STRING: "This came from your roofline design, where this channel has no primary run. If it should be in your shows, include it here."
+features/wled/hardware_config_screen.dart:253 | Hardware config off-LAN | customer | LAN-only | KEY STRING: "LED hardware settings can only be changed on your home WiFi. Connect to the same network as your controller and try again."
+features/game_day/game_day_screen.dart:537 | Light Up Now failure (:537, :609) | customer | LAN wording | KEY STRING: "Controller not connected. Make sure you are on the same WiFi as your controller."
+features/schedule/schedule_sync.dart:1021 | Schedule sync unreachable | customer | LAN wording | KEY STRING: "Controller not reachable. Make sure you are on the same WiFi as your controller."
+features/design/find_led.dart:61 | Find LED (:61-72) | customer/installer | Results | KEY STRING: "LED $requested is lit red (Channel …" / "Not connected to a controller — can't light LED $requested."
+NO POWER-OUTAGE COPY: no string anywhere in lib/ mentions an outage or lost power. The nearest are help_center_screen.dart:13 ("unplugging for 10 seconds to reboot") and the reconnect copy above.
+
+======================================================================
+E. REMOTE ACCESS & LUMINA BRIDGE
+======================================================================
+features/site/system_management_screen.dart:37 | System Management "Remote Access" tab (tabs :35-38: Controllers / My Lights / Remote Access / Mode) | customer | Tab label | KEY STRING: "Remote Access"
+features/site/system_management_screen.dart:903 | Remote status label (:903-917) | customer | Connection states | KEY STRING: "On Home Network — direct connection" / "Remote — bridge connected" / "Remote — bridge offline" / "Offline" / "Away from home — remote access disabled"
+features/site/system_management_screen.dart:957 | Remote summary rows (:957-987) | customer | Calls the bridge "ESP32 Bridge", while blocked-reason copy says "Lumina Bridge" | KEY STRING: "Remote Access" Enabled|Disabled / "Home Network" / "Bridge / Webhook" Webhook|ESP32 Bridge|Not Set / "Remote Access Settings" | "Set Up Remote Access"
+features/site/remote_access_screen.dart:675 | RemoteAccessScreen (/settings/remote-access) | customer | Title + toggle (:701-705) | KEY STRING: "Remote Access" / "Enable Remote Access" / "Control your lights from anywhere" | "Remote access is disabled"
+features/site/remote_access_screen.dart:63 | No-bridge check result | customer | Error | KEY STRING: "No Lumina Bridge is paired to this account yet. Use Set Up Bridge below to add one."
+features/site/remote_access_screen.dart:731 | Home Network card (:731-787) | customer | Explains SSID capture | KEY STRING: "Save your current WiFi network as your home network. The app will use local connections when on this network." / "Detect Home Network" | "Update Home Network"
+features/site/remote_access_screen.dart:464 | SSID read failure | customer | Error | KEY STRING: "SSID read failed: $reason. Make sure WiFi is enabled and you are connected to your home network."
+features/site/remote_access_screen.dart:504 | Location permission dialog (:497-522) | customer | Why location; per-OS steps | KEY STRING: "Location Permission Needed" / "Lumina needs location permission to read your WiFi network name. It uses this to detect when you are on your home network so it […]"
+features/site/remote_access_screen.dart:497 | Location steps by OS | customer | How-to | KEY STRING: "Open Settings and choose \"While Using the App\" under Location." | "Open Settings, tap Permissions → Location, then choose \"Allow only while using the app\"."
+features/site/remote_access_screen.dart:810 | Webhook URL card (:810-837) | customer | Dynamic-DNS input | KEY STRING: "Enter your Dynamic DNS URL that points to your home network. This is how the cloud will reach your Lumina controller." (hint "https://myhome.duckdns.org:8080")
+features/site/remote_access_screen.dart:252 | Webhook test errors (:252-307) | customer | Diagnostic table | KEY STRING: "The URL you entered doesn't look valid. Check for typos and try again." / "Can't find that address. Check that your DuckDNS (or Dynamic DNS) domain is spelled correctly and is active."
+features/site/remote_access_screen.dart:271 | Webhook test errors (cont.) | customer | Diagnostic table | KEY STRING: "Your controller responded but returned an unexpected status ($code). Check your port forwarding." / "The connection timed out. Your network may be slow, or a firewall is blocking the request."
+features/site/remote_access_screen.dart:294 | Webhook test errors (cont.) | customer | Diagnostic table | KEY STRING: "Address found but the connection was refused. Check that port forwarding in your router points to your Lumina controller." / "Network error — couldn't reach your controller. ($msg)"
+features/site/remote_access_screen.dart:392 | Bridge test timeout (:383, :392, :398) | customer | Error | KEY STRING: "No response from ESP32 Bridge within 10 seconds. Check that the bridge is powered on and connected to WiFi."
+features/site/remote_access_screen.dart:926 | Bridge CTA → /settings/bridge-setup (:926-938) | customer | CTA and paired row | KEY STRING: "Reconfigure Bridge" | "Set Up Bridge" / "Paired Bridge"
+features/site/remote_access_screen.dart:973 | Connection Mode selector (:966-985) | customer | Mode explainer | KEY STRING: "ESP32 Bridge" — "No port forwarding needed. Works with any ISP." / "Webhook (Dynamic DNS)" — "Requires port forwarding and a public IP."
+features/site/remote_access_screen.dart:1016 | Bridge status card (:1016-1078) | customer | Status table | KEY STRING: "Testing Bridge..." / "Bridge Connected" / "No Bridge Paired" / "Bridge Not Responding" / "Relay Online — Waiting for Bridge" / "Bridge Status Unknown" / "Test Bridge"
+features/site/remote_access_screen.dart:1048 | Relay-online subtitle | customer | Explains state | KEY STRING: "Firestore is reachable but the ESP32 bridge has not responded. Check that the bridge is powered on and connected to WiFi."
+features/site/remote_access_screen.dart:1094 | User ID card (:1094-1114) | customer | Shows the account UID with a copy button | KEY STRING: "Your User ID" / "User ID copied to clipboard"
+features/site/remote_access_screen.dart:1138 | "How Bridge Mode Works" explainer (:1138-1162) | customer | Product explanation | KEY STRING: "ESP32 bridge on your network" / "Commands go through the cloud" / "No port forwarding needed" — "Unlike webhook mode, bridge mode works with any ISP including T-Mobile, Starlink, and other CGNAT networks."
+features/site/remote_access_screen.dart:1182 | Network status (:1182-1202) | customer | States | KEY STRING: "On Home Network" / "Remote Mode Active" — "Commands are sent via cloud relay." / "Away from Home" — "Enable remote access to control your lights." / "Offline"
+features/site/remote_access_screen.dart:1228 | Webhook status (:1228-1252) | customer | States | KEY STRING: "Checking…" / "Connected" / "Not Reachable" / "Not Checked" — "Tap \"Test\" to verify your webhook URL."
+features/site/remote_access_screen.dart:1279 | Webhook "Setup Guide" (:1279-1317) | customer | 4-step how-to | KEY STRING: "To enable remote access, you need to:" 1 "Set up Dynamic DNS" 2 "Configure port forwarding" 3 "Enter your webhook URL" 4 "Save your home network"
+features/site/remote_access_screen.dart:572 | Clear config dialog (:572-607) | customer | Destructive confirm | KEY STRING: "Clear Remote Access" / "This will remove your webhook URL and home network settings. Remote access will be disabled."
+features/site/bridge_setup_screen.dart:685 | BridgeSetupScreen (/settings/bridge-setup) | customer | Title + 3 steps (:704-716) | KEY STRING: "Bridge Setup" / "Find" / "Pair" / "Verify"
+features/site/bridge_setup_screen.dart:740 | Find step (:740-791) | customer | Discovery | KEY STRING: "Find Your Bridge" / "Make sure the bridge is powered on and connected to WiFi." / "No bridges found nearby." / "Ready to pair" | "Already paired"
+features/site/bridge_setup_screen.dart:829 | Advanced manual IP (:819-840) | customer/installer | Troubleshooting entry | KEY STRING: "Enter the bridge IP address directly. Use this only when discovery isn't working — for example, on an isolated network or for installer diagnostics."
+features/site/bridge_setup_screen.dart:177 | Manual IP errors (:166, :177) | customer | Error | KEY STRING: "That IP responded but isn't a Lumina Bridge. Make sure you're entering the bridge IP, not the controller IP."
+features/site/bridge_setup_screen.dart:266 | No controller selected. "Site Setup" does not exist in the app. | customer | Blocked | KEY STRING: "No lighting controller selected. Choose a controller in Site Setup before pairing a bridge."
+features/site/bridge_setup_screen.dart:913 | Pair step (:907-959) | customer | Explains pairing | KEY STRING: "This will register the bridge with your account and point it at your Lumina controller." / "Controller Target" / "None selected — set up a controller first"
+features/site/bridge_setup_screen.dart:112 | Transfer dialog (:112-127, repeated :199-214) | customer/installer | Hijack warning | KEY STRING: "This bridge is currently paired to a different Nex-Gen account. Continuing will transfer the bridge to your account and stop service for the previous owner.[…]"
+features/site/bridge_setup_screen.dart:527 | Paired-elsewhere dialog. Points to an "Unpair Bridge" button that does not exist in RemoteAccessScreen. | customer | Ownership | KEY STRING: "This bridge is paired to a different Nex-Gen account. To use it on this account, the previous owner must release it first (Settings → Remote Access → Unpair […]"
+features/site/bridge_setup_screen.dart:367 | Pair errors (:351, :367, :423, :447, :460, :466, :472, :543) | customer | Firmware and timeouts | KEY STRING: "This bridge firmware is outdated. Please reflash the bridge with the latest firmware and try again."
+features/site/bridge_setup_screen.dart:472 | Pair error | customer | Ownership or firmware | KEY STRING: "Bridge did not confirm pairing to this account. It may be paired to another user, or it may need a firmware update."
+features/site/bridge_setup_screen.dart:576 | Verify errors (:560, :576, :607, :638, :647, :654) | customer | Heartbeat and ping | KEY STRING: "The bridge has not heartbeated to Firestore in the last 60 seconds. Make sure it is powered on and connected to WiFi."
+features/site/bridge_setup_screen.dart:998 | Verify step (:998-1082) | customer | Round-trip explanation and result | KEY STRING: "Testing round-trip through Firestore..." / "Bridge is working!" / "Verification Issue" / "Retry" / "Done Anyway"
+
+======================================================================
+F. CONTROLLER CHOICE ("Set as Active") / ADDING CONTROLLERS
+======================================================================
+features/site/system_management_screen.dart:157 | Controller details dialog | customer | Choose the active controller | KEY STRING: "Set as Active"
+features/site/system_management_screen.dart:106 | Controller row tap | customer | Snackbar | KEY STRING: "${c.name ?? "Controller"} is now active"
+features/site/system_management_screen.dart:75 | Controllers tab (:75, :83, :699 badge, :760) | customer | Header and states | KEY STRING: "Manage your controllers" / "Add Controller" / "ACTIVE" / "Connected" | "Connecting..."
+features/site/system_management_screen.dart:172 | Remove controller dialog (:172-197) | customer | Destructive confirm | KEY STRING: "Remove ${item.name ?? 'this controller'} from your account?\n\nThis will delete all saved settings for this controller."
+features/site/system_management_screen.dart:850 | Empty state (:850-866) | customer | Empty state | KEY STRING: "No Controllers Yet" / "Add your first Nex-Gen controller to get started with smart lighting control." / "Add Your First Controller"
+features/site/manage_controllers_page.dart:216 | ManageControllersPage (/settings/controllers) details | customer | Choose the active controller | KEY STRING: "Set as Active"
+features/site/manage_controllers_page.dart:72 | Controller row (:72, :82-84, :90) | customer | Labels | KEY STRING: "Active" / "IP: ${item.ip}" / "Network: ${item.ssid}" / tooltip "Re-sync Configuration"
+features/site/manage_controllers_page.dart:119 | Re-sync results (:119, :134, :157, :166, :175) | customer | Status | KEY STRING: "Profile not loaded — try again in a moment." / "Re-syncing controller…" / "Controller re-synced successfully"
+features/site/manage_controllers_page.dart:228 | Rename dialog (:228-249) | customer | Rename | KEY STRING: "Rename Controller" / "Enter a name for this controller"
+features/site/manage_controllers_page.dart:346 | Empty state (:346-350) | customer | Empty state | KEY STRING: "No controllers yet" / "Add your Nex-Gen Controller to manage it here."
+features/dashboard/wled_dashboard_page.dart:556 | Home controller switcher (popup :570-609) | customer | Tooltip on the router icon | KEY STRING: "Controller online" | "Controller offline"
+shared/explicit_selection.dart:52 | SelectionDecision copy (:52-82) | customer | Generic choose-a-thing reasons | KEY STRING: "That $noun is no longer available. Choose another $noun." / "No $noun found yet." / "Tap the $noun to choose it." / "Choose a $noun to continue."
+features/design/roofline_target_bar.dart:47 | RooflineTargetBar (:47, :106-114) | customer | Which controller a roofline is for | KEY STRING: "Which controller is this roofline for?" / "$verb: ${controllerDisplayName(target)}" / "Choose controller"
+features/design/roofline_config_providers.dart:349 | Roofline target reasons (:349-375) | customer | Selection reasons | KEY STRING: "Loading your controllers…" / "Add a controller before setting up your roofline." / "Choose which controller this roofline belongs to."
+features/site/settings_page.dart:281 | Link Controllers sheet (commercial, :281-294) | customer | Links controllers. "Settings > Controllers & Devices" does not exist. | KEY STRING: "Choose which controllers should act as one system." / "Add devices in Settings > Controllers & Devices."
+features/site/settings_page.dart:153 | Commercial zones (:112-224) | customer | Zone member input; tooltip "Set as Primary" (:184) | KEY STRING: "Add controller IP (e.g. [IP withheld])" / "DDP Sync" / "DDP/Sync configured"
+features/ble/device_setup_page.dart:69 | Add-controller permission (:69-76) | customer | Why the customer cannot add | KEY STRING: "Your account is part of someone else's lighting system. Ask […]" / "Only system owners can add new controllers."
+features/ble/device_setup_page.dart:350 | Bluetooth blockers (:286, :350-368) | customer | BLE how-to | KEY STRING: "Bluetooth is turned off. Turn Bluetooth on, then tap Rescan." / "Bluetooth permission denied. Open Settings → Apps → Lumina → Permissions to enable Nearby devices, then return here."
+features/ble/device_setup_page.dart:795 | Wi-Fi step (:795-906) | customer | Provisioning UI | KEY STRING: "Use your current Wi‑Fi network?" / "Connect Controller to Wi‑Fi" / "Connect & Finish Setup" / "Make sure the controller is in pairing mode and nearby."
+features/ble/device_setup_page.dart:620 | Provision result (:545, :620-648) | customer | Saved vs not saved | KEY STRING: "Wi‑Fi details sent" | "Not added to your account" / "Connection Failed. Please check your Wi‑Fi password and try again."
+features/ble/wled_manual_setup.dart:296 | WLED manual setup (:296-357) | customer | 4-step AP how-to. Step 2 contains a controller IP. | KEY STRING: "Connect to Controller AP" — "Power on your controller and connect to the \"Lumina-XXXX\" WiFi network from your device settings." / "Configure WiFi" / "Reconnect to Home WiFi"
+features/ble/wled_manual_setup.dart:472 | Manual IP (:466-524) | customer | Fallback how-to | KEY STRING: "Controller not found automatically.\n\nCheck your router's connected devices list for your Lumina controller and enter its IP address below."
+features/ble/wled_manual_setup.dart:541 | Choose your controller (:541-601) | customer | Selection | KEY STRING: "Choose your controller" / "We found one controller on this network. Tap it to add it […]" / "Enter the address instead"
+features/ble/wled_manual_setup.dart:618 | Added (:618-632) | customer | Success | KEY STRING: "Controller Added!" / "Your controller has been added and is ready to use." / "Go to My Controllers"
+features/discovery/discovery_page.dart:274 | Discovery status (:274-281, :328-341) | customer | Discovery guidance | KEY STRING: "Found 1 controller — tap it to continue" / "Make sure your device is powered on and connected to the same Wi-Fi network" / "Set up a new controller with Bluetooth"
+features/ble/provisioning_service.dart:268 | Provision account-save errors (:268-287, :414, :494) | customer | Errors | KEY STRING: "You're not signed in, so the controller couldn't be added to […]" / "Controller not found on network after 3 attempts."
+features/properties/my_properties_screen.dart:793 | Link controllers to a property (:793-825). Exposes "WLED" to customers. | customer | How-to | KEY STRING: "Toggle controllers to assign them to this property." / "Discover a WLED controller first from the System tab."
+NOT FOUND: the string "Use this controller" does not exist in lib/.
+
+======================================================================
+G. GAME DAY (status / gate / preflight / run mode / celebration / crew)
+======================================================================
+features/game_day/gate_status.dart:69 | GateStatus.headline | customer | Gate headline | KEY STRING: "Game Day is on" | "Game Day is on — not firing yet"
+features/game_day/gate_status.dart:81 | gate reason gated_no_facts | customer | Blocking reason | KEY STRING: "Open the app at home, on your Wi-Fi, so your controller can report its channels."
+features/game_day/gate_status.dart:87 | gate reason gated_ladder_bad | customer | Blocking reason | KEY STRING: "Your saved lighting presets need repairing before Game Day can run safely."
+features/game_day/gate_status.dart:94 | gate reason (unknown) | customer | Blocking reason | KEY STRING: "A setup step is incomplete."
+features/game_day/gate_status.dart:136 | kGatedBadgeLabel | customer | Upcoming-game chip | KEY STRING: "Today · setup needed"
+features/game_day/game_day_server_status.dart:240 | preflight_no_bridge | customer/dealer | Preflight reason | KEY STRING: "Your home has no Lumina Bridge paired, so our servers cannot reach your lights."
+features/game_day/game_day_server_status.dart:243 | preflight_bridge_stale | customer/dealer | Preflight reason | KEY STRING: "Your Lumina Bridge has not checked in recently. Check that it is plugged in."
+features/game_day/game_day_server_status.dart:246 | preflight_no_participation | customer/dealer | Preflight reason | KEY STRING: "Open the app at home, on your Wi-Fi, so your controller can report its channels."
+features/game_day/game_day_server_status.dart:249 | preflight_ladder_unknown | customer/dealer | Preflight reason | KEY STRING: "Open the app at home, on your Wi-Fi, so we can check your everyday lighting settings."
+features/game_day/game_day_server_status.dart:252 | preflight_ladder_bad | customer/dealer | Preflight reason | KEY STRING: "Your everyday lighting settings need repairing. Opening the app at home repairs them."
+features/game_day/game_day_server_status.dart:255 | preflight_controller_unreachable | customer/dealer | Preflight reason | KEY STRING: "Our servers could not reach your controller before the game."
+features/game_day/game_day_server_status.dart:257 | preflight_gated | customer | Returns null; the Blocked state shows the gate copy instead | KEY STRING: (null)
+features/game_day/game_day_server_status.dart:259 | preflight (unknown) | customer | Fallback | KEY STRING: "A setup step for server-run Game Day is incomplete."
+features/game_day/game_day_run_mode.dart:95 | GameDayRunCopy SERVER title + line | customer/dealer | Server-run banner | KEY STRING: "Game Day runs from our servers" / "Your lights change for the game even with the app closed."
+features/game_day/game_day_run_mode.dart:98 | SERVER: teams the server does not run | customer | Mixed mode | KEY STRING: "${names} still runs|run from this phone: keep the app open at home for that game|those games."
+features/game_day/game_day_run_mode.dart:102 | SERVER next/last fire (:102-109) | customer | Schedule lines | KEY STRING: "Next: $team, ${gameDayWhen}." / "$team's game is on. Your lights go back to normal after the final." / "Last change: $when, N s after it was due."
+features/game_day/game_day_run_mode.dart:118 | PHONE title + line | customer | Phone-run banner | KEY STRING: "Game Day runs from this phone" / "Your lights change for the game when the Lumina app is open at home."
+features/game_day/game_day_run_mode.dart:121 | PHONE stale heartbeat | customer | Fallback note | KEY STRING: "Our servers have not checked in for a while, so this phone is running Game Day for now."
+features/game_day/game_day_run_mode.dart:126 | BLOCKED | customer | Uses the gate headline and reasons | KEY STRING: GameDayRunCopy(gate.headline, gate.reasons)
+features/game_day/game_day_run_mode.dart:133 | upcomingBadgeLabel (:133-135) | customer | Chip table | KEY STRING: "Today · server" / "Today · phone" / "Today · setup needed"
+features/game_day/game_day_run_mode.dart:140 | runModeTag (:140-142) | customer | Day-timeline tags | KEY STRING: "server" / "phone" / "setup needed"
+features/game_day/gate_status_banner.dart:34 | GameDayRunBanner / GameDayStatusBadge | customer | Renders the copy above (icons: cloud, phone, pending) | KEY STRING: (renders copy.title / copy.lines)
+features/game_day/game_day_screen.dart:240 | Game Day screen intro | customer | Product explanation | KEY STRING: "Set up your teams and choose a look for game day. Once a team is added, this screen shows whether our servers or this phone runs it. Live scoring celebrates your […]"
+features/game_day/game_day_screen.dart:176 | Empty state (:176, :185) | customer | Empty state | KEY STRING: "No teams added yet" / "Tap the + button below to add your first team."
+features/game_day/game_day_screen.dart:397 | Team card controls (:397, :414, :426, :446, :1035, :1056, :1065) | customer | Labels | KEY STRING: "Light Up Now" / "Design" / "Live Scoring" / "Autopilot" / "Alerts" / "Celebration" / "Skip day games"
+features/game_day/game_day_screen.dart:1079 | Skip-day-games explainer | customer | Helper | KEY STRING: "Skip games that are fully in daylight at your location"
+features/game_day/game_day_screen.dart:871 | Alert Sensitivity table (:871-881; title :906) | customer | Options | KEY STRING: "All Events" — "Celebrate every scoring play" / "Major Only" — "Only touchdowns, home runs, goals and the like" / "Clutch Only" — "Only late-game and go-ahead moments"
+features/game_day/game_day_screen.dart:1105 | Design variety tooltip (:1097-1119) | customer | Tooltip | KEY STRING: "Autopilot generates 6 team-themed designs\n(Solid, Chase, Breathe, Twinkle, etc.)\nusing your team's colors." / "Rotate through team designs" / "Same pattern each game"
+features/game_day/game_day_screen.dart:1136 | Lead time and motion (:1136, :1175, :1213, :1221) | customer | Labels | KEY STRING: "Lead time before game" / "Motion style" / "Static" … "Fast Motion"
+features/game_day/game_day_screen.dart:766 | Celebration row value (_celebrationLabel :756-771) | customer | Shows "Default" or "$name · Short|Long" | KEY STRING: "Default" / "$name · ${config.celebrationLength.label}"
+features/game_day/game_day_screen.dart:2118 | Team Priority card (:2113-2120) | customer | Explainer | KEY STRING: "Drag to reorder. When two of your teams play at the same time, the top team lights the house and its score alerts are the ones that fire."
+features/game_day/game_day_screen.dart:2219 | Refresh all schedules (result text: game_day_refresh_result) | customer | Button | KEY STRING: "Refresh all schedules" | "Refreshing…"
+features/autopilot/game_day_refresh_result.dart:124 | userMessage table (:124-142) | customer | Refresh outcomes | KEY STRING: "Already refreshing — hang tight." / "Schedules are already up to date." / "No teams have Game Day turned on." / "Couldn't reach any team's schedule. Check your connection."
+features/autopilot/game_day_refresh_result.dart:134 | userMessage (cont.) | customer | Refresh outcomes | KEY STRING: "Refreshed N teams, N games — couldn't reach $names." / "Refreshed N teams — no games scheduled in the next week." / "Refreshed N teams, N games."
+features/game_day/game_day_screen.dart:509 | Errors (:509, :609, :637, :670, :841, :1002, :2156) | customer | Error snackbars | KEY STRING: "Couldn't find ${team}'s designs in the library." / "Couldn't save that celebration effect." / "Couldn't save the new team order. Try again."
+features/sports_alerts/services/celebration_length.dart:14 | CelebrationLength labels (:14-16) | customer | Picker options (x0.5 / x1 / x2) | KEY STRING: "Short" / "Medium" / "Long"
+features/sports_alerts/services/celebration_length.dart:100 | celebrationLengthHelper | customer | Length helper | KEY STRING: "A touchdown plays ${short} seconds on Short, ${medium} on Medium and ${long} on Long. Every celebration ends on its own." (renders 8 / 15 / 30)
+features/wled/colorway_effect_selector.dart:1993 | Celebration picker (:1993, :2039, :2069, :2087, :2106) | customer | Picker chrome; title is "${team} Celebration" (game_day_screen.dart:790) | KEY STRING: "CELEBRATION EFFECTS" / "Length" / celebrationLengthHelper() / tooltip "Back" / "Set celebration"
+features/game_day/live_scoring_prompt.dart:246 | Live scoring prompt (:68, :200-201, :246-248, :272) | customer | Opt-in | KEY STRING: "Want to enable live scoring effects? Your lights will celebrate your team's scores while the app is open." / "No thanks"
+features/game_day/live_scoring_prompt.dart:110 | Live scoring enabled | customer | Confirmation | KEY STRING: "Live scoring enabled for ${teamName}! Your lights will celebrate your team's scores while the app is open."
+features/game_day/team_picker_sheet.dart:195 | TeamPickerSheet (:195, :232, :306, :410, :419) | customer | Picker | KEY STRING: "Search all teams..." / "Choose a Team" / "No teams match" / "${team} added to Game Day!"
+features/game_day/ephemeral_session/active_session_sheet.dart:120 | Active session sheet (:120-187, :237, :266) | customer | Session controls | KEY STRING: "Game start" / "Will revert to" / "Edit Design" / "Open Game Day" / "End session" / "PRE-GAME" "POST-GAME" "WAITING" "COMPLETED"
+features/game_day/game_day_screen.dart:1590 | Game Day Crew (:1475-1476, :1505, :1551-1552, :1590, :1607, :1645, :1710-1787, :1894-1975) | customer | Crew how-to | KEY STRING: "Share with neighbors" / "Create Crew" / "Have an invite code from a neighbor?" / "You'll stop receiving ${team} game day designs from this crew. […]"
+features/autopilot/base_layer_gate.dart:111 | Base-layer gate dialog (:111-149) | customer | Why an everyday schedule matters | KEY STRING: "No everyday schedule set" / "Game Day turns your lights on for a game. Going back to normal afterwards happens when the app is open at home, or on its own if our servers run […]"
+features/autopilot/base_layer_gate.dart:132 | Base-layer gate (cont.) | customer | Risk explanation | KEY STRING: "You don't have an everyday schedule saved. If something goes wrong at the end of a game — your bridge is offline, or the score never arrives — there's nothing […]"
+features/autopilot/base_layer_gate.dart:140 | Base-layer gate (cont.; "Not now" :149) | customer | Fix | KEY STRING: "Setting an everyday schedule fixes that — your lights go back to their normal routine at the next on or off time."
+features/schedule/calendar_entry_editor.dart:360 | Game Day entry "Ends" helper (:344-365) | customer | Open-ended lease explainer | KEY STRING: "The game decides. The estimate is a guess, not a setting." | "The game decides. If it never reports final, the show stops by HH:MM."
+features/schedule/calendar_entry_editor.dart:437 | Save scope (:437-463, :522, :558) | customer | This game vs all games | KEY STRING: "Save changes for..." / "This game only" — "Override just $dateKey" / "All future $team games" — "Update autopilot settings and regenerate schedule"
+features/schedule/calendar_providers.dart:98 | gameDayHoldsNightMessage (used at my_schedule_page.dart:735) | customer | Refusal | KEY STRING: "A Game Day already has that night." | "The $team game already has that night."
+features/neighborhood/widgets/game_day_setup_screen.dart:144 | Group Game Day setup (:144, :186, :337-345, :385, :598) | customer | Setup copy | KEY STRING: "Who are we lighting up for today?" / "Lights activate 30 min before game start, off 30 min after." / "Also broadcast to my neighborhood"
+features/wled/base_ladder_repair_providers.dart:58 | serverLiveReasonAt (:58, :62, :65) | internal | Deferral reasons, probably logs only | KEY STRING: "our servers started a game and have not ended it yet" / "our servers will end a game in progress"
+
+======================================================================
+H. LADDER / PRESET REPAIR / SCHEDULE SYNC STATUS
+======================================================================
+features/schedule/widgets/ladder_repair_banner.dart:24 | ladderSlotLabel (:24-30) | customer | Preset names | KEY STRING: "On" / "Off" / "Dim" / "Low" / "Medium" / "preset $id"
+features/schedule/widgets/ladder_repair_banner.dart:44 | _what (:44-46) | customer | What was wrong | KEY STRING: "Your ${labels} setting(s) would have turned your lights on with nothing showing." / "Your Off setting would have left some lights on."
+features/schedule/widgets/ladder_repair_banner.dart:55 | Repaired (:55-64; kBaseLookName = "Lumina Blue") | customer | Repair outcome | KEY STRING: "We fixed your everyday lighting" / "They now light every channel in Lumina Blue." / "Off now turns every channel off." / "We kept a copy of the old settings. You will see the change […]"
+features/schedule/widgets/ladder_repair_banner.dart:70 | Partial (:70-76) | customer | Repair outcome | KEY STRING: "We fixed part of your everyday lighting" / "Fixed: X. Not fixed: Y — the controller did not save it." / "If your lights come on with nothing showing, contact support. We kept a copy of the old settings."
+features/schedule/widgets/ladder_repair_banner.dart:80 | Failed (:80-84) | customer | Repair outcome | KEY STRING: "We could not fix your everyday lighting" / "Saving the fix did not work, so nothing was changed. Contact support if your lights come on with nothing showing."
+features/schedule/widgets/ladder_repair_banner.dart:156 | Dismiss | customer | Button | KEY STRING: "Got it"
+NOT FOUND: there is no ladder_repair_action file or LadderRepairAction class at c283d62. Repair copy lives only in ladder_repair_banner.dart and game_day_server_status.dart:252.
+features/schedule/schedule_sync.dart:1415 | Preset-repair sync note | customer | Release note shown in sync status | KEY STRING: "Your base lighting presets were repaired (slot(s) N). A previous app version could save these presets with channels switched off, which left the lights dark […]"
+features/schedule/schedule_sync.dart:1140 | Presets unreadable | customer | Sync warning | KEY STRING: "Could not read the presets saved on your controller ($reason). Your schedules were not re-saved, to avoid overwriting them. Lights and existing […]"
+features/schedule/schedule_sync.dart:1668 | Sunrise ON conflict | customer | Sync warning | KEY STRING: "\"$name\" turns lights ON at sunrise, which conflicts with \"Turn lights off at sunrise daily\" — not armed. Turn that setting off, or give this schedule a […]"
+features/schedule/schedule_sync.dart:1765 | Timer table full | customer | Sync warning | KEY STRING: "Schedule saved but couldn't arm — controller timer slots are full (8/8). Delete an old schedule."
+features/schedule/schedule_sync.dart:1803 | Solar slot taken | customer | Sync warning | KEY STRING: "Only one sunrise and one sunset schedule are supported per controller — \"$who\" was not armed."
+features/schedule/schedule_sync.dart:1853 | Nothing armed (internal) | customer | Sync error | KEY STRING: "Your schedules are saved but could not be armed on the controller. Try syncing again — if this keeps happening, contact support."
+features/schedule/schedule_sync.dart:1940 | All refused | customer | Sync error | KEY STRING: "None of your schedules could be armed, so your controller was left unchanged. Check the warnings for what to fix."
+features/schedule/schedule_sync.dart:2457 | kScheduleOffLanNotice | customer | Deferred arm | KEY STRING: "Saved. Your schedule will arm the next time you're on your home Wi-Fi."
+features/schedule/schedule_sync.dart:2463 | kScheduleCfgVerifying | customer | Interim | KEY STRING: "Saving to controller — this can take a few minutes. Your lights keep working."
+features/schedule/schedule_sync.dart:2470 | kScheduleLeaseLedgerNotice | customer | Interim | KEY STRING: "Saved — finishing up on your controller. This clears in a moment."
+features/schedule/schedule_sync.dart:2477 | kScheduleCfgWriteFailed | customer | Failure | KEY STRING: "Couldn't confirm your schedule saved — the controller didn't respond. Check that it's powered and on WiFi, then press Sync again."
+features/schedule/schedule_sync.dart:2489 | kScheduleSolarMismatch | customer | Partial | KEY STRING: "Your timed schedules are set, but the sunrise/sunset part could not be confirmed on the controller. Check the controller's location and time settings, then […]"
+features/schedule/schedule_sync.dart:2494 | kScheduleCfgFirmwareMismatch | customer | Firmware | KEY STRING: "Schedule saved but the controller reported different values — sync may be incompatible with this controller's firmware. Contact support if this repeats."
+features/schedule/schedule_sync.dart:2442 | Status (:2442, :2450) | customer | Status | KEY STRING: "Loading your schedules…" / "Successfully synced N schedule(s)"
+features/schedule/calendar_entry_lease_manager.dart:785 | Lease deferrals (:785, :876) | customer | Dated-night deferral | KEY STRING: "Saved. This night will update on your controller the next time you're on your home Wi-Fi." / "Saved. This night will arm on your controller the next time […]"
+
+======================================================================
+I. SCHEDULE EDITOR, HINTS AND WARNINGS
+======================================================================
+features/schedule/widgets/dated_schedule_controls.dart:34 | ScheduleModeToggle | customer | One night vs weekly | KEY STRING: "Just this day" / "Repeats weekly"
+features/schedule/widgets/dated_schedule_controls.dart:83 | Day picker (:83, :101, :122, :137, :165) | customer | Labels | KEY STRING: "Pick the day" / "Day: $date. Change the day" / "Change" / "Add for this day"
+features/schedule/my_schedule_page.dart:4675 | Schedule editor sheet (:4675-4853) | customer | Labels | KEY STRING: "New Schedule" | "Edit Schedule" / "Turn On" / "Time" "Solar" / "Turn Off" / "Repeat Days" / "Action" / "What should the lights do?"
+features/schedule/my_schedule_page.dart:4851 | Action options (:4851-4899) | customer | Options | KEY STRING: "Turn Off" / "Run Pattern" / "Set Brightness" / "React to Music" — "Use a random audio-reactive effect"
+features/schedule/my_schedule_page.dart:4484 | "Just this day" validation (:4484-4499) | customer | Blocked reasons | KEY STRING: "React to Music can't run on a single night — pick a pattern." / "That pattern can't be saved for one night — pick it from Explore or My Designs." / "Pick today or a later day"
+features/schedule/my_schedule_page.dart:4565 | "Just this day" save results (:4565-4585) | customer | Outcomes | KEY STRING: "Couldn't save for $when — your controller's timer slots are full that night. Free a slot in My Schedule and try again." / "Saved for $when. It will arm […]"
+features/schedule/my_schedule_page.dart:4578 | Solar note (:4578, :4621-4624) | customer | Sun times without an address | KEY STRING: " Set your home address in Settings for exact sun times." / "On $day, … A one-night schedule uses the clock time."
+features/schedule/my_schedule_page.dart:5044 | Cap dialog (:5044-5056). Says 20, while other copy says 8 timer slots. | customer | Limit | KEY STRING: "Maximum limit reached." / "You can have up to 20 schedules." / "Select at least one day" / "Choose a pattern to run"
+features/schedule/schedule_providers.dart:693 | Repeat-day validation (:430, :693, :771) | customer | Error | KEY STRING: "Pick at least one repeat day — the schedule won't run without one."
+features/schedule/dated_entry_compose.dart:209 | recurrenceCopy (:209-217) | customer | Repeat summaries | KEY STRING: "No repeat days set" / "Repeats every day" / "Repeats on weekdays" / "Repeats on weekends" / "Repeats every $Day"
+features/schedule/dated_overwrite_dialog.dart:60 | Overwrite dialog (:60-139). Says one entry per day; the code comments say A1 allows several. | customer | Replace warning | KEY STRING: "Replace what's saved on $date?" / "This day already has something saved. Saving replaces it." / "A day can only hold one saved entry. The old one is not kept."
+features/schedule/eviction_picker_dialog.dart:179 | Eviction picker (:179-316) | customer | Slot pool full | KEY STRING: "Schedule slots full" / "All 8 schedule slots are in use. Pause one recurring schedule until $pauseLabel to add this entry." / "Pause & add entry"
+features/schedule/widgets/timer_slot_meter.dart:170 | TimerSlotMeter (:170-177) | customer | Meter | KEY STRING: "${used} of $budget timer slots used" / "($reservation held by calendar days)"
+features/schedule/widgets/timer_slot_meter.dart:219 | Meter notes (:219-224) | customer | Explainer | KEY STRING: "Your calendar days are currently holding every timer slot. Your schedule will be saved, but it may not arm until one of those days passes."
+features/schedule/widgets/timer_slot_meter.dart:237 | No slots dialog (:237-261) | customer | Blocked | KEY STRING: "No timer slots left" / "This schedule needs N slot(s), and X of Y are already used." / "Delete or disable one, then try again."
+features/schedule/schedule_conflict_dialog.dart:96 | Conflict dialog (:96-188) | customer | Choice | KEY STRING: "Schedule Conflict" / "Replace Existing" — "Delete the conflicting schedule(s) and save this one" / "Run Both" — "Keep all schedules — the most recently applied wins"
+features/schedule/schedule_overload_banner.dart:95 | Overload banner (:95-115; sheet :283-409) | customer | Warning | KEY STRING: "You have N active schedules with N overlaps. Overlapping schedules can cause unpredictable lighting." / "Clean Up" / "Resolve Schedule Conflicts"
+features/schedule/widgets/timeline_row.dart:69 | timelineConsequence (:69-82) | customer | Day timeline explainers | KEY STRING: "Overlaps another schedule at the same time — which one runs is not predictable" / "Paused while the game runs — resumes at $t" / "$who takes over at $t"
+features/schedule/widgets/timeline_row.dart:82 | timelineConsequence (cont.) | customer | Explainer | KEY STRING: "Start time could not be resolved — check your location settings"
+features/schedule/schedule_off_warning.dart:180 | Off warning | customer | Heads-up | KEY STRING: "Heads up — your '$name' schedule turns the lights off at $offLabel."
+features/schedule/widgets/channel_scope_picker.dart:97 | Channel scope (:65, :75, :97) | customer | Scope explainer | KEY STRING: "Channels" / "All channels" / "Other channels will turn off during this schedule."
+features/schedule/my_schedule_page.dart:249 | My Schedule page (:249, :305, :349, :359-360, :916) | customer | Sync chrome | KEY STRING: "My Schedule" / "Schedules synced to controller" / "Sync" | "Synced $age" / "Not synced — controller offline"
+features/schedule/my_schedule_page.dart:776 | Save results (:776-798) | customer | Outcomes | KEY STRING: "Schedule could not be saved. Please try again." / "Schedule saved — $recurrence" / "Couldn't fit N nights — your schedule is full. Free a slot in My Schedule and try again."
+features/schedule/my_schedule_page.dart:2185 | Delete dialogs (:2111, :2162, :2185-2198) | customer | Destructive confirm | KEY STRING: "Delete \"$name\" for $date? Anything else scheduled that day stays." / "This will delete the recurring schedule and affect N other days. Continue?"
+features/schedule/my_schedule_page.dart:1310 | Source labels (:1292-1335, :2385-2389 legend) | customer | Labels | KEY STRING: "Holiday" / "AI-Generated" / "Manual" / "Game Day Autopilot" / "Autopilot" / "No Schedule" / legend "Auto" "User" "Pending"
+features/schedule/my_schedule_page.dart:3246 | Schedule AI bar hint | customer | AI schedule-phrase placeholder | KEY STRING: "Schedule lights by date, week, or holiday…"
+features/schedule/my_schedule_page.dart:3021 | Schedule AI quick actions | customer | Example phrases | KEY STRING: "July 4th → Independence Blue 100%" / "Christmas week → red and green"
+features/schedule/my_schedule_page.dart:3097 | Schedule AI no-dates hint | customer | Phrase hint | KEY STRING: "Lumina couldn't find specific dates to update. Try something like \"every Friday in April\" or \"turn off December 1st\"."
+features/schedule/my_schedule_page.dart:3562 | Empty week (:3562-3638) | customer | Empty state + examples | KEY STRING: "Your week is wide open" / "Ask Lumina to fill your week" / "Use the Lumina AI bar above" / "\"Warm white every night at sunset\"" / "\"Christmas week — red & green chase\""
+features/schedule/my_schedule_page.dart:3638 | Empty week autopilot (:3416, :3423, :3470-3485) | customer | Autopilot entry | KEY STRING: "Turn on Autopilot and let Lumina handle it" / "Daily evening lighting" / "Warm white from sunset, off at sunrise" / "Suggest" / "Proactive"
+features/schedule/my_schedule_page.dart:3776 | Autopilot generation card (:3776-3977) | customer | Status | KEY STRING: "Lumina is crafting your first lighting plan based on your holidays, teams, and preferences." / "Generate This Week's Schedule"
+features/schedule/my_schedule_page.dart:1031 | Pending AI plan card (:1031-1103) | customer | Confirm | KEY STRING: "Lumina wants to schedule N designs across N nights" / "Confirm All N"
+features/schedule/calendar_providers.dart:1046 | Schedule AI errors (:1046-1123) | customer | AI errors | KEY STRING: "You've reached the hourly AI limit. Try again in an hour." / "Lumina had trouble reading that. Try rephrasing your request."
+features/schedule/calendar_providers.dart:1123 | Schedule AI no match | customer | Phrase hint | KEY STRING: "No dates matched — did you mean this week or a specific date?"
+features/wled/clock_health.dart:391 | clockHealthMessage (:391-397) | customer | Clock issues | KEY STRING: "Controller clock isn't set — schedules won't fire. Check WiFi/NTP in controller settings." / "Controller timezone looks off — schedules may fire at the wrong hour."
+features/wled/clock_health.dart:397 | clockHealthMessage | customer | Location unset | KEY STRING: "Sunrise/sunset schedules need the controller's location set."
+features/wled/clock_health.dart:407 | clockHealthRemediation (:407-418) | customer | Controller web-UI how-to | KEY STRING: "Open the controller in a browser (type its IP address), then Config → WiFi Setup and confirm it is connected to your network. Next, Config → Time & Macros […]"
+features/wled/clock_health_ui.dart:103 | Clock dialogs (:103-164) | customer | Save-anyway prompt | KEY STRING: "Controller clock" / "Heads up" / "Your schedule will still be saved — it just may not run correctly until the controller is fixed." / "Save anyway"
+features/site/settings_page.dart:1125 | _SunriseOffCard | customer | Explainer | KEY STRING: "Turn lights off at sunrise daily" / "Your controller turns the lights off at sunrise every day, whatever is running — even with the app closed."
+features/site/settings_page.dart:1059 | Sunrise-off results (:1059-1072) | customer | Outcome table | KEY STRING: "Your lights will turn off at sunrise every day." / "Saved, but your controller can only be updated on your home Wi-Fi. Open the app there to finish."
+features/site/settings_page.dart:1065 | Sunrise-off results (cont.) | customer | Outcome table | KEY STRING: "Saved, but no controller was reachable — reconnect and this will finish applying." / "Saved, but the controller didn't confirm the change. Try again on your home Wi-Fi."
+
+======================================================================
+J. LUMINA AI CHAT (hints, placeholders, suggested prompts, replies)
+======================================================================
+features/ai/lumina_ai_screen.dart:353 | LuminaAIScreen header (:287, :296, :311-324, :353, :361) | customer | Greeting | KEY STRING: "Good morning|afternoon|evening — I'm Lumina" / "How can I light up your home?" / "FAST" "SMART" / "Clear conversation"
+features/ai/lumina_ai_screen.dart:427 | Suggestion chips (:427-432; same list in lumina_bottom_sheet.dart:758-763) | customer | Suggested prompts | KEY STRING: "Warm white" / "Sunset vibes" / "Party mode" / "Calm & cozy" / "Surprise me" / "Game day"
+features/ai/lumina_ai_screen.dart:538 | Input hint (also lumina_bottom_sheet.dart:1098) | customer | Placeholder = LuminaBrain.contextualPlaceholder() | KEY STRING: (see next lines)
+features/ai/lumina_brain.dart:130 | Holiday placeholders (:130-144) | customer | Placeholder table | KEY STRING: Christmas "Try \"Christmas lights\"" / Halloween "Try \"spooky Halloween\"" / Independence Day and 4th of July "Try \"4th of July fireworks\"" / Valentine's "Try \"romantic Valentine's glow\""
+features/ai/lumina_brain.dart:135 | Holiday placeholders (cont.) | customer | Placeholder table | KEY STRING: "Try \"St. Patrick's green\"" / "Try \"warm Thanksgiving\"" / "Try \"pastel Easter lights\"" / "Try \"New Year's celebration\"" / "Try \"midnight countdown glow\"" / "Try \"Juneteenth celebration\""
+features/ai/lumina_brain.dart:141 | Holiday placeholders (cont.) | customer | Placeholder table | KEY STRING: "Try \"Cinco de Mayo fiesta\"" / "Try \"Mardi Gras party\"" / fallback "Try \"$name lights\""
+features/ai/lumina_brain.dart:150 | Sport placeholders (:150, :156, :161) | customer | Placeholder table | KEY STRING: "Try \"game day lights\" 🏈" / "Try \"game night lights\" 🏀" / "Try \"ballpark lights\" ⚾"
+features/ai/lumina_brain.dart:167 | Season placeholders (:167-171) | customer | Placeholder table | KEY STRING: "Try \"fresh spring glow\"" / "Try \"warm summer night\"" / "Try \"cozy autumn glow\"" / "Try \"cool winter sparkle\"" / "Ask Lumina anything…"
+features/ai/lumina_bottom_sheet.dart:720 | Bottom sheet (:720, :735, :743, :822, :937) | customer | Header and listening state | KEY STRING: "${greeting} — Lumina" / "How can I light up your home?" / "Lumina is listening..." / "Clear session"
+features/ai/lumina_brain.dart:71 | Deflection reply | customer | Safe reply | KEY STRING: "I'm Lumina — I'm here to help with your lighting. What can I light up for you today?"
+features/ai/lumina_brain.dart:1711 | Unparseable design reply (:1711-1721) | customer | Phrase hint | KEY STRING: "I couldn't turn that into a design. Tell me the colours you want, a team, or a holiday and I'll build it."
+features/ai/lumina_brain.dart:422 | Audio Mode replies (:422-519) | customer | Firmware and audio | KEY STRING: "Audio Mode needs AudioReactive firmware on your controller. Check your controller settings." / "Audio Mode is on — your lights will now pulse to whatever's playing in the room. […]"
+features/ai/lumina_brain.dart:447 | Audio Mode reply | customer | Firmware | KEY STRING: "Your controller has AudioReactive firmware but no audio effects were detected. Try updating your firmware."
+features/ai/lumina_command_router.dart:265 | Clarify suggestions (:265-286) | customer | Suggested prompts | KEY STRING: "Set brightness to 50%" / "Full brightness" / "Dim the lights" / "Warm white" / "Cool white" / "Set to red" / "Turn on the lights" / "Show me something festive" / "Surprise me"
+features/ai/lumina_command_router.dart:291 | Fallback | customer | Hint | KEY STRING: "I didn't quite catch that — try describing the lighting effect or color you have in mind."
+features/ai/lumina_command_router.dart:394 | Acknowledgements (:394-397, :410) | customer | Small talk | KEY STRING: "Glad you like it! Let me know if you want to adjust anything." / "Hey! What would you like to do with your lights?"
+features/ai/cloud_ai_processor.dart:66 | Cloud errors (:66-95, :150) | customer | Error table | KEY STRING: "That request was a bit much for me to set up in one go — try fewer days or designs and I'll get it." / "You've reached the hourly AI limit. Try again in an hour."
+features/ai/cloud_ai_processor.dart:76 | Cloud errors (cont.) | customer | Error table | KEY STRING: "Please sign out and sign back in to use Lumina AI." / "Lumina AI is temporarily unavailable. Try again shortly." / "I'm having trouble connecting right now. Check your connection and try again."
+features/ai/mic_availability.dart:20 | micUnavailableMessage (button "Settings" :53) | customer | Mic blocked | KEY STRING: "Microphone access is off — enable it in Settings to talk to Lumina." / "Mic unavailable — voice input is not available on this device. You can still type."
+features/ai/dated_intent_nights.dart:131 | Dated-nights reply (:129-144) | customer | AI schedule-phrase hint | KEY STRING: "$theme is in your Schedule for N nights: $list. They run on those nights only — say \"every night\" or \"every Friday\" if you want it to repeat."
+features/ai/dated_intent_nights.dart:132 | Dated single night | customer | Reply | KEY STRING: "$theme is in your Schedule for $day ($date). It runs that night only."
+features/ai/dated_intent_nights.dart:175 | Dated no-days | customer | AI schedule-phrase hint | KEY STRING: "I couldn't work out which nights you meant. Tell me the days, or say \"every night\" if it should repeat."
+features/ai/dated_intent_nights.dart:187 | Dated proposal snackbar (:187-189, :272) | customer | Confirm | KEY STRING: "Add \"$theme\" for $day only?" / "Add \"$theme\" for the next N nights ($days)?" / "Nothing was added"
+features/ai/dated_intent_nights.dart:216 | No time given (same text in lumina_conversation_driver.dart:330) | customer | AI schedule-phrase hint | KEY STRING: "I couldn't tell what time each night should start. Tell me a time like \"7pm\" or \"sunset\"."
+features/ai/dated_intent_nights.dart:142 | Pool full | customer | Limit | KEY STRING: "I couldn't fit N night(s) — your schedule is full. Free a slot in My Schedule and ask again."
+features/ai/scheduling_intent_handler.dart:145 | Recurring, no time | customer | AI schedule-phrase hint | KEY STRING: "I couldn't tell what time to run $names, and I won't guess. Tell me a time (like \"7pm\" or \"sunset\") and I'll set it up."
+features/ai/scheduling_intent_handler.dart:157 | Recurring, no days (also :323) | customer | AI schedule-phrase hint | KEY STRING: "I couldn't schedule $names as stated — no repeat days were set, so it would never run. Tell me which days (or say \"every night\") and I'll set it up."
+features/ai/scheduling_intent_handler.dart:224 | Recurring proposal (:224, :235, :310) | customer | Confirm | KEY STRING: "Add \"$name\" to your schedule at $time?" / "Add $names to your weekly plan?"
+features/ai/lumina_schedule_persistence.dart:370 | Night skip replies (:370-389) | customer | Refusals | KEY STRING: "Skipped $day — you already have \"$pattern\" that night. Delete it in Schedule first if you want this instead."
+features/ai/lumina_schedule_persistence.dart:419 | Tonight plan replies (:419-464) | customer | Outcomes | KEY STRING: "Tonight's $theme look is on your lights now." / "Only tonight was applied — I couldn't save the other N nights. They won't run on their own."
+features/ai/recurring_sports_autopilot_handler.dart:88 | AI Game Day confirmation (:88-93) | customer | Server vs phone | KEY STRING: "✓ Game Day Autopilot is on for $team — I'll set your lights for every game. Our servers run Game Day for your home, so the app can stay closed." (or "…while the app is open at home.")
+features/ai/recurring_sports_autopilot_handler.dart:58 | AI Game Day errors (:58, :72) | customer | Errors | KEY STRING: "I couldn't find that team in my roster yet, so I didn't set up automatic game-day lighting. Try the team's name again and I'll wire it up."
+features/ai/ephemeral_session_dispatcher.dart:219 | AI one-game replies (:179, :219) | customer | Fallback | KEY STRING: "There's no $team game $date, but I've applied the colors anyway. Want me to set this up for the next $team game instead?"
+features/ai/lumina_conversation_driver.dart:391 | Favorites via AI (:391, :399, :408, :707) | customer | Outcomes | KEY STRING: "Sign in to save favourites." / "Saved \"$pattern\" to Favorites" / "Couldn't save that to Favorites. Try again in a moment."
+features/ai/lumina_conversation_driver.dart:525 | AI errors (:525, :663, :764, :860, :915, :938) | customer | Errors | KEY STRING: "I hit a snag and couldn't finish that. Try again in a moment." / "I couldn't set the post-game revert — sign in and ask me again."
+features/ai/local_command_parser.dart:505 | Local quick replies (:505-533) | customer | Replies | KEY STRING: "Turning your lights on." / "Setting brightness to $pct%." / "Applying $name." / "Opening that for you."
+features/ai/lumina_response_card.dart:187 | Response card (:187-278) and adjustment panel (lumina_adjustment_panel.dart:89-161) | customer | Labels | KEY STRING: "Palette" / "Effect" / "Brightness" / "Speed" / "Sent to" / "Zone" / "Apply" / "Adjust" | "Done" / "Save as Favorite" / "Apply This"
+
+======================================================================
+K. FAVORITES / RECENT PATTERNS / DESIGN-CARD CONTROLS / EXPLORE / MY DESIGNS
+======================================================================
+features/favorites/favorite_doc.dart:105 | kFavoritesFullMessage (cap kMaxFavorites = 2 at :98) | customer | Favorites cap | KEY STRING: "You can keep 2 favorites. Remove one to add another."
+features/favorites/favorites_full_dialog.dart:99 | Favorites-full dialog (:99-127) | customer | Replace flow | KEY STRING: "Favorites are full" / kFavoritesFullMessage / "Put \"$newName\" in place of:" / "Keep my favorites"
+features/favorites/favorites_full_dialog.dart:137 | favoriteSaveMessage (:137-139) | customer | Outcomes | KEY STRING: "Saved \"$name\" to Favorites" / kFavoritesFullMessage
+features/favorites/favorites_picker.dart:57 | Replace outcomes (:57-85) | customer | Outcomes | KEY STRING: "Replaced \"$old\" with \"$new\"" / "Saved \"$new\" to Favorites, but \"$old\" couldn't be removed. Try removing it again."
+features/favorites/favorites_editing.dart:44 | Edit guards (:44, :59) | customer | Blocked | KEY STRING: "Sign in to change your favorites." / "Your profile hasn't loaded yet. Try again in a moment."
+widgets/favorites_grid.dart:346 | Add tile (:346, :360) | customer | Empty / add | KEY STRING: "Add a favorite" / "Add a favorite — pick any look from the library"
+widgets/favorites_grid.dart:169 | Tile menu (:99, :169-244, :536-543) | customer | Edit flow | KEY STRING: "Edit" | "Done" / "Replace…" — "Pick a different look for this tile" / "Remove from My Favorites" / "Remove \"$name\" from My Favorites? Your lights don't change."
+widgets/favorites_grid.dart:320 | Load failure (:320, :328) | customer | Error | KEY STRING: "Couldn't load your favorites" / "Retry"
+widgets/favorite_heart_button.dart:80 | Heart button (:80, :126-127) | customer | Errors | KEY STRING: "Please sign in to save favorites" / "Failed to save favorite"
+features/dashboard/wled_dashboard_page.dart:1336 | Home "MY FAVORITES" (:1320-1437) | customer | Apply outcomes | KEY STRING: "\"$name\" has no saved look to apply. Replace it from My Favorites." / "Couldn't apply $name — check your connection"
+features/wled/pattern_library_browser.dart:57 | Recent Patterns section (compact card; a11y label :325, tooltip :331) | customer | Header and card | KEY STRING: "Recent Patterns" / "${name}, ${effect} effect, $ago" / "$name · $effect"
+features/wled/pattern_library_browser.dart:152 | Recent apply outcomes (:152-172) | customer | Outcomes | KEY STRING: "Couldn't apply $name — check your connection" / "Applied: $name" / "Failed to apply pattern"
+features/wled/colorway_effect_selector.dart:1214 | Tuner action bar (:1214-1278) | customer | Labels | KEY STRING: "Save to design" / "Apply" / "Previewing" | "Preview on lights" / "Save to $dest" / "Save…"
+features/wled/colorway_effect_selector.dart:1277 | Live-preview note | customer | Explainer | KEY STRING: "Previewing on your lights — nothing is saved until you tap Save|Save to $dest."
+features/wled/colorway_effect_selector.dart:1308 | Save-to sheet (:1308-1395) | customer | Destinations | KEY STRING: "Save \"$name\"" / "Save to Favorites" / "Save to Game Day" — "Pick a team" / "Save to schedule" — "Opens a new schedule with this design" / "Add a team on the Game Day screen first."
+features/wled/colorway_effect_selector.dart:1619 | Editing-saved-design note | customer | What is saved | KEY STRING: "Editing a saved design: effect, speed, intensity, spacing and layout are saved back. Colours are not editable here."
+features/wled/colorway_effect_selector.dart:45 | kStaticSetupReturnHint | customer | Hint | KEY STRING: "Applies to Static. Tap Blocks or Alternating to switch back."
+features/wled/colorway_effect_selector.dart:131 | kRestoreFailedMessage | customer | Error | KEY STRING: "Couldn't restore the previous look — your lights are still showing the preview."
+features/wled/colorway_effect_selector.dart:1643 | Card controls (:1643-2586) | customer | Labels | KEY STRING: "Intensity" / "TOP PICKS" | "N EFFECTS" / "Clear filters" / "Brightness Pattern" / "LEDs per Step" / "Breathing" / "Static setup" / "Blocks" | "Alternating" / "LEDs per color" / "Dark LEDs between"
+features/wled/colorway_effect_selector.dart:2273 | Color modes (:2273-2296) | customer | Labels | KEY STRING: "Any Color" / "My Colors" / "Blended" / "Auto Colors"
+widgets/pattern_adjustment_panel.dart:541 | Adjust panel (:541-705) | customer | Labels (effect list :25-102) | KEY STRING: "Direction" "L→R" "R→L" / "Effect" / "Select effect" / "Pixel Layout" / "Grouping" / "Spacing" / "Color Sequence"
+features/wled/pattern_grid_widgets.dart:2399 | Pattern card adjust sheet (:194, :1778, :1930, :1955, :2399-2588) | customer | Labels | KEY STRING: "Design actions" / "LEDs/color (1–10, 1=alt):" / "Adjust" / "Love this look? Get it on your home." / "Gradient" / "Band Width" / "Intensity" / "Direction"
+features/wled/pattern_theme_selection.dart:573 | My Designs empty state | customer | How to save designs | KEY STRING: "No saved designs yet.\n\nOpen any pattern in Explore, tap the tune icon to edit it, then tap SAVE. Or on Home, open Adjust Pattern and tap \"Save As Custom […]"
+features/wled/pattern_theme_selection.dart:624 | Per-pixel design not schedulable | customer | Why blocked | KEY STRING: "Your controller's timers can replay colours and effects, not a painted picture, so this one can't be chosen here. You can still apply it any time from My Designs."
+features/wled/pattern_theme_selection.dart:1017 | Solid color choice (:134, :688, :1017) | customer | Prompt | KEY STRING: "Solid effect displays one color. Which should we use?"
+features/wled/pattern_explore_screen.dart:543 | Explore search (:543, :635-682) | customer | Search and empty state | KEY STRING: "Search designs, e.g. Christmas" / "We couldn't find '$query' in our design library" / "Build it in Design Studio"
+features/wled/pattern_category_detail.dart:189 | Category CTA | customer | AI prompt | KEY STRING: "Ask Lumina for a $category look"
+features/wled/edit_pattern_screen.dart:191 | Pattern editor (:191, :369, :389, :424, :931) | customer | Blocked off-LAN | KEY STRING: "Connect to your lights to favorite this pattern — it is stored LED […]" / tooltip "Save to My Designs"
+features/wled/save_custom_pattern_dialog.dart:43 | Save custom pattern (:33, :43, :98) | customer | Explainer | KEY STRING: "Give your custom pattern a name so you can find it later in My Designs." / "Your pattern will be saved to My Designs"
+features/wled/current_colors_editor_screen.dart:93 | Current colors (:86-138) | customer | Explainer | KEY STRING: "Tap any color to change it" / "Edit colors temporarily or save as a custom pattern for future use"
+widgets/color_behavior_badge.dart:64 | Effect color-behavior tooltip (also pattern_adjustment_panel.dart:631) | customer | Tooltip | KEY STRING: "${behavior.displayName}\n${behavior.description}"
+
+======================================================================
+L. DESIGN STUDIO / ROOFLINE MARKING / TRACING
+======================================================================
+features/design/design_studio_gate.dart:116 | Gate: loading | customer | Status | KEY STRING: "Checking your roofline…" / "One moment while your roofline map loads."
+features/design/design_studio_gate.dart:123 | Gate: no controller | customer | Blocked | KEY STRING: "No controller yet" / "Design Studio paints your roofline by its corners, peaks and runs. Your installer sets up your controller and roofline first — once that's done, Design […]"
+features/design/design_studio_gate.dart:132 | Gate: choose controller | customer | Controller choice | KEY STRING: "Choose a controller" / "You have more than one controller. Choose the one you want to design for on the Home screen, then come back to Design Studio."
+features/design/design_studio_gate.dart:140 | Gate: not mapped | customer | How-to | KEY STRING: "Your roofline isn't mapped yet" / "Design Studio needs to know where your corners, peaks and runs are. Trace your roofline on your house photo first (or ask your installer), […]"
+features/design/design_studio_gate.dart:230 | Gate: not marked (:230-264) | customer | How-to | KEY STRING: "Your sections aren't marked yet" / "Mark your corners and peaks once and each section of your roofline becomes something you can select and paint." / "Mark corners and peaks"
+features/design/design_studio_gate.dart:247 | Gate: almost there | customer | How-to | KEY STRING: "Almost there" / "$names's corners and peaks aren't marked yet. Mark them and Design Studio opens." / "Mark the rest"
+features/design/screens/ai_design_studio_screen.dart:363 | Design Studio input (:305-559) | customer | Prompt hint | KEY STRING: "Describe your lighting..." / "e.g. \"Dark green with red accents on corners, wave effect moving right to left\"" / "Create Design"
+features/design/screens/ai_design_studio_screen.dart:529 | Quick Ideas (:529-559) | customer | Suggested prompts | KEY STRING: "Warm White" / "Team Colors" / "Downlighting" / "Chase Effect" (prompts like "Bright white on corners and peaks, soft white spaced evenly in between")
+features/design/screens/ai_design_studio_screen.dart:682 | Live preview note (:323, :682, :977) | customer | Explainer | KEY STRING: "Preview is on — each design you create will show on your […]" / "Takes a few minutes. One light at a time lights up on your […]"
+features/design/screens/ai_design_studio_screen.dart:725 | Save/apply outcomes (:615, :725-806, :1052-1096) | customer | Outcomes | KEY STRING: "Saved to My Designs" / "Describe a design first, then apply it." / "Applied to your lights, with motion" / "Paint it by hand"
+features/design/roofline_feature_walkthrough.dart:397 | Mark Your Roofline walkthrough | customer | Roofline marking how-to | KEY STRING: "Mark Your Roofline" / "One light is lit on your house. Move it along your roofline and tap what it is sitting on: a corner, a peak, or the start of a new run. Everything […]"
+features/design/roofline_feature_walkthrough.dart:435 | Walkthrough blockers (:435-452) | customer | States | KEY STRING: "Your roofline hasn't been set up yet. Trace it on your house photo first, or ask your installer." / "Your lights can't be lit from here right now (you may be away from home). […]"
+features/design/roofline_feature_walkthrough.dart:451 | Walkthrough done | customer | Completion | KEY STRING: "Every channel is marked. Design Studio can now select your corners, peaks and runs."
+features/design/roofline_feature_walkthrough.dart:549 | Marking controls (:518-656) | customer | Labels | KEY STRING: "This light is on…" / "A corner" / "A peak" / "The start of a new run" / "No marks on this channel yet — it is one straight run." / "Save — this channel is one straight run"
+features/design/roofline_feature_walkthrough.dart:292 | Start-over and save outcomes (:292-371) | customer | Dialogs | KEY STRING: "Start over on channel N?" / "Channel N didn't save. Try again." / "Channel N saved with N sections."
+features/design/roofline_walkthrough_widgets.dart:151 | Strip/map mismatch note | customer | Explainer | KEY STRING: "Your map says channel N has X lights, but the strip has Y. Marking uses the strip. Saving this channel updates the map to match."
+features/design/roofline_walkthrough_widgets.dart:179 | Start-over confirm (:55-59, :99, :105, :179) | customer | Explainer | KEY STRING: "This removes $removed on channel N. The channel becomes one straight run of N lights. Nothing is saved until you tap Save."
+features/design/roofline_feature_marking.dart:471 | Merge blockers (:471-485) | customer | Why it cannot merge | KEY STRING: "This channel is already one straight run." / "This run sits between marked features. Remove the corner or peak next to it to merge them."
+features/site/roofline_editor_screen.dart:190 | Trace Roofline (:140, :190, :311-374) | customer | Tracing how-to | KEY STRING: "Trace Roofline" / "Tap along each roofline section. Use \"+ New Segment\" for […]" / "Auto-Detect" / "Finish"
+features/site/roofline_editor_screen.dart:95 | Trace delete/undo reasons (:95-102, :323, :403-418) | customer | Disabled-reason tooltips | KEY STRING: "Tap a segment on the photo or in the list to select it, then Delete removes that one." / "No segments yet. Tap on the photo to start tracing."
+features/site/roofline_editor_screen.dart:829 | Marking status (:829-836, :654-750) | customer | Next step | KEY STRING: "Corners and peaks marked" / "Your roofline's corners and peaks aren't marked yet." / "Review" | "Mark them"
+features/design/refine/refine_roofline_screen.dart:344 | Refine Roofline (:226-513) | customer | Explainer | KEY STRING: "Refine Roofline" / "Features — tap to spotlight & adjust" / "Your roofline changed on this channel." / "Rescale to fit" / "Walk it again"
+features/design/segment_setup_screen.dart:63 | Segment editor (installer lock; alternative "Mark Your Roofline instead") | customer/installer | Lock screen | KEY STRING: "Roofline Segments" / "The Roofline Segments editor" (+ installer_lock_screen copy)
+features/design/segment_setup_screen.dart:377 | Duplicate cleanup (:370-429, :788-802) | installer | Explainer | KEY STRING: "Clean up duplicate segments" / "This keeps one copy of each stacked segment. Nothing is […]" / "Back up and clean up"
+features/installer/installer_lock_screen.dart:65 | InstallerLockScreen (:65, :75-77, :106) | customer | Why it is locked | KEY STRING: "Installer Access Required" / "$featureName is only available to certified installers. This ensures your LED system is configured correctly for optimal performance."
+features/design/roofline_setup_wizard.dart:422 | Roofline Setup Wizard (installer-locked; :267-268) | installer | Wizard intro and checklist (:422-450) | KEY STRING: "This wizard will help you configure the customer's roofline so Lumina AI can create perfectly customized lighting designs." / "Before you begin:"
+features/design/roofline_setup_wizard.dart:807 | Wizard steps (:473-1569, :1914-2145, :2527-2749) | installer | Step help | KEY STRING: "Break the roofline into logical segments. Corners and Peaks are used by Lumina AI for pattern design." / "Anchor points are key positions that receive […]"
+features/design/manual_editor/manual_design_editor.dart:248 | Manual editor (:248-326, :402, :612, :665-736, :998-999) | customer | How-to and hints | KEY STRING: "Channel sections aren't marked yet — select by light for now, […]" / "Tap a light · drag to select a range · zoom in to reach one LED"
+features/design/manual_editor/manual_design_editor.dart:665 | Go to LED (:665-670) | customer | Input help | KEY STRING: "Go to LED" / "57 or 12-40" / "Enter an LED 0–${len-1}, or a range like 12-40"
+features/design/manual_editor/design_apply.dart:63 | Design apply outcomes (:63-69, :360-392) | customer | Outcomes | KEY STRING: "Not connected to your lights." / "No channels are selected to receive this." / "Only part of this reached your lights — the background […]"
+features/design/smart_presets/smart_presets_section.dart:32 | Smart Presets (:32-181, :336) | customer | Gating copy | KEY STRING: "Smart Presets" / "Map your roofline first to place accents." / "Map your roofline to unlock corner & peak accents"
+features/design/design_save_errors.dart:17 | Save error table (:17-36) | customer | Errors | KEY STRING: "You don't have permission to save designs on this account, so […]" / "Couldn't reach the server, so nothing was saved. Check your […]"
+features/design/design_deletion.dart:79 | Delete design (:79-148) | customer | Consequences | KEY STRING: "Delete \"$name\"?\n\nThe matching scene will disappear too — saved designs and custom […]"
+features/design/screens/design_detail_screen.dart:125 | Design detail (:117-346) | customer | States | KEY STRING: "Design not found" / "It may have been deleted from another device. Go back to see your current designs."
+features/design/roofline_config_providers.dart:850 | Roofline save errors (:581, :850-948) | customer | Errors | KEY STRING: "Sign in to save your roofline." / "The controller changed since this roofline was […]" / "Your roofline didn't save ($e). Check your connection and try […]"
+widgets/house_photo_uploader.dart:209 | House photo (:209-256, :442, :483-545) | customer | Explainer | KEY STRING: "Add House Photo" / "Your photo will be used to preview lighting effects" / "Trace Roofline" — "Draw where your lights are installed"
+widgets/house_photo_uploader.dart:483 | Photo not linked | customer | Next step | KEY STRING: "Your photo outline isn't linked to your lights yet — open it […]" / "Trace your roofline for accurate light preview"
+
+======================================================================
+M. SETTINGS (MISC) / PROFILE / ACCOUNT / FAMILY / HARDWARE
+======================================================================
+features/site/settings_page.dart:1274 | Simple Mode card (:1246-1259) | customer | Explainer | KEY STRING: "Simple Mode" / "A simplified interface with large buttons and essential features only. Perfect for easier, more straightforward control."
+features/site/settings_page.dart:1301 | Enable Simple Mode dialog (:1299-1326) | customer | Feature list (mentions voice) | KEY STRING: "Simple Mode provides:\n\n• Large, easy-to-tap buttons\n• Only essential features (Home & Settings)\n• Your favorite lighting patterns\n• Simple brightness […]"
+features/site/settings_page.dart:1339 | Disable Simple Mode dialog. Calls the tab "Settings"; the nav tab is labelled "System" (glass_dock_nav_bar.dart:77). | customer | Explainer | KEY STRING: "This will show all app features and navigation tabs (Home, Schedule, Lumina, Explore, Settings)."
+features/site/system_management_screen.dart:1062 | Mode tab (:1058-1197) | customer | Residential vs commercial | KEY STRING: "Choose the mode that best fits your lighting installation." / "• Optimized for single homes\n• One primary controller with optional linked controllers[…]"
+features/site/system_management_screen.dart:247 | My Lights tab (:237-536) | customer | Explainers | KEY STRING: "Your lighting channels as configured in Hardware Config." / "Configure controller ports, LED counts, power limits, and LED type."
+features/site/system_management_screen.dart:340 | Advanced Effects (:336-380) | customer | Explainer | KEY STRING: "Enable additional effect categories for specialized hardware." / "2D Matrix Effects" / "Audio-Reactive Effects" — "Requires microphone/line-in on controller"
+features/site/system_management_screen.dart:403 | Roofline Setup card (:399-420) | customer | Explainer | KEY STRING: "Configure your roofline layout including peaks, valleys, and segment boundaries." / "Setup Wizard" / "Edit Layout"
+features/site/system_management_screen.dart:480 | Saved layout note (:480, :500-501) | customer | LAN-only | KEY STRING: "Showing your saved channel layout. $kLanOnlyMessage." / "Saved layout — connect on site for details"
+features/wled/hardware_config_screen.dart:468 | Hardware config (:449-690) | customer/installer | Explainer | KEY STRING: "Assign lights to the output channels on your controller." / "Number of Lights" — helper "Count the bulbs on this strand." / "Save & Reboot Board"
+features/wled/hardware_config_screen.dart:386 | Manual config dialog (:386-426) | installer | Web-UI how-to | KEY STRING: "Manual Configuration Required" / "This controller requires manual LED configuration via its web interface." / "Go to: Config → LED Preferences"
+features/wled/zone_configuration_page.dart:156 | My Lighting Areas (:25-291) | customer | Explainer | KEY STRING: "Use Design Studio to paint individual LEDs, create gradients, and apply effects to your areas." / "No lighting areas configured. Set up your LED counts in Hardware Configuration."
+features/audio/audio_mode_page.dart:189 | Audio Mode not available (:179-213) | customer | Firmware explainer | KEY STRING: "This controller doesn't have AudioReactive firmware installed. Audio Mode requires a WLED build with the AudioReactive usermod […]"
+features/audio/audio_mode_page.dart:213 | Audio hardware note (:324-616) | customer | Product claim | KEY STRING: "The Nex-Gen NGL-CTRL-P1 comes with AudioReactive firmware and onboard mic pre-installed."
+features/geofence/geofence_setup_screen.dart:156 | Welcome Home (:106-249) | customer | Labels | KEY STRING: "Welcome Home" / "Trigger Distance: N ft" / "When I enter this circle…" / "Only at Night?"
+features/properties/my_properties_screen.dart:273 | Properties empty (:24-284) | customer | Empty state | KEY STRING: "No Properties Yet" / "Add your first property to organize your lighting systems across multiple locations."
+features/properties/my_properties_screen.dart:214 | Delete property | customer | Consequence | KEY STRING: "Are you sure you want to delete \"$name\"? This will unlink all controllers associated with this property."
+features/site/user_profile_screen.dart:45 | Profile menu (:45-68; Family Members is behind kManageFamilyMembersEnabled, compile-time, default off) | customer | Labels | KEY STRING: "Edit Profile" / "Security & Password" / "Manage Family Members" / "Sign Out"
+features/site/security_settings_screen.dart:54 | Change password. Minimum is 6 here and 8 in forced reset. | customer | Validation | KEY STRING: "New password must be at least 6 characters."
+features/site/security_settings_screen.dart:138 | Delete account dialog (:85-170, :285) | customer | Consequences list | KEY STRING: "This permanently deletes:" / "Your profile, address and contact details" / […] / "Your lights will keep running whatever schedule is already […]" / "This cannot be undone."
+services/account_deletion_service.dart:209 | Deletion outcomes (:189-281) | customer | Errors | KEY STRING: "That password is incorrect. Nothing has been deleted." / "Your data could not be deleted. Your account is unchanged — […]"
+features/users/sub_users_screen.dart:441 | Invite family member (:81-539) | customer | How-to | KEY STRING: "Invite Family Member" / "Share this code with $email:" / "This code expires in 7 days." / "Tap \"Invite\" to add someone"
+features/auth/join_with_code_screen.dart:72 | JoinWithCodeScreen (:51-364) | customer | How-to | KEY STRING: "Enter the 6-character code you received from the system owner." / "Don't have a code? Ask the system owner to invite you."
+features/auth/join_with_code_screen.dart:244 | Join errors (:238-333) | customer | Errors | KEY STRING: "Sign in with the email address your invitation was sent to, then enter the code again." / "This invitation has expired. Ask the system owner for a new […]"
+features/site/edit_profile_screen.dart:689 | Lifestyle profile: time format (:518, :681-689) | customer | Explainer | KEY STRING: "Lumina Lifestyle Profile" / "How times appear across schedules, game days, and summaries."
+features/site/edit_profile_screen.dart:834 | Teams (:830-877) | customer | Where to manage teams | KEY STRING: "Manage teams in Game Day — that is where colours, designs and […]" / "Add a team in Game Day"
+features/site/edit_profile_screen.dart:948 | HOA and color windows (:947-1001, :419) | customer | Explainer | KEY STRING: "If enabled, Lumina will prioritize Architectural White on weeknights and limit colors to Holidays/Weekends." / "Quiet Hours"
+features/site/edit_profile_screen.dart:1057 | Privacy toggles (:1024-1070). The "stored locally" claim is doubtful: profile data is in Firestore. | customer | Privacy claims | KEY STRING: "Allow Nex-Gen to recommend your custom designs to other users with the same Builder/Floor Plan. […]" / "Nex-Gen respects your privacy. Your data is stored locally and securely."
+features/site/edit_profile_screen.dart:1154 | Builder match. "12" is a hard-coded claim. | customer | Product claim | KEY STRING: "Matches Found: We have 12 saved lighting designs for the '$builder - $plan' model. Lumina can auto-configure your zones."
+features/site/edit_profile_screen.dart:1308 | Autopilot (:1297-1475) | customer | Explainer | KEY STRING: "Let Lumina automatically generate and maintain your lighting schedule based on your preferences." / "How often should Lumina change your lighting patterns?"
+features/site/edit_profile_screen.dart:1424 | Team Priority (second wording, different from game_day_screen.dart:2118) | customer | Explainer | KEY STRING: "Drag to reorder. When multiple teams play on the same day, the top team takes priority."
+features/site/edit_profile_screen.dart:1447 | Weekly preview | customer | Explainer | KEY STRING: "Receive a notification every Sunday evening with your upcoming schedule for the week. Only sent when there are special events (games, holidays)."
+features/site/edit_profile_screen.dart:592 | My Whites tile | customer | Explainer | KEY STRING: "My Whites" / "Set your go-to white lighting for everyday use."
+
+======================================================================
+N. AUTH / ACCOUNT
+======================================================================
+features/auth/login_page.dart:186 | Login reset sheet (:171-266) | customer | How-to | KEY STRING: "Enter your email address and we'll send you a link to reset your password." / "SEND RESET LINK"
+features/auth/login_page.dart:391 | Login (:347-499) | customer | Labels | KEY STRING: "Welcome back" / "Forgot Password?" / "ENTER LUMINA" / "Experience Nex-Gen Demo"
+features/auth/login_page.dart:524 | Reviewer button (only when _showReviewerButton) | internal | Fills the reviewer email | KEY STRING: "App Store Review" / "Review credentials applied"
+features/auth/forgot_password_page.dart:114 | ForgotPasswordPage (:41-158) | customer | How-to | KEY STRING: "Enter your email address and we'll send you a reset link." / "No account found with this email" / "Remember your password?"
+features/auth/forced_password_reset_screen.dart:239 | Forced reset (:56-367) | customer | First-login reset | KEY STRING: "Welcome to Lumina!" / "For your security, please set a new […]" / "Didn't receive a temp password? Send password reset email" / "At least 8 characters."
+features/auth/staff_pin_screen.dart:398 | Staff PIN (/staff/pin; :178-407) | installer/dealer/internal | PIN entry | KEY STRING: "Staff Access" / "Enter 4-digit PIN" / "Invalid PIN. N attempts remaining." / "Too many attempts. Locked for Ns."
+features/auth/sign_out_button.dart:52 | Sign out (:35, :52) | customer | Button | KEY STRING: "Sign out" / "Couldn't sign out: $e"
+ACCOUNT SWITCHING: there is no customer-facing "switch account" copy. Related: link_account_screen.dart:95 "Signed in as $signedInEmail"; installer impersonation wled_dashboard_page.dart:317-348 ("Viewing customer system: $customerName", "Exit", "Switch") and widgets/installer_mode_banner.dart:36 ("Installer Mode — $customerName's Account", "Exit") — audience installer.
+
+======================================================================
+O. NEIGHBORHOOD SYNC
+======================================================================
+features/neighborhood/widgets/neighborhood_onboarding.dart:147 | Onboarding carousel (:123-818) | customer | Product explanation | KEY STRING: "Imagine your entire street lighting up in perfect harmony. Colors flowing from home to home like a wave. […]"
+features/neighborhood/widgets/neighborhood_onboarding.dart:295 | Four Ways to Sync (:270-326) | customer | Mode explainer | KEY STRING: "Sequential Flow" / "Simultaneous" / "Pattern Match" / "The Complement" — "Each home displays a different color from the theme. Together, you create a living rainbow."
+features/neighborhood/widgets/neighborhood_onboarding.dart:612 | Getting started (:585-650; repeated neighborhood_sync_screen.dart:897-949) | customer | 3-step how-to | KEY STRING: "Create or Join" / "Configure Your Home" / "Sync & Celebrate" / "Pro tip: Share your invite code via text or social media to grow your group quickly!"
+features/neighborhood/widgets/battery_optimization_prompt.dart:76 | Battery prompt (:65-115) | customer | Android how-to | KEY STRING: "For reliable Sync Event triggers when the app is closed, Lumina needs to be exempted from battery optimization." / "Open Settings > Apps > Lumina" / "Tap Battery" […]
+features/neighborhood/neighborhood_sync_screen.dart:287 | Join crew (:224-307, :1263) | customer | How-to | KEY STRING: "Got an invite code? Enter it below to join your neighbors' light show crew." / "Hmm, that code didn't work. Double-check it and try again!"
+features/neighborhood/neighborhood_sync_screen.dart:1342 | Crew admin (:1339-2807) | customer | Dialogs | KEY STRING: "Regenerating the code invalidates the current one. Anyone with the […]" / "You can rejoin anytime with the group code." / "Allow nearby neighbors to find and request to join"
+features/neighborhood/widgets/sync_control_panel.dart:731 | Sync Control Center (:545-1963) | customer | How-to | KEY STRING: "Tap a house to assign a unique pattern. Unassigned houses use the selection above." / "Tip: Reorder homes in the Members section to change color assignments"
+features/neighborhood/widgets/sync_control_panel.dart:1963 | Per-pixel block | customer | Why blocked | KEY STRING: "My Designs cannot be shared to a neighbourhood — sync […]"
+features/neighborhood/widgets/sync_event_setup_screen.dart:357 | Sync event setup (:270-820) | customer | Options | KEY STRING: "Automatically starts when the game begins (recommended)" / "Fires when your team scores. All homes flash simultaneously." / "Members who have opted in to Game Day syncs will automatically join this session."
+features/neighborhood/widgets/sync_warning_dialog.dart:172 | Active sync warning (:122-331) | customer | Explainer | KEY STRING: "Your sync participation has been paused so your […]" / "You left sync — Tap to rejoin"
+features/neighborhood/widgets/season_renewal_dialog.dart:226 | Season renewal (:102-230) | customer | Explainer | KEY STRING: "All home games for the $season season are complete. Renew to keep syncing for next season."
+features/neighborhood/widgets/schedule_list.dart:337 | Group schedules (:89-1325) | customer | Empty state | KEY STRING: "No Group Schedules Yet" / "Create a schedule to automatically sync\nyour group's lights for any occasion." / "Start at sunset (unavailable — pick a time)"
+features/neighborhood/widgets/member_position_list.dart:657 | Member config (:478-738) | customer | Explainer | KEY STRING: "How do your LEDs run along your roofline?" / "Your home will skip group animations and run its own pattern."
+features/neighborhood/services/sync_refusal_record.dart:66 | SyncRefusal title (body = server message, rendered by sync_refusal_banner.dart:80) | customer | Refusal | KEY STRING: "Sync skipped" | "Neighborhood Sync did not start"
+
+======================================================================
+P. NOTIFICATIONS (OS-level copy)
+======================================================================
+services/notifications_service.dart:155 | Geofence | customer | Push body | KEY STRING: "Welcome Home!" / "Lights set to $patternName."
+services/notifications_service.dart:196 | Misc pushes (:196, :219, :260, :274-275, :310, :324, :362) | customer | Push copy | KEY STRING: "Lumina Noticed a Pattern" / "Holiday Schedule Conflict" / "Weekly Schedule Preview" / "Your top $count patterns have been added to favorites."
+services/autopilot_notification_service.dart:43 | Weekly brief | customer | Channel | KEY STRING: "Autopilot Weekly Brief"
+features/sports_alerts/services/alert_trigger_service.dart:632 | Score alert (:48, :632, :645 event names) | customer | Push | KEY STRING: "Your lights are celebrating!" / "Two-point conversion!"
+features/sports_alerts/services/sports_background_service.dart:466 | Foreground service (:303-491; disabled by kSportsBackgroundServiceEnabled=false) | customer | Status | KEY STRING: "Lumina Sports Watch" / "Watching $team game..." / "CLUTCH TIME — Watching $team"
+features/neighborhood/services/sync_notification_service.dart:529 | Sync pushes (:529-683) | customer | Push copy | KEY STRING: "Your lights are celebrating with the neighborhood" / "Your $group lights will resume after the game." / "Group Autopilot Cancelled"
+
+======================================================================
+Q. INSTALLER / SALES / DEALER / CORPORATE / MEDIA / INVENTORY (non-customer)
+======================================================================
+features/installer/installer_landing_screen.dart:76 | Installer landing | installer | Purpose | KEY STRING: "Onboard new customers, complete day-of installs, and manage existing accounts."
+features/installer/installer_landing_screen.dart:95 | InfoExpansionCard | installer | Dual-network guidance | KEY STRING: "Installing a SKIKBILY or dual-network controller?" — "When the controller has both WiFi and Ethernet capability, use Ethernet whenever a wall jack is available. […]"
+features/installer/installer_setup_wizard.dart:417 | Wizard session (:411-589, :2159-2188) | installer | Resume and expiry | KEY STRING: "You have an incomplete installation:" / "Your installer session will expire soon due to inactivity." / "Extend Session"
+features/installer/installer_setup_wizard.dart:997 | Controllers didn't transfer (:990-1017, :1219-1251, :1322) | installer | Critical failure | KEY STRING: "Controllers didn't transfer" / "The customer's account was created, but NONE of the […] If you stop now they will sign in to an app with no […]"
+features/installer/installer_setup_wizard.dart:1263 | Master PIN misuse | installer | Error | KEY STRING: "That's a master support PIN — it can't be used to set up a customer. Re-enter your own installer PIN (your dealer code + installer code) to […]"
+features/installer/installer_setup_wizard.dart:890 | Link existing account (:890-926, :1893-1902) | installer | Errors | KEY STRING: "That account belongs to another dealer. Contact support to […]"
+features/installer/installer_setup_wizard.dart:2021 | Completion credentials (:2015-2098; template at :2068 includes the temporary password) | installer | Handoff | KEY STRING: "CUSTOMER LOGIN CREDENTIALS" / "Customer should change their password after first login." / "Credentials copied to clipboard"
+features/installer/handoff_screen.dart:307 | Handoff prefs (:225-559, :829-886) | installer | Customer preferences | KEY STRING: "Configure user preferences before completing setup." / "Passive: suggests changes, waits for approval" / "Users can always switch between Simple and Full modes in Settings."
+features/installer/screens/connection_method_screen.dart:234 | Connection method (:84-658) | installer | Ethernet-vs-WiFi guidance | KEY STRING: "For each controller, pick how it stays on the network. Ethernet is more reliable for permanent installs — pick it […]" / "Why never leave both connected:"
+features/installer/screens/controller_setup_screen.dart:645 | Controller setup (:244-1560) | installer | Static IP how-to | KEY STRING: "Controller saved, but it did not answer at $ip. Step 3 (Connection Method) will not let you continue […] WLED in a browser at this IP → Config → WiFi Setup […]"
+features/installer/screens/hardware_config_step.dart:120 | Hardware step (:55-197) | installer | Skip consequence | KEY STRING: "Your lights and schedules need controller setup to work […] You can configure this later from System → Hardware."
+features/installer/screens/map_roofline_step.dart:568 | Map roofline step (:244-600) | installer | How-to | KEY STRING: "Walk each channel with the lit pixel and mark corners, peaks, and […]" / "This roofline capture could NOT be saved […]"
+features/installer/screens/zone_configuration_screen.dart:87 | Zones (:34-800) | installer | Explainer | KEY STRING: "Link controllers together so they operate as a unified system. All linked controllers will respond to commands together."
+features/installer/screens/customer_info_screen.dart:412 | Customer info (:239-541) | installer | Field help | KEY STRING: "Any special instructions or details about the installation." / hint containing a sample gate code [value withheld]
+features/installer/screens/existing_customer_screen.dart:251 | Existing customer (:135-288) | installer | How-to | KEY STRING: "Search by name, email, or address to access their Lumina account."
+features/installer/media_landing_screen.dart:153 | Media mode (:85-211) | internal | How-to | KEY STRING: "Enter your 6-character media access code. This code was provided by your Nex-Gen team lead." / "Media sessions expire after 4 hours of inactivity."
+features/installer/media_access_code_screen.dart:229 | Media code footer (:101-345) | internal | Contact (email withheld) | KEY STRING: "Don't have a code? Contact [email withheld]"
+features/installer/admin/dealer_dashboard_screen.dart:1179 | Dealer dashboard (:972-1706) | dealer | Payout policy | KEY STRING: "Visa gift card rewards are capped at $599 per referrer per […]" / "Installer records contain sign-in credentials, so they are […]"
+features/installer/admin/dealer_management_screen.dart:164 | Dealer management (:73-553) | internal | Consequence | KEY STRING: "This will also deactivate all installers under $company. They will no longer be able to log in."
+features/installer/admin/installer_management_screen.dart:597 | Installer management (:137-683) | internal | PIN composition helper | KEY STRING: "Full PIN: $dealerCode$installerCode" (runtime value)
+features/sales/screens/sales_landing_screen.dart:88 | Sales landing (:88-104) | installer/dealer | Workflow explainer | KEY STRING: "Log zones, run lengths, injection points, and power mounts during a site survey."
+features/sales/screens/estimate_wizard/wizard_step1_home_photo.dart:69 | Estimate wizard steps 1-5 (step2 :117-154, step3 :72, step4 :72-561, step5 :108-142) | dealer | Step guidance | KEY STRING: "Photograph the front of the home" / "Runs over 100ft must have at least one injection point […]"
+features/sales/screens/day1_blueprint_screen.dart:222 | Day 1 / Day 2 / wrap-up (day1 :115-780, day2 :136-603, wrap-up :491-887) | installer | Checklists | KEY STRING: "This pushes the job into the Day 2 install queue. The customer […]" / "Capture one photo per channel. These get attached to the […]"
+features/sales/screens/dealer_messaging_config_screen.dart:193 | Dealer messaging (:140-349) | dealer | Field help | KEY STRING: "Appears at the end of every text message we send your customers." / "US phone number shown in emails so customers can reach you."
+features/sales/screens/estimate_preview_screen.dart:447 | Estimate preview (:219-451) | customer-facing doc | Product claims | KEY STRING: "Professional 2-day installation" / "Rated 50,000-hour service life — 20+ years at typical evening use"
+features/sales/screens/inventory_dashboard_screen.dart:79 | Inventory dashboard (:61-397) | dealer | Not finished; internal dev wording reaches the UI | KEY STRING: "Inventory bridge required" / "Computed once Section 2 is bridged. Until then, refer to Section 1 for the on-hand quantity directly."
+features/corporate/screens/corporate_admin_screen.dart:503 | Corporate admin (:161-908) | internal | Role-grant consequences | KEY STRING: "This grants cross-dealer visibility of customer accounts. Current […]"
+features/corporate/screens/corporate_pin_screen.dart:131 | Corporate PIN (:90-131) | internal | Entry | KEY STRING: "Nex-Gen LED Systems — internal access"
+features/inventory/dealer/order_screen.dart:179 | Dealer ordering (order_screen :153-675, order_history :186-876, auto_reorder :137-391) | dealer | Process explainer | KEY STRING: "Nex-Gen will calculate shipping cost and confirm payment […]" / "Order submitted! Nex-Gen will review and confirm shipping cost before processing."
+features/inventory/corporate/catalog_management_screen.dart:229 | Corporate inventory (catalog, orders, PO, receive, warehouse) | internal | Process copy | KEY STRING: "This will update N active SKUs." / "No open POs. Tap \"New PO\" to order from a supplier."
+features/referrals/screens/payout_approval_screen.dart:38 | Payout approval (:38-234) | dealer | Process | KEY STRING: "Review and approve pending payouts" / "Reward approved — referrer will be notified"
+
+======================================================================
+R. COMMERCIAL MODE
+======================================================================
+widgets/commercial/commercial_pro_banner.dart:91 | CommercialProBanner | customer (commercial) | "Coming" subscription notice | KEY STRING: "Multi-location management and advanced commercial features are currently included." / "A Lumina Commercial subscription is coming — set up now to be grandfathered."
+screens/commercial/onboarding/screens/review_go_live_screen.dart:415 | Review & Go Live (:34, :415-417, :678) | customer (commercial) | "Coming" notice | KEY STRING: "Multi-location management and advanced commercial features are currently included in Lumina at no additional cost. A Lumina Commercial subscription is coming […]"
+screens/commercial/onboarding/commercial_onboarding_wizard.dart:68 | Wizard chrome (:68, :169) | customer (commercial) | Progress | KEY STRING: "Progress saved. You can resume anytime." / "Step N of M"
+screens/commercial/onboarding/screens/brand_identity_screen.dart:323 | Brand identity (:79-619) | customer (commercial) | How-to | KEY STRING: "Search our brand library to auto-fill your brand colors. […]"
+screens/commercial/onboarding/screens/channel_setup_screen.dart:125 | Channel roles (:95-321) | customer (commercial) | How-to | KEY STRING: "Assign a role to each lighting channel." / "No channels detected.\nConnect to a Lumina controller first." / "Dims or turns off outdoor lights during daylight hours"
+screens/commercial/onboarding/screens/multi_location_screen.dart:106 | Multi-location (:102-197) | customer (commercial) | Explainer | KEY STRING: "Channels, day-parts, and coverage policies will be copied. Hours can still differ per location."
+screens/commercial/onboarding/screens/hours_of_operation_screen.dart:77 | Hours (:77, :181) and business type (business_type_screen.dart:189) | customer (commercial) | Validation and help | KEY STRING: "Set at least one day as open, or select \"Our hours vary\"." / "Used to suggest your local sports teams"
+screens/commercial/schedule/CommercialScheduleScreen.dart:257 | Commercial schedule (:225-1554) | customer (commercial) | Locked state | KEY STRING: "This schedule is managed by $orgName. Contact your admin." / "Drag to resize — snap to 15 min increments"
+features/commercial/events/events_screen.dart:104 | Events (events_screen :44-214, create_event :112-299, CommercialHomeScreen :48-469) | customer (commercial) | Explainer | KEY STRING: "Create events to sync your lighting with your marketing […]" / "No controller connected — apply unavailable."
+features/commercial/brand/brand_search_screen.dart:178 | Brand library (search, setup, correction review) | customer/internal | How-to | KEY STRING: "Find verified colors for thousands of […]" / "This screen is restricted to corporate brand-library administrators."
+screens/commercial/fleet/FleetDashboardScreen.dart:1421 | Fleet dashboard (:856-1886) | customer (commercial) | Labels | KEY STRING: "Push a schedule to selected locations" / "Prevents local edits until unlocked"
+
+======================================================================
+S0. KEYWORD SWEEP: TestFlight / "coming soon" / beta / Alexa / Google / Siri
+======================================================================
+- TestFlight appears only in comments (main.dart:63, :65). No user-facing string mentions it.
+- "coming soon" and "beta" appear in no user-facing string. The only "coming" copy is commercial_pro_banner.dart:102 and review_go_live_screen.dart:417 (section R).
+- Alexa / Google Home / Hey Google / Siri appear only in features/voice/** (section B), settings_page.dart:858, settings_page.dart:1306 (Simple Mode "Voice assistant setup") and handoff_screen.dart:544.
+
+======================================================================
+S1. HELP / GUIDE / TUTORIAL ROUTES (nav.dart is a 4-line barrel that re-exports app_router.dart and route_guards.dart, so it has no matches; all routes are in app_router.dart)
+======================================================================
+- /settings/help — name 'help-center' -> HelpCenterScreen (app_router.dart:1008-1013; const :1130). Reached only from settings_page.dart:413/472.
+- /settings/voice-assistants — name 'voice-assistants' -> VoiceAssistantGuideScreen (:1044-1049; const :1146). Reached from settings_page.dart:875.
+- /welcome — name 'welcome' -> WelcomeWizardPage (:253-257; const :1113). Reached from settings_page.dart:801 and discovery_page.dart:72; guard at route_guards.dart:153/275.
+- /first-run — name 'first-run' -> FirstRunScreen (:261-262; const :1248); guard at route_guards.dart:272-291.
+- /setup/wizard — name 'controller-setup-wizard' -> ControllerSetupWizard (:287-290; const :1124).
+- /settings/remote-access — name 'remote-access' (:1032-1037) and /settings/bridge-setup — name 'bridge-setup' (:1038-1043). Both contain embedded setup guides.
+- /roofline-setup-wizard (:352-355; installer-locked), /installer/wizard (:398-401), /commercial/onboarding (:693-698), /sales/jobs/:jobId/wizard/* (:472-521).
+- /demo plus /demo/profile, photo, roofline, complete, patterns, schedule, explore, lumina (:195-243); /demo-code.
+- /link-account (:181) and /join-with-code (:187): account-linking help.
+- /first-week-reveal (:268) and /autopilot/calendar (:277): Autopilot reveal.
+- Not routes: Feature Tour (overlay from settings_page.dart:766), Support sheet and Support Request form (bottom sheets in settings_page.dart:361/402), Battery-optimization prompt, Neighborhood onboarding carousel.
+- AppRoutes.systemDeactivated ('/system-deactivated', :1230) is declared but no GoRoute registers it.
+
+======================================================================
+S2. LINKS TO EXTERNAL HELP OR DOCS
+======================================================================
+- features/site/settings_page.dart:416 — YouTube channel ("Video Tutorials").
+- features/site/settings_page.dart:514 — https://nex-genled.com/privacy-policy.
+- features/voice/voice_assistant_guide_screen.dart:926 — https://www.home-assistant.io/integrations/wled/ ("View Integration Guide").
+- features/voice/alexa_service.dart:29 (skill enable page), :32 (alexa:// deep link), :183/:189 (Alexa discover / smart-home web).
+- features/voice/google_home_service.dart:28 (googlehome://), :32 (placeholder YOUR_PROJECT_ID URL), :186 (https://home.google.com/).
+- features/auth/support_contact.dart:16 (website "Nex-GenLED.com", used by the "Visit" button at link_account_screen.dart:355), plus tel: and mailto: URIs built at :42-49.
+- features/site/settings_page.dart:385 — mailto to the corporate support email. features/site/lumina_studio_screen.dart:77-81 — mailto to the dealer email, else corporate.
+- features/demo/demo_code_screen.dart:292 — https://nex-genled.com.
+- features/site/referral_program_screen.dart:105 — https://nex-genled.com/r/$code (in the SMS body).
+- features/sales/screens/estimate_preview_screen.dart:50 — https://nex-genled.com/estimate/$id (dealer).
+- features/inventory/dealer/order_history_screen.dart:648-655 — UPS / FedEx / USPS / Google tracking (dealer).
+- Controller web UI by IP (not docs, but instructional): ble/wled_manual_setup.dart:312, wled/hardware_config_screen.dart:397, wled/clock_health.dart:407-418, installer/screens/controller_setup_screen.dart:1311-1332.
+- Debug only (not user-facing): schedule/geocoding_service.dart:160 (Google console URL in debugPrint).
+
+======================================================================
+S3. STRINGS CONTAINING EMAIL / PHONE / IP / PASSWORD / PIN / KEY (kind only; values not quoted)
+======================================================================
+EMAIL:
+- features/auth/support_contact.dart:15 — corporate support email (shown at settings_page.dart:383, mailto at :385).
+- services/reviewer_seed_service.dart:18 — App Store reviewer account email (login_page.dart:513 fills it).
+- features/installer/media_access_code_screen.dart:229 — media-team contact email in footer text.
+- Placeholder or example emails: corporate_admin_screen.dart:609, demo_profile_screen.dart:139, dealer_dashboard_screen.dart:1477, installer/screens/customer_info_screen.dart:511, users/sub_users_screen.dart:299.
+PHONE:
+- features/auth/support_contact.dart:14 — corporate phone (used by link_account "Call").
+- Example or placeholder numbers: support_contact.dart:40 (doc comment), demo_profile_screen.dart:161, installer/screens/customer_info_screen.dart:329.
+IP ADDRESS (UI hint or instructional text):
+- site/settings_page.dart:153 (zone IP label), ble/wled_manual_setup.dart:312 (controller AP web UI), ble/wled_manual_setup.dart:483 (hint), installer/screens/controller_setup_screen.dart:468 (hint), widgets/ip_entry_sheet.dart:31 and :194 (hint).
+- Code, comments or tests (not UI): audio_capability_detector.dart:171, device_setup_page.dart:496, provisioning_service.dart:98/:335, device_discovery.dart:41, schedule_sync.dart:118/:708, sunrise_off_service.dart:304, device_identity.dart:5, sparkle_background.dart:18, wled_effects_catalog.dart:749, wled_payload_utils.dart:226/:723, wled_service.dart:451/:514/:563/:581.
+PASSWORD:
+- installer/installer_setup_wizard.dart:2068 — credential clipboard template that interpolates the customer's temporary password (runtime value, no literal).
+- No hard-coded password literal found in lib/.
+PIN / ACCESS CODE:
+- installer/screens/customer_info_screen.dart:423 — hint text with a sample gate code (4-digit literal).
+- corporate/providers/corporate_admin_providers.dart:100-103 — Firestore doc IDs for master PINs (names only, no PIN values).
+- installer/installer_providers.dart:133 — composes fullPin at runtime.
+- No hard-coded staff PIN value found.
+API KEY / IDENTIFIER:
+- firebase_options.dart:50, :59, :67 — Firebase client API keys.
+- features/voice/alexa_service.dart:25 — Alexa skill ID.
+- autopilot/game_day_autopilot_background_worker.dart:47, neighborhood/neighborhood_service.dart:86, neighborhood/services/sync_event_background_worker.dart:41 — Cloud Functions base URL containing the project ID.
+
+======================================================================
+S4. COPY THAT DISAGREES WITH THE APP OR WITH OTHER COPY (useful for the docs overhaul)
+======================================================================
+1. Version: Settings shows hard-coded "Version 1.6.0 / Build 2026.01" (settings_page.dart:631). Login shows v2.5.10 from kAppVersion (app_version.dart:22).
+2. Help Center FAQ #2 names a path that does not exist ("Device Setup > Select Controller > Wi-Fi Settings"). FAQ #4 sends people to "Time & Macro" in Hardware Config, which is really in the controller web UI (clock_health.dart:407).
+3. bridge_setup_screen.dart:529 points to "Settings → Remote Access → Unpair Bridge", but no Unpair button exists. bridge_setup_screen.dart:266 says "Site Setup", and settings_page.dart:294 says "Settings > Controllers & Devices"; neither label exists.
+4. Bridge naming: blocked-reason and Game Day copy say "Lumina Bridge"; Remote Access and System Management say "ESP32 Bridge".
+5. The commercial kLanOnlyMessage ("venue Wi-Fi") is shown to homes at system_management_screen.dart:480.
+6. Schedule limits: "up to 20 schedules" (my_schedule_page.dart:5045), "All 8 schedule slots" (eviction_picker_dialog.dart:188), and "timer slots are full (8/8)" (schedule_sync.dart:1765). dated_overwrite_dialog.dart:124 says "A day can only hold one saved entry", while the code comments say several dated entries per day are allowed.
+7. Password minimum is 6 in security_settings_screen.dart:54 and 8 in forced_password_reset_screen.dart:57.
+8. The Simple Mode disable dialog calls the tab "Settings"; the nav tab is labelled "System".
+9. Team Priority has two different explanations (game_day_screen.dart:2118 vs edit_profile_screen.dart:1424).
+10. edit_profile_screen.dart:1154 hard-codes "12 saved lighting designs". edit_profile_screen.dart:1070 says data is "stored locally".
+11. The voice guide tells users to search for "Nex-Gen Lumina" in Alexa Skills and Works with Google, but the Google setup URL is a YOUR_PROJECT_ID placeholder.
+12. The Manage Family Members screen is off by default (a compile-time flag), yet the Link Account screen and the Join with Code screen advertise invitation codes.
+
+======================================================================
+COUNT OF SURFACES BY FEATURE AREA (one line in sections A-R = one surface)
+======================================================================
+A Help / FAQ / Support / Contact / Version ........ 44
+B Voice assistants ................................ 40
+C Onboarding / Welcome / First run / Tour / Demo .. 39
+D Blocked apply / connection / reconnect .......... 43
+E Remote Access & Bridge .......................... 40
+F Controller choice / adding controllers .......... 30
+G Game Day (gate / preflight / run mode / celebration / crew) ... 55
+H Ladder / preset repair / sync status ............ 24
+I Schedule editor / hints / warnings .............. 46
+J Lumina AI chat .................................. 46
+K Favorites / Recent / design cards / Explore ..... 35
+L Design Studio / roofline ........................ 40
+M Settings misc / profile / account / hardware .... 35
+N Auth / account .................................. 8
+O Neighborhood Sync ............................... 13
+P Notifications ................................... 6
+Q Installer / sales / dealer / corporate / media / inventory ... 31
+R Commercial ...................................... 11
+TOTAL ≈ 586, plus S1 routes (~20), S2 external links (~16) and S3 sensitive-string sites (~40).

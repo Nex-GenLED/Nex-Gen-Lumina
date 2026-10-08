@@ -1,0 +1,347 @@
+READ-ONLY DOCUMENTATION AUDIT — bridge / voice / security / marketing set
+Worktree: C:\Flutter Projects\lumina-docs-overhaul @ c283d62. No file modified. Firmware verified against esp32-bridge/src/main.cpp; app claims verified against lib/, functions/. Every verdict cites a truth-table ID or a file:line I read. Emails, private IPs are redacted per the privacy rule and listed in section C.
+
+Firmware facts established from esp32-bridge/src/main.cpp (used throughout): six HTTP routes only — GET /api/info, GET /api/bridge/status, POST /api/bridge/pair, POST /api/bridge/auth, POST /api/reboot, POST /api/reset; everything else 404 JSON (:366-372, :518-520). No web page, no filesystem (no LittleFS/SPIFFS include; platformio.ini has no data dir). Captive portal = WiFiManager autoConnect on AP "Lumina-" + MAC suffix, 5-minute timeout then reboot (:69, :144-149, :293-310); portal address 192.168.4.1 root [T-R4] — no /setup route. Heartbeat and registry re-assert every 30 s, rewriting status + pairedUid (:52, :252, :263-266, :1122-1160). Command poll = POLL_INTERVAL_MS from git-ignored config.h (example 1000 ms, config.h.example:61); pairing poll 5 s (:53); watchdog reboot after 5 min without cloud success (:273-276). Bridge auth = compiled-in email/password via signInWithPassword (:569-574; config.h.example:27-31); TLS with setInsecure() (:530). Commands relay only GET/POST /json/state and GET /json/info — never /json/cfg (:811-823) [T-R8]. /api/reset clears only the "bridge" NVS namespace and reboots; Wi-Fi credentials (WiFiManager) survive (:504-516). Status LED: every 5 s 1 blink = Wi-Fi+Firebase, 2 = Wi-Fi only, 3 = no Wi-Fi; 5 fast at boot; 3 when portal starts (:142, :303, :1296-1307). App side: bridge_api_client.dart targets the six routes incl. POST /api/reset (:106-209), 5 s client timeout (:100); health check 15 s (bridge_health_service.dart:34); relay command timeout 45 s (cloud_relay_repository.dart:58); Test Bridge waits 10 s (remote_access_screen.dart:388-394); bridge reachability is shown on Remote Access and System Management screens only, never on Home (remote_access_screen.dart:1038; system_management_screen.dart:895); Home shows the Direct / Via Bridge badge (route_path_badge.dart:52).
+
+================================================================
+A. PER-DOCUMENT HEADERS
+================================================================
+DOC: docs/ESP32_Bridge_Setup_Guide.md | customer + installer | "app 2.5.10+89, bridge fw v1.2, August 2026" | 348 lines | overall: archive | Self-declared SUPERSEDED (line 33); carries a non-existent /setup URL, a non-existent web wizard/Option B, a customer-facing flashing procedure, a wrong factory-reset outcome and a wrong home-screen status dot.
+DOC: docs/guides-2026-09/07-bridge-setup-guide.md | customer + installer | "app 2.5.10+98, firmware v1.2, September 2026" | 263 lines | overall: keep (rewrite audience + add gaps) | Technically sound against firmware and app; wrong audience (customers pairing), misses the ten-minute gap, away messages, Test Bridge semantics, and quotes a wrong schedule message.
+DOC: esp32-bridge/README.md | internal / firmware | none | 36 lines | overall: rewrite | Calls the fielded v1.2 firmware "legacy" and points to a lumina-firmware/ directory that does not exist; claims anonymous auth, a web dashboard and a 3-step wizard, all false.
+DOC: alexa-skill/DEPLOYMENT.md | internal | none | 128 lines | overall: rewrite (gate behind T-VA1 notice) | Account-linking config contradicts the implemented alexaAuth/alexaToken functions; serverless option cannot run; never says linking has never worked.
+DOC: google-home/DEPLOYMENT.md | internal | none | 192 lines | overall: rewrite (gate behind T-VA1 notice) | Its deploy command would push the entire main Functions codebase, its rules snippet would replace the hardened ruleset, and its fulfillment/reportState names point at a stale duplicate folder.
+DOC: docs/guides-2026-09/README.md | internal index | "Rev 2026.09 · 2026-09-17 · 2.5.10+98 · fw v1.2" | 109 lines | overall: keep (refresh) | Good grounding record; stale on build (+98 vs +116), fanout flag, reset client path, bridge-guide audience; mailbox open item still open and none of its four spellings matches the in-app constant.
+DOC: README.md | root / public | none | 3 lines | overall: keep | Accurate one-liner; could point to the canonical guide set and say the app is invitation-only.
+DOC: CLAUDE.md | internal engineering | none (refers to 2026-09-17 verifications) | 471 lines | overall: keep (fix listed items) | Mostly current; wrong on "no automated tests" (425 test files), timer count, accent colour/file, voice status wording, dashboard description, round-trip figures; points at the superseded bridge guide.
+DOC: SECURITY.md | internal | "Changelog 2026-01-23 / 2026-09-17" | 562 lines | overall: rewrite | §1 corrected to Anthropic, but two implementation files it cites do not exist, AI-usage retention is not actually enforced, a forced rules deploy is instructed, a non-existent reEncryptUserData() is prescribed, and OPENAI_API_KEY survives in the checklist.
+DOC: SECURITY_SUMMARY.md | internal | none ("PRODUCTION READY") | 213 lines | overall: archive (merge into SECURITY.md) | Pre-correction snapshot: OpenAI everywhere, 10/hour and 2000-token limits (actual 50/hour, 1024), two missing files, wrong rules line numbers.
+DOC: LANDINGSITE_AI_PROMPTS.md | website marketing prompts | "Last updated: January 23, 2026" (inside Prompt 5) | 811 lines | overall: rewrite (do not use as-is) | Tells the website to claim OpenAI as processor, Alexa voice control, 10/hour AI limit, 90-day retention of everything, GDPR/CCPA/SOC 2, data export/opt-out buttons, store downloads, audit reports, enterprise plans, refund guarantee and named testimonials — none anchored in the product.
+DOC: CHANGELOG.md | internal | "[2.1.0] - 2026-03-10" | 45 lines | overall: archive (regenerate from docs/BUILD_LEDGER.md) | Stops at 2.1.0 while the app is 2.5.10+116; two "Removed" items still exist in lib/.
+
+================================================================
+B. FINDINGS TABLE
+Format: path | line(s) | claim | verdict | correct statement [source] | severity
+Accurate claims: per-document count, plus up to 5 on P1 topics (severity column "—").
+================================================================
+
+--- docs/ESP32_Bridge_Setup_Guide.md (DOC 1) ---
+docs/ESP32_Bridge_Setup_Guide.md | 3, 37, 348 | "app 2.5.10+89" / "August 2026" | outdated | Current test build is 2.5.10+116; bridge firmware 1.2 is still correct [T-B1; T-R5] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 44-45 | "A USB data cable for the bridge (it needs data transfer…)" / "A computer with an internet connection" | misleading | A customer needs only 5 V USB power; data cable + computer are only for the internal flashing procedure [esp32-bridge/platformio.ini:31-32; docs/guides-2026-09/07-bridge-setup-guide.md:36] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 61, 315 | "passes them to your lights within a couple of seconds" | misleading | Bench round trip 1.6–9.2 s, median 4.2 s; CLAUDE.md states 5–10 s typical, 30–45 s tail [T-R6] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 63 | "The check only runs when Remote Access is enabled in your settings" | outdated | Startup check is gated on auth + selected controller + a paired bridge (relay eligibility), not on the Enable Remote Access toggle [lib/features/wled/wled_providers.dart:255-275] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 65-69, 214-216, 230, 314 | "status dot on your home screen … Checking / Online (green) / Offline (grey)" | wrong | Bridge reachability appears on the Remote Access and System Management screens; Home shows only the Direct / Via Bridge badge [lib/features/site/remote_access_screen.dart:1038; lib/features/site/system_management_screen.dart:895; T-R10] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 79-133 | "Part 1 — Flash the bridge firmware" (PlatformIO, in a customer/installer guide) | misleading | Bridge flashing is an internal engineering procedure (classified, not failed); it does not belong in a customer guide and must never be conflated with controller flashing, which is never done [T-R5; T-F2; T-F3] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 106-107 | "pio run -t uploadfs" | wrong | Firmware v1.2 has no filesystem image (no LittleFS/SPIFFS in main.cpp, no data dir, no fs settings); the step fails [esp32-bridge/src/main.cpp:16-26; esp32-bridge/platformio.ini:1-35] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 118-131 | serial banner "[FS] LittleFS mounted / [CFG] Device / [WiFi] Starting AP / [API] HTTP server started…" | wrong | Boot prints a plain "=====" box, "Lumina ESP32 Bridge v1.2", Device name/ID, Wi-Fi lines, "HTTP server started on port 80"; no [FS]/[CFG]/[API] prefixes [esp32-bridge/src/main.cpp:133-136, 158-161, 374] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 126 | "[CFG] WLED IP: <REDACTED:private-ip>:80" | wrong | Example embeds a private LAN address in a public repo; firmware prints the NVS/compile-time target, not this line [esp32-bridge/src/main.cpp:188-193] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 139 | "The bridge runs a friendly setup wizard in a web browser… three quick steps" | wrong | The only browser page is WiFiManager's Wi-Fi captive portal; there is no multi-step wizard [esp32-bridge/src/main.cpp:293-310; T-R4] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 145, 301 | "http://192.168.4.1/setup" | wrong | No /setup route; firmware serves six /api routes and 404s all else; the captive portal is http://192.168.4.1 (root) [esp32-bridge/src/main.cpp:366-372, 518-520; T-R4] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 152 | "You'll see 'Connected! IP: x.x.x.x' and the wizard moves to the next step" | wrong | That is a serial-monitor line, not a web page; the portal closes and the bridge joins Wi-Fi [esp32-bridge/src/main.cpp:338-340] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 158-161 | "Enter the email and password for the bridge's cloud account… create them in your Nex-Gen cloud console under Authentication → Users" | wrong | Bridge credentials are compiled into config.h; there is no entry page and customers have no console; the doc itself says so at :320-321 [esp32-bridge/src/main.cpp:569-574; esp32-bridge/src/config.h.example:27-31] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 169 | "System → System Management → Remote Access → Set Up Bridge" | outdated | Settings entry reads 'System & Device Management' (screen title 'System Management') [lib/features/site/settings_page.dart:250; lib/features/site/system_management_screen.dart:29] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 184-191 | "Option B — Pair from the bridge's web page… Enter your Lumina user ID… Tap Pair & Finish" | wrong | No web page exists; pairing is app-driven (POST /api/bridge/pair or the Firestore pairing request) [esp32-bridge/src/main.cpp:366-372, 420-476, 1180-1280; T-R4] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 186 | "Your User ID… Copy User ID button" | misleading | Controls exist but their only documented use (Option B) does not; copying a user ID serves no customer purpose [lib/features/site/remote_access_screen.dart:1094, 1111] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 187 | "Enter your controller's local IP address (e.g., <REDACTED:private-ip>)" | wrong | Belongs to the non-existent web page; also embeds a private LAN address [esp32-bridge/src/main.cpp:366-372] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 191 | "The bridge reboots and starts listening for commands from the cloud" | wrong | /api/bridge/pair saves NVS and returns {"ok":true} without rebooting [esp32-bridge/src/main.cpp:461-476] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 199 | "If you can open both in a browser from a computer on your home Wi-Fi, you're good" | misleading | The bridge's root URL returns 404 JSON; only the controller opens in a browser [esp32-bridge/src/main.cpp:518-520; T-R4] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 204, 307 | "Tap System (gear icon) → Remote Access" / "System → Remote Access" | contradictory | Path is System → System & Device Management → Remote Access, as the doc's own :225 says [lib/features/site/settings_page.dart:250] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 264-266, 342 | "comes back up unpaired — broadcasting its Lumina-XXXX setup Wi-Fi again" / "boots the bridge back into its setup Wi-Fi" | wrong | POST /api/reset clears only the 'bridge' NVS namespace (pairing); Wi-Fi credentials persist and the bridge rejoins the same Wi-Fi unpaired. The portal reappears only if that Wi-Fi is gone [esp32-bridge/src/main.cpp:504-516, 293-310] | P2
+docs/ESP32_Bridge_Setup_Guide.md | 269 | "Contact your dealer or email <REDACTED:email>" | unverifiable | Mailbox differs from the owner-confirmed in-app constant; canonical mailbox is an open item [lib/features/auth/support_contact.dart:16; T-SU2] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 273 | "Reflashing over USB also clears it" | unverifiable | pio upload rewrites the app partition; esp32-bridge/README.md:15 claims NVS settings survive firmware updates — the repo contradicts itself [esp32-bridge/README.md:15] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 285-291 | LED table "LED blinks each poll cycle / LED off between polls" | wrong | LED blinks every 5 s: 1 = Wi-Fi+Firebase up, 2 = Wi-Fi only, 3 = no Wi-Fi; 5 fast blinks at boot; 3 when the portal starts [esp32-bridge/src/main.cpp:142, 303, 1296-1307] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 303 | "Short-name URL http://lumina-xxxx.local/" | misleading | mDNS hostname exists but the root URL returns 404 JSON; nothing to open [esp32-bridge/src/main.cpp:345-352, 518-520] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 305, 333 | "Remote command timeout 30 seconds" / "The app waits 30 seconds for a response" | wrong | 45 s [lib/features/wled/cloud_relay_repository.dart:58] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 320-321 | "Its credentials are compiled into the firmware… not something you can re-enter" | contradictory | True [esp32-bridge/src/config.h.example:27-31], but Part 2 Step 3 (:158-161) tells the user to type them into a page | P2
+docs/ESP32_Bridge_Setup_Guide.md | 324 | "Pairing is driven from the app, not from the bridge" | contradictory | True [esp32-bridge/src/main.cpp:420-476], but contradicts Option B (:184-191) | P3
+docs/ESP32_Bridge_Setup_Guide.md | 327 | "a failure there means the bridge can't reach your controller" | misleading | Test Bridge is a 10 s cloud round trip; it also fails when the bridge is offline, unpaired, or in a ten-minute gap [lib/features/site/remote_access_screen.dart:388-394; T-R7] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 338 | "the bridge falls back to its setup Wi-Fi after about 15 seconds" | unverifiable | WiFiManager's connect timeout is a library default not set in the repo; only the 5-minute portal timeout is set [esp32-bridge/src/main.cpp:300] | P3
+docs/ESP32_Bridge_Setup_Guide.md | (absent) | ten-minute bridge gaps | missing | Every fielded bridge goes quiet ~10 min about every 7.5 h; away commands fail; wait ten minutes and retry [T-R7] | P2
+docs/ESP32_Bridge_Setup_Guide.md | (absent) | away-from-home messages | missing | The exact "You're away from home…" / "Couldn't reach your home from here…" texts and what each means [T-R2] | P3
+docs/ESP32_Bridge_Setup_Guide.md | (absent) | setup-portal timeout | missing | The portal closes after 5 minutes and the bridge reboots [esp32-bridge/src/main.cpp:300-309] | P3
+docs/ESP32_Bridge_Setup_Guide.md | (absent) | watchdog | missing | Bridge reboots itself after 5 minutes without successful cloud activity [esp32-bridge/src/main.cpp:273-276] | P3
+docs/ESP32_Bridge_Setup_Guide.md | (absent) | no OTA | missing | Bridge firmware is updated only by dealer USB reflash [T-R5] | P3
+docs/ESP32_Bridge_Setup_Guide.md | (absent) | Reconfigure / Unpair | missing | Once paired the button reads 'Reconfigure Bridge'; an 'Unpair Bridge' action exists under Remote Access [lib/features/site/remote_access_screen.dart:926; lib/features/site/bridge_setup_screen.dart:529] | P3
+docs/ESP32_Bridge_Setup_Guide.md | 56-75, 141-156, 167-182, 201-216, 237-246, 250-281, 295-307, 318-344 | overlap with 07-bridge-setup-guide.md 26-31/133-136, 50-68, 80-113, 117-125, 138-146/196-198, 156-177 (near-verbatim), 181-194, 205-250 | duplicate | 07-bridge-setup-guide.md should survive; DOC 1 content unique to it (Part 1 flashing, Option B, credentials step, LED table, home-screen dot) is either wrong or internal-only [docs/ESP32_Bridge_Setup_Guide.md:33] | P3
+docs/ESP32_Bridge_Setup_Guide.md | accurate claims: 16 | e.g. :33 SUPERSEDED banner [docs/guides-2026-09/README.md:16]; :71 heartbeat 30 s with uptime/commands [esp32-bridge/src/main.cpp:252, 983-1003]; :74 schedules are LAN-only writes [T-R8]; :177/254/259 pairing re-asserted every 30 s [esp32-bridge/src/main.cpp:1122-1160]; :238 six JSON endpoints, 404 otherwise [esp32-bridge/src/main.cpp:366-372, 518-520]; :273 POST /api/reset + client path corrected [lib/services/bridge_api_client.dart:194-209; T-O9] | accurate | — | —
+
+--- docs/guides-2026-09/07-bridge-setup-guide.md (DOC 2) ---
+docs/guides-2026-09/07-bridge-setup-guide.md | 3, 22 | "app 2.5.10+98" | outdated | 2.5.10+116 [T-B1] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 16-20, 80-113 (whole Part 2) | customer is told to pair the bridge ("This half happens in the app") | misleading | Bridges are dealer-installed; policy is professional install with no customer self-pairing; address Part 2 to installers [T-R9] | P2
+docs/guides-2026-09/07-bridge-setup-guide.md | 85-86 | "The pairing button stays disabled until one is" | misleading | 'Set Up Bridge' always opens the wizard; it is the 'Pair Bridge' button inside the wizard that is disabled without a selected controller [lib/features/site/remote_access_screen.dart:907; lib/features/site/bridge_setup_screen.dart:949] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 135-136 | "Saved, but your controller can only be updated on your home Wi-Fi." | wrong | Actual text: "Saved. Your schedule will arm the next time you're on your home Wi-Fi." [lib/features/schedule/schedule_sync.dart:2458] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 171 | "email <REDACTED:email> and we'll walk through it, or reflash the bridge" | unverifiable | Mailbox differs from the in-app constant [T-SU2; lib/features/auth/support_contact.dart:16]; reflash clearing pairing is contradicted by esp32-bridge/README.md:15 | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 172-173 | "The app's own reset action currently targets a different path and does not work" | outdated | Client has targeted POST /api/reset since the 09-17 fix; still no UI button calls it [lib/services/bridge_api_client.dart:194-209; T-O9] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 256 | "email <REDACTED:email>" | unverifiable | [T-SU2] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 105, 156-177 | "needs a factory reset first — see Part 4" | missing | Part 4 never says that after a reset the bridge rejoins the old Wi-Fi unpaired (the portal reappears only if that Wi-Fi is absent) and re-pairing resumes at Part 2, not Part 1 [esp32-bridge/src/main.cpp:504-516, 293-310] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 240-245 | "Remote control worked, then stopped" | missing | Omits the most common cause: the ~10-minute bridge gap every ~7.5 h — wait ten minutes and retry [T-R7] | P2
+docs/guides-2026-09/07-bridge-setup-guide.md | (absent) | away-from-home messages | missing | Exact texts and meanings [T-R2] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | (absent) | stale controller selection | missing | A stale selection shows "remote access isn't set up" even with a bridge; fix built, not shipped [T-R3] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 125 | "Tap Test Bridge to confirm" | missing | Test Bridge waits 10 s and reports "No response from ESP32 Bridge within 10 seconds…"; failure also occurs during a gap [lib/features/site/remote_access_screen.dart:388-394; T-R7] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | (absent) | Reconfigure / Unpair | missing | Paired state relabels the button 'Reconfigure Bridge'; 'Unpair Bridge' exists [lib/features/site/remote_access_screen.dart:926; lib/features/site/bridge_setup_screen.dart:529] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | (absent) | LED meaning | missing | 1/2/3 blinks every 5 s [esp32-bridge/src/main.cpp:1296-1307] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | (absent) | power outage | missing | After a power cut the channel split is restored only when the app connects at home; away from home nothing restores it [T-P1; T-P2] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | (absent) | Game Day away | missing | Phone-run games need the app open at home within 48 h of kickoff; the bridge does not do this [T-GD3] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | 123 | "Leave Connection Mode on ESP32 Bridge" | missing | Should add that 'Webhook (Dynamic DNS)' is a DIY path needing DDNS + port forward and is not supported for installs [lib/features/site/remote_access_screen.dart:984; CLAUDE.md:295] | P3
+docs/guides-2026-09/07-bridge-setup-guide.md | accurate claims: 34 | e.g. :61-62 portal at http://192.168.4.1 [T-R4]; :70-71 5-minute window then restart [esp32-bridge/src/main.cpp:300-309]; :160-167 bridge re-publishes pairing every 30 s, server release does not free a live bridge [esp32-bridge/src/main.cpp:1122-1160]; :169-170 no reset button, no web dashboard [T-R4; bridge_api_client.dart:194-209 has no callers]; :193 remote command timeout 45 s [lib/features/wled/cloud_relay_repository.dart:58]; :200-201 no OTA [T-R5]; :133-134 no schedule writes over the bridge [T-R8] | accurate | — | —
+
+--- esp32-bridge/README.md (DOC 3) ---
+esp32-bridge/README.md | 1, 3, 7-9 | "Legacy — Firebase Polling… The current recommended bridge firmware is in the lumina-firmware/ directory" | wrong | lumina-firmware/ does not exist; esp32-bridge/src/main.cpp IS the fielded v1.2 firmware [esp32-bridge/src/main.cpp:54; T-R5; directory listing] | P2
+esp32-bridge/README.md | 3, 14 | "web dashboard — monitor bridge status, commands, and errors from a browser" | wrong | No web page has ever been served [esp32-bridge/src/main.cpp:366-372, 518-520; T-R4] | P2
+esp32-bridge/README.md | 3, 12, 33 | "3-step web wizard — configure bridge auth, user pairing, and WLED IP from a phone browser" | wrong | Only WiFiManager's Wi-Fi portal exists; auth is compiled in; pairing/WLED IP come from the app [esp32-bridge/src/main.cpp:293-310, 420-476, 569-574] | P2
+esp32-bridge/README.md | 9 | "required hardcoding the Firebase API key, project ID, and user UID in src/config.h" | outdated | API key, project ID and bridge email/password are still compiled in; the user UID is optional and set by app pairing into NVS [esp32-bridge/src/config.h.example:17-31; esp32-bridge/src/main.cpp:163-185] | P3
+esp32-bridge/README.md | 17 | "see docs/ESP32_Bridge_Setup_Guide.md" | outdated | That guide is superseded by docs/guides-2026-09/07-bridge-setup-guide.md [docs/ESP32_Bridge_Setup_Guide.md:33] | P3
+esp32-bridge/README.md | 21 | "ESP32 connects to home WiFi (credentials in config.h)" | outdated | config.h Wi-Fi is optional; an empty SSID starts the captive portal [esp32-bridge/src/main.cpp:293-296; config.h.example:34-40] | P3
+esp32-bridge/README.md | 22 | "ESP32 authenticates with Firebase using anonymous auth" | wrong | Email/password sign-in via identitytoolkit signInWithPassword [esp32-bridge/src/main.cpp:569-574] | P2
+esp32-bridge/README.md | 29-31 | "Flash the new firmware from lumina-firmware/ using PlatformIO" | wrong | No such directory; flashing this tree is `pio run -t upload` inside esp32-bridge/ (internal procedure) [esp32-bridge/platformio.ini] | P2
+esp32-bridge/README.md | 34 | "No changes needed in the Lumina app — the Firestore command format is identical" | unverifiable | There is no second firmware to compare against | P3
+esp32-bridge/README.md | 36 | "The new bridge uses email/password Firebase Auth instead of anonymous auth" | contradictory | This tree already uses email/password; contradicts :22 [esp32-bridge/src/main.cpp:569-574] | P3
+esp32-bridge/README.md | (absent) | what the firmware serves/does | missing | Six routes; 30 s heartbeat; 1 s poll (config.h); 5 s pairing poll; 5-min watchdog; relays /json/state and /json/info only; LED codes [esp32-bridge/src/main.cpp:366-372, 252, 53, 273-276, 811-823, 1296-1307; T-R8] | P2
+esp32-bridge/README.md | (absent) | fielded version / 1.3 / rules | missing | Fielded bridges run 1.2; 1.3 built and pushed, nothing flashed; no OTA; Firestore rules tightened 2026-10-05 to exactly 1.2's behaviour — widen before any 1.3 flash [T-R5] | P2
+esp32-bridge/README.md | (absent) | TLS posture | missing | secureClient.setInsecure() — Firestore TLS without certificate validation [esp32-bridge/src/main.cpp:530] | P3
+esp32-bridge/README.md | accurate claims: 2 | :15 heartbeat to /users/{uid}/bridge_status/current every 30 s [esp32-bridge/src/main.cpp:252, 983-987]; :32 AP named Lumina-XXXX [esp32-bridge/src/main.cpp:69, 144-149] | accurate | — | —
+
+--- alexa-skill/DEPLOYMENT.md (DOC 4) ---
+alexa-skill/DEPLOYMENT.md | 3 | "This guide covers deploying the Nex-Gen Lumina Alexa Smart Home Skill." | missing | No statement that account linking has never worked for anyone, that the fix (feat/voice-link-e2e) is built and not deployed, or that Alexa must not be advertised [T-VA1] | P2
+alexa-skill/DEPLOYMENT.md | 34 | "Runtime: Node.js 18.x" | unverifiable | Repo only pins engines ">=18.0.0"; AWS runtime lifecycle is external [alexa-skill/lambda/package.json:15-16] | P3
+alexa-skill/DEPLOYMENT.md | 42-48 | "Option B: Serverless Framework… serverless deploy" | wrong | No serverless.yml exists in alexa-skill/lambda; the command fails [directory listing] | P2
+alexa-skill/DEPLOYMENT.md | 54-59 | "Authorization URI: https://YOUR_FIREBASE_PROJECT.firebaseapp.com/__/auth/handler; Access Token URI: securetoken.googleapis.com…" | wrong | The implemented OAuth endpoints are the alexaAuth / alexaToken / alexaUnlink / generateAlexaAuthCode functions [functions/index.js:422, 485, 725, 860; SECURITY.md:135-171] | P2
+alexa-skill/DEPLOYMENT.md | 70-74 | "Update the skill ID… 'amzn1.ask.skill.YOUR_ACTUAL_SKILL_ID'" | outdated | The skill ID is already set in the app [lib/features/voice/alexa_service.dart:25] | P3
+alexa-skill/DEPLOYMENT.md | 76-83 | "Test the Skill… 'Alexa, discover my devices' / 'turn on the house lights'" | misleading | Presents the skill as testable end-to-end; linking has never completed for any user [T-VA1] | P2
+alexa-skill/DEPLOYMENT.md | 85-89 | "Submit for Certification" | misleading | Premature; linking never worked and policy is not to advertise Alexa [T-VA1] | P3
+alexa-skill/DEPLOYMENT.md | 96 | "Ensure user has completed account linking" | misleading | No user ever has [T-VA1] | P3
+alexa-skill/DEPLOYMENT.md | (absent) | Android link failure | missing | On Android 11+ the link buttons fail to open because the manifest <queries> lacks the schemes [T-VA1; android/app/src/main/AndroidManifest.xml:178-183] | P2
+alexa-skill/DEPLOYMENT.md | (absent) | fix branch | missing | feat/voice-link-e2e @ 9d23dd8 built, not deployed, gated on Prompt C [T-VA1] | P3
+alexa-skill/DEPLOYMENT.md | accurate claims: 3 | :99 executeWledCommand exists [functions/index.js:247]; :108-121 Lambda tree matches [alexa-skill/lambda listing]; :36 lambda.zip present — scanned, contains no .env / service-account file [alexa-skill/lambda.zip listing] | accurate | — | —
+
+--- google-home/DEPLOYMENT.md (DOC 5) ---
+google-home/DEPLOYMENT.md | 3 | "deploying the Nex-Gen Lumina Google Smart Home Action" | missing | No statement that linking has never worked / fix unshipped / do not advertise [T-VA1] | P2
+google-home/DEPLOYMENT.md | 23-28 | "Authorization URL: https://YOUR_PROJECT.firebaseapp.com/__/auth/handler; Token URL: securetoken.googleapis.com…" | wrong | Implemented endpoints are googleAuth / googleToken in the main codebase [functions/index.js:1484, 1678] | P2
+google-home/DEPLOYMENT.md | 34-39 | "cd google-home/functions … firebase deploy --only functions" | wrong | google-home has no firebase.json/.firebaserc; the CLI resolves the repo-root firebase.json (source: functions) and deploys the ENTIRE main codebase (48 exports) instead of this folder — an unintended full production deploy [firebase.json:31; functions/index.js export count; directory listing] | P1
+google-home/DEPLOYMENT.md | 44-49 | "URL like https://us-central1-YOUR_PROJECT.cloudfunctions.net/smarthome" | wrong | The handler in the deployed codebase is googleSmartHome; google-home/functions/index.js (smarthome, reportState) is a stale duplicate [functions/index.js:1218; google-home/functions/index.js:367, 370] | P2
+google-home/DEPLOYMENT.md | 75-84 | "Open Google Home app… Search for [test] Nex-Gen Lumina… Sign in with your Lumina account… Try commands" | misleading | Linking has never completed for anyone [T-VA1] | P2
+google-home/DEPLOYMENT.md | 86-93 | "Submit for Certification" | misleading | [T-VA1] | P3
+google-home/DEPLOYMENT.md | 95-129 | "Add these rules to allow the Cloud Function to read/write" (full rules_version='2' ruleset) | wrong | Functions use the Admin SDK and bypass rules; pasting this generic ruleset would replace the hardened production rules (bridge least-privilege, installer/dealer arms). Rules deploys are manual and branch-sensitive [T-R5; firestore.rules:104-116] | P1
+google-home/DEPLOYMENT.md | 139-155 | intents / traits tables | unverifiable | Describe the stale duplicate folder, not the deployed googleSmartHome handler [functions/index.js:1218] | P3
+google-home/DEPLOYMENT.md | 179-185 | "The reportState function automatically reports state changes to Google" | wrong | reportState exists only in the stale google-home/functions/index.js; no such export in the main codebase [google-home/functions/index.js:370; functions/index.js exports] | P2
+google-home/DEPLOYMENT.md | (absent) | Android link failure / fix branch | missing | [T-VA1; android/app/src/main/AndroidManifest.xml:178-183] | P2
+google-home/DEPLOYMENT.md | accurate claims: 2 | :131-137 folder structure [google-home/functions listing]; :175 executeWledCommand exists [functions/index.js:247] | accurate | — | —
+
+--- docs/guides-2026-09/README.md (DOC 6) ---
+docs/guides-2026-09/README.md | 3, 24-25 | "Describes Lumina app 2.5.10+98" / "699a498, 2.5.10+97, bumped to +98" | outdated | Build 116; nothing from 110–116 (favorites cap 2, Lumina all channels, Just this day, controller selection, Recent Patterns) is reflected in the set [T-B1; T-V1; T-L1; T-D1; T-S1; T-E3] | P3
+docs/guides-2026-09/README.md | 16 | "07-bridge-setup-guide.md | Customers, installers" | misleading | Bridges are dealer-installed; no customer self-pairing; audience should be installers [T-R9] | P2
+docs/guides-2026-09/README.md | 42 | "Contact is email only. No phone numbers anywhere in the set." | contradictory | A doc rule, but the app itself shows the dealer's or corporate phone on the support card [T-SU1] | P3
+docs/guides-2026-09/README.md | 94-95 | "drafts use <REDACTED:email>. The repo currently carries <REDACTED:email>, <REDACTED:email>, and <REDACTED:email>" | unverifiable | None of the four spellings matches the owner-confirmed in-app constant (case-insensitive); the canonical mailbox is still open [lib/features/auth/support_contact.dart:16; T-SU2] | P2
+docs/guides-2026-09/README.md | 96-99 | "the app's client method targets /api/bridge/reset — a path the firmware does not serve — and nothing calls it" | outdated | Client now targets POST /api/reset (fixed 09-17); still no UI caller [lib/services/bridge_api_client.dart:194-209; T-O9] | P3
+docs/guides-2026-09/README.md | 102-104 | "Neighborhood Sync fanout is off in production" | outdated | Server flag is a scoped enable for some accounts since 2026-08-12; current scope unverified [T-O3] | P2
+docs/guides-2026-09/README.md | (absent) | ten-minute gap | missing | [T-R7] | P2
+docs/guides-2026-09/README.md | (absent) | voice policy | missing | The set should state Alexa/Google are never to be mentioned and Siri Shortcuts / Android shortcuts are the real voice path [T-VA1; T-VA2] | P2
+docs/guides-2026-09/README.md | (absent) | controller firmware policy | missing | Installers record the WLED version and never flash; "pin to 0.15.1 via quinled" is wrong and still in the dealer SOP [T-F2; T-F3] | P2
+docs/guides-2026-09/README.md | (absent) | bridge firmware 1.3 status | missing | [T-R5] | P3
+docs/guides-2026-09/README.md | accurate claims: 10 | :64 six /api endpoints, 404 otherwise [esp32-bridge/src/main.cpp:366-372; T-R4]; :66 20 saved schedules / 8 timer slots [T-L4; lib/features/schedule/schedule_sync.dart:336]; :67 solar live [T-D2]; :68 Sports Alerts retired [T-GD9]; :69 warranty wording [T-O6]; :70 installer-invitation install path [T-O8]; :71 no AR [lib/features/ar listing: providers only]; :77 Audio Mode debug-only [T-O1; lib/features/dashboard/wled_dashboard_page.dart:505]; :78-85 commercial shell unreachable [T-O2] | accurate | — | —
+
+--- README.md (DOC 7) ---
+README.md | 3 | "User-facing documentation lives in docs/" | misleading | docs/ mixes a superseded bridge guide with unpublished September drafts; no pointer to which is canonical [docs/ESP32_Bridge_Setup_Guide.md:33; docs/guides-2026-09/README.md:5-6] | P3
+README.md | (absent) | install path | missing | The app is invitation-only and not publicly listed on either store [T-O8; T-B3; T-B4] | P3
+README.md | accurate claims: 2 | :3 remote control via the Lumina Bridge (ESP32 + Firestore relay) [T-R1]; :3 WLED-based outdoor pixel LED systems [CLAUDE.md:7] | accurate | — | —
+
+--- CLAUDE.md (DOC 8) ---
+CLAUDE.md | 10 | "SDK: Flutter 3.6.0+" | misleading | pubspec constrains the Dart SDK (^3.6.0), not a Flutter version [pubspec.yaml:8] | P3
+CLAUDE.md | 58-59 | "HTTP timeouts are 15 seconds in WledService … every _wledClientFor(...) and req.close().timeout(...) call site" | misleading | Most are 15 s, but 30 s, 10 s and 5 s call sites remain [lib/features/wled/wled_service.dart:1169, 1199-1203, 1222-1226] | P3
+CLAUDE.md | 75 | "/users/{uid}/schedules - Scheduled automations" | misleading | Storage is chosen by the schedules_subcollection flag (legacy inline vs /schedules) [lib/features/schedule/schedule_providers.dart:43-61] | P3
+CLAUDE.md | 110 | "builds a /json/cfg payload with tim array (up to 20 timers)" | wrong | WLED has 8 timer slots (+ sunrise/sunset = 10); 20 is the saved-schedule cap [lib/features/schedule/schedule_sync.dart:336-347; T-L4] | P3
+CLAUDE.md | 294 | "Round-trip ~5–10s typical, 30–45s tail" | outdated | Bench 2026-10-05: 1.6–9.2 s, median 4.2 s; app timeout 45 s [T-R6; lib/features/wled/cloud_relay_repository.dart:58] | P3
+CLAUDE.md | 292, 295 | "Both transport paths are live… Webhook Mode (DIY)" | unverifiable | Webhook branch exists in executeWledCommand and the app offers 'Webhook (Dynamic DNS)'; no evidence any customer uses it; truth table is silent [functions/index.js:242-286; lib/features/site/remote_access_screen.dart:984] | P3
+CLAUDE.md | 303 | "User-facing setup: docs/ESP32_Bridge_Setup_Guide.md" | outdated | Points at the superseded guide; current draft is docs/guides-2026-09/07-bridge-setup-guide.md [docs/ESP32_Bridge_Setup_Guide.md:33] | P3
+CLAUDE.md | 320 | "audio/ Audio-reactive mode (interface IN-PROGRESS; WLED hardware mic backend)" | outdated | Gated to debug builds; absent from every release [T-O1; lib/features/dashboard/wled_dashboard_page.dart:505] | P3
+CLAUDE.md | 337 | "voice/ Alexa/Google/Siri integrations (ARCHITECTED — not yet verified end-to-end)" | misleading | Alexa/Google linking has never worked (fix built, not deployed; do not advertise); Siri Shortcuts and Android shortcuts are shipped native code [T-VA1; T-VA2] | P2
+CLAUDE.md | 348-349 | "NexGenPalette in lib/theme.dart — Primary accent: Cyan (#00E5FF)" | outdated | NexGenPalette is in lib/app_colors.dart; primary = cyan 0xFF00D4FF [lib/app_colors.dart:134, 146, 152] | P3
+CLAUDE.md | 359-364 | "Quick preset buttons (Run Schedule, Warm White, etc.) … Weekly schedule preview" | outdated | No 'Run Schedule' / 'Warm White' strings exist in the dashboard page [lib/features/dashboard/wled_dashboard_page.dart (grep)] | P3
+CLAUDE.md | 368 | "No automated tests currently exist." | wrong | test/ holds 425 *_test.dart files (bench, features, hardware, helpers, models…) [test/ listing] | P2
+CLAUDE.md | 406 | "Read at eight sites:" (six files listed) | misleading | 17 references across 7 files outside app_providers.dart [grep lib] | P3
+CLAUDE.md | 419-421 | "Polls device state every 1.5s; On connection loss, starts a 10s retry timer" | outdated | Adaptive cadence: local 1.5 s / remote 10 s, background 10 s / 60 s, max backoff 120 s [lib/features/wled/wled_providers.dart:797-801] | P3
+CLAUDE.md | 459 | "Re-apply Stability Fixes: Always increase HTTP timeouts to 15s" | contradictory | §1 (:265-278) states the fixes are present and re-applying is not a task | P3
+CLAUDE.md | (absent) | controller firmware policy | missing | Installers record the WLED version and never flash/update/downgrade; "pin to 0.15.1 via quinled" is wrong [T-F2; T-F3] | P2
+CLAUDE.md | (absent) | bridge limits | missing | Bridge relays only /json/state and /json/info; schedules/config never cross it; ten-minute gaps every ~7.5 h [T-R8; T-R7; esp32-bridge/src/main.cpp:811-823] | P3
+CLAUDE.md | (absent) | rules deploy discipline | missing | Firestore rules tightened 2026-10-05 to firmware 1.2's exact behaviour; deploys are manual and branch-sensitive [T-R5] | P3
+CLAUDE.md | accurate claims: 14 | e.g. :11 platforms [T-B5]; :28-34/:285-288 nav.dart barrel, router files, dashboard location [lib/nav.dart:1-4]; :60/:277 areaAnyOnProvider 15 s [lib/features/site/site_providers.dart:218]; :186-191 compileSdk/targetSdk 36, minSdk 24 [android/app/build.gradle:20, 51-52]; :294 Bridge Mode dealer-installed [T-R9]; :303 Dealer guide §9 [docs/Dealer_Installer_Setup_Guide.md:628]; :397-398 kSimulationMode = false [lib/app_providers.dart:17]; :129 _wled._tcp [lib/features/discovery/device_discovery.dart:23] | accurate | — | —
+
+--- SECURITY.md (DOC 9a) ---
+SECURITY.md | 74 | "AES-256-CBC encryption" | accurate | Code uses AESMode.cbc — but the class doc-comment says GCM (code-comment drift worth fixing) [lib/services/encryption_service.dart:13, 108] | P3
+SECURITY.md | 82 | "homeSsid → home_ssid_hash (hashed, not encrypted)" | outdated | SSID is stored both encrypted (home_ssid_encrypted) and hashed [lib/services/encryption_service.dart:210-214] | P3
+SECURITY.md | 85-88 | "automatically initialized in main.dart: await EncryptionService.initialize();" | missing | Init has a 10 s timeout and a degraded mode on failure, which the doc omits [lib/main.dart:213-216] | P3
+SECURITY.md | 113-118 | "firestore.rules line 18 … '.*@nexgenled.com' … '.*@your-dealer-domain.com'" | outdated | Function is at :110-116 and matches '.*@nex-genled\.com' plus the placeholder '.*@authorized-dealer.com' [firestore.rules:110-116] | P3
+SECURITY.md | 118 | "// ADD YOUR DOMAINS HERE" | missing | The placeholder domain is still live in the rules file: any dealer_email at that placeholder domain passes validation [firestore.rules:115] | P2
+SECURITY.md | 124, 281 | "firebase deploy --only firestore:rules" | misleading | Rules deploys are manual and must come from the ruleset matching fielded bridge firmware 1.2; deploying from the wrong checkout regresses it [T-R5] | P2
+SECURITY.md | 135-171 | "4. Alexa OAuth Security ✅" | missing | Endpoints exist [functions/index.js:422-860] but the doc never says linking has never worked for anyone and the fix is unshipped [T-VA1] | P2
+SECURITY.md | 169 | deploy list alexaAuth/alexaToken/alexaUnlink/generateAlexaAuthCode | missing | Google equivalents googleAuth / googleToken / googleSmartHome exist and are undocumented [functions/index.js:1218, 1484, 1678] | P3
+SECURITY.md | 180 | "AI Usage Logs: 90 days" | wrong | cleanupOldData sweeps ai_usage, but claudeProxy writes claude_usage; AI usage records are never purged [functions/index.js:1006-1010; functions/src/claudeProxy.js:52] | P2
+SECURITY.md | 179-184 | retention list | missing | Also sweeps commands (7 days) and debug_errors (30 days) [functions/index.js:956-959] | P3
+SECURITY.md | 194-197 | "Automated Cleanup (Recommended): Set up a scheduled Cloud Function" | outdated | scheduledDataCleanup already exists [functions/index.js:1193] | P3
+SECURITY.md | 230 | "Implementation: lib/services/permission_rationale_service.dart" | wrong | File does not exist; no PermissionRationaleService caller anywhere in lib [file listing; grep] | P2
+SECURITY.md | 235 | "Camera: House photos, AR preview" | misleading | No AR; lib/features/ar holds only a providers file, no camera path [docs/guides-2026-09/README.md:71; lib/features/ar listing] | P3
+SECURITY.md | 257 | "Implementation: lib/features/patterns/community_sharing_consent_dialog.dart" | wrong | File does not exist; no showCommunitySharingConsentDialog caller [file listing; grep] | P2
+SECURITY.md | 285 | "OPENAI_API_KEY in functions/.env" | contradictory | Should be ANTHROPIC_API_KEY per the corrected §1 [SECURITY.md:59-62; functions/src/claudeProxy.js] | P2
+SECURITY.md | 301-303 | "Make 11 AI requests in 1 hour; Verify 11th request is rejected" | contradictory | Hard block is 50/hour [functions/src/claudeProxy.js:27; SECURITY.md:34] | P3
+SECURITY.md | 291, 380 | "firebase deploy --only functions" | misleading | Deploys all 48 exported functions from whatever checkout; production deploys are made per function [functions/index.js export count] | P2
+SECURITY.md | 395 | "firebase deploy --only firestore:rules --force" | wrong | A forced rules deploy from an arbitrary checkout can overwrite the least-privilege bridge rules deployed 2026-10-05 [T-R5] | P1
+SECURITY.md | 401 | "await EncryptionService.reEncryptUserData(userData);" | wrong | No such method exists [lib/services/encryption_service.dart (grep)] | P2
+SECURITY.md | 420 | "Force user to re-link Alexa skill" | misleading | No user has ever linked [T-VA1] | P3
+SECURITY.md | 448 | "✅ Right to Access: Users can view all their data in settings" | unverifiable | No data-view/export surface found; export marked 'implement if needed' at :450 | P3
+SECURITY.md | 450 | "✅ Right to Portability: Export feature (implement if needed)" | contradictory | Ticked as implemented while admitting it is not; SECURITY_SUMMARY.md:172 lists export as still needed | P2
+SECURITY.md | 449, 451 | "Account deletion removes all user data" / "Data is deleted, not archived" | misleading | The doc's own :52-56 says claude_usage is left behind [SECURITY.md:52-56] | P3
+SECURITY.md | 455 | "Usage data: 90 days" | duplicate | Same defect as :180 (AI usage never purged) [functions/index.js:1006-1010] | P3
+SECURITY.md | 459-465 | "Privacy Policy Updates Needed" | missing | Add: the published policy also promises an analytics opt-out that does not exist; analytics are declared required [T-O4] | P2
+SECURITY.md | 504-506 | "Two-factor authentication: Enable in Firebase Authentication settings" | misleading | No MFA code in lib; listed as future at :554 [grep lib multiFactor: none] | P3
+SECURITY.md | 517 | "Email: <REDACTED:email>" | unverifiable | Different domain spelling from the in-app constant [T-SU2; lib/features/auth/support_contact.dart:16] | P3
+SECURITY.md | (absent) | bridge security posture | missing | Bridge credentials compiled into firmware; TLS setInsecure(); bridge→controller plain HTTP; a default controller-AP password printed in the dealer SOP [esp32-bridge/src/main.cpp:530, 890-900; esp32-bridge/src/config.h.example:27-31; T-A3] | P2
+SECURITY.md | (absent) | analytics / crash posture | missing | No analytics opt-out; uncaught errors written to the account's debug_errors with app version [T-O4; T-O7] | P3
+SECURITY.md | accurate claims: 15 | e.g. :15-27 Anthropic via claudeProxy, no OpenAI path [functions/src/claudeProxy.js:23-24, 47]; :32-40 limits 50/h, 500/month soft, 1024 tokens, model allow-list [claudeProxy.js:23-29]; :107 owner_id immutable [firestore.rules:104]; :140/:143 32-byte codes, 5-minute expiry [functions/index.js:440, 447-448]; :547 security headers on every onRequest endpoint [functions/index.js:913-920] | accurate | — | —
+
+--- SECURITY_SUMMARY.md (DOC 9b) ---
+SECURITY_SUMMARY.md | 7 | "OpenAI API Rate Limiting & Monitoring" | wrong | AI path is claudeProxy → Anthropic; OpenAI receives nothing [functions/src/claudeProxy.js:23-24; SECURITY.md:17-27] | P2
+SECURITY_SUMMARY.md | 127, 132, 137, 153, 159, 179 | "OpenAI…" (cost model, protected resources, metrics) | duplicate | Same error as :7 | P3
+SECURITY_SUMMARY.md | 8 | "Rate limit: 10 requests/user/hour" | wrong | 50/hour hard block; 500/month soft warn [functions/src/claudeProxy.js:27-28] | P2
+SECURITY_SUMMARY.md | 9 | "Token limit: Max 2000 tokens/request" | wrong | 1024 [functions/src/claudeProxy.js:29] | P3
+SECURITY_SUMMARY.md | 11 | "Input validation prevents prompt injection" | unverifiable | No injection filter evidenced in claudeProxy; not in truth table | P3
+SECURITY_SUMMARY.md | 12 | "File: functions/index.js" (AI proxy) | wrong | functions/src/claudeProxy.js [SECURITY.md:29] | P3
+SECURITY_SUMMARY.md | 26-31 | "Alexa OAuth Security ✅" | missing | Linking never worked; fix unshipped [T-VA1] | P2
+SECURITY_SUMMARY.md | 36 | "AI usage logs: 90 days" | wrong | claude_usage is never purged [functions/index.js:1006-1010; functions/src/claudeProxy.js:52] | P2
+SECURITY_SUMMARY.md | 52-55 | "File: lib/services/permission_rationale_service.dart" | wrong | File absent [file listing] | P2
+SECURITY_SUMMARY.md | 57-61 | "File: lib/features/patterns/community_sharing_consent_dialog.dart" | wrong | File absent [file listing] | P2
+SECURITY_SUMMARY.md | 85 | "OPENAI_API_KEY=sk-your-key-here" | wrong | ANTHROPIC_API_KEY [SECURITY.md:59-62] | P2
+SECURITY_SUMMARY.md | 91 | "Edit firestore.rules line 20-21" | wrong | isValidDealerEmail is at :110-116 [firestore.rules:110-116] | P3
+SECURITY_SUMMARY.md | 95-96 | "firebase deploy --only firestore:rules / --only functions" | misleading | Manual, branch-sensitive rules deploy; full-codebase functions deploy [T-R5; functions/index.js export count] | P2
+SECURITY_SUMMARY.md | 100 | "Make 11 AI requests (11th should be rate-limited)" | wrong | 50/hour [functions/src/claudeProxy.js:27] | P3
+SECURITY_SUMMARY.md | 103 | "Link Alexa account (should use secure tokens)" | misleading | Linking never completes [T-VA1] | P2
+SECURITY_SUMMARY.md | 163-168 | "GDPR/CCPA Ready… ✅ Clear privacy disclosures" | misleading | Published policy names OpenAI and promises a non-existent analytics opt-out [SECURITY.md:460-462; T-O4] | P2
+SECURITY_SUMMARY.md | 193 | "Implement automated cleanup schedule (daily cron)" | outdated | scheduledDataCleanup exists [functions/index.js:1193] | P3
+SECURITY_SUMMARY.md | 211-213 | "Status: ✅ PRODUCTION READY — All critical and high-priority security measures have been implemented and tested." | misleading | Two listed files do not exist; AI-usage retention not enforced; limits misstated | P2
+SECURITY_SUMMARY.md | accurate claims: 6 | :14-18 AES-256-CBC, device key, SSID hash [lib/services/encryption_service.dart:108, 167-172]; :63-67 security headers [functions/index.js:913-920]; :69-72 dealer email validation in rules and UserModel [firestore.rules:110-116; lib/models/user_model.dart]; :118-121 modified files [lib/services/user_service.dart:44, 77; lib/main.dart:213] | accurate | — | —
+
+--- LANDINGSITE_AI_PROMPTS.md (DOC 10) ---
+LANDINGSITE_AI_PROMPTS.md | 17 | "Bank-level AES-256 encryption for all personal data" | misleading | Only address, webhook URL and SSID are encrypted; email, name, phone, coordinates, schedules, patterns are stored plain [lib/services/encryption_service.dart:199-214, 218-219] | P2
+LANDINGSITE_AI_PROMPTS.md | 91, 128, 194, 227, 321, 550, 617, 651, 679 | "AES-256 … personal data" / "Lumina encrypts everything" (:697) | duplicate | Same overstatement as :17 | P3
+LANDINGSITE_AI_PROMPTS.md | 49 | "Your WiFi network name is hashed (one-way encryption) - we can verify it but never read it" | wrong | SSID is also stored AES-encrypted and decrypted for display [lib/services/encryption_service.dart:22, 210-212] | P2
+LANDINGSITE_AI_PROMPTS.md | 272, 398, 680, 713 | "we can't read it" / "we can never read your WiFi name" | duplicate | Same as :49 | P3
+LANDINGSITE_AI_PROMPTS.md | 53 | "AI requests are rate-limited to 10/hour per user" | wrong | 50/hour abuse block [functions/src/claudeProxy.js:27] | P2
+LANDINGSITE_AI_PROMPTS.md | 97, 136, 230, 275, 401, 551, 716 | "Max 10 requests per hour" | duplicate | Same as :53 | P3
+LANDINGSITE_AI_PROMPTS.md | 53, 57, 178, 244, 275, 295 | "Voice processed locally… never record, store, or upload your voice" | unverifiable | speech_to_text delegates to OS recognizers, which may be cloud-backed; not anchored in the repo [pubspec.yaml:22] | P3
+LANDINGSITE_AI_PROMPTS.md | 20 | "GDPR & CCPA compliant with automatic 90-day data retention" | unverifiable | No compliance assessment in repo; known gaps: policy names OpenAI, promises a non-existent analytics opt-out, no export [SECURITY.md:459-465; T-O4] | P2
+LANDINGSITE_AI_PROMPTS.md | 26, 63-64, 104, 170, 236, 299-302, 414, 461-463, 499, 576, 657, 719 | "GDPR & CCPA compliant" / "GDPR compliance badge" / "GDPR Article 17 compliant" | duplicate | Same as :20 | P3
+LANDINGSITE_AI_PROMPTS.md | 60 | "Never keep data longer than 90 days (automatic cleanup)" | contradictory | 90 days applies to pattern_usage/detected_habits only; AI chat usage, profile, schedules, patterns are kept until deletion — the doc's own :293-297 says so [functions/index.js:956-959, 1006-1060; functions/src/claudeProxy.js:52] | P2
+LANDINGSITE_AI_PROMPTS.md | 103, 140, 167, 236, 363-365, 404, 552, 618, 656, 682, 699, 718 | "Auto-delete after 90 days" / "We delete your data after 90 days" | duplicate | Same as :60 | P3
+LANDINGSITE_AI_PROMPTS.md | 24 | CTA "Download Lumina - The Secure Way to Control Your Lights" | misleading | App is not publicly listed; customers arrive by installer invitation; iOS is TestFlight-only, Android closed testing [T-O8; T-B3; T-B4] | P2
+LANDINGSITE_AI_PROMPTS.md | 114, 542, 598, 624, 791 | "Download the App" / "iOS + Android buttons" / "[Get Started Free]" / "Download: [link]" | duplicate | Same as :24 | P3
+LANDINGSITE_AI_PROMPTS.md | 65 | "SOC 2 Type II in progress" | unverifiable | No evidence anywhere in the repo; must not be published | P2
+LANDINGSITE_AI_PROMPTS.md | 66, 324, 571-573 | "Firebase Security Rules audited quarterly" / "Third-Party Audits… [View Latest Audit Report]" | unverifiable | No audit artifacts; penetration testing is listed as future [SECURITY.md:549-552] | P2
+LANDINGSITE_AI_PROMPTS.md | 69-72 | "Show screenshots of permission rationale dialogs — Explain each permission before requesting it" | wrong | lib/services/permission_rationale_service.dart does not exist [file listing; SECURITY.md:230] | P2
+LANDINGSITE_AI_PROMPTS.md | 106-110, 144, 233, 407, 553, 620, 683, 721 | "Transparent Permissions / We explain every permission before asking" | duplicate | Same as :69-72 | P3
+LANDINGSITE_AI_PROMPTS.md | 109 | "Camera for AR preview?" | wrong | No AR exists [docs/guides-2026-09/README.md:71; lib/features/ar listing] | P3
+LANDINGSITE_AI_PROMPTS.md | 76, 153, 418, 513 | "links to SECURITY.md" / "PDF version of SECURITY.md" | misleading | SECURITY.md is an internal ops document with deploy commands and env-var names, not a customer whitepaper | P3
+LANDINGSITE_AI_PROMPTS.md | 97 | "We track costs and alert you to unusual activity" | unverifiable | Cost tracking is server-side; no user-facing alert found | P3
+LANDINGSITE_AI_PROMPTS.md | 148-149 | "OAuth Security — Lumina: ✅ Cryptographically secure tokens" | misleading | Alexa/Google linking has never worked; do not advertise [T-VA1] | P2
+LANDINGSITE_AI_PROMPTS.md | 195, 238-239, 316, 325, 554 | "Alexa and other integrations now use cryptographically secure tokens…" | duplicate | Same as :148-149 | P3
+LANDINGSITE_AI_PROMPTS.md | 179 | "Usage Analytics … Aggregated & anonymized" | wrong | Usage records are per-user subcollections under /users/{uid} [functions/index.js:1024-1058] | P2
+LANDINGSITE_AI_PROMPTS.md | 182, 185 | "Right to Access: [Download My Data]" / "Right to Portability: [Export My Data]" | wrong | No export feature exists [SECURITY.md:450; SECURITY_SUMMARY.md:172] | P2
+LANDINGSITE_AI_PROMPTS.md | 305, 307 | "Access all your data / Export your data" | duplicate | Same as :182/:185 | P3
+LANDINGSITE_AI_PROMPTS.md | 184 | "Right to Opt-Out: [Manage Preferences]" | wrong | No analytics opt-out; analytics declared required [T-O4] | P2
+LANDINGSITE_AI_PROMPTS.md | 308 | "Opt out of data collection" | duplicate | Same as :184 | P3
+LANDINGSITE_AI_PROMPTS.md | 189 | "OpenAI: Lumina AI chat (rate-limited)" (privacy-policy third-party list) | wrong | The recipient is Anthropic via claudeProxy; naming the wrong sub-processor in a privacy policy [functions/src/claudeProxy.js:23-24; SECURITY.md:460-462] | P1
+LANDINGSITE_AI_PROMPTS.md | 190 | "Amazon Alexa: Voice control (optional)" | wrong | Never worked; not to be advertised [T-VA1] | P2
+LANDINGSITE_AI_PROMPTS.md | 297 | "OAuth tokens: Until you unlink the integration" | duplicate | Same as :190 | P3
+LANDINGSITE_AI_PROMPTS.md | 201-203 | "privacy@ / security@ / support@ <REDACTED:email>" | unverifiable | None matches the owner-confirmed in-app constant; canonical mailbox is an open item [T-SU2; lib/features/auth/support_contact.dart:16] | P3
+LANDINGSITE_AI_PROMPTS.md | 247, 332, 420, 600, 726 | "<REDACTED:email>" | duplicate | Same as :201-203 | P3
+LANDINGSITE_AI_PROMPTS.md | 206 | "Last updated: January 23, 2026" | outdated | P3 | P3
+LANDINGSITE_AI_PROMPTS.md | 217-257 | "App Store Listing… Apple App Store and Google Play Store" | misleading | No public store listing exists [T-B3; T-B4; T-O8] | P2
+LANDINGSITE_AI_PROMPTS.md | 253 | "Data encrypted at rest: YES (AES-256)" (Google Play data-safety) | misleading | Three fields only; everything else plain [lib/services/encryption_service.dart:199-214] | P2
+LANDINGSITE_AI_PROMPTS.md | 255 | "Data retention period: 90 days" (Google Play data-safety) | wrong | Profile, schedules, patterns and AI usage are retained until deletion; a false data-safety declaration [functions/index.js:956-959; functions/src/claudeProxy.js:52] | P1
+LANDINGSITE_AI_PROMPTS.md | 256 | "Data shared with third parties: NO" (Google Play data-safety) | wrong | Lumina AI chat text is sent to Anthropic; data is hosted on Firebase/Google; a false data-safety declaration [functions/src/claudeProxy.js:23-24; SECURITY.md:23-27] | P1
+LANDINGSITE_AI_PROMPTS.md | 279 | "Finding your controllers on your WiFi network (requires location permission on Android)" | misleading | Location is needed to read the Wi-Fi name for Detect Home Network, not for mDNS discovery [lib/features/site/remote_access_screen.dart:436-437; lib/features/discovery/device_discovery.dart:23] | P3
+LANDINGSITE_AI_PROMPTS.md | 286-289 | "We have zero access to your controllers… We use encrypted communication" | wrong | The server runs Game Day for allowlisted accounts by writing relay commands; bridge→controller is plain HTTP and the bridge's TLS skips certificate validation [T-GD1; esp32-bridge/src/main.cpp:530, 890-900] | P2
+LANDINGSITE_AI_PROMPTS.md | 312 | "Go to Settings > Account > Delete Account" | unverifiable | Delete Account lives on the security settings screen; exact menu path not verified [lib/features/site/security_settings_screen.dart:283-293] | P3
+LANDINGSITE_AI_PROMPTS.md | 320 | "We've never experienced a data breach" | unverifiable | Not anchored anywhere | P3
+LANDINGSITE_AI_PROMPTS.md | 327 | "we would notify affected users within 72 hours per GDPR" | unverifiable | Policy commitment not in repo | P3
+LANDINGSITE_AI_PROMPTS.md | 349 | "military-grade AES-256 encryption" | contradictory | :760 instructs never to use "military-grade" | P3
+LANDINGSITE_AI_PROMPTS.md | 412, 724 | "Your existing data has been encrypted" | unverifiable | No migration of pre-existing records evidenced; service keeps "backward compatibility with unencrypted legacy data" [SECURITY.md:77] | P3
+LANDINGSITE_AI_PROMPTS.md | 414 | "You're now GDPR & CCPA compliant" (addressed to the customer) | wrong | Customers are not the regulated party; and see :20 | P3
+LANDINGSITE_AI_PROMPTS.md | 445-447, 453-458 | "Multi-Property Management… Isolated Tenant Data… AES-256 encryption with property-specific keys" | wrong | Key is device-specific, not per property; the commercial shell is unreachable [lib/services/encryption_service.dart:9; T-O2] | P2
+LANDINGSITE_AI_PROMPTS.md | 462 | "Legal team approved" | unverifiable | Not anchored anywhere | P2
+LANDINGSITE_AI_PROMPTS.md | 465-469 | "Complete Activity Logging… Immutable audit logs, exportable as CSV" | wrong | No audit-log or CSV export feature exists | P2
+LANDINGSITE_AI_PROMPTS.md | 475-476 | "Role-Based Access Control: Property managers, installers, and residents" | misleading | Roles are customer / installer / dealer / staff; no property-manager role [firestore.rules:104-116] | P3
+LANDINGSITE_AI_PROMPTS.md | 481-482 | "Encrypted Data Export… encrypted CSV" | wrong | No export feature | P2
+LANDINGSITE_AI_PROMPTS.md | 484-485 | "SSO Integration (Coming Q2 2026)" | outdated | Q2 2026 has passed; not built | P2
+LANDINGSITE_AI_PROMPTS.md | 487-488 | "White-Label Option (Enterprise Plan)" | unverifiable | No plans or tiering exist | P2
+LANDINGSITE_AI_PROMPTS.md | 490-491 | "Priority support with 4-hour response SLA. Direct line to our security team." | unverifiable | Not anchored anywhere | P2
+LANDINGSITE_AI_PROMPTS.md | 493-505 | "Compare Plans: Residential vs. Commercial vs. Enterprise" | unverifiable | Single app, invitation-only; no plans [T-O8] | P2
+LANDINGSITE_AI_PROMPTS.md | 511-514 | "[Download Security Whitepaper (PDF)] … [Schedule Security Review]" | unverifiable | No such artifacts | P3
+LANDINGSITE_AI_PROMPTS.md | 577 | "[Download Compliance Docs]" | wrong | No such documents | P2
+LANDINGSITE_AI_PROMPTS.md | 581-590 | testimonials attributed to "Sarah M., Seattle", "David K., Austin", "Jennifer L., Boston" | misleading | Fabricated quotes attributed to named people; must not be published as real | P2
+LANDINGSITE_AI_PROMPTS.md | 592-596 | "30-Day Privacy Guarantee… we'll refund your purchase" | unverifiable | No refund policy in repo; the only anchored warranty wording is 5-year product / 1-year labor / 50,000 h [T-O6] | P2
+LANDINGSITE_AI_PROMPTS.md | 677 | "We just launched enterprise-grade security features" | unverifiable | P3 | P3
+LANDINGSITE_AI_PROMPTS.md | (absent) | bridge requirement | missing | Any "control your lights from anywhere" copy must say it requires a dealer-installed Lumina Bridge [T-R1; T-R9] | P3
+LANDINGSITE_AI_PROMPTS.md | (absent) | real voice path | missing | If voice is mentioned, the shipped path is Siri Shortcuts / Android shortcuts, not Alexa/Google [T-VA2; T-VA1] | P3
+LANDINGSITE_AI_PROMPTS.md | accurate claims: 4 | :18/:45/:166 home address and Wi-Fi name never stored in plain text [lib/services/encryption_service.dart:199-214; lib/services/user_service.dart:44, 77]; :269 per-device encryption key [lib/services/encryption_service.dart:9]; :293-297 retention statement (profile/patterns until deletion) [functions/index.js:956-959]; :760 "not military-grade" style rule | accurate | — | —
+
+--- CHANGELOG.md (DOC 11) ---
+CHANGELOG.md | 3 | "[2.1.0] - 2026-03-10" (only entry) | outdated | App is 2.5.10+116; nothing after 2.1.0 is recorded; docs/BUILD_LEDGER.md is the authoritative history [pubspec.yaml:5; lib/app_version.dart:22; T-B1] | P3
+CHANGELOG.md | 37 | "Removed: Simple Mode" | contradictory | simpleModeProvider and 'Simple Mode' UI strings still exist [lib/features/simple/simple_providers.dart:57; lib/features/site/settings_page.dart:1246] | P3
+CHANGELOG.md | 39 | "Removed: Legacy sports_alert_service.dart" | contradictory | lib/services/sports_alert_service.dart exists and is imported [lib/services/sports_alert_service.dart:1-12] | P3
+CHANGELOG.md | 17-18 | "Neighborhood Sync: Game Day team selection… live score celebration propagation to all group members" | unverifiable | Fanout flag scope not re-read; score celebrations are phone-only [T-O3; T-C2] | P3
+CHANGELOG.md | (absent) | every release since March | missing | e.g. favorites cap 2 (115), Lumina all channels (115), Just this day (112), controller selection (116), Recent Patterns (116), celebration Length (115) [T-V1; T-L1; T-D1; T-S1; T-E3; T-C1] | P3
+CHANGELOG.md | accurate claims: 5 | :20-21 FCM + flutter_background_service deps [pubspec.yaml:56, 61]; :22 GameScheduleService [lib/features/sports_alerts/services/game_schedule_service.dart]; :31 Preferred White onboarding [lib/features/permissions/welcome_wizard.dart:198]; :42 rgbw_validation.dart [lib/utils/rgbw_validation.dart]; :43 TeamColorResolver [lib/data/team_color_resolver.dart] | accurate | — | —
+
+================================================================
+C. SECURITY ITEMS (file:line — KIND; no values)
+================================================================
+docs/ESP32_Bridge_Setup_Guide.md:126 — PRIVATE_IP
+docs/ESP32_Bridge_Setup_Guide.md:187 — PRIVATE_IP
+docs/ESP32_Bridge_Setup_Guide.md:269 — EMAIL
+docs/guides-2026-09/07-bridge-setup-guide.md:171 — EMAIL
+docs/guides-2026-09/07-bridge-setup-guide.md:256 — EMAIL
+docs/guides-2026-09/README.md:94 — EMAIL
+docs/guides-2026-09/README.md:95 — EMAIL (three addresses on one line)
+SECURITY.md:517 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:201 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:202 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:203 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:247 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:332 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:420 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:600 — EMAIL
+LANDINGSITE_AI_PROMPTS.md:726 — EMAIL
+firestore.rules:115 — PLACEHOLDER DEALER DOMAIN still live in the ruleset (referenced by SECURITY.md:118) — not PII, but a permissive placeholder
+Notes: SECURITY.md:62, :379 contain only an "sk-ant-..." placeholder (no value). alexa-skill/DEPLOYMENT.md:73 is a placeholder skill ID; the real skill ID sits in lib/features/voice/alexa_service.dart:25 (identifier, not a secret; not reproduced). Scanned alexa-skill/lambda.zip, alexa-skill/lambda and google-home/functions: no .env, service-account JSON or private key found. No phone numbers, MAC addresses, bridge ids or user ids appear in the eleven documents.
+
+================================================================
+D. GAPS — bridge / remote-access / voice tasks NONE of these documents covers
+================================================================
+1. Ten-minute bridge gaps: what they look like ("Couldn't reach your home from here…" / Test Bridge failing / Game Day "served" flipping off for ~5 min) and what to do (wait ten minutes, retry) [T-R7; T-R2].
+2. Every away-from-home message and its meaning, including the stale-selection case that shows "remote access isn't set up" even when a bridge exists [T-R2; T-R3].
+3. Pairing policy: who may pair/re-pair a bridge (installer-only per policy; "may a customer pair a replacement?" is an open owner question) [T-R9].
+4. Re-pairing after a router/ISP change: Wi-Fi portal reappears automatically when the old network is gone (WiFiManager fallback, main.cpp:293-310); pairing persists in NVS; the controller may get a new LAN address — the app's controller record must be refreshed (commands carry controllerIp, main.cpp:778-780; pairedWledIp is only a fallback); re-run Detect Home Network [T-R10]. No document states the sequence.
+5. Moving a bridge to a new house under the SAME account vs a DIFFERENT account: same account = new Wi-Fi via portal + Reconfigure Bridge for the new controller target; different account = POST /api/reset first (clears pairing only, not Wi-Fi), then Part 2 [main.cpp:504-516].
+6. Factory reset does NOT clear Wi-Fi credentials; the bridge rejoins the same Wi-Fi unpaired — DOC 1 says the opposite [main.cpp:504-516].
+7. How to test the bridge from the app: Test Bridge is a 10-second cloud round trip (remote_access_screen.dart:388-394); the Verify step inside Set Up Bridge; the Direct / Via Bridge badge as proof [T-R10]. Only partially covered in DOC 2.
+8. What the Reconfigure Bridge / Unpair Bridge actions do, and that unpairing from the app does not free a live bridge [remote_access_screen.dart:926; bridge_setup_screen.dart:529; main.cpp:1122-1160].
+9. Bridge LED codes and the 5-minute watchdog reboot [main.cpp:1296-1307, 273-276].
+10. Siri Shortcuts (iOS) and Android app-shortcut setup — the only real voice path — appears in none of these documents (only the in-app guide screen) [T-VA2; T-VA3]; and a standing rule that Alexa/Google are never advertised [T-VA1].
+11. Schedules and Game Day away from home: schedule edits away write nothing until the phone is home; phone-run games need the app open at home within 48 h; the bridge cannot do either [T-R8; T-GD3].
+12. Power-outage recovery: the channel split is restored only when the app connects on home Wi-Fi; nothing restores it remotely [T-P1; T-P2].
+13. Controller firmware policy (record version, never flash/update/downgrade; the quinled/0.15.1 pin instruction is wrong) — absent from CLAUDE.md and the guide index [T-F2; T-F3].
+14. Bridge firmware lifecycle for engineers: 1.2 fielded, 1.3 built/not flashed, no OTA, Firestore rules locked to 1.2's behaviour — widen rules before any 1.3 flash [T-R5].
+15. Webhook (Dynamic DNS) connection mode: exists in the UI, is DIY-only; no customer doc says to ignore it beyond "leave it on ESP32 Bridge" [remote_access_screen.dart:984].
+16. Canonical support mailbox: four spellings across the docs, none matching the in-app constant [T-SU2].
+
+================================================================
+E. COUNTS
+================================================================
+Findings (non-accurate rows in B): 216
+By severity: P1 = 6 · P2 = 85 · P3 = 125
+  P1 rows: google-home/DEPLOYMENT.md:34-39 (full-codebase deploy), google-home/DEPLOYMENT.md:95-129 (rules replacement), SECURITY.md:395 (forced rules deploy), LANDINGSITE_AI_PROMPTS.md:189 (OpenAI in privacy policy), :255 (Play retention declaration), :256 (Play third-party-sharing declaration).
+By verdict: wrong = 69 · misleading = 46 · missing = 44 · outdated = 25 · unverifiable = 37 (incl. doc-level duplicates counted once) · contradictory = 13 · duplicate = 20 (rows; several cover multiple lines)
+  (Rows carrying two verdicts were counted under the first-named verdict.)
+Accurate claims recorded per document: DOC1 16 · DOC2 34 · DOC3 2 · DOC4 3 · DOC5 2 · DOC6 10 · DOC7 2 · DOC8 14 · SECURITY.md 15 · SECURITY_SUMMARY.md 6 · LANDINGSITE 4 · CHANGELOG 5 (total 113).
+Security items: 16 PII-class locations (2 private IPs, 14 email locations) + 1 live placeholder domain in firestore.rules.
+
+Overall disposition: survive = docs/guides-2026-09/07-bridge-setup-guide.md (fix audience, message text, reset note; add gaps 1-9), CLAUDE.md, README.md, docs/guides-2026-09/README.md (refresh); rewrite = esp32-bridge/README.md, SECURITY.md, both voice DEPLOYMENT docs (behind a T-VA1 banner), LANDINGSITE_AI_PROMPTS.md; archive = docs/ESP32_Bridge_Setup_Guide.md, SECURITY_SUMMARY.md, CHANGELOG.md.
