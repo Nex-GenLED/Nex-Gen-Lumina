@@ -227,7 +227,7 @@ Validation is automatically applied in `UserModel` constructor.
 
 ### 7. Permission Rationale Dialogs ✅
 
-**Implementation:** `lib/services/permission_rationale_service.dart`
+**Implementation:** not implemented (no permission-rationale service exists in lib/; the OS prompts are the rationale)
 
 **Permissions Explained:**
 - **Location:** Network discovery, geofencing, sunrise/sunset
@@ -254,7 +254,7 @@ final status = await PermissionRationaleService.requestWithRationale(
 
 ### 8. Community Pattern Sharing Consent ✅
 
-**Implementation:** `lib/features/patterns/community_sharing_consent_dialog.dart`
+**Implementation:** not implemented (no community-sharing consent dialog exists in lib/)
 
 **Features:**
 - **Explicit opt-in** (default is OFF)
@@ -282,7 +282,7 @@ if (consented == true) {
   ```
 
 - [ ] **Environment Variables Set**
-  - [ ] `OPENAI_API_KEY` in functions/.env
+  - [ ] `ANTHROPIC_API_KEY` in functions/.env
   - [ ] `ALEXA_CLIENT_ID` in functions/.env
   - [ ] `ALEXA_CLIENT_SECRET` in functions/.env
 
@@ -398,7 +398,7 @@ firebase functions:log --only cleanupOldData
 3. If encryption keys compromised, rotate:
    ```dart
    // In app, call this for affected users
-   await EncryptionService.reEncryptUserData(userData);
+   // (no re-encryption helper exists; rotate the device key and let legacy records decrypt on read)
    ```
 4. Notify affected users
 
@@ -452,7 +452,7 @@ firebase functions:log --only cleanupOldData
 - ✅ **Consent Management:** Explicit opt-in for pattern sharing
 
 **Data Retention:**
-- Usage data: 90 days
+- Usage data: 90 days for usage-learning records; AI usage logs are not purged today
 - User profile: Until account deletion
 - OAuth tokens: Until revoked
 

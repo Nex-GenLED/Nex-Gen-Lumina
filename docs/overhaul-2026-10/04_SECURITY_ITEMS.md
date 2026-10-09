@@ -54,6 +54,11 @@ Rule: file and line and KIND only. No values are reproduced here or anywhere in 
 
 Nine distinct support-style addresses appear across documents (`docs/guides-2026-09/README.md:94-95` lists three; the sweep found `support@` on two domains and a third top-level domain, plus `security@`, `privacy@`, `payouts@`, `media@`, `info@`, and `General@` in the privacy policy). The app ships exactly one corporate email constant. Decision needed: T-SU2.
 
+## Owner's update, 2026-10-09
+
+- S1/S2: no PIN in any copy of the admin guide was live; the 2026-08-29 rotation holds. The redactions at HEAD on this branch are cleanup only. The two Drive copies of the Admin Operations PDF are to be replaced (see `docs/drive-exports/`) or pulled.
+- S3: the setup-AP password printed in the SOP was WLED's public factory default, and controllers broadcast their AP with it out of the box. The SOP and the install checklist now require a unique AP password per controller, recorded privately, and turning "always serve the AP" off once the controller is on the home network (UNVERIFIED for Skikbily builds, FACTS T-A5). Nothing was changed on any controller.
+
 ## What to do with this list (not done in this overhaul)
 
 1. Rotate: S1 (every PIN that appears), S3 (the AP password on every fielded controller — a bench/installer job), S5 (bridge credential, already recommended), S6/S7 (restrict or rotate the keys), S8 (signer key).
