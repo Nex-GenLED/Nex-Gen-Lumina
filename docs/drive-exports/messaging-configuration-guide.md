@@ -1,0 +1,80 @@
+# Dealer Guide (messaging section)
+
+*Replacement text for the Drive file `messaging-configuration-guide.pdf`. Generated 2026-10-09 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
+
+
+---
+
+# Dealer guide
+
+*Describes build: 2.5.10+116 · Last verified: 2026-10-09 · For dealer principals and office staff*
+
+## Getting in
+
+1. On the Lumina sign-in screen tap the Lumina logo five times within three seconds, or tap **Installer** under **Nex-Gen Professional Access** on the Link Account screen. You'll see **Staff Access**.
+2. Enter your PIN: your two-digit dealer code followed by your two-digit personal code. Five wrong attempts lock the pad for 30 seconds.
+3. Your session lasts 30 minutes, with a warning five minutes before it ends. Sales and installer PINs both land on their own landing screen; the Dealer Dashboard is reachable from either.
+
+Never write a PIN in a message, a document or on a label.
+
+## The Dealer Dashboard
+
+From the Installer Mode landing screen tap **Dealer Dashboard**. Six tabs:
+
+| Tab | What is there |
+|---|---|
+| **Overview** | Eight stat cards (active jobs, completed installs, active installers, pending payouts, month- and year-to-date revenue, average ticket, conversion) and a feed of the ten most recent events. Installer and payout cards show a dash for non-admin sessions. |
+| **Pipeline** | Every job with its status. Job numbers read NXG, the date, and a sequence number. |
+| **Team** | Admin and owner sessions only. **Manage team** opens the installer list: add, deactivate, filter. |
+| **Payouts** | Referral rewards by status, with an approve action on each pending reward. |
+| **Inventory** | On-hand stock, which changes only when you receive stock. The committed, available and reorder sections are not available today, and the waste section cannot fill from live jobs. |
+| **Messaging** | Your sender name, reply phone and support email, the automated message toggles, and a 30-character sign-off. |
+
+## The pipeline, and the one gate everybody misses
+
+Statuses run: draft → estimate sent → signed → pre-wire scheduled → pre-wire complete → install scheduled → install complete → complete (paid).
+
+**A signed job cannot be scheduled for Day 1 until someone marks the 50 % deposit collected.** The only control for that is on the job's card in the **Day 1 Queue** on the Installer Mode landing screen: tap the deposit action and confirm. Sales Mode has no way to mark it, and the customer is told nothing while the job waits. Decide who collects the deposit and who marks it.
+
+After Day 1 and Day 2, the final payment is confirmed on the Day 2 wrap-up's close step; that moves the job to complete (paid).
+
+## Day 1 and Day 2 queues
+
+Both queues live on the Installer Mode landing screen (**Day 1 Queue**, **Day 2 Queue**), not in the Dealer Dashboard. A sales PIN cannot open them.
+
+## Referrals
+
+Customers find **Refer a Friend** under System in their app. Codes issue on signature; rewards appear on your **Payouts** tab for approval. There is a yearly cap per referrer. Do not quote reward figures in your own materials; point customers to the screen.
+
+## Messaging
+
+**Messaging** tab: set the sender name customers see, the reply phone and support email, and which automated messages go out (scheduling confirmations, reminders, install complete). Message bodies are fixed. Whether texts are delivered depends on the messaging service being configured for your dealership; confirm with Nex-Gen if customers report no texts.
+
+## What is not in the app today
+
+- Ordering stock from Nex-Gen through the app. The corporate side has an orders queue, but the dealer ordering screens are not reachable. Order the way you do today.
+- The five-step estimate wizard. The live sales flow is Prospect → Zones → Review → Estimate → Sign (see Sales mode).
+- Waste intelligence and material check-in figures. They depend on data the live flow does not write.
+- An admin dashboard. An admin PIN opens the Corporate Dashboard.
+
+## When a customer calls
+
+| They say | Do this |
+|---|---|
+| "I can sign in but nothing responds" | Ask them to open **System → System & Device Management → Controllers**, tap their controller and choose **Set as Active**. If no controller is listed, the install never linked it: an installer opens the account with **Existing Customer** and re-runs controller setup. |
+| "Away from home it says it needs a bridge" | They have no paired bridge. Sell and install one, or explain that control is home-Wi-Fi only. |
+| "Away from home it failed / the bridge hasn't checked in" | About every seven hours the bridge is quiet for ten minutes. Try again then. If it fails for longer, the bridge is unplugged or the home internet is down. |
+| "The lights came back wrong after a power outage" | Open the app at home for a minute. See the customer page After a power outage. |
+| "Game Day didn't switch back" | Open the app at home and tap the everyday schedule. If the Game Day screen says the everyday lighting needs repairing, an installer or Nex-Gen support corrects the presets; the app cannot yet. |
+| "Can I use Alexa / Google?" | No. Siri Shortcuts on iPhone and Android app shortcuts only. Never promise the others. |
+| "Can you update my firmware?" | No. Firmware is recorded at install and never changed. |
+
+## Claims you may make
+
+See Claims policy. In short: no voice assistants other than Siri Shortcuts, no "lifetime warranty" (5-year product, 1-year labor minimum, 50,000-hour rated life), no store-download instructions (installer invitation only), no "AR".
+
+## Support
+
+Your customers' app shows your dealership's phone and email under **Support & Resources** once their profile carries it (set at install). For anything you cannot solve, open Help in your own app and contact Nex-Gen.
+
+*Facts: T-X9, T-X10, T-X11, T-X8, T-X12, T-O2, T-S2, T-R1, T-R7, T-P2, T-GD5, T-GD6, T-VA1, T-VA2, T-F2, T-O6, T-O8, T-SU1, T-SU2.*
