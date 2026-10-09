@@ -327,7 +327,7 @@ token-refresh build or later, adoption is complete and the rules may tighten.**
 
 The three scenarios below exercise `signInWithCustomToken` / `signInAnonymously` /
 `mintStaffToken`, which are plugin- and network-bound and cannot be driven from
-`flutter test`. Rig: controller `192.168.1.150`, installer PIN `0101`.
+`flutter test`. Rig: controller `192.0.2.1`, installer PIN `<R>`.
 
 | # | Scenario | How to force | Expected |
 |---|---|---|---|

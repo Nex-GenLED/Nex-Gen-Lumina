@@ -67,7 +67,7 @@ Each match was classified into one of four categories defined by the audit promp
 
 5. **No hardcoded MAC addresses anywhere.** Only match: `WiFi.macAddress(mac);` at [esp32-bridge/src/main.cpp:146](esp32-bridge/src/main.cpp#L146) — runtime read of the device's own MAC, not a hardcoded value.
 
-6. **No hardcoded dealer codes or installer PINs as values.** The `5502` PIN known from memory does not appear as a string literal anywhere in `lib/` (zero matches). All `dealerCode` references are field names on data models or Firestore rule helpers — that's the correct architecture (dealer code is per-record data, not a baked-in constant).
+6. **No hardcoded dealer codes or installer PINs as values.** The `<R>` PIN known from memory does not appear as a string literal anywhere in `lib/` (zero matches). All `dealerCode` references are field names on data models or Firestore rule helpers — that's the correct architecture (dealer code is per-record data, not a baked-in constant).
 
 7. **No 28-char UID-shaped string literals in `lib/` or `esp32-bridge/src/`.** Quoted-form regex (`"[A-Za-z0-9]{28}"`) returned zero matches in production code.
 

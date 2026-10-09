@@ -42,7 +42,7 @@ This is your playbook for running the admin side of Lumina — the dealer networ
 ## What you'll need
 
 - Access to the Lumina app on a phone or tablet, signed in as Nex-Gen LED LLC staff
-- The **Corporate PIN** (for the Corporate Dashboard) or **Admin PIN** `9999` (for dealer/installer management)
+- The **Corporate PIN** (for the Corporate Dashboard) or **Admin PIN** `<REDACTED>` (for dealer/installer management)
 - Access to the Firebase Console for the Lumina production project — used for PIN hashing, demo codes, and `app_config` changes
 - A list of your active dealers and installers if you're onboarding or auditing
 
@@ -55,23 +55,23 @@ Every staff PIN flows through one screen — the **Staff PIN** screen. The PIN y
 | Item | Value | Lands you in |
 |------|-------|------|
 | **Corporate PIN** | Set in Firestore — see Section 7 | Corporate Dashboard |
-| **Admin PIN** | `9999` | Admin Dashboard (dealer + installer management) |
-| **Master Installer PIN** | `8817` (Nex-Gen LED LLC bypass) | Installer Mode |
+| **Admin PIN** | `<REDACTED>` | Admin Dashboard (dealer + installer management) |
+| **Master Installer PIN** | `<REDACTED>` (Nex-Gen LED LLC bypass) | Installer Mode |
 | **Sales PIN** | Set in Firestore `app_config/master_sales_pin` | Sales Mode |
-| **Dev/Test PIN** | `0000` — disable before launch | Installer Mode |
+| **Dev/Test PIN** | `<REDACTED>` — disable before launch | Installer Mode |
 
 ### How PIN validation is prioritized
 
 When a PIN is entered, the app checks sources in this order:
 
 1. **Corporate PIN** — SHA-256 hash compared against `app_config/master_corporate_pin`
-2. **Installer PINs** — master installer PIN (`8817`), then individual installer PINs in the `installers` collection
+2. **Installer PINs** — master installer PIN (`<REDACTED>`), then individual installer PINs in the `installers` collection
 3. **Sales PIN** — master sales PIN, then per-installer sales fallback
 
 Corporate is checked first because it has no collection fallback, so it can never accidentally claim someone else's PIN. The order prevents PIN collisions from routing staff to the wrong mode.
 
 <div class="danger">
-<strong>Before you launch publicly:</strong> The Admin PIN (<code>9999</code>) and Master Installer PIN (<code>8817</code>) are hardcoded in the app. Plan to migrate both to hashed Firestore values — the same pattern the Corporate PIN already uses — so they can be rotated without an app release.
+<strong>Before you launch publicly:</strong> The Admin PIN (<code><REDACTED></code>) and Master Installer PIN (<code><REDACTED></code>) are hardcoded in the app. Plan to migrate both to hashed Firestore values — the same pattern the Corporate PIN already uses — so they can be rotated without an app release.
 </div>
 
 ---
@@ -111,7 +111,7 @@ There is no visible "Installer Mode" or "Admin Access" button on the login scree
 
 ### Entering the Admin Dashboard
 
-Type `9999` on the Staff PIN screen. You land on the **Admin Dashboard**, which shows three live stats across the top:
+Type `<REDACTED>` on the Staff PIN screen. You land on the **Admin Dashboard**, which shows three live stats across the top:
 
 - **Active Dealers** — companies you've onboarded
 - **Active Installers** — technicians across all dealers
@@ -128,19 +128,19 @@ The reviewer-reveal gesture used to live on the "POWERED BY NEX-GEN" subtitle, b
 ## 3. The big picture
 
 ```
-YOU (Admin PIN 9999)
+YOU (Admin PIN <REDACTED>)
  │
  ├── Dealer 01: "ABC Lighting Co."
- │    ├── Installer 01 → PIN 0101 (Mike)
- │    ├── Installer 02 → PIN 0102 (Sarah)
- │    └── Installer 03 → PIN 0103 (Jake)
+ │    ├── Installer 01 → PIN <REDACTED> (Mike)
+ │    ├── Installer 02 → PIN <REDACTED> (Sarah)
+ │    └── Installer 03 → PIN <REDACTED> (Jake)
  │
  ├── Dealer 02: "Premier Outdoor LLC"
- │    ├── Installer 01 → PIN 0201 (Tony)
- │    └── Installer 02 → PIN 0202 (Lisa)
+ │    ├── Installer 01 → PIN <REDACTED> (Tony)
+ │    └── Installer 02 → PIN <REDACTED> (Lisa)
  │
  └── Dealer 03: "Bright Ideas Inc."
-      └── Installer 01 → PIN 0301 (Carlos)
+      └── Installer 01 → PIN <REDACTED> (Carlos)
 ```
 
 - You create **Dealers** — companies that sell and install Nex-Gen
@@ -204,10 +204,10 @@ The dealer is live and appears in the dealer list.
 You're adding the first installer under Dealer 03 (Bright Ideas Inc.):
 
 - System assigns installer code `01`
-- Combined PIN: `0301`
-- Tell Carlos: "Your PIN is 0301"
+- Combined PIN: `<REDACTED>`
+- Tell Carlos: "Your PIN is <REDACTED>"
 
-Carlos opens Lumina → taps the Lumina logo 5 times → enters `0301` on the Staff PIN screen → he's in Installer Mode.
+Carlos opens Lumina → taps the Lumina logo 5 times → enters `<REDACTED>` on the Staff PIN screen → he's in Installer Mode.
 
 ---
 
@@ -243,13 +243,13 @@ Tap any dealer or installer to edit their contact info (name, email, phone). The
 
 ## 7. Corporate Dashboard — network-level oversight
 
-The **Corporate Dashboard** is a separate admin experience from the Admin Dashboard. The Admin Dashboard (PIN `9999`) handles dealer and installer records one at a time. The Corporate Dashboard is where you see the whole network — analytics, inventory intelligence, and cross-dealer oversight.
+The **Corporate Dashboard** is a separate admin experience from the Admin Dashboard. The Admin Dashboard (PIN `<REDACTED>`) handles dealer and installer records one at a time. The Corporate Dashboard is where you see the whole network — analytics, inventory intelligence, and cross-dealer oversight.
 
 ### Admin Dashboard vs. Corporate Dashboard
 
 | | Admin Dashboard | Corporate Dashboard |
 |---|---|---|
-| **Access** | PIN `9999` (hardcoded today) | Corporate PIN (SHA-256 hash in Firestore) |
+| **Access** | PIN `<REDACTED>` (hardcoded today) | Corporate PIN (SHA-256 hash in Firestore) |
 | **Purpose** | Dealer + installer CRUD, installation records | Network analytics, pipeline, inventory, pricing |
 | **Scope** | One dealer at a time | Cross-dealer, network-wide |
 | **Session timeout** | Standard | 60 minutes with 5-minute warning |
@@ -631,7 +631,7 @@ Subcollections under `/users/{uid}` — owner-only write, media/dealer/admin rea
 When you sign up a new dealer, here's the full sequence:
 
 - [ ] Collect their info — contact name, company name, email, phone
-- [ ] Open the Staff PIN screen — Lumina login → tap Lumina logo 5 times → enter `9999`
+- [ ] Open the Staff PIN screen — Lumina login → tap Lumina logo 5 times → enter `<REDACTED>`
 - [ ] Create the dealer — **Manage Dealers** → **Add Dealer** → fill in info → **Save**
 - [ ] Note the dealer code (e.g., `03`)
 - [ ] Create their installers — **Manage Installers** → select dealer → **Add Installer** for each technician
@@ -650,10 +650,10 @@ When you sign up a new dealer, here's the full sequence:
 | Action | Where |
 |--------|-------|
 | Open Staff PIN screen | Login → tap Lumina logo 5 times (within 3 seconds) |
-| Enter Admin Dashboard | Staff PIN → `9999` |
+| Enter Admin Dashboard | Staff PIN → `<REDACTED>` |
 | Enter Corporate Dashboard | Staff PIN → Corporate PIN |
 | Enter Sales Mode | Staff PIN → Sales PIN |
-| Enter Installer Mode | Staff PIN → Installer PIN (e.g., `0301`) |
+| Enter Installer Mode | Staff PIN → Installer PIN (e.g., `<REDACTED>`) |
 | Create a dealer | Admin Dashboard → **Manage Dealers** → **Add** |
 | Create an installer | Admin Dashboard → **Manage Installers** → **Add** |
 | Deactivate a dealer | **Manage Dealers** → tap dealer → toggle **Active** off |
@@ -688,8 +688,8 @@ When you sign up a new dealer, here's the full sequence:
 <div class="warning">
 <strong>Things to tighten before scaling:</strong>
 
-- <strong>Admin PIN is hardcoded</strong> (<code>9999</code> in <code>admin_providers.dart</code>). Anyone who guesses it gets full admin. Migrate to a hashed Firestore value.
-- <strong>Master Installer PIN is hardcoded</strong> (<code>8817</code> in <code>installer_providers.dart</code>). Same migration path.
+- <strong>Admin PIN is hardcoded</strong> (<code><REDACTED></code> in <code>admin_providers.dart</code>). Anyone who guesses it gets full admin. Migrate to a hashed Firestore value.
+- <strong>Master Installer PIN is hardcoded</strong> (<code><REDACTED></code> in <code>installer_providers.dart</code>). Same migration path.
 - <strong>Demo/media codes</strong> are managed in Firebase Console today — consider an in-app screen.
 - <strong>No audit log</strong> — dealer/installer changes aren't tracked. A Firestore <code>audit_log</code> collection would fix this.
 - <strong>Deletes are soft</strong> — deactivation only, data is preserved.
@@ -774,7 +774,7 @@ If a customer asks for a genuinely complete erasure, these three need clearing b
 **A physical controller must be claimed by exactly one customer account.** This is the operating rule. Follow it.
 
 <div class="warning">
-<strong>Nothing enforces it.</strong> There is no uniqueness check at claim time. A production audit on 2026-08-27 found controller <code>80_f3_da_b4_d1_50</code> claimed by <strong>three</strong> accounts at once — the previous customer, the new customer, and an installer staging account — carrying three different LED counts for one physical strip. Nothing in the write path noticed. Tracked as <strong>P2-52</strong>.
+<strong>Nothing enforces it.</strong> There is no uniqueness check at claim time. A production audit on 2026-08-27 found controller <code>[redacted controller id]</code> claimed by <strong>three</strong> accounts at once — the previous customer, the new customer, and an installer staging account — carrying three different LED counts for one physical strip. Nothing in the write path noticed. Tracked as <strong>P2-52</strong>.
 </div>
 
 ### What goes wrong when it's violated

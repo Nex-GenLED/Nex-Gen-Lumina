@@ -33,7 +33,7 @@ three reports into a single ordered run:
 | `audit/VERIFICATION_REPORT.md` §4 | Part B — Design Studio slices 0–5 with LEDs observed, incl. the save-gate failure case |
 
 **Rig:** controller `192.168.1.150`, WLED 0.15.1, 290 LEDs (ch1=128 / ch2=162).
-**Package:** `com.nexgenled.lumina`. **Installer PIN:** `0101` (dealer 01 / installer 01).
+**Package:** `com.nexgenled.lumina`. **Installer PIN:** `<R>` (dealer <R> / installer <R>).
 **Do NOT use master PIN `55xx`** — the wizard refuses it for customer installs (`68e5f04`),
 which is correct behaviour and will just waste a run.
 
@@ -75,7 +75,7 @@ specifically tests surviving *backgrounding*, and a force-close would destroy th
 and invalidate 1.5.
 
 ### 1.1 — Start the install
-Staff PIN `0101` → new customer (use a **fresh email you control**) → add controller
+Staff PIN `<R>` → new customer (use a **fresh email you control**) → add controller
 `192.168.1.150` → proceed to **Map Roofline**.
 
 ### 1.2 — 🔦 STRIP IN VIEW — capture, and confirm Slice 0 while you are here
