@@ -51,7 +51,7 @@ Install Lumina from your invitation, sign in with the same email, then check **S
 Yes. Ask your installer to add them; invited members get full control.
 
 **Where do I find my support contact?**
-**System → Support & Resources → Contact Nex-Gen Support**. It shows your installer's phone and email, or Nex-Gen LED's if no installer is on your profile.
+**System → Support & Resources → Contact Nex-Gen Support**. It shows your installer's phone and email, or Nex-Gen LED's if no installer is on your profile. You can always email general@nex-genled.com.
 
 **Is my data private?**
 Your home address and Wi-Fi name are stored encrypted. Lumina AI requests go to Nex-Gen's own service and on to the AI provider as text only. You can delete your account under **System → My Profile → Security & Password**.
@@ -59,4 +59,4 @@ Your home address and Wi-Fi name are stored encrypted. Lumina AI requests go to 
 **Which version do I have?**
 Open **System**; the version shows at the bottom. The current test build is 2.5.10 (116).
 
-*Facts: T-L4, T-R1, T-R6, T-R7, T-VA1, T-VA2, T-V1, T-R10, T-P2, T-GD5, T-C1, T-GD4, T-F2, T-S2, T-X24, T-SU1, T-X15, T-X14, T-B1.*
+*Facts: T-L4, T-R1, T-R6, T-R7, T-VA1, T-VA2, T-V1, T-R10, T-P2, T-GD5, T-C1, T-GD4, T-F2, T-S2, T-X24, T-SU1, T-SU2, T-X15, T-X14, T-B1.*

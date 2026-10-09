@@ -71,6 +71,6 @@ You now know enough to use Lumina every day. The next page covers power, brightn
 
 ## Something is not right?
 
-Open [Troubleshooting](06-troubleshooting.md), or in the app go to **System → Support & Resources** and tap **Contact Nex-Gen Support**. It shows your installer's phone and email.
+Open [Troubleshooting](06-troubleshooting.md), or in the app go to **System → Support & Resources** and tap **Contact Nex-Gen Support**. It shows your installer's phone and email. You can also email general@nex-genled.com.
 
-*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-S2.*
+*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-SU2, T-S2.*

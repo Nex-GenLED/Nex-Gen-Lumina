@@ -2,7 +2,7 @@
 
 *Describes build: 2.5.10+116 · Last verified: 2026-10-09*
 
-Find your problem below and follow the steps in order. Each ends with what to do if it still is not fixed. Contact for anything else: **System → Support & Resources → Contact Nex-Gen Support**, which shows your installer's phone and email.
+Find your problem below and follow the steps in order. Each ends with what to do if it still is not fixed. Contact for anything else: **System → Support & Resources → Contact Nex-Gen Support**, which shows your installer's phone and email, or email general@nex-genled.com with the date and time.
 
 ## My lights are dark
 
@@ -77,10 +77,10 @@ Siri Shortcuts work on iPhone: open **System → Voice Assistants**, save a look
 
 ## I changed my Wi-Fi password or router
 
-Your controller and bridge need the new network. This is an installer task: contact your installer from **System → Support & Resources**. Do not try to reconfigure the controller through its own web pages.
+Your controller and bridge need the new network. This is an installer task: contact your installer from **System → Support & Resources**. Do not try to reconfigure the controller through its own web pages; when its network is gone the controller opens its own setup network, and your installer uses that to reconnect it.
 
 ## I want to remove a controller
 
 Open **System → System & Device Management → Controllers**, tap the controller and choose to remove it. The app warns that this deletes all saved settings for that controller. Ask your installer before doing this.
 
-*Facts: T-X20, T-R10, T-P1, T-P2, T-R1, T-R2, T-R3, T-R6, T-R7, T-S1, T-S2, T-GD3, T-GD5, T-GD6, T-VA1, T-VA2, T-X21, T-D2, T-R9, T-SU1.*
+*Facts: T-X20, T-R10, T-P1, T-P2, T-R1, T-R2, T-R3, T-R6, T-R7, T-S1, T-S2, T-GD3, T-GD5, T-GD6, T-VA1, T-VA2, T-X21, T-D2, T-R9, T-A2, T-SU1, T-SU2.*

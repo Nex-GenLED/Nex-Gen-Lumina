@@ -41,7 +41,7 @@ Open Lumina on your home Wi-Fi at some point in the two days before kickoff. Tha
 
 The lights return to your everyday look (your usual ON schedule). On new systems that look is Lumina Blue, the standard everyday color; on older systems it is whatever your installer saved. If a game runs very long, the look is taken down eight hours after it started at the latest.
 
-**If the house is still in team colors an hour after the final:** open the app at home and tap your everyday schedule on the Schedule tab, or turn the lights off and on from Home. Then tell your installer which game it was, from **System → Support & Resources**.
+**If the house is still in team colors an hour after the final:** open the app at home and tap your everyday schedule on the Schedule tab, or turn the lights off and on from Home. Then tell your installer which game it was, from **System → Support & Resources** or by emailing general@nex-genled.com.
 
 ## More than one team
 
@@ -57,4 +57,4 @@ Add each team on the Game Day screen. Under **Team Priority**, drag to reorder: 
 
 Tap **Refresh all schedules** at the bottom of the Game Day screen to pull the latest game times.
 
-*Facts: T-GD1, T-GD2, T-GD3, T-GD4, T-GD5, T-GD6, T-GD8, T-GD9, T-GD10, T-C1, T-C2, T-C3.*
+*Facts: T-GD1, T-GD2, T-GD3, T-GD4, T-GD5, T-GD6, T-GD8, T-GD9, T-GD10, T-C1, T-C2, T-C3, T-SU2.*
