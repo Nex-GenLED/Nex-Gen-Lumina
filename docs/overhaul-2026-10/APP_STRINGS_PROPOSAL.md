@@ -33,15 +33,19 @@ For a separate branch after the bus-repair branch (`fix/ladder-repair-bus-change
 | 20 | Relay stale message · `lib/services/bridge_pairing.dart:227` | "Your Lumina Bridge hasn't checked in for N. Check that it's powered on and online at home." | "Your Lumina Bridge hasn't checked in for N. This usually clears on its own within ten minutes. Try again then, or check that it's plugged in at home." | T-R7. |
 | 21 | Profile privacy line and builder match · `lib/features/site/edit_profile_screen.dart:1070, 1154` | "Your data is stored locally and securely." / "We have 12 saved lighting designs for the '…' model." | Remove both sentences (or wire the count to data). | False claims. T-X15. |
 
+| 22 | Support mailbox spellings (owner decision 2026-10-09: general@nex-genled.com, lowercase, everywhere) · `lib/features/auth/support_contact.dart:15` already holds exactly that address (no change) · `lib/features/installer/media_access_code_screen.dart:229` prints "media@Nex-GenLED.com" in the Media Mode footer · `lib/services/reviewer_seed_service.dart:18` holds the App Store reviewer account identity "reviewer@Nex-GenLED.com" (an account name, not a support address) | two other spellings | Media Mode footer: "Don't have a code? Email general@nex-genled.com" (or drop the footer: Media Mode is unreachable today). Reviewer account: no string change unless the account itself is renamed; keep the identity out of customer-facing text. | T-SU2. |
+
 ## P3 — small polish, same branch
 
 | # | Screen · file:line | Today | Proposed |
 |---|---|---|---|
-| 22 | Blocked-apply snackbars (every `ApplyBlockedReason` surface) | message only | Add a **Help** action that opens `/settings/help`. |
-| 23 | Favorites add tile · `lib/widgets/favorites_grid.dart:346` | "Add a favorite" | "Add a favorite (you can keep 2)" |
-| 24 | Properties hint · `lib/features/properties/my_properties_screen.dart:793` | "Discover a WLED controller first from the System tab." | "Add your controller from the System tab first." |
-| 25 | Simple Mode disable dialog · `settings_page.dart:1339` | tab list ends "…Settings)" | "…System)" |
-| 26 | Dead push string · `lib/services/notifications_service.dart:196` | "Your top N patterns have been added to favorites." | Delete with its (dead) sender. |
-| 27 | Remote Access / System Management · `remote_access_screen.dart`, `system_management_screen.dart:957–987` | "ESP32 Bridge" | "Lumina Bridge" everywhere. |
+| 23 | Blocked-apply snackbars (every `ApplyBlockedReason` surface) | message only | Add a **Help** action that opens `/settings/help`. |
+| 24 | Favorites add tile · `lib/widgets/favorites_grid.dart:346` | "Add a favorite" | "Add a favorite (you can keep 2)" |
+| 25 | Properties hint · `lib/features/properties/my_properties_screen.dart:793` | "Discover a WLED controller first from the System tab." | "Add your controller from the System tab first." |
+| 26 | Simple Mode disable dialog · `settings_page.dart:1339` | tab list ends "…Settings)" | "…System)" |
+| 27 | Dead push string · `lib/services/notifications_service.dart:196` | "Your top N patterns have been added to favorites." | Delete with its (dead) sender. |
+| 28 | Remote Access / System Management · `remote_access_screen.dart`, `system_management_screen.dart:957–987` | "ESP32 Bridge" | "Lumina Bridge" everywhere. |
+
+Related app bug, same build: #187 in `docs/BUGS_AND_DEBT.md` (the hardware editor's GPIO list does not match the Skikbily outputs 2, 14, 16, 18).
 
 Reference: `docs/overhaul-2026-10/07_findings_inapp.md` for the full in-app findings and `docs/FACTS.md` for every fact cited.

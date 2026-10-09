@@ -514,7 +514,7 @@ firebase functions:log --only cleanupOldData
 ## Contact
 
 For security issues or questions:
-- **Email:** security@nexgenled.com
+- **Email:** general@nex-genled.com
 - **Bug Bounty:** (Set up if needed)
 
 **Report Format:**
