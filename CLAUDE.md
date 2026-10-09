@@ -304,7 +304,7 @@ Remote control from off-home networks is implemented via the ESP32 Lumina Bridge
 - [lib/features/site/remote_access_screen.dart](lib/features/site/remote_access_screen.dart) — user-facing setup UI
 - [esp32-bridge/](esp32-bridge/) — bridge firmware (PlatformIO)
 
-Routing matrix + per-command details: [docs/bridge_command_routing_context_2026-05-11.md](docs/bridge_command_routing_context_2026-05-11.md). User-facing setup: [docs/ESP32_Bridge_Setup_Guide.md](docs/ESP32_Bridge_Setup_Guide.md), [docs/Dealer_Installer_Setup_Guide.md](docs/Dealer_Installer_Setup_Guide.md) §9.
+Routing matrix + per-command details: [docs/bridge_command_routing_context_2026-05-11.md](docs/bridge_command_routing_context_2026-05-11.md). Installer-facing setup: [docs/guides/installer/12-bridge-guide.md](docs/guides/installer/12-bridge-guide.md); engineering detail: [docs/guides/internal/32-bridge-firmware.md](docs/guides/internal/32-bridge-firmware.md).
 
 ## Project Structure
 
