@@ -55,7 +55,7 @@ This is the complete handbook for getting your dealership up and running and com
 - The physical controllers and LED runs installed, powered, and reachable on the customer's network
 
 <div class="warning">
-<strong>Before you flash or install anything:</strong> every controller must be on the <strong>pinned WLED version</strong> — <code>0.15.1</code> for both SKIKBILY 4-channel and Dig-Octa 8-channel. Flashing "latest" (0.15.4) produces a controller that stalls periodically in the field <em>and passes every other check in this guide</em>. The <strong>Dealer Pre-Install Setup SOP</strong> (§2.0) is the authority on bench prep; this guide assumes you have followed it.
+<strong>Firmware: record the version, never flash.</strong> Controllers arrive with their firmware installed. Never flash, update or downgrade a controller, and never load a generic WLED image. Read the version from the controller card in the installer wizard and write it on the install sheet. (Rewritten 2026-10-09; the earlier instruction here to pin a version and re-flash was wrong.)
 </div>
 
 ---
@@ -533,8 +533,8 @@ When you tap **Complete Setup**, the app:
 CUSTOMER LOGIN CREDENTIALS
 ----------------------------
 Name:               Jane Smith
-Email:              jane@email.com
-Temporary Password: Xk9mB2nQ
+Email:              <customer email>
+Temporary Password: <temporary password>
 
 Customer should change their password after first login.
 ```
@@ -884,7 +884,7 @@ Then **Save Configuration** and test: lights on/off, a pattern across all segmen
 
 ### Related guides
 
-- **Dealer Pre-Install Setup SOP** — bench prep, firmware pinning, flash procedure (read this first)
+- **Dealer Pre-Install Setup SOP** — bench prep (read this first)
 - **Lumina Homeowner Guide** — hand this to the customer
 - **Sales Mode Guide** — field sales visits and estimates
 - **Dealer Dashboard Guide** — full dashboard tour

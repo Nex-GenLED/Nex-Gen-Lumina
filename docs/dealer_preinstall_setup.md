@@ -83,7 +83,7 @@ Network details (ask if customer knows; otherwise skip — DHCP is fine):
   Router brand/model:           __________________________
   IP assignment preference:     [ ] DHCP (default)
                                 [ ] Static IP — _______________
-  Subnet:                       _________________ (e.g. 192.168.1.0/24)
+  Subnet:                       _________________ (e.g. 192.0.2.0/24)
   Gateway:                      _________________
 
 Controller hardware (per install plan / site survey):
@@ -114,60 +114,35 @@ Controller hardware (per install plan / site survey):
 
 ## Section 2 — WLED controller pre-config
 
-### 2.0 Flash the PINNED WLED version FIRST (REQUIRED — do not skip)
+### 2.0 Firmware: record the version, never flash (REQUIRED)
 
-**Flashing method is right; "flash the latest" is wrong.** The standing rule is
-to flash via **quinled.info** — correct. But quinled.info's web flasher serves
-**the LATEST** WLED release, which today is **0.15.4**. A dealer who flashes
-"latest" to the letter produces a **stalling controller with no error surfaced
-anywhere** — it passes every other step in this SOP and ships broken.
+Controllers arrive with their firmware already installed. **Never flash, update or
+downgrade a controller.** Do not use a web flasher, a USB flashing tool or a generic
+WLED image on a Lumina controller, at the bench or on site.
 
-**Pin the version per board:**
+What you DO at the bench:
 
-| Board / variant | WLED version to flash | Notes |
-|---|---|---|
-| **SKIKBILY 4-channel** (ESP32_Ethernet) | **0.15.1** | What the vendor ships and what is field-proven |
-| Dig-Octa 8-channel | 0.15.1 | Same family; pin the same until re-qualified |
+1. Power the controller (2.1) and join its setup network (2.2).
+2. Read the firmware version: open `http://4.3.2.1/json/info` in a browser and note
+   `ver` and `release`, or read the version shown on the controller's card in the
+   Lumina installer wizard once the controller is on the network.
+3. Write the version on the install sheet (Section 1) and on the controller label (2.7).
 
-**Why 0.15.1 specifically (two independent reasons):**
+Every firmware version in service today is supported as shipped, and the app's effect
+catalog works with all of them. If a controller shows a version you have not seen
+before, note it and tell Nex-Gen support through the app (Settings → Support & Resources).
+Do not change it.
 
-1. **A confirmed 0.15.4 stall regression on this exact board.** Field-measured
-   on two same-variant SKIKBILY 4-channel controllers (both `ESP32_Ethernet`),
-   with the WLED version as the *only* differing variable:
-   - **0.15.1** (vendor factory firmware) → **69–87 fps, rock-steady, no stall.**
-   - **0.15.4** (reflashed latest) → 170 fps between stalls, but **drops to 0 fps
-     for 4–6s every ~17s (~30% duty cycle)**, a both-core pause (HTTP goes
-     unreachable during the stall too). Ruled out by live data: realtime
-     (`live:false`), memory (heap flat), reboot (uptime monotonic), AudioReactive
-     (off), WiFi (rssi −30s, bssid fixed), the app (force-stopped, still stalls),
-     the bridge (unplugged), and other LAN nodes (none). Only the version differs.
-2. **The Lumina app's effect catalog is pinned to 0.15.1 fx IDs**
-   (`lib/features/patterns/canonical_palettes.dart`, `design_models.dart` — the
-   `WledEffectsCatalog` verified against a 0.15.1 device). A controller on a
-   different WLED build risks effect-ID drift, so the app would apply the wrong
-   effect. Matching the firmware to the catalog keeps effect selection correct.
-
-**After flashing, VERIFY the version (one command — makes this self-detecting):**
-
-```bash
-curl -s http://4.3.2.1/json/info | python3 -c "import sys,json;d=json.load(sys.stdin);print('release',d.get('release'),'| ver',d.get('ver'))"
-# SKIKBILY 4-channel MUST read:  release ESP32_Ethernet | ver 0.15.1
-```
-
-Confirm BOTH: `release` matches the board variant AND `ver` matches the pin. If
-`ver` reads 0.15.4 (or anything but the pin), re-flash the pinned version before
-continuing — every later step will otherwise "pass" on a controller that stalls.
-
-Treat this as a standing never-default of the flash procedure, same class as
-*erase flash first*, *ABL never default*, *disable AudioReactive* (§2.5), and
-*verify NTP actually synced*.
+> Rewritten 2026-10-09. The earlier text in this section ("pin the WLED version", "flash
+> via a web flasher", "re-flash before continuing") was withdrawn. There is no flash step
+> in this SOP.
 
 ### 2.1 Bench power up
 
 1. Connect the controller to its 12V power supply (no LED strip needed yet — controller boots without LEDs attached).
 2. Wait ~30 seconds. The controller boots into WLED AP mode if no WiFi creds are saved.
 3. On your laptop or phone WiFi list, look for `WLED-AP` (or similar — the SSID may include the chip's MAC suffix).
-4. Connect to it. Default password is `wled1234`.
+4. Connect to it with the AP password. A new unit uses the manufacturer's default; you replace it in 2.2 step 5. Never write a password in a shared document.
 5. The captive portal page should auto-open at `http://4.3.2.1`. If not, open a browser and navigate there manually.
 
 ### 2.2 Save the customer's WiFi credentials
@@ -178,7 +153,7 @@ Treat this as a standing never-default of the flash procedure, same class as
 4. Set **WLED status name** (mDNS hostname): use a customer-recognizable prefix, e.g. `lumina-<customer-last-name>` or `lumina-<install-num>`. This will appear as `<name>.local` on the customer's LAN.
 5. Set **AP Mode** options:
    - **Always serve AP** → OFF
-   - **AP password** → `wled1234` (keep default; only matters if WiFi connect fails at the install site)
+   - **AP password** → set a unique password for this unit and record it in the dealer's own secure record (never in this document). The setup network only reappears if the controller loses its Wi-Fi.
 6. (Optional) If the customer needs a **static IP**:
    - Toggle **Static IP** ON
    - Enter the assigned IP, subnet (255.255.255.0 usually), and gateway from the customer info sheet
@@ -255,9 +230,9 @@ This step makes the Lumina app's channel-aware features work correctly.
 
 **The flash image ships this usermod ENABLED with a digital mic pre-configured on GPIO 32/15 — pins our hardware does not have — so disable it.** Our controllers flashed with the AudioReactive build variant (name ends in `-AR`, e.g. `Dig-Octa-ESP32-8L-Eth-AR`) build the usermod default-on. Its idle I2S/FFT path is needless overhead on a mic-less unit, so turning it off is correct housekeeping.
 
-> **Correction (field finding):** AudioReactive was *originally* blamed for the periodic effect freeze, on the strength of a short symptom-free window after a manual disable. That was an over-conclusion — the freeze is **intermittent**, so a brief clean window proved nothing. The freeze was later traced to the **WLED 0.15.4 stall regression (see §2.0)**, reproduced with AudioReactive already OFF. So: still disable it (overhead), but it is **not** the freeze cause — the version pin in §2.0 is.
+> **Note:** an earlier field finding blamed this usermod for a periodic effect freeze and later attributed the freeze to a firmware version difference. Neither is established on current units. Disable the usermod because our hardware has no microphone, not for any other reason.
 
-Treat this as a standing never-default of the flash procedure, in the same class as *erase flash first*, *ABL never default*, *pin the WLED version* (§2.0), and *NTP host → `time.google.com`*.
+Treat this as a standing never-default of the flash procedure, in the same class as *erase flash first*, *ABL never default*, *NTP host → `time.google.com`*.
 
 1. Navigate to `http://4.3.2.1` → **Config** → **Usermods**.
 2. Find the **AudioReactive** section.
@@ -341,7 +316,7 @@ Print or write on a label affixed to the bridge body:
 ```
 Lumina Install # ____________
 Customer: ___________________
-Bridge deviceId: <MAC-no-colons, e.g. D4E9F4FA8E78>
+Bridge deviceId: <MAC-no-colons, e.g. AA00000000A1>
 Bridge AP name: Lumina-<last-4-of-MAC>
 Pre-configured: 2026-MM-DD by <staff initials>
 ```
@@ -503,7 +478,7 @@ cd esp32-bridge
 /c/Users/<user>/.platformio/penv/Scripts/pio.exe run --target upload --upload-port COMxx
 ```
 
-The serial output during erase prints the MAC address — **record this on the bridge label** as `deviceId` (MAC with colons stripped, e.g. `D4E9F4FA8E78`). It's the doc ID under `/bridge_registry` and the install crew uses it for visual confirmation in the app.
+The serial output during erase prints the MAC address — **record this on the bridge label** as `deviceId` (MAC with colons stripped, e.g. `AA00000000A1`). It's the doc ID under `/bridge_registry` and the install crew uses it for visual confirmation in the app.
 
 ---
 
@@ -576,5 +551,5 @@ Warranty + support contact: <dealer info>
 
 ## Change log
 
-- **2026-07-17**: Added §2.0 — **pin the WLED version** (SKIKBILY 4-channel → 0.15.1) with a post-flash `curl /json/info` verify. Field finding: WLED 0.15.4 (quinled.info "latest") has a periodic both-core stall regression on this board (~17s period, ~30% duty) that 0.15.1 does not; only the version differed across two same-variant units. Corrected §2.5 — AudioReactive is overhead to disable, but was wrongly blamed for the freeze; the freeze is the version regression, reproduced with AudioReactive off.
+- **2026-10-09**: §2.0 rewritten — firmware is recorded, never flashed, updated or downgraded. The 2026-07-17 entry that added a version pin and a flash procedure is withdrawn.
 - **2026-05-13**: Initial publication. Reflects firmware v1.2 (`POLL_INTERVAL_MS=1000`, item #76 fix), iOS Item #75 Podfile fix, and Now Playing fix bundle items #88a–e.
