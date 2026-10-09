@@ -456,11 +456,9 @@ and their own password. Up to five household members on a residential account.
 On iPhone, save the looks you use most (from Explore, via **Save**), then add each one to Siri with
 **Add to Siri**. After that, *"Hey Siri, warm white"* works without opening the app.
 
-> **Note** — **Alexa and Google Home: the app's side works as of this release.** A server-side
-> permission fault used to stop the link before it ever handed you to the assistant app; that is
-> fixed. Whether the Nex-Gen skill is live in the Alexa and Google Home stores for your account is
-> a separate question — ask your dealer before relying on it. **Siri Shortcuts on iPhone is the
-> voice path we can promise today.**
+> **Note** — **Alexa and Google Home are not available.** The Voice Assistants screen shows Google
+> and Alexa options, but linking does not complete. Siri Shortcuts on iPhone is the voice path that
+> works today. (Corrected 2026-10-09.)
 
 Advanced users running Home Assistant will find an integration guide linked on the same screen.
 
@@ -596,8 +594,8 @@ things to know first:
 - **A bridge that's still plugged in stays claimed.** The bridge remembers its pairing in its own
   memory. If someone else is taking over the house, it needs a factory reset — that's an installer
   step today; see the *Lumina Bridge Setup* guide.
-- **Email us to finish the job.** A little data outside your profile — crew membership, any voice
-  links — isn't removed automatically yet. We'll clear it by hand.
+- **Email us to finish the job.** A little data outside your profile — crew membership — isn't
+  removed automatically yet. We'll clear it by hand.
 
 ---
 

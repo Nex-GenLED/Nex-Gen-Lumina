@@ -612,16 +612,7 @@ Short, memorable phrases work best.
 
 ### Google Home and Amazon Alexa
 
-The app includes guided setup for both, linking your Lumina account to the assistant so you can say things like **"Alexa, turn on the house lights."**
-
-1. Open the Google Home or Alexa app.
-2. Add / enable **Nex-Gen Lumina**.
-3. Sign in with your Lumina account to link it.
-4. Ask the assistant to discover devices.
-
-<div class="warning">
-<strong>Corrected 2026-09-17 — the app's side of Alexa and Google linking is fixed in 2.5.10+98.</strong> The link step used to fail before it ever handed you off to the assistant app, so the four steps above could not be finished by anyone. That fault is fixed. Whether the Nex-Gen skill is live in the Alexa or Google Home store for your account is a separate question — check with your dealer. <strong>Siri Shortcuts on iPhone remains the voice path we can promise</strong>.
-</div>
+Not available. Lumina does not connect to Google Home or Amazon Alexa today; the Google and Alexa options on the Voice Assistants screen do not complete. Siri Shortcuts on iPhone is the voice path that works. (Corrected 2026-10-09.)
 
 ### Home Assistant (advanced)
 
@@ -886,9 +877,9 @@ Score celebrations play while the Lumina app is open on your phone, so keep the 
 
 ### Hardware
 
-<div class="faqq">Can I cut the light strips?</div>
+<div class="faqq">Can I cut or extend the light strips?</div>
 
-Yes, at the copper pads marked with cut lines — with the power off first. If you're extending or reconfiguring a run, call your installer; the LED counts in the app need to match the hardware.
+No. Your lights are a permanent, professionally installed system. For any change to a run, call your installer; the LED counts in the app must match the hardware.
 
 <div class="faqq">How do I reconnect the controller after changing my Wi-Fi password?</div>
 
@@ -923,8 +914,8 @@ Support sees only the diagnostics you choose to send with **Upload system logs**
 Three things are worth knowing before you do it:
 
 - **Your lights keep running.** Deleting your account does not turn anything off or wipe the controller. Whatever schedule is already stored on it keeps running until an installer resets the hardware.
-- **A bridge that's still plugged in stays claimed.** The bridge remembers its pairing in its own memory, so deleting your account doesn't free it. If someone else is taking over the house, have them factory-reset the bridge from its dashboard — see the *Lumina Bridge Setup* guide.
-- **Ask us to finish the job.** A small amount of data outside your profile — neighborhood crew membership, and any voice-assistant links you set up — isn't removed automatically yet. Email support and we'll clear it by hand.
+- **A bridge that's still plugged in stays claimed.** The bridge remembers its pairing in its own memory, so deleting your account doesn't free it. If someone else is taking over the house, have your installer reset the bridge. The bridge has no web page; the reset is an installer step.
+- **Ask us to finish the job.** A small amount of data outside your profile — neighborhood crew membership — isn't removed automatically yet. Email support and we'll clear it by hand.
 
 <div class="pagebreak"></div>
 
@@ -949,7 +940,7 @@ Three things are worth knowing before you do it:
 | Control lights while away | System → Remote Access |
 | Add a family member | System → Manage Users |
 | Delete my account | System → Security → **Delete Account** |
-| Set up Siri / Alexa / Google | System → Voice Assistants |
+| Set up Siri Shortcuts (iPhone) | System → Voice Assistants |
 | Add your house photo | System → My Profile → Edit Profile |
 | Choose your white | System → My Whites |
 | Lights on when I get home | System → Geofence Controls |
