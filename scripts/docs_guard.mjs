@@ -118,7 +118,8 @@ const PII = [
   [/\bPIN\b[^\n|]{0,20}\b\d{4}\b/, 'PIN value'],
   [/password[^\n`]{0,12}(?:is|:|=|→)\s*`?(?!<)(?=[A-Za-z0-9!@#$%^&*]*\d)[A-Za-z0-9!@#$%^&*]{6,}/i, 'password value'],
 ];
-const PII_OK = [/192\.168\.4\.1/, /4\.3\.2\.1/, /AA00000000A1/, /192\.0\.2\./];
+// The one support mailbox (owner decision 2026-10-09) is the only email address a maintained document may carry, lowercase.
+const PII_OK = [/192\.168\.4\.1/, /4\.3\.2\.1/, /AA00000000A1/, /192\.0\.2\./, /^general@nex-genled\.com$/];
 
 // ---------- scope ----------
 const scope = [factsPath, ...walk(join(ROOT, 'docs/guides'), (p) => p.endsWith('.md')), ...walk(join(ROOT, 'docs/drive-exports'), (p) => p.endsWith('.md'))].filter(existsSync);

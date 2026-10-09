@@ -23,7 +23,7 @@ This page lists the claims that must not be made, the reason, and what to say in
 | A bridge "dashboard", "web page", "Factory Reset button", any `http://<bridge-ip>/` address | The bridge serves no web page. Facts T-R4. | "Your installer tests and resets the bridge from the app." |
 | "Repair base lighting" card, "Use this controller", server celebrations | Built, not shipped. Facts T-GD7, T-S3, T-C2. | "Coming." or nothing. |
 | "Opening the app repairs your everyday lighting" | The repair is a dry run today. Facts T-GD6. | "Contact your installer." |
-| Any email address, phone number, password, PIN, address, device id or customer name in a document | The repository is public. | "Open Help in the app." |
+| Any phone number, password, PIN, address, device id, customer name, or any email address other than the support mailbox, in a document | The repository is public. | "Email general@nex-genled.com" (lowercase; the only address a document carries). |
 
 ## Always say
 
@@ -33,7 +33,7 @@ This page lists the claims that must not be made, the reason, and what to say in
 - Voice: "Siri Shortcuts on iPhone. Android app shortcuts." (T-VA2)
 - Schedules: "Up to 20 saved schedules; the controller holds 8 timed changes at once. Edits made away from home apply when you are home." (T-L4, T-R8)
 - Favorites: "Keep up to 2." (T-V1)
-- Support: "Open Help in the app: Settings → Support & Resources → Contact Nex-Gen Support." (T-SU1, T-SU2)
+- Support: "Email general@nex-genled.com, or in the app open Settings → Support & Resources → Contact Nex-Gen Support." Always lowercase; no other support address. (T-SU1, T-SU2)
 
 ## Store listings and the website
 
