@@ -1,3 +1,10 @@
+> **ARCHIVED 2026-10-09 — DO NOT USE.** These website prompts tell the site to make claims the
+> product does not meet: the wrong AI vendor in the privacy policy; "90-day retention" and "no
+> third-party sharing" data-safety answers that are false; Alexa voice control; a 10-per-hour AI
+> limit; SOC 2, audit reports, data export and opt-out buttons; store downloads; enterprise plans;
+> a refund guarantee; and named testimonials. Replacement: docs/guides/internal/33-claims-policy.md
+> and docs/FACTS.md. Kept for history only.
+
 # Landingsite.ai Prompts for www.nex-genled.com
 
 ## Website Security & Privacy Messaging

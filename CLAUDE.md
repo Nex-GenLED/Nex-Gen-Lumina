@@ -62,6 +62,10 @@ The app controls WLED devices (permanent LED light controllers) over HTTP and op
   was stale: the change is in the code and has been for some time. See
   "Critical Known Issues" below.
 
+### Controller firmware policy (owner decision 2026-10-08)
+
+Controllers ship with their firmware installed. The fleet runs more than one WLED version and every version in service is supported as shipped. **Never flash, update or downgrade a controller**, and never load a generic WLED image. Installers record the version shown on the controller card. The older "pin to one version via a web flasher" instruction is withdrawn everywhere. Effect ids are identical across the versions in service, so the app's effect catalog applies to all of them. Facts: `docs/FACTS.md` T-F1 to T-F5.
+
 ### Firebase Integration
 
 **Auth:** Firebase Authentication for user sign-in/sign-up
@@ -317,7 +321,7 @@ lib/
 │   └── auth_manager.dart       # Firebase Auth abstraction
 ├── features/
 │   ├── ai/                     # Lumina AI chat integration
-│   ├── audio/                  # Audio-reactive mode (interface IN-PROGRESS; WLED hardware mic backend)
+│   ├── audio/                  # Audio-reactive mode (debug builds only; absent from every release build)
 │   ├── auth/                   # Login/signup screens
 │   ├── autopilot/              # Calendar-driven automation (Game Day, etc.)
 │   ├── ble/                    # BLE provisioning for new devices
@@ -334,7 +338,7 @@ lib/
 │   ├── scenes/                 # Scene model + management
 │   ├── schedule/               # Schedule CRUD + sync to WLED
 │   ├── site/                   # Property/zone management, settings, remote access UI
-│   ├── voice/                  # Alexa/Google/Siri integrations (ARCHITECTED — not yet verified end-to-end)
+│   ├── voice/                  # Siri Shortcuts + Android app shortcuts (shipped). Alexa/Google account linking has NEVER worked; fix built on feat/voice-link-e2e, not deployed. Do not advertise.
 │   └── wled/                   # WLED API integration (core) — incl. cloud_relay_repository.dart
 ├── models/                     # Shared data models
 ├── services/                   # Bridge client/health/discovery, user service, notifications
@@ -365,7 +369,7 @@ lib/
 
 ## Testing Strategy
 
-**No automated tests currently exist.** When adding tests:
+**Tests exist:** `test/` holds about 425 `*_test.dart` files (bench, features, hardware, models, services, widgets). When adding tests:
 
 - Unit tests: Test providers, models, services in isolation
 - Widget tests: Test UI components with `WidgetTester`

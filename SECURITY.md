@@ -392,7 +392,7 @@ firebase functions:log --only cleanupOldData
 **Response:**
 1. **Verify Firestore rules are deployed:**
    ```bash
-   firebase deploy --only firestore:rules --force
+   firebase deploy --only firestore:rules   # from the checkout whose rules match the fielded bridge firmware (1.2); never --force
    ```
 2. Check Firestore audit logs (Firebase Console > Firestore > Usage)
 3. If encryption keys compromised, rotate:
