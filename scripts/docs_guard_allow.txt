@@ -1,0 +1,3 @@
+# docs_guard allow-list: bold phrases in docs/guides that are NOT app labels but are legitimately bold.
+# One per line, case-insensitive. Add a line only when the phrase is real and cannot be unbolded;
+# a phone-OS prompt or a section name belongs here, an app label never does (fix the label instead).
