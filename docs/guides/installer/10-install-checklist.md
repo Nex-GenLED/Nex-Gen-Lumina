@@ -18,8 +18,9 @@ Work down this list on install day. Each step says what you should see. The two 
 2. **Read the firmware version and write it on the install sheet.** It shows on the controller's card in the installer wizard once the controller is on the network, or at `http://4.3.2.1/json/info` while you are on its setup network. **Never flash, update or downgrade a controller.** Never load a generic WLED image.
 3. If the controller is not yet on the customer's Wi-Fi: join its setup network from your phone (the network named on the controller's label), open `http://4.3.2.1`, enter the customer's Wi-Fi name and password, and save. The controller restarts and joins the home Wi-Fi.
 4. **Set a unique AP password on this controller.** Controllers ship broadcasting their setup network with the manufacturer's public default password. On the controller's Wi-Fi settings page, replace it with a password unique to this unit and record it privately in your dealer's own record: never in a document, a message, a photo or the repo.
-5. Once the controller is on the home network, turn "always serve the AP" off on the same page, so the setup network stops broadcasting. UNVERIFIED for Skikbily builds: until the vendor confirms the build supports this while connected, do the step if the page offers it and note on the install sheet what you found. Do not experiment on the controller beyond that setting.
-6. Read the output numbers printed on the controller for each run you wired. Write them on the install sheet. Do not rely on a map in a document; the labels on the controller are the truth.
+5. On the same page (the controller's own settings, "Wi-Fi Setup"), set the option that decides when the setup network opens to one of the "when there is no connection" choices. Never choose "never": if the home network ever disappears, the setup network is how an installer reaches the controller again. The exact option labels, and which choice is right for Skikbily builds, are UNVERIFIED until someone observes them on a spare unit; write on the install sheet what the page offered and what you chose. Do not experiment beyond that one setting.
+6. **Confirm the controller still answers on the home network after the change.** On the installer phone, open the controller's card and tap **Test Lights**, or reload the controller's page at its home-network address. Do not leave the site until it answers.
+7. Map each run to one of the controller's four outputs. The canonical outputs are: output 1 = GPIO 2, output 2 = GPIO 14, output 3 = GPIO 16, output 4 = GPIO 18. Write each run's output number on the install sheet. Never use more than four; how many outputs a Skikbily unit has beyond these four is UNVERIFIED.
 
 **If the controller stays on its setup network:** the Wi-Fi name or password is wrong, the network is 5 GHz-only, or the name is hidden. Fix the network and repeat step 3.
 
@@ -32,7 +33,7 @@ Work down this list on install day. Each step says what you should see. The two 
    - Controller setup: tap **Add Controller**, then **BLE Scan (New Device)** for a new controller or **Enter IP Address** for one already on the network. Tap **Test Lights**; the house flashes white for three seconds.
    - Connection method: Ethernet when a wall jack is available, otherwise Wi-Fi. Never leave both connected.
    - Zone configuration: residential homes are one system; leave the toggle on residential unless the sale says commercial.
-   - Hardware configuration: one row per output; enter the number of lights on each run and keep the Nex-Gen standard LED settings. Check that the output number on each row matches the label on the controller (see [Controller setup](11-controller-setup.md)). You may tap **Skip for now** behind the warning and finish this later from System & Device Management → My Lights.
+   - Hardware configuration: one row per output; enter the number of lights on each run and keep the Nex-Gen standard LED settings. Each row's GPIO number must be 2, 14, 16 or 18 for outputs 1 to 4. The app keeps the numbers it reads from the controller, but a row it proposes on its own comes from a list that does not match these outputs (app bug #187), so set the four outputs on the controller's own LED settings page at the bench first (SOP 1.3) and never add a new port in the app's editor. See [Controller setup](11-controller-setup.md). You may tap **Skip for now** behind the warning and finish this later from System & Device Management → My Lights.
    - Map roofline: walk each run with the lit pixel and mark corners, peaks and the start of each run, or choose to map later from Design Studio.
    - Hand-off: set the customer's preferences, then create their account. Copy the credentials for the customer.
 4. **Never hand the customer a phone that is still in Installer Mode.** Tap **Tap to exit installer mode** under System first, or finish on your own phone and have the customer sign in on theirs.
@@ -49,17 +50,17 @@ Follow the [Bridge guide](12-bridge-guide.md): join its setup network, set the h
 2. The Schedule tab: one repeating schedule you set together, and the **Turn lights off at sunrise daily** switch under System.
 3. Game Day, if they follow a team: add the team, and tell them the one rule: **open the app at home in the two days before a game**. Score celebrations need the app open.
 4. Away from home: works only with the bridge; a change takes a few seconds; about every seven hours the bridge is quiet for ten minutes.
-5. Support: **System → Support & Resources → Contact Nex-Gen Support** shows your dealer's phone and email.
+5. Support: **System → Support & Resources → Contact Nex-Gen Support** shows your dealer's phone and email, and anyone can email general@nex-genled.com.
 
 Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life.
 
 ## Before you leave
 
-- [ ] Firmware version, output numbers and LED counts written on the install sheet.
+- [ ] Firmware version, output numbers (GPIO 2, 14, 16, 18) and LED counts written on the install sheet.
 - [ ] Customer signed in on their own phone, lights responding, badge reads **Direct**.
 - [ ] One repeating schedule saved and the header reads "Schedules synced to controller".
 - [ ] Bridge paired and tested from mobile data, if supplied.
-- [ ] A unique AP password set on the controller and recorded privately; "always serve the AP" turned off if the controller's page offers it (note what you found).
+- [ ] A unique AP password set on the controller and recorded privately; the setup network set to open only when there is no connection (never "never"); the controller confirmed answering on the home network afterwards.
 - [ ] Your phone out of Installer Mode.
 
-*Facts: T-F2, T-F3, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-SU1, T-R10.*
+*Facts: T-F2, T-F3, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-SU1, T-SU2, T-R10.*

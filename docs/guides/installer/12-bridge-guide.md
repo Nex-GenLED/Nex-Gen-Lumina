@@ -61,7 +61,7 @@ From a computer or phone on the same Wi-Fi as the bridge, send an HTTP POST to t
 ## The customer changed their router or Wi-Fi
 
 1. The bridge's setup network reappears when the old Wi-Fi is gone. Join it and set the new Wi-Fi. The pairing is kept.
-2. The controller needs the new Wi-Fi too (see the [install checklist](10-install-checklist.md), step 3). If the controller got a new address, open System & Device Management → Controllers, tap the controller and re-sync it.
+2. The controller needs the new Wi-Fi too. Because its setup network is set to open when it has no connection (install checklist step 5), it reappears once the old network is gone: join it with the unit's own AP password from the dealer's record and enter the new Wi-Fi (checklist step 3). If the controller got a new address, open System & Device Management → Controllers, tap the controller and re-sync it.
 3. In the app tap **Detect Home Network** on the new network.
 
 ## Do not
@@ -70,4 +70,6 @@ From a computer or phone on the same Wi-Fi as the bridge, send an HTTP POST to t
 - Do not use the Webhook (Dynamic DNS) connection mode for an install. It is a do-it-yourself path that needs port forwarding; leave **Connection Mode** on the bridge.
 - Do not describe a bridge web page or dashboard to a customer. There is none.
 
-*Facts: T-R1, T-R4, T-R5, T-R6, T-R7, T-R8, T-R9, T-R10, T-X1, T-X2, T-O9.*
+Questions: general@nex-genled.com.
+
+*Facts: T-R1, T-R4, T-R5, T-R6, T-R7, T-R8, T-R9, T-R10, T-X1, T-X2, T-O9, T-A2, T-SU2.*

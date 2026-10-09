@@ -33,11 +33,12 @@ A new unit broadcasts its setup network with the manufacturer's public default p
 2. Open `http://4.3.2.1`. Enter the customer's Wi-Fi name and password and save.
 3. On the same Wi-Fi settings page, set a unique AP password for this unit. Record it privately in the dealer's secure record: never in a document, a message, a photo or the repo. Never keep the default.
 4. The controller restarts and tries the customer's Wi-Fi. At the shop it cannot reach it, so after about 30 seconds its setup network returns, now with the unit's own password. That is expected.
-5. Turning "always serve the AP" off is done on site, once the controller is on the home network (install checklist step 5). UNVERIFIED for Skikbily builds: whether the build supports this while connected is an open vendor question; do not experiment on the controller to find out.
+5. On the same page, set the option that decides when the setup network opens to one of the "when there is no connection" choices, never "never", so an installer can always reach a controller whose network is gone. The exact option labels, and which choice is right for Skikbily builds, are UNVERIFIED until observed on a spare unit; note what the page offers. Do not experiment beyond that setting.
+6. On site, after the controller joins the home network, confirm it still answers there before leaving (install checklist step 6).
 
 ### 1.3 Lights settings
 
-Prefer to do this in the Lumina app on site (the wizard's hardware step sets the Nex-Gen standard). If you set it at the bench on the controller's page, use: one output per run, the number of lights per run, the Nex-Gen standard LED type (RGBW), colour order RGB, and the output numbers printed on the controller. Do not use a pin table from a document; the controller's labels are the truth.
+Set the outputs at the bench on the controller's own LED settings page (the app's hardware editor proposes wrong GPIO numbers for new rows today, app bug #187; it keeps numbers it reads from the controller). Use: one output per run, the number of lights per run, the Nex-Gen standard LED type (RGBW), colour order RGB, and the four canonical outputs: output 1 = GPIO 2, output 2 = GPIO 14, output 3 = GPIO 16, output 4 = GPIO 18. Never use more than four; how many outputs a Skikbily unit has beyond these is UNVERIFIED. Write the mapping on the install sheet.
 
 ### 1.4 Time and location
 
@@ -70,7 +71,7 @@ Customer name, date, and "bridge". Pairing happens on site, in the customer's ac
 
 ## Section 3 — On site
 
-Use the [install checklist](10-install-checklist.md).
+Use the [install checklist](10-install-checklist.md). Questions: general@nex-genled.com.
 
 ## Section 4 — Troubleshooting at the bench or on site
 
@@ -86,7 +87,7 @@ Use the [install checklist](10-install-checklist.md).
 ## What this SOP no longer contains
 
 - Any firmware pin or flash step. Withdrawn.
-- Any password, address, device id or pin table. The controller's labels are the source for outputs; passwords live in the dealer's own record.
+- Any password, address or device id. The only pin map is the four canonical outputs above; passwords live in the dealer's own record.
 - Bridge firmware flashing. That is an internal Nex-Gen procedure (see the internal bridge firmware page).
 
-*Facts: T-F2, T-F3, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1.*
+*Facts: T-F2, T-F3, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1, T-SU2.*
