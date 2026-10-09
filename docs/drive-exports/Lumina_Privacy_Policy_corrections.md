@@ -20,8 +20,12 @@ Replace the line "Opt-Out of Analytics — disable usage analytics through the A
 
 > Usage analytics are required for the App to operate and cannot be turned off separately. They are tied to your account and are deleted with it.
 
+## Sections 6, 7, 8, 10 and 12 — the contact address
+
+Write the contact address as general@nex-genled.com, lowercase, in every place the policy names it. Mail delivery to this address is UNVERIFIED until the owner sends a test message.
+
 ## Section 5 — deletion scope (owner to confirm before publishing)
 
 The current text promises deletion or anonymisation within 30 days. Whether every record tied to an account (including the lighting-system records and any bridge pairing) is purged today is not verified; confirm the purge behaviour before republishing this paragraph, or soften it to "we delete the personal data in your account profile within 30 days and remove remaining records on request".
 
-*Facts: T-O8, T-F2, T-X14, T-O4, T-X16.*
+*Facts: T-O8, T-F2, T-X14, T-O4, T-X16, T-SU2.*

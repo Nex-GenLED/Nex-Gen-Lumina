@@ -22,8 +22,12 @@ The App Store listing, the Play listing, the data-safety and App Privacy answers
 - Data shared with third parties: yes. Lumina AI request text goes to Anthropic; hosting is Google Firebase.
 - Encryption at rest: only the home address, the home Wi-Fi name and the webhook address are stored encrypted; state that, not "all data".
 
+## Support contact on both listings, the data-safety forms and the website
+
+The support email is general@nex-genled.com, lowercase, everywhere. No other address appears. (Delivery to this address is UNVERIFIED until the owner sends a test.)
+
 ## Tester notes (TestFlight "What to Test")
 
-Copy the entry for the build from `docs/guides/internal/31-release-notes.md`.
+Copy the entry for the build from `docs/guides/internal/31-release-notes.md` and end with "Send reports to general@nex-genled.com with the date and time."
 
-*Facts: T-VA1, T-VA2, T-O8, T-O6, T-R1, T-R9, T-X14, T-X15, T-X16, T-O4.*
+*Facts: T-VA1, T-VA2, T-O8, T-O6, T-R1, T-R9, T-X14, T-X15, T-X16, T-O4, T-SU2.*

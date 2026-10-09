@@ -78,9 +78,9 @@ You now know enough to use Lumina every day. The next page covers power, brightn
 
 ## Something is not right?
 
-Open Troubleshooting, or in the app go to **System → Support & Resources** and tap **Contact Nex-Gen Support**. It shows your installer's phone and email.
+Open Troubleshooting, or in the app go to **System → Support & Resources** and tap **Contact Nex-Gen Support**. It shows your installer's phone and email. You can also email general@nex-genled.com.
 
-*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-S2.*
+*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-SU2, T-S2.*
 
 ---
 
@@ -298,7 +298,7 @@ Open Lumina on your home Wi-Fi at some point in the two days before kickoff. Tha
 
 The lights return to your everyday look (your usual ON schedule). On new systems that look is Lumina Blue, the standard everyday color; on older systems it is whatever your installer saved. If a game runs very long, the look is taken down eight hours after it started at the latest.
 
-**If the house is still in team colors an hour after the final:** open the app at home and tap your everyday schedule on the Schedule tab, or turn the lights off and on from Home. Then tell your installer which game it was, from **System → Support & Resources**.
+**If the house is still in team colors an hour after the final:** open the app at home and tap your everyday schedule on the Schedule tab, or turn the lights off and on from Home. Then tell your installer which game it was, from **System → Support & Resources** or by emailing general@nex-genled.com.
 
 ## More than one team
 
@@ -314,7 +314,7 @@ Add each team on the Game Day screen. Under **Team Priority**, drag to reorder: 
 
 Tap **Refresh all schedules** at the bottom of the Game Day screen to pull the latest game times.
 
-*Facts: T-GD1, T-GD2, T-GD3, T-GD4, T-GD5, T-GD6, T-GD8, T-GD9, T-GD10, T-C1, T-C2, T-C3.*
+*Facts: T-GD1, T-GD2, T-GD3, T-GD4, T-GD5, T-GD6, T-GD8, T-GD9, T-GD10, T-C1, T-C2, T-C3, T-SU2.*
 
 ---
 
@@ -358,7 +358,7 @@ Check the controller's power supply and the outlet it is on. If the controller h
 
 *Describes build: 2.5.10+116 · Last verified: 2026-10-09*
 
-Find your problem below and follow the steps in order. Each ends with what to do if it still is not fixed. Contact for anything else: **System → Support & Resources → Contact Nex-Gen Support**, which shows your installer's phone and email.
+Find your problem below and follow the steps in order. Each ends with what to do if it still is not fixed. Contact for anything else: **System → Support & Resources → Contact Nex-Gen Support**, which shows your installer's phone and email, or email general@nex-genled.com with the date and time.
 
 ## My lights are dark
 
@@ -433,13 +433,13 @@ Siri Shortcuts work on iPhone: open **System → Voice Assistants**, save a look
 
 ## I changed my Wi-Fi password or router
 
-Your controller and bridge need the new network. This is an installer task: contact your installer from **System → Support & Resources**. Do not try to reconfigure the controller through its own web pages.
+Your controller and bridge need the new network. This is an installer task: contact your installer from **System → Support & Resources**. Do not try to reconfigure the controller through its own web pages; when its network is gone the controller opens its own setup network, and your installer uses that to reconnect it.
 
 ## I want to remove a controller
 
 Open **System → System & Device Management → Controllers**, tap the controller and choose to remove it. The app warns that this deletes all saved settings for that controller. Ask your installer before doing this.
 
-*Facts: T-X20, T-R10, T-P1, T-P2, T-R1, T-R2, T-R3, T-R6, T-R7, T-S1, T-S2, T-GD3, T-GD5, T-GD6, T-VA1, T-VA2, T-X21, T-D2, T-R9, T-SU1.*
+*Facts: T-X20, T-R10, T-P1, T-P2, T-R1, T-R2, T-R3, T-R6, T-R7, T-S1, T-S2, T-GD3, T-GD5, T-GD6, T-VA1, T-VA2, T-X21, T-D2, T-R9, T-A2, T-SU1, T-SU2.*
 
 ---
 
@@ -496,7 +496,7 @@ Install Lumina from your invitation, sign in with the same email, then check **S
 Yes. Ask your installer to add them; invited members get full control.
 
 **Where do I find my support contact?**
-**System → Support & Resources → Contact Nex-Gen Support**. It shows your installer's phone and email, or Nex-Gen LED's if no installer is on your profile.
+**System → Support & Resources → Contact Nex-Gen Support**. It shows your installer's phone and email, or Nex-Gen LED's if no installer is on your profile. You can always email general@nex-genled.com.
 
 **Is my data private?**
 Your home address and Wi-Fi name are stored encrypted. Lumina AI requests go to Nex-Gen's own service and on to the AI provider as text only. You can delete your account under **System → My Profile → Security & Password**.
@@ -504,4 +504,4 @@ Your home address and Wi-Fi name are stored encrypted. Lumina AI requests go to 
 **Which version do I have?**
 Open **System**; the version shows at the bottom. The current test build is 2.5.10 (116).
 
-*Facts: T-L4, T-R1, T-R6, T-R7, T-VA1, T-VA2, T-V1, T-R10, T-P2, T-GD5, T-C1, T-GD4, T-F2, T-S2, T-X24, T-SU1, T-X15, T-X14, T-B1.*
+*Facts: T-L4, T-R1, T-R6, T-R7, T-VA1, T-VA2, T-V1, T-R10, T-P2, T-GD5, T-C1, T-GD4, T-F2, T-S2, T-X24, T-SU1, T-SU2, T-X15, T-X14, T-B1.*

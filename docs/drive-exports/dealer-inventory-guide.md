@@ -75,6 +75,6 @@ See Claims policy. In short: no voice assistants other than Siri Shortcuts, no "
 
 ## Support
 
-Your customers' app shows your dealership's phone and email under **Support & Resources** once their profile carries it (set at install). For anything you cannot solve, open Help in your own app and contact Nex-Gen.
+Your customers' app shows your dealership's phone and email under **Support & Resources** once their profile carries it (set at install). For anything you cannot solve, email general@nex-genled.com with the customer's name and the date and time.
 
 *Facts: T-X9, T-X10, T-X11, T-X8, T-X12, T-O2, T-S2, T-R1, T-R7, T-P2, T-GD5, T-GD6, T-VA1, T-VA2, T-F2, T-O6, T-O8, T-SU1, T-SU2.*

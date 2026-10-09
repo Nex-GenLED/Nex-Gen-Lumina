@@ -63,11 +63,15 @@ Server-run Game Day exists for the bench account only. Do not tell a customer th
 
 The deployed values of the server flags (solar scheduling, calendar leases, sync fanout scope, the Game Day planner allowlist) are read in the Firebase console, not from any document. Rules and functions are deployed per function from the matching checkout, never from an arbitrary branch and never with a forced rules deploy. The bridge rules were tightened on 2026-10-05 to firmware 1.2's exact behaviour; widen them before any 1.3 unit is flashed.
 
+## Support mailbox
+
+The support mailbox is general@nex-genled.com, lowercase, and it is the only address printed in any guide, export, checklist or tester message. The app's own corporate contact uses the same address. Mail delivery to it is UNVERIFIED until the owner sends a test.
+
 ## Documents
 
 The guide set is `docs/guides/`; the facts behind it are `docs/FACTS.md`; the claims rules are the Claims policy. Superseded documents are in `docs/archive/` and are not maintained. Replacement text for Drive and the stores is prepared under `docs/drive-exports/`; uploading it is the owner's step.
 
-*Facts: T-X9, T-X10, T-X8, T-B1, T-B2, T-B3, T-B4, T-X16, T-O4, T-O7, T-S1, T-S2, T-S3, T-S4, T-R1, T-R3, T-R7, T-P1, T-P2, T-GD1, T-GD2, T-GD6, T-GD7, T-GD8, T-VA1, T-F2, T-X21, T-D2, T-R5, T-O3.*
+*Facts: T-X9, T-X10, T-X8, T-B1, T-B2, T-B3, T-B4, T-X16, T-O4, T-O7, T-S1, T-S2, T-S3, T-S4, T-R1, T-R3, T-R7, T-P1, T-P2, T-GD1, T-GD2, T-GD6, T-GD7, T-GD8, T-VA1, T-F2, T-X21, T-D2, T-R5, T-O3, T-SU1, T-SU2.*
 
 ---
 
@@ -96,7 +100,7 @@ This page lists the claims that must not be made, the reason, and what to say in
 | A bridge "dashboard", "web page", "Factory Reset button", any `http://<bridge-ip>/` address | The bridge serves no web page. Facts T-R4. | "Your installer tests and resets the bridge from the app." |
 | "Repair base lighting" card, "Use this controller", server celebrations | Built, not shipped. Facts T-GD7, T-S3, T-C2. | "Coming." or nothing. |
 | "Opening the app repairs your everyday lighting" | The repair is a dry run today. Facts T-GD6. | "Contact your installer." |
-| Any email address, phone number, password, PIN, address, device id or customer name in a document | The repository is public. | "Open Help in the app." |
+| Any phone number, password, PIN, address, device id, customer name, or any email address other than the support mailbox, in a document | The repository is public. | "Email general@nex-genled.com" (lowercase; the only address a document carries). |
 
 ## Always say
 
@@ -106,7 +110,7 @@ This page lists the claims that must not be made, the reason, and what to say in
 - Voice: "Siri Shortcuts on iPhone. Android app shortcuts." (T-VA2)
 - Schedules: "Up to 20 saved schedules; the controller holds 8 timed changes at once. Edits made away from home apply when you are home." (T-L4, T-R8)
 - Favorites: "Keep up to 2." (T-V1)
-- Support: "Open Help in the app: Settings → Support & Resources → Contact Nex-Gen Support." (T-SU1, T-SU2)
+- Support: "Email general@nex-genled.com, or in the app open Settings → Support & Resources → Contact Nex-Gen Support." Always lowercase; no other support address. (T-SU1, T-SU2)
 
 ## Store listings and the website
 
