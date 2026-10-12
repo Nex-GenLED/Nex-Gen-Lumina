@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
@@ -259,8 +260,10 @@ List<Map<String, dynamic>> buildSkikbilyBuses(
   const int ledType = 30; // SK6812 RGBW
   const int colorOrder = 1; // RGB (W appended automatically on RGBW bus type)
   // Pins come from the existing config when present (preserves manual
-  // installer overrides), else the SKIKBILY default GPIOs.
-  const defaultPins = [16, 3, 1, 4];
+  // installer overrides), else the canonical Skikbily outputs 2/14/16/18
+  // (FACTS T-X5, #187). The old fallback here was a different four that
+  // matched no output on the installed units.
+  const defaultPins = kCanonicalOutputPins;
 
   final existingBuses = currentConfig?.buses ?? const <WledLedBus>[];
 

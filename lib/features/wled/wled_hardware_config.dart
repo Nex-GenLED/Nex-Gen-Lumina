@@ -5,6 +5,26 @@
 
 /// A single LED output bus (hardware channel) on the WLED controller.
 /// Maps to one entry in the `hw.led.ins` array from GET /json/cfg.
+/// The canonical LED outputs of the Skikbily controller, by position: output
+/// 1 = GPIO 2, output 2 = GPIO 14, output 3 = GPIO 16, output 4 = GPIO 18
+/// (FACTS T-X5, owner decision 2026-10-09). Installers map runs to these
+/// four positions; the guides never claim more than four. Both writers of a
+/// NEW bus — the hardware editor and the Nex-Gen Standard push — assign from
+/// this list (#187). An existing bus keeps the pin the device reports; nothing
+/// here migrates a configured controller.
+const List<int> kCanonicalOutputPins = <int>[2, 14, 16, 18];
+
+/// A port with no canonical output (beyond the fourth). The hardware editor
+/// shows such a port only for a bus the device already has.
+const int kNoOutputPin = -1;
+
+/// PURE. The default pin for each of [portCount] editor ports: the canonical
+/// outputs in order, then [kNoOutputPin].
+List<int> defaultPortPins(int portCount) => <int>[
+      for (var i = 0; i < portCount; i++)
+        i < kCanonicalOutputPins.length ? kCanonicalOutputPins[i] : kNoOutputPin,
+    ];
+
 class WledLedBus {
   final List<int> pin; // GPIO pin(s) for this bus
   final int start; // 0-based LED start index

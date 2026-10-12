@@ -28,7 +28,7 @@ void main() {
 
       expect(buses.length, 4);
       expect(buses[0]['pin'], [2]); // preserved
-      expect(buses[1]['pin'], [3]); // SKIKBILY default GPIO
+      expect(buses[1]['pin'], [14]); // canonical output 2 (T-X5, #187)
     });
 
     test('null config (genuinely new device) → all rev:false, default pins', () {
@@ -36,7 +36,11 @@ void main() {
 
       expect(buses.length, 4);
       expect(buses.every((b) => b['rev'] == false), true);
-      expect(buses.map((b) => (b['pin'] as List).first).toList(), [16, 3, 1, 4]);
+      // #187: the canonical Skikbily outputs, by position (FACTS T-X5).
+      expect(buses.map((b) => (b['pin'] as List).first).toList(),
+          [2, 14, 16, 18]);
+      expect(buses.map((b) => (b['pin'] as List).first).toList(),
+          kCanonicalOutputPins);
       expect(buses.every((b) => b['type'] == 30), true);
       expect(buses.every((b) => b['order'] == 1), true);
       // Fresh device asserts the SKIKBILY 100-px default on every channel.

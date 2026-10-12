@@ -32,6 +32,9 @@ List<Map<String, dynamic>> buildHardwareConfigBuses({
     final existing = (originalBuses != null && i < originalBuses.length)
         ? originalBuses[i]
         : null;
+    // #187: a NEW port with no canonical output cannot become a bus. A port
+    // that already holds a device bus keeps whatever pin the device reports.
+    if (pins[i] < 0 && existing == null) continue;
     segs.add({
       'start': startAddress,
       'len': count,
@@ -56,8 +59,11 @@ class HardwareConfigScreen extends ConsumerStatefulWidget {
 class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
   static const int _portCount = 8;
 
-  // QuinLED Dig-Octa GPIO pin map (default pins)
-  static const List<int> _defaultPins = [0, 1, 2, 3, 4, 5, 12, 13];
+  // #187 — new ports take the canonical Skikbily outputs 2/14/16/18 (FACTS
+  // T-X5); ports beyond the fourth have no output of their own and are
+  // offered only for a bus the device already has. A device's existing buses
+  // keep their reported pins (see _applyHardwareConfig) — no migration.
+  static final List<int> _defaultPins = defaultPortPins(_portCount);
 
   late List<bool> _enabled;
   late List<TextEditingController> _countCtrls;
@@ -496,7 +502,11 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
                         focusNode: _countFocus[i],
                         range: _uiRangeForPort(i),
                         gpioPin: _pins[i],
-                        onToggle: (val) => setState(() => _enabled[i] = val),
+                        // #187: a port with no canonical output and no
+                        // existing bus cannot be switched on.
+                        onToggle: _pins[i] < 0 && !_enabled[i]
+                            ? null
+                            : (val) => setState(() => _enabled[i] = val),
                         onChanged: (val) => setState(() {}),
                       )),
                   const SizedBox(height: 16),
@@ -559,7 +569,7 @@ class _PortCard extends StatelessWidget {
   final FocusNode focusNode;
   final ({int start, int end})? range;
   final int gpioPin;
-  final ValueChanged<bool> onToggle;
+  final ValueChanged<bool>? onToggle;
   final ValueChanged<String> onChanged;
 
   @override
@@ -578,9 +588,14 @@ class _PortCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Channel ${index + 1}', style: titleStyle),
-                    Text('GPIO $gpioPin', style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.white54,
-                    )),
+                    Text(
+                      gpioPin < 0
+                          ? 'No output on this controller'
+                          : 'GPIO $gpioPin',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white54,
+                      ),
+                    ),
                   ],
                 ),
               ),
