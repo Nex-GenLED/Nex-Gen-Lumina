@@ -923,6 +923,7 @@ class ControllerDefaultsHealer {
       baseBoundariesOffered: rows != null,
       wrote: wrote,
       ladderRestore: restoreVerdict,
+      ladderAssertsSegments: ladderVerdict,
       participating: restoreVerdict == null ? null : input?.resolved,
     );
     debugPrint('[Healer] facts-publish $controllerId: ${outcome.describe()}');

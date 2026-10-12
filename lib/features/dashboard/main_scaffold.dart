@@ -11,6 +11,8 @@ import 'package:nexgen_command/features/geofence/geofence_monitor.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
+import 'package:nexgen_command/features/wled/base_ladder_repair_providers.dart'
+    show ladderBusChangeWatchProvider;
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/installer_mode_banner.dart';
 import 'package:nexgen_command/widgets/navigation/navigation.dart';
@@ -141,6 +143,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
   @override
   Widget build(BuildContext context) {
     ref.watch(autoConnectControllerProvider);
+    // #183: re-evaluates the base ladder when the controller's bus list
+    // changes, not only at connect.
+    ref.watch(ladderBusChangeWatchProvider);
     ref.watch(installationConfigLoaderProvider);
     ref.watch(gameDayBackgroundPersistenceKeepAliveProvider);
     // Foreground score celebrations: keep the driver alive so it pushes the

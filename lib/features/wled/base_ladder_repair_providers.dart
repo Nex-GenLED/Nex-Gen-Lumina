@@ -15,6 +15,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/installer/installer_access_providers.dart'
+    show effectiveUserUidProvider, installerAccessingCustomerProvider;
+import 'package:nexgen_command/features/game_day/gate_status.dart';
+import 'package:nexgen_command/features/game_day/gate_status_provider.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_service.dart'
     show AutopilotSession;
 import 'package:nexgen_command/features/game_day/ephemeral_session/ephemeral_game_session.dart'
@@ -27,11 +31,19 @@ import 'package:nexgen_command/features/game_day/game_day_server_status_provider
 import 'package:nexgen_command/features/schedule/base_ladder_repair_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
+import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart'
+    show publishedBaseLadderMemo;
 import 'package:nexgen_command/features/wled/base_ladder_repair.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart'
-    show controllerFactsPublisherProvider, healerPhoneNowProvider;
+    show
+        controllerDefaultsHealerProvider,
+        controllerFactsPublisherProvider,
+        healerPhoneNowProvider;
 import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
 import 'package:nexgen_command/features/wled/controller_facts_writer.dart';
+import 'package:nexgen_command/features/wled/device_channel.dart'
+    show deviceChannelsFromConfig;
+import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 
@@ -40,21 +52,36 @@ const String kLadderRepairPublishSource = 'ladder_repair';
 
 // ── Game Day activity (pure core + probe) ────────────────────────────────────
 
+/// How long a server start with no end since still counts as a game in
+/// progress: kickoff plus the app's hard cap for a game whose end was never
+/// confirmed — the same six hours `gameDayEntryWindow`, the priority resolver
+/// and the background worker use. The server itself ends on start + the
+/// estimated duration, well inside this. It used to be eight hours with no
+/// relation to any cap, which held the repair off for the whole stranded
+/// evening of 2026-10-05 (#177 server side, #183 app side).
+const Duration kGameDayStartHardCap = Duration(hours: 6);
+
 /// PURE. What the server's own status says about a game in progress, or null.
 ///
 /// Read whether or not the served flag is fresh: a planner that stopped
 /// writing may still have minted jobs that the dispatcher fires, so for a
 /// "do not touch the controller now" question the raw data is the safe input.
-///   • a start that completed within the last 8 h and no end since → live;
+///   • a start that completed less than [startCap] ago and no end since →
+///     live; past the cap the game is treated as ENDED, whatever the server
+///     has or has not written (#183);
 ///   • an END pending → the game is on;
 ///   • a START due within [kLadderRepairGameGuard] (or overdue) → about to fire.
-String? serverLiveReasonAt(GameDayServerStatus s, DateTime now) {
+String? serverLiveReasonAt(
+  GameDayServerStatus s,
+  DateTime now, {
+  Duration startCap = kGameDayStartHardCap,
+}) {
   final last = s.lastFire;
   if (last != null &&
       last.seq == 'start' &&
       last.completed &&
       last.completedAt != null &&
-      now.difference(last.completedAt!) < const Duration(hours: 8)) {
+      now.difference(last.completedAt!) < startCap) {
     return 'our servers started a game and have not ended it yet';
   }
   final next = s.nextFire;
@@ -217,6 +244,14 @@ class SharedPrefsLadderRepairStore implements LadderRepairStore {
   }
 
   @override
+  Future<void> clearRan(String controllerId) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.remove(ladderRepairMarkerKey(controllerId));
+    } catch (_) {/* a marker that cannot be cleared waits for the next build */}
+  }
+
+  @override
   Future<bool> saveBackup(String controllerId, String backupJson) async {
     try {
       final p = await SharedPreferences.getInstance();
@@ -225,6 +260,16 @@ class SharedPrefsLadderRepairStore implements LadderRepairStore {
       return ok && p.getString(ladderRepairBackupKey(controllerId)) == backupJson;
     } catch (_) {
       return false;
+    }
+  }
+
+  @override
+  Future<String?> readBackup(String controllerId) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      return p.getString(ladderRepairBackupKey(controllerId));
+    } catch (_) {
+      return null;
     }
   }
 
@@ -282,34 +327,39 @@ typedef LadderRepairConsider = Future<LadderRepairRun?> Function({
   required String controllerId,
 });
 
-/// Called by the healer provider once a LAN connect's publish has resolved.
-/// Returns null when there was nothing to consider.
-final ladderRepairCoordinatorProvider = Provider<LadderRepairConsider>((ref) {
-  return ({
-    required FactsPublishOutcome outcome,
-    required WledService svc,
-    required String controllerId,
-  }) async {
-    final verdict = outcome.ladderRestore;
-    final participating = outcome.participating;
-    if (verdict == null || participating == null || verdict.restoreLit) {
-      return null;
-    }
-    final nowFn = ref.read(healerPhoneNowProvider);
-    final runner = BaseLadderRepairRunner(LadderRepairDeps(
+/// The runner, wired to the app. Shared by the connect-time coordinator and
+/// the customer's own "Repair base lighting" (#183). [participating] empty
+/// means every bus (the runner's default).
+BaseLadderRepairRunner buildLadderRepairRunner(
+  Ref ref, {
+  required WledService svc,
+  required String controllerId,
+  required List<int> participating,
+  Duration readinessTimeout = const Duration(minutes: 2),
+  void Function(String step)? onProgress,
+}) {
+  final nowFn = ref.read(healerPhoneNowProvider);
+  // The account that asked. A run whose account changes under it stops: the
+  // next account's controller is not the one that was backed up.
+  final uidAtStart = ref.read(effectiveUserUidProvider);
+  return BaseLadderRepairRunner(LadderRepairDeps(
       svc: svc,
       controllerId: controllerId,
       participating: participating,
       now: nowFn,
       phoneUtcOffset: nowFn().timeZoneOffset,
       // Absent or unreadable config = dry run; only an explicit "repair"
-      // writes (ladderRepairModeFrom).
+      // writes (ladderRepairModeFrom). The user action ignores the mode
+      // except `enabled:false` (repairNow).
       mode: () => readLadderRepairMode(
           () => ref.read(baseLadderRepairConfigProvider.future)),
       gameDay: ref.read(gameDayActivityProbeProvider),
       store: SharedPrefsLadderRepairStore(
         onStatus: (s) => ref.read(ladderRepairStatusProvider.notifier).show(s),
       ),
+      readinessTimeout: readinessTimeout,
+      onProgress: onProgress,
+      cancelled: () => ref.read(effectiveUserUidProvider) != uidAtStart,
       writeRecord: (record) => writeControllerFacts(
         controllerId: controllerId,
         families: [
@@ -368,8 +418,233 @@ final ladderRepairCoordinatorProvider = Provider<LadderRepairConsider>((ref) {
         } catch (_) {}
       },
     ));
-    final run = await runner.consider(verdict);
+}
+
+/// Called by the healer provider once a LAN connect's publish has resolved.
+/// Returns null when there was nothing to consider: the ladder lights AND
+/// states every bus (R2), or was not measured.
+final ladderRepairCoordinatorProvider = Provider<LadderRepairConsider>((ref) {
+  return ({
+    required FactsPublishOutcome outcome,
+    required WledService svc,
+    required String controllerId,
+  }) async {
+    final verdict = outcome.ladderRestore;
+    final participating = outcome.participating;
+    final asserts = outcome.ladderAssertsSegments;
+    if (verdict == null ||
+        participating == null ||
+        (verdict.restoreLit && asserts != false)) {
+      return null;
+    }
+    final runner = buildLadderRepairRunner(
+      ref,
+      svc: svc,
+      controllerId: controllerId,
+      participating: participating,
+    );
+    final run = await runner.consider(verdict, assertsSegments: asserts);
     debugPrint('[LadderRepair] $controllerId → $run');
     return run;
   };
 });
+
+// ── Bus change (#183) ────────────────────────────────────────────────────────
+
+/// PURE. Did the bus list change in a way the ladder cares about — the count
+/// or the ids? A first reading is not a change.
+bool busSetChanged(List<int>? before, List<int> after) {
+  if (before == null) return false;
+  final a = [...before]..sort();
+  final b = [...after]..sort();
+  if (a.length != b.length) return true;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return true;
+  }
+  return false;
+}
+
+/// Re-runs the ladder evaluation when the LIVE bus list changes, not only at
+/// connect. The healer measures the ladder once per connect; a bus added
+/// outside the app (WLED's own settings page) mid-session, or found changed on
+/// the next connect of the same endpoint, left the facts stale and the
+/// one-time repair marker set. On a change for the SAME endpoint this clears
+/// that marker and runs the heal again (facts republished, repair
+/// reconsidered). A new endpoint is a connect, which the healer already
+/// handles. Pure apart from the injected actions, so it is unit-testable.
+class LadderBusChangeWatcher {
+  LadderBusChangeWatcher({
+    required this.reheal,
+    required this.clearMarker,
+    required this.controllerId,
+  });
+
+  final Future<void> Function() reheal;
+  final Future<void> Function(String controllerId) clearMarker;
+  final String? Function() controllerId;
+
+  String? _endpoint;
+  List<int>? _lastIds;
+  bool _running = false;
+
+  /// The ids last seen for the current endpoint (tests).
+  List<int>? get lastIds => _lastIds;
+
+  /// One hardware reading for [endpoint]. True when it re-ran the heal.
+  Future<bool> onBuses(String endpoint, List<int> ids) async {
+    if (_endpoint != endpoint) {
+      _endpoint = endpoint;
+      _lastIds = ids;
+      return false;
+    }
+    if (!busSetChanged(_lastIds, ids)) return false;
+    _lastIds = ids;
+    if (_running) return false;
+    _running = true;
+    try {
+      final id = controllerId();
+      if (id != null && id.isNotEmpty) await clearMarker(id);
+      await reheal();
+      return true;
+    } catch (e) {
+      debugPrint('[LadderRepair] bus-change re-evaluation failed: $e');
+      return false;
+    } finally {
+      _running = false;
+    }
+  }
+}
+
+/// Keeps a [LadderBusChangeWatcher] on the live hardware config. Watched by
+/// MainScaffold. A controller reboots when its buses change, so the
+/// connection drops and comes back; on that return the hardware config is
+/// re-read, which is what feeds the watcher.
+final ladderBusChangeWatchProvider = Provider<LadderBusChangeWatcher>((ref) {
+  final watcher = LadderBusChangeWatcher(
+    reheal: () => ref.read(controllerDefaultsHealerProvider)(),
+    clearMarker: (id) => SharedPrefsLadderRepairStore().clearRan(id),
+    controllerId: () => ref.read(selectedControllerIdProvider),
+  );
+  ref.listen<AsyncValue<WledHardwareConfig?>>(deviceHardwareConfigProvider,
+      (_, next) {
+    if (!next.hasValue) return;
+    final hw = next.value;
+    final repo = ref.read(wledRepositoryProvider);
+    if (hw == null || repo is! WledService) return;
+    unawaited(watcher.onBuses(
+      repo.baseUrl,
+      deviceChannelsFromConfig(hw).map((c) => c.id).toList(),
+    ));
+  }, fireImmediately: true);
+  ref.listen<bool>(wledStateProvider.select((s) => s.connected), (prev, next) {
+    if (prev == false && next) ref.invalidate(deviceHardwareConfigProvider);
+  });
+  return watcher;
+});
+
+// ── The customer's own repair (#183) ─────────────────────────────────────────
+
+/// Does the readiness status say the base ladder needs repair? The server
+/// gate's `gated_ladder_bad`, pre-flight's `preflight_ladder_bad`, or this
+/// session's own R2 measurement for the selected controller.
+final ladderRepairNeededProvider = Provider<bool>((ref) {
+  final gate = ref.watch(gateStatusProvider).valueOrNull ?? GateStatus.unknown;
+  if (gate.blocking.contains(kGateLadderBad)) return true;
+  final pf = ref.watch(gameDayServerStatusSyncProvider).preflight;
+  if (pf != null && pf.reasons.contains(PreflightReason.ladderBad)) return true;
+  final id = ref.watch(selectedControllerIdProvider);
+  return id != null && publishedBaseLadderMemo[id] == false;
+});
+
+/// Why "Repair base lighting" cannot run right now, or null when it can:
+/// the LAN (a direct WledService), the account's own controller (not a
+/// customer an installer is viewing), and a selected controller record.
+String? ladderRepairBlockedReason({
+  required bool onLan,
+  required bool hasControllerId,
+  required bool impersonating,
+}) {
+  if (impersonating) {
+    return "Only the homeowner's phone can repair base lighting.";
+  }
+  if (!onLan) {
+    return 'Connect to your home Wi-Fi to repair your base lighting.';
+  }
+  if (!hasControllerId) return 'Choose your controller in Settings first.';
+  return null;
+}
+
+/// What the Game Day screen's action talks to — an interface so widget tests
+/// can fake the run without a controller.
+abstract class LadderRepairAction {
+  String? blockedReason();
+  Future<LadderRepairRun> run({void Function(String step)? onProgress});
+  Future<LadderRepairRun> restore({void Function(String step)? onProgress});
+}
+
+/// The customer's repair: the same runner as the connect-time repair, with
+/// the tap as consent (repairNow) and a shorter wait for Game Day state.
+class UserLadderRepair implements LadderRepairAction {
+  const UserLadderRepair(this._ref);
+  final Ref _ref;
+
+  @override
+  String? blockedReason() => ladderRepairBlockedReason(
+        onLan: _ref.read(wledRepositoryProvider) is WledService,
+        hasControllerId:
+            (_ref.read(selectedControllerIdProvider) ?? '').isNotEmpty,
+        impersonating: _ref.read(installerAccessingCustomerProvider) != null,
+      );
+
+  BaseLadderRepairRunner? _runner(void Function(String step)? onProgress) {
+    final repo = _ref.read(wledRepositoryProvider);
+    final id = _ref.read(selectedControllerIdProvider);
+    if (repo is! WledService || id == null || id.isEmpty) return null;
+    return buildLadderRepairRunner(
+      _ref,
+      svc: repo,
+      controllerId: id,
+      participating: const [],
+      readinessTimeout: const Duration(seconds: 20),
+      onProgress: onProgress,
+    );
+  }
+
+  @override
+  Future<LadderRepairRun> run({void Function(String step)? onProgress}) async {
+    final reason = blockedReason();
+    if (reason != null) {
+      return LadderRepairRun(LadderRepairOutcome.aborted, reason);
+    }
+    final runner = _runner(onProgress);
+    if (runner == null) {
+      return const LadderRepairRun(
+          LadderRepairOutcome.aborted, 'no controller on the LAN');
+    }
+    return runner.repairNow();
+  }
+
+  @override
+  Future<LadderRepairRun> restore(
+      {void Function(String step)? onProgress}) async {
+    final reason = blockedReason();
+    if (reason != null) {
+      return LadderRepairRun(LadderRepairOutcome.aborted, reason);
+    }
+    final runner = _runner(onProgress);
+    if (runner == null) {
+      return const LadderRepairRun(
+          LadderRepairOutcome.aborted, 'no controller on the LAN');
+    }
+    return runner.restoreFromBackup();
+  }
+
+  Future<bool> hasBackup() async {
+    final id = _ref.read(selectedControllerIdProvider);
+    if (id == null || id.isEmpty) return false;
+    return await SharedPrefsLadderRepairStore().readBackup(id) != null;
+  }
+}
+
+final userLadderRepairProvider =
+    Provider<LadderRepairAction>((ref) => UserLadderRepair(ref));

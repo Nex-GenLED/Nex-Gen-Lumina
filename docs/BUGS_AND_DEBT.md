@@ -4503,6 +4503,37 @@ commit — merging `main` into this tree will collide with the untracked copies.
     duplicates, no empty addresses; relay commands all targeted the current record — a stale
     selection sends nothing, so it never showed server-side.
 
+- [x] **#183 — A BUS ADDED OUTSIDE THE APP BLOCKED GAME DAY, AND THE LADDER REPAIR COULD NOT FIX IT**
+  - Status: **DONE on `fix/ladder-repair-bus-change` (2026-10-07), NOT merged** · Severity: **P2** ·
+    Evidence: **owner incident 2026-10-05/06** (a fourth bus, LEDs 390-480 on GPIO 18, added in WLED's
+    own LED settings page; `gated_ladder_bad` from 15:50 CDT; that evening's Game Day end never written —
+    the server half is #177; five presets repaired by hand on 10-06) + **verified-by-test**
+    (`base_ladder_repair_bus_change_test.dart`, `ladder_repair_action_test.dart`).
+  - Cause: presets 1 and 2 name one segment per bus as of their last save. A bus added outside the app
+    leaves them naming fewer buses than the controller has; the server gate (R2,
+    `base_ladder_asserts_segments`) reads that and blocks the account. The on-connect repair could not
+    clear it: its plan came from the restore-lit verdict, in which an OFF preset that kills the master
+    "darkens every bus" and is fine, so preset 2 was never planned; it only dry-ran unless
+    `connect_repair:"repair"`; it refused for eight hours after an unended server start; and it ran once
+    per connect, never when the bus list changed.
+  - Fix (app side): the plan treats presets 1 and 2 as bad whenever they do not state every live bus
+    (`channel_unstated`), and presets 3/4/5 as before; the rewrite is built from the controller's BUS
+    LIST, not the live segments, in exactly the manual shape — ON: root on, bri 200/51/102/153, `ib`,
+    one entry per bus, on, Solid, `[0,212,255,0]` + two black slots; OFF: root off, every bus off and
+    black. Each psave is read back before the next and the run stops at the first that fails or does not
+    persist. A bus-list change (count or ids) on the same endpoint re-arms the one-time marker and re-runs
+    the heal (facts republished, repair reconsidered). A server start with no end counts as live only
+    until kickoff + the hard cap (6 h, the app's open-ended fallback), not 8 h. **"Repair base
+    lighting"** on the Game Day screen: shown when the gate or pre-flight says the ladder is bad; explains
+    (five presets, about a minute, never your schedules), confirms, backs up to the phone and the account
+    record, saves with read-back, stops on failure and offers to put the backup back. The tap is the
+    consent — the fleet mode does not apply (the kill switch `enabled:false` still does); LAN only, the
+    account's own controller only, never during a Game Day window, never near a timer. Facts are
+    republished immediately after a write so the gate clears on the next planner tick.
+  - Not changed: a MISSING preset 1 or 2 is still schedule sync's to create; the server's end gating
+    (#177, on `fix/gameday-espn-slate`); schedule sync and sunrise-off still treat a ladder preset with
+    fewer segments than buses as satisfied (they do not re-save it — the repair does).
+
 ---
 
 ## P3 — debt (no launch relevance)
@@ -4691,6 +4722,16 @@ commit — merging `main` into this tree will collide with the untracked copies.
     account. Choose your controller in Settings → System & Device Management → Controllers." —
     checked after offline and before the away-from-home reasons; `chooseController` when two or
     more controllers answered and none is chosen yet. Related: #175.
+
+- [x] **#184 — "OPENING THE APP AT HOME REPAIRS THEM" WAS SHOWN FOR A LADDER THE APP COULD NOT REPAIR**
+  - Status: **DONE on `fix/ladder-repair-bus-change` (2026-10-07), NOT merged** · Severity: **P3**
+    (copy) · Evidence: **owner report 2026-10-06** + **verified-by-test** (`ladder_repair_action_test.dart`).
+  - Cause: `preflightReasonCopy(ladderBad)` and `GateStatus.reasons` promised a repair that the on-connect
+    path only dry-runs by default and never planned for preset 2 (#183).
+  - Fix: both name the cause — "Your everyday lighting settings don't cover every channel on your
+    controller — usually after a channel was added or changed" — and the action: "Use Repair base
+    lighting" (on the Game Day screen). The banner after a user-initiated repair says what it did
+    ("now cover every channel") instead of the captured-black story. Related: #183.
 
 ## Features promised (post-cleanup)
 

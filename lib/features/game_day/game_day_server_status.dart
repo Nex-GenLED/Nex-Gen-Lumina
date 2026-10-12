@@ -249,8 +249,12 @@ String? preflightReasonCopy(String reason) {
       return 'Open the app at home, on your Wi-Fi, so we can check your '
           'everyday lighting settings.';
     case PreflightReason.ladderBad:
-      return 'Your everyday lighting settings need repairing. Opening the app '
-          'at home repairs them.';
+      // #183 — "Opening the app at home repairs them" was untrue once a bus
+      // had been added outside the app: the on-connect repair dry-runs by
+      // default and never included preset 2. Name the cause and the action.
+      return "Your everyday lighting settings don't cover every channel on "
+          'your controller — usually after a channel was added or changed. '
+          'Use Repair base lighting on the Game Day screen.';
     case PreflightReason.controllerUnreachable:
       return 'Our servers could not reach your controller before the game.';
     case PreflightReason.gated:

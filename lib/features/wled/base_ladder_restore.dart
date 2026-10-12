@@ -76,6 +76,13 @@ abstract final class LadderFault {
   static const channelOpacityZero = 'channel_opacity_zero';
   static const channelBlack = 'channel_black';
   static const offLeavesLit = 'off_leaves_lit';
+
+  /// A restore preset (1 or 2) that does not STATE `on` for every live bus —
+  /// the R2 fault (`base_ladder_asserts_segments` false). It is not a
+  /// restore-lit fault: an OFF preset that kills the master darkens a bus it
+  /// never names. It is what the repair rewrites after a bus is added outside
+  /// the app, because the server gate reads R2.
+  static const channelUnstated = 'channel_unstated';
 }
 
 /// The verdict for one ladder slot.

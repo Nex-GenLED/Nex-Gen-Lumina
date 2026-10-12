@@ -274,12 +274,21 @@ class _Store implements LadderRepairStore {
   }
 
   @override
+  Future<void> clearRan(String controllerId) async {
+    ran = false;
+    marker = null;
+  }
+
+  @override
   Future<bool> saveBackup(String controllerId, String backupJson) async {
     log.add('backup');
     if (!backupWorks) return false;
     backup = backupJson;
     return true;
   }
+
+  @override
+  Future<String?> readBackup(String controllerId) async => backup;
 
   @override
   Future<void> saveStatus(LadderRepairStatus s) async {
@@ -663,15 +672,31 @@ void main() {
       expect(plan.first.faults, [LadderFault.channelBlack]);
     });
 
-    test('repair state is the builders\' output — ON in the base look, OFF '
-        'all-off', () {
-      final on = ladderRepairState(1, _live());
+    test('repair state is the manual shape — ON in the base look per live '
+        'bus, OFF every bus off and black (#183)', () {
+      final on = ladderRepairState(1, _buses);
+      // Same as the ON builder's output when the live segments ARE the buses.
       expect(on, ScheduleSyncService.buildNglOnPresetState(200, _live()));
       for (final seg in (on['seg'] as List).cast<Map>()) {
         expect(seg['col'], baseLookColSlots());
       }
-      expect(ladderRepairState(2, _live()),
-          ScheduleSyncService.buildNglOffPresetState(_live()));
+      expect(ladderRepairState(2, _buses), {
+        'on': false,
+        'ib': true,
+        'seg': [
+          for (final id in _buses)
+            {
+              'id': id,
+              'on': false,
+              'fx': 0,
+              'col': [
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+              ],
+            },
+        ],
+      });
     });
   });
 
@@ -782,8 +807,12 @@ void main() {
       );
       final run = await h.run();
       expect(run.outcome, LadderRepairOutcome.repaired);
-      expect(h.ctl.savedStates[2],
-          ScheduleSyncService.buildNglOffPresetState(_live()));
+      // #183: root off, every bus off and black — the manual shape.
+      expect(h.ctl.savedStates[2], ladderRepairState(2, _buses));
+      expect(h.ctl.savedStates[2]!['on'], false);
+      for (final seg in (h.ctl.savedStates[2]!['seg'] as List).cast<Map>()) {
+        expect(seg['on'], false);
+      }
     });
   });
 

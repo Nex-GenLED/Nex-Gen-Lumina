@@ -83,9 +83,14 @@ class GateStatus {
           );
           break;
         case kGateLadderBad:
+          // #183 — the real cause (a channel added or changed outside the
+          // app leaves the saved presets naming fewer channels than the
+          // controller has) and the real action (the Repair base lighting
+          // button on this screen). "Opening the app at home" was untrue.
           out.add(
-            'Your saved lighting presets need repairing before Game Day can '
-            'run safely.',
+            "Your everyday lighting settings don't cover every channel on "
+            'your controller — usually after a channel was added or changed. '
+            'Use Repair base lighting below.',
           );
           break;
         default:
@@ -98,10 +103,11 @@ class GateStatus {
   }
 
   /// Retired with R1. The only self-serve fix the gate ever offered was "set a
-  /// schedule", and a schedule is no longer a precondition for anything — so
-  /// there is no longer a blocking reason the customer can clear with one tap.
+  /// schedule", and a schedule is no longer a precondition for anything.
   /// The remaining two are a LAN visit (`no_facts`) and a preset repair
-  /// (`ladder_bad`); neither is a button.
+  /// (`ladder_bad`); since #183 the latter IS a button — "Repair base
+  /// lighting" (ladder_repair_action.dart) — but it is its own widget, keyed
+  /// on `ladderRepairNeededProvider`, not a flag here.
   @Deprecated('R1 removed 2026-08-26; always false. Remove with its callers.')
   bool get hasScheduleFix => false;
 

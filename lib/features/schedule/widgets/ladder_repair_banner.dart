@@ -49,6 +49,18 @@ String _what(List<int> ids) {
 
 /// PURE. The banner's title and lines for one status.
 ({String title, List<String> lines}) ladderRepairCopy(LadderRepairStatus s) {
+  // #183 — a repair the customer asked for is reported as what it was, not as
+  // a surprise: the "would have turned your lights on with nothing showing"
+  // story belongs to the captured-black defect, not to a bus that was added.
+  if (s.userInitiated && s.outcome == LadderRepairOutcome.repaired) {
+    return (
+      title: 'Your everyday lighting was repaired',
+      lines: const [
+        'Your On, Off, Dim, Low and Medium settings now cover every channel on '
+            'your controller. We kept a copy of the old settings.',
+      ],
+    );
+  }
   switch (s.outcome) {
     case LadderRepairOutcome.repaired:
       return (

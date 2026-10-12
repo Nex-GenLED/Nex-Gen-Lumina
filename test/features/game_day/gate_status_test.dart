@@ -95,9 +95,12 @@ void main() {
       expect(s.reasons.single, contains('at home'));
     });
 
-    test('ladder_bad names the repair', () {
+    test('ladder_bad names the cause and the action (#184)', () {
       final s = GateStatus([kGateLadderBad]);
-      expect(s.reasons.single, contains('presets'));
+      expect(s.reasons.single, contains('every channel'));
+      expect(s.reasons.single, contains('added or changed'));
+      expect(s.reasons.single, contains('Repair base lighting'));
+      expect(s.reasons.single, isNot(contains('Opening the app')));
     });
 
     test('every blocking reason gets its own sentence', () {
