@@ -13,8 +13,8 @@ What was seen: the file names, sizes and modified dates below come from a read-o
 | 3 | ESP32_Bridge_Setup_Guide.pdf | 287,084 | 2026-08-27 22:28 | render of `d67d350`; superseded by `5ac40ac`, archived | REMOVE | `ESP32_Bridge_Setup_Guide.md` | Lumina How-To's + Hub dealer folder |
 | 4 | Dealer_Dashboard_Guide.pdf | 402,700 | 2026-08-27 22:28 | render of `d67d350`; superseded by `5ac40ac`, archived | REMOVE | `Dealer_Dashboard_Guide.md` | Lumina How-To's + Hub dealer folder |
 | 5 | sales-mode-guide.pdf | 248,101 | 2026-08-27 22:28 | render of `d67d350`, archived | REMOVE | `sales-mode-guide.md` | Lumina How-To's + Hub dealer folder |
-| 6 | day1-electrician-guide.pdf | 167,273 | 2026-08-27 22:28 | render of `d67d350`, archived | REMOVE (the name is not reused: we are not electricians, owner 2026-10-12) | `Field_Guide_Day1_Day2.md` (one combined field guide, uploaded as `Field_Guide_Day1_Day2.pdf`) | Lumina How-To's + Hub dealer folder |
-| 7 | day2-install-guide.pdf | 198,817 | 2026-08-27 22:28 | render of `d67d350`, archived | REMOVE | `Field_Guide_Day1_Day2.md` (same combined field guide; one upload replaces both) | Lumina How-To's + Hub dealer folder |
+| 6 | day1-electrician-guide.pdf | 167,273 | 2026-08-27 22:28 | render of `d67d350`, archived | REMOVE (the name is not reused: we are not electricians, owner 2026-10-12; owner-approved 2026-10-12, T-W10) | `Field_Guide_Day1_Day2.md` (one combined field guide, uploaded as `Field_Guide_Day1_Day2.pdf`; name owner-approved) | Lumina How-To's + Hub dealer folder |
+| 7 | day2-install-guide.pdf | 198,817 | 2026-08-27 22:28 | render of `d67d350`, archived | REMOVE (owner-approved 2026-10-12, T-W10) | `Field_Guide_Day1_Day2.md` (same combined field guide; one upload replaces both) | Lumina How-To's + Hub dealer folder |
 | 8 | dealer-inventory-guide.pdf | 158,650 | 2026-08-27 22:28 | render of `d67d350`, archived | REMOVE | `dealer-inventory-guide.md` (the dealer guide; the inventory screens it described are not available) | Lumina How-To's |
 | 9 | messaging-configuration-guide.pdf | 348,150 | 2026-08-27 22:28 | render of `d67d350`, archived | REMOVE | `messaging-configuration-guide.md` (the dealer guide, Messaging section) | Lumina How-To's |
 | 10 | User_Guide_Commercial.pdf | 516,908 | 2026-08-27 22:28 | render of `d67d350`; superseded by `5ac40ac`, archived | REMOVE | `User_Guide_Commercial.md` (commercial customers use the standard app; same pages as the homeowner guide) | Lumina How-To's |
@@ -63,7 +63,7 @@ Also add to "Lumina How-To's": `nex-gen-operations-overview.md` (replaces the re
 7. Apply `store-listings-and-website-notes.md` to the website and both store listings.
 8. Send one test message to general@nex-genled.com and tell the branch owner it arrived (FACTS T-SU2 stays UNVERIFIED until then).
 
-## G. Print forms (new 2026-10-12; pen-ready, white page)
+## G. Print forms (new 2026-10-12; pen-ready, white page; upload names owner-approved 2026-10-12, T-W10)
 
 Render each from `docs/drive-exports/print/` with `md-to-pdf <file>` (the front matter sets US Letter, 12 mm margins with a 20 mm left margin, no backgrounds, and `_print_write.css`; keep the `.css` and `nexgen_mark.png` beside the `.md` when rendering). Verified 2026-10-12 by rendering every page to PNG: white pages, dark text, thin light-gray rules, the small mark the only dark area.
 
@@ -73,7 +73,23 @@ Render each from `docs/drive-exports/print/` with `md-to-pdf <file>` (the front 
 | G2 | `print/P2-install-day-sheet.md` | `Lumina_Install_Day_Sheet.pdf` | Hub dealer folder + Lumina How-To's | nothing (new) |
 | G3 | `print/P3-site-controller-record.md` | `Lumina_Site_Controller_Record.pdf` | Hub dealer folder + Lumina How-To's | nothing (new); this is "the install sheet" the guides refer to |
 
-## H. Changed on 2026-10-12 — use these versions for the swap
+## H. Changed in CONTENT on 2026-10-12, second round (owner decisions) — upload exactly these
+
+The exports were regenerated again after the owner's six decisions. Compared with the first round earlier the same day (the generated-date line is identical, so a changed file changed in content):
+
+| Export | Content change this round | Upload |
+|---|---|---|
+| `Dealer_Installer_Setup_Guide.md` | "Not our work" box rewritten (installer may plug the supply in; no outlets, no household power wiring; no working outlet = stop and tell the customer); checklist pre-install and step 1; SOP troubleshooting row; warranty sentence | yes |
+| `Field_Guide_Day1_Day2.md` | the same checklist text plus the dealer guide (box, call row, warranty sentence) | yes |
+| `Dealer_Dashboard_Guide.md`, `dealer-inventory-guide.md`, `messaging-configuration-guide.md` | dealer guide: box, "add an outlet" call row, warranty sentence | yes |
+| `sales-mode-guide.md` | warranty sentence (two places); the electrical-work line | yes |
+| `Lumina_Homeowner_Guide.md`, `User_Guide_Commercial.md` | getting-started "What your installer did" paragraph | yes |
+| `Admin_Operations_Guide.md`, `nex-gen-operations-overview.md` | claims policy: warranty sentence; the not-electricians row marked owner-confirmed | yes |
+| `print/P1-preinstall-bench-sheet.md`, `print/P2-install-day-sheet.md`, `print/P3-site-controller-record.md` | callouts and outlet lines rewritten; re-rendered and checked | yes (rows G1–G3) |
+| `store-listings-and-website-notes.md` | warranty sentence added to the store rule (public listing text: the owner looks at it before it reaches a listing) | after the owner's look |
+| `ESP32_Bridge_Setup_Guide.md`, `corporate-dashboard-guide.md`, `Media_Mode_Guide.md`, `Lumina_Privacy_Policy_corrections.md`, `README.md` | byte-identical to the first round | no (first-round file stands) |
+
+### First round of 2026-10-12 (history)
 
 Every export was regenerated on 2026-10-12 (the generated-date line changed in all of them). Content changed in these; upload these versions, not the 2026-10-09 renders:
 
@@ -94,4 +110,4 @@ Every export was regenerated on 2026-10-12 (the generated-date line changed in a
 - Everything inside "Inventory Tools", "Logo, Icons, Media" (including its "web" and "Media Video and Photo" folders), "Nex-Gen Dealer Development" and the dealer files folder.
 - Any folder not reached by the listing (the search was by name and by the folders above).
 
-*Facts: T-O8, T-SU2, T-X8, T-VA1, T-W1, T-W6. Last verified: 2026-10-12.*
+*Facts: T-O8, T-SU2, T-X8, T-VA1, T-W1, T-W6, T-W10. Last verified: 2026-10-12.*

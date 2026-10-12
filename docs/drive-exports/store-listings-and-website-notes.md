@@ -7,7 +7,7 @@ The App Store listing, the Play listing, the data-safety and App Privacy answers
 
 - Any mention of Alexa, Google Home or Google Assistant control. Linking has never worked for anyone. (Siri Shortcuts on iPhone and Android app shortcuts may be mentioned.)
 - "Download from the App Store / Google Play" calls to action. The app is invitation-only.
-- "Lifetime warranty". Use: 5-year product warranty, 1-year labor minimum, 50,000-hour rated life.
+- "Lifetime warranty". Use: 5-year product warranty, 1-year labor minimum, 50,000-hour rated life. Local dealers may add additional coverage at their discretion.
 - "AR" or "augmented reality".
 - "Control from anywhere" without "with the Lumina Bridge your installer installs".
 - "Zero maintenance", "set it and forget it".
@@ -30,4 +30,4 @@ The support email is general@nex-genled.com, lowercase, everywhere. No other add
 
 Copy the entry for the build from `docs/guides/internal/31-release-notes.md` and end with "Send reports to general@nex-genled.com with the date and time."
 
-*Facts: T-VA1, T-VA2, T-O8, T-O6, T-R1, T-R9, T-X14, T-X15, T-X16, T-O4, T-SU2.*
+*Facts: T-VA1, T-VA2, T-O8, T-O6, T-W7, T-R1, T-R9, T-X14, T-X15, T-X16, T-O4, T-SU2.*

@@ -34,7 +34,7 @@ From the Installer Mode landing screen tap **Dealer Dashboard**. Six tabs:
 
 Statuses run: draft → estimate sent → signed → pre-wire scheduled → pre-wire complete → install scheduled → install complete → complete (paid).
 
-Day 1 is the pre-install: our installer runs the low-voltage wiring, and no lights go up. Day 2 is install day. Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Where a job involves line-voltage power (power to the power-supply location, a new outlet, a circuit, a breaker, hardwiring), Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing, before install day. The app's Day 1 labels and the booking email still say "electrical" and "electrician"; that wording is being replaced (strings proposal item 29) and is not repeated to customers. The pen forms for the bench, install day and the site record are in the print forms.
+Day 1 is the pre-install: our installer runs the low-voltage wiring, and no lights go up. Day 2 is install day. Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. The app's Day 1 labels and the booking email still say "electrical" and "electrician"; that wording is being replaced (strings proposal item 29) and is not repeated to customers. The pen forms for the bench, install day and the site record are in the print forms.
 
 **A signed job cannot be scheduled for Day 1 until someone marks the 50 % deposit collected.** The only control for that is on the job's card in the **Day 1 Queue** on the Installer Mode landing screen: tap the deposit action and confirm. Sales Mode has no way to mark it, and the customer is told nothing while the job waits. Decide who collects the deposit and who marks it.
 
@@ -70,14 +70,14 @@ Customers find **Refer a Friend** under System in their app. Codes issue on sign
 | "Game Day didn't switch back" | Open the app at home and tap the everyday schedule. If the Game Day screen says the everyday lighting needs repairing, an installer or Nex-Gen support corrects the presets; the app cannot yet. |
 | "Can I use Alexa / Google?" | No. Siri Shortcuts on iPhone and Android app shortcuts only. Never promise the others. |
 | "Can you update my firmware?" | No. Firmware is recorded at install and never changed. The app treats every version in service the same. |
-| "Can you add an outlet / run power to the garage?" | No. Nex-Gen LED does not do electrical work. The customer arranges line-voltage work through a licensed professional of their own choosing; we do the low-voltage pre-install and the install. |
+| "Can you add an outlet / run power to the garage?" | No. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. Our installer may plug the power supply into an existing outlet; we do the low-voltage pre-install and the install. |
 
 ## Claims you may make
 
-See Claims policy. In short: no voice assistants other than Siri Shortcuts, no "lifetime warranty" (5-year product, 1-year labor minimum, 50,000-hour rated life), no store-download instructions (installer invitation only), no "AR".
+See Claims policy. In short: no voice assistants other than Siri Shortcuts, no "lifetime warranty" (5-year product, 1-year labor minimum, 50,000-hour rated life), no store-download instructions (installer invitation only), no "AR". Local dealers may add additional coverage at their discretion.
 
 ## Support
 
 Your customers' app shows your dealership's phone and email under **Support & Resources** once their profile carries it (set at install). For anything you cannot solve, email general@nex-genled.com with the customer's name and the date and time.
 
-*Facts: T-X9, T-X10, T-X11, T-X8, T-X12, T-O2, T-S2, T-R1, T-R7, T-P2, T-GD5, T-GD6, T-VA1, T-VA2, T-F2, T-F12, T-O6, T-O8, T-SU1, T-SU2, T-W1, T-W2, T-W5, T-W6.*
+*Facts: T-X9, T-X10, T-X11, T-X8, T-X12, T-O2, T-S2, T-R1, T-R7, T-P2, T-GD5, T-GD6, T-VA1, T-VA2, T-F2, T-F12, T-O6, T-O8, T-SU1, T-SU2, T-W1, T-W2, T-W5, T-W6, T-W7, T-W8.*

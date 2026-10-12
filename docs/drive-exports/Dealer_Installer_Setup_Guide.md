@@ -13,14 +13,14 @@ The job in order: what the dealer does before install day (pre-install), what yo
 
 ## Not our work
 
-Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Where a job involves line-voltage power (power to the power-supply location, a new outlet, a circuit, a breaker, hardwiring), Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing, before install day.
+Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day.
 
-Not yet decided by the owner, so do not improvise an answer on site (ask): plugging the power supply into the customer's outlet; GFCI and weatherproof outlets; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
+Not yet decided by the owner, so do not improvise an answer on site (ask): whether the installer may plug into an outlet that is not weatherproof or GFCI; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
 
 ## Pre-install (the dealer, before install day)
 
 - [ ] The site and controller record from the sale (print form): customer name, address, email, the runs and their LED counts, which outputs they go on, and whether a Lumina Bridge was sold.
-- [ ] Line-voltage power at the power-supply location confirmed in place, or confirmed arranged by the customer (see *Not our work*). Note it on the record.
+- [ ] A working outlet at the power-supply location confirmed in place, or confirmed arranged by the homeowner (see *Not our work*). Note it on the record.
 - [ ] The 50 % deposit marked collected on the job's card in the **Day 1 Queue** (**Mark Deposit Collected**); the app will not schedule Day 1 before that.
 - [ ] Day 1, the pre-install visit: the dealer's installer runs the low-voltage wiring for each run back to the controller location and labels every wire end by run, so install day is lights, controller and app. No lights go up on Day 1.
 - [ ] The controller and bridge bench-prepared per the pre-install SOP and labelled; the pre-install bench sheet completed and filed.
@@ -31,7 +31,7 @@ Not yet decided by the owner, so do not improvise an answer on site (ask): plugg
 
 ### At the controller
 
-1. Mount the controller, connect the low-voltage wiring and the lights, and power it up from its power supply. Wait about a minute.
+1. Mount the controller, connect the low-voltage wiring and the lights, and plug the power supply into the existing outlet. If there is no working outlet, do not install one: stop and tell the customer. Wait about a minute.
 2. **Read the firmware version and write it on the record.** It shows on the controller's card in the installer wizard once the controller is on the network, or at `http://4.3.2.1/json/info` while you are on its setup network. **Never flash, update or downgrade a controller.** Never load a generic WLED image. The controller's own settings page offers an update; do not use it.
 3. If the controller is not yet on the customer's Wi-Fi: join its setup network from your phone (the network named on the controller's label), open `http://4.3.2.1`, enter the customer's Wi-Fi name and password, and save. The controller restarts and joins the home Wi-Fi.
 4. **Set a unique AP password on this controller.** Controllers ship broadcasting their setup network with the manufacturer's public default password. On the controller's Wi-Fi settings page, replace it with a password unique to this unit and record it privately in your dealer's own record: never in a document, a message, a photo or the repo.
@@ -74,7 +74,7 @@ Follow the Bridge guide: join its setup network, set the home Wi-Fi, then in the
 4. The homeowner guide (the dealer's copy), and the final payment confirmed on the Day 2 wrap-up's close step.
 5. Nothing on paper that carries a password, a PIN or a key. The site and controller record stays in the dealer's file.
 
-Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life. Do not describe anyone from Nex-Gen LED or the dealer as an electrician, and do not offer electrical work.
+Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life. Local dealers may add additional coverage at their discretion. Do not describe anyone from Nex-Gen LED or the dealer as an electrician, and do not offer electrical work.
 
 ## Before you leave
 
@@ -85,7 +85,7 @@ Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortc
 - [ ] A unique AP password set on the controller and recorded privately; the setup network set to open only when there is no connection (never "never"); the controller confirmed answering on the home network afterwards.
 - [ ] Your phone out of Installer Mode.
 
-*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X11, T-X13, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-O8, T-SU1, T-SU2, T-R10.*
+*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W7, T-W8, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X11, T-X13, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-O8, T-SU1, T-SU2, T-R10.*
 
 ---
 
@@ -230,14 +230,14 @@ Prepare each controller and bridge at the shop so install day is lights, control
 
 ## Not our work
 
-Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Where a job involves line-voltage power (power to the power-supply location, a new outlet, a circuit, a breaker, hardwiring), Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing, before install day. Confirm it on the site and controller record before Day 1 is scheduled.
+Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day; confirm it on the site and controller record before Day 1 is scheduled.
 
-Not yet decided by the owner (ask; nothing in this SOP answers them): plugging the power supply into the customer's outlet; GFCI and weatherproof outlets; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
+Not yet decided by the owner (ask; nothing in this SOP answers them): whether the installer may plug into an outlet that is not weatherproof or GFCI; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
 
 ## The pre-install, in order
 
 1. Capture the customer's information on the site and controller record (below).
-2. Confirm the line-voltage side is the customer's and is in place or arranged (above).
+2. Confirm a working outlet at the power-supply location is in place or arranged by the homeowner (above).
 3. Bench-prepare the controller (Section 1) and, if sold, the bridge (Section 2).
 4. Day 1, the pre-install visit: the dealer's installer runs the low-voltage wiring for each run back to the controller location and labels every wire end by run. No lights go up on Day 1.
 5. Install day (Day 2) follows the install checklist.
@@ -251,7 +251,7 @@ Not yet decided by the owner (ask; nothing in this SOP answers them): plugging t
 
 ## Information to capture from the customer first
 
-Name, email (the one the account will use), phone, address (used for sunrise and sunset), Wi-Fi name (password recorded privately, never on the sheet), number of runs and the light count of each, whether a bridge was sold, and whether line-voltage power at the power-supply location is in place or arranged by the customer.
+Name, email (the one the account will use), phone, address (used for sunrise and sunset), Wi-Fi name (password recorded privately, never on the sheet), number of runs and the light count of each, whether a bridge was sold, and whether a working outlet at the power-supply location is in place or arranged by the homeowner.
 
 ## Section 1 — Controller
 
@@ -321,7 +321,7 @@ Day 1 is the low-voltage pre-install visit (above). Install day follows the inst
 | "Could not read WiFi name" when tapping Detect Home Network | Location permission denied | Allow Location for Lumina "While Using the App" |
 | A power change takes 30 seconds or fails while off Wi-Fi | Normal bridge latency is a few seconds; longer means the bridge's quiet window | Wait ten minutes and retry |
 | Lights come on briefly then go dark at power-on | Normal start-up, then the schedule | Open the app at home for a minute |
-| The controller has no power at the power-supply location | The line-voltage side is not in place | Not our work: the customer arranges it through a licensed professional of their own choosing; reschedule install day |
+| No working outlet at the power-supply location | The outlet is the homeowner's to provide | Not our work: do not install one; stop, tell the customer, and reschedule install day |
 
 ## What this SOP no longer contains
 
@@ -330,4 +330,4 @@ Day 1 is the low-voltage pre-install visit (above). Install day follows the inst
 - Bridge firmware flashing. That is an internal Nex-Gen procedure (see the internal bridge firmware page).
 - Any description of our work as anything other than low-voltage, or of our people as any trade. Withdrawn (owner 2026-10-12).
 
-*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1, T-SU2.*
+*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W8, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1, T-SU2.*

@@ -68,7 +68,7 @@ You now know enough to use Lumina every day. The next page covers power, brightn
 
 ## What your installer did
 
-Your installer ran the low-voltage wiring on the pre-install visit, mounted the controller, put up the lights on install day, created your account, sent the invitation and showed you the app. Their phone and email are under **System → Support & Resources**. Nex-Gen LED does no electrical work: if your home needed power at the power-supply location, a new outlet, a circuit or a breaker, that was arranged by you through a licensed professional of your own choosing. Your controller's firmware was recorded at install and nobody updates it.
+Your installer ran the low-voltage wiring on the pre-install visit, mounted the controller, put up the lights on install day, created your account, sent the invitation and showed you the app. Their phone and email are under **System → Support & Resources**. Nex-Gen LED does no electrical work: your installer may plug the power supply into an existing outlet, but does not install outlets and does not run household power wiring. If your home needed an outlet or power at the power-supply location, that was your responsibility, arranged through a licensed professional of your own choosing. Your controller's firmware was recorded at install and nobody updates it.
 
 ## The five tabs
 
@@ -84,7 +84,7 @@ Your installer ran the low-voltage wiring on the pre-install visit, mounted the 
 
 Open Troubleshooting, or in the app go to **System → Support & Resources** and tap **Contact Nex-Gen Support**. It shows your installer's phone and email. You can also email general@nex-genled.com.
 
-*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-SU2, T-S2, T-W1, T-W2, T-F2.*
+*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-SU2, T-S2, T-W1, T-W2, T-W8, T-F2.*
 
 ---
 
