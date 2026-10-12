@@ -34,7 +34,7 @@ From the Installer Mode landing screen tap **Dealer Dashboard**. Six tabs:
 
 Statuses run: draft → estimate sent → signed → pre-wire scheduled → pre-wire complete → install scheduled → install complete → complete (paid).
 
-Day 1 is the pre-install: our installer runs the low-voltage wiring, and no lights go up. Day 2 is install day. Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. The app's Day 1 labels and the booking email still say "electrical" and "electrician"; that wording is being replaced (strings proposal item 29) and is not repeated to customers. The pen forms for the bench, install day and the site record are in the print forms.
+Day 1 is the pre-install: our installer runs the low-voltage wiring, and no lights go up. Day 2 is install day. Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no line-voltage work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage (household power) wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. The app's Day 1 labels and the booking email still say "electrical" and "electrician"; that wording is being replaced (strings proposal item 29) and is not repeated to customers. The pen forms for the bench, install day and the site record are in the print forms.
 
 **A signed job cannot be scheduled for Day 1 until someone marks the 50 % deposit collected.** The only control for that is on the job's card in the **Day 1 Queue** on the Installer Mode landing screen: tap the deposit action and confirm. Sales Mode has no way to mark it, and the customer is told nothing while the job waits. Decide who collects the deposit and who marks it.
 
@@ -70,7 +70,7 @@ Customers find **Refer a Friend** under System in their app. Codes issue on sign
 | "Game Day didn't switch back" | Open the app at home and tap the everyday schedule. If the Game Day screen says the everyday lighting needs repairing, an installer or Nex-Gen support corrects the presets; the app cannot yet. |
 | "Can I use Alexa / Google?" | No. Siri Shortcuts on iPhone and Android app shortcuts only. Never promise the others. |
 | "Can you update my firmware?" | No. Firmware is recorded at install and never changed. The app treats every version in service the same. |
-| "Can you add an outlet / run power to the garage?" | No. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. Our installer may plug the power supply into an existing outlet; we do the low-voltage pre-install and the install. |
+| "Can you add an outlet / run power to the garage?" | No. We do no line-voltage (household power) work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. We do the low-voltage pre-install and the install. |
 
 ## Claims you may make
 
@@ -80,7 +80,7 @@ See Claims policy. In short: no voice assistants other than Siri Shortcuts, no "
 
 Your customers' app shows your dealership's phone and email under **Support & Resources** once their profile carries it (set at install). For anything you cannot solve, email general@nex-genled.com with the customer's name and the date and time.
 
-*Facts: T-X9, T-X10, T-X11, T-X8, T-X12, T-O2, T-S2, T-R1, T-R7, T-P2, T-GD5, T-GD6, T-VA1, T-VA2, T-F2, T-F12, T-O6, T-O8, T-SU1, T-SU2, T-W1, T-W2, T-W5, T-W6, T-W7, T-W8.*
+*Facts: T-X9, T-X10, T-X11, T-X8, T-X12, T-O2, T-S2, T-R1, T-R7, T-P2, T-GD5, T-GD6, T-VA1, T-VA2, T-F2, T-F12, T-O6, T-O8, T-SU1, T-SU2, T-W1, T-W2, T-W5, T-W6, T-W7, T-W8, T-W12.*
 
 ---
 
@@ -92,7 +92,7 @@ The job in order: what the dealer does before install day (pre-install), what yo
 
 ## Not our work
 
-Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day.
+Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no line-voltage work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage (household power) wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day.
 
 Not yet decided by the owner, so do not improvise an answer on site (ask): whether the installer may plug into an outlet that is not weatherproof or GFCI; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
 
@@ -153,7 +153,7 @@ Follow the Bridge guide: join its setup network, set the home Wi-Fi, then in the
 4. The homeowner guide (the dealer's copy), and the final payment confirmed on the Day 2 wrap-up's close step.
 5. Nothing on paper that carries a password, a PIN or a key. The site and controller record stays in the dealer's file.
 
-Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life. Local dealers may add additional coverage at their discretion. Do not describe anyone from Nex-Gen LED or the dealer as an electrician, and do not offer electrical work.
+Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life. Local dealers may add additional coverage at their discretion. Do not describe anyone from Nex-Gen LED or the dealer as an electrician, and do not offer line-voltage work.
 
 ## Before you leave
 
@@ -164,4 +164,4 @@ Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortc
 - [ ] A unique AP password set on the controller and recorded privately; the setup network set to open only when there is no connection (never "never"); the controller confirmed answering on the home network afterwards.
 - [ ] Your phone out of Installer Mode.
 
-*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W7, T-W8, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X11, T-X13, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-O8, T-SU1, T-SU2, T-R10.*
+*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W7, T-W8, T-W12, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X11, T-X13, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-O8, T-SU1, T-SU2, T-R10.*

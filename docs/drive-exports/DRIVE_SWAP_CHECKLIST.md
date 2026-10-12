@@ -73,7 +73,23 @@ Render each from `docs/drive-exports/print/` with `md-to-pdf <file>` (the front 
 | G2 | `print/P2-install-day-sheet.md` | `Lumina_Install_Day_Sheet.pdf` | Hub dealer folder + Lumina How-To's | nothing (new) |
 | G3 | `print/P3-site-controller-record.md` | `Lumina_Site_Controller_Record.pdf` | Hub dealer folder + Lumina How-To's | nothing (new); this is "the install sheet" the guides refer to |
 
-## H. Changed in CONTENT on 2026-10-12, second round (owner decisions) — upload exactly these
+## H. Changed in CONTENT on 2026-10-12, third round (the "no line-voltage work" wording) — upload exactly these
+
+Compared with the branch at `9dcb2bb` (second round; the generated-date line is identical, so a changed file changed in content):
+
+| Export | Content change this round | Upload |
+|---|---|---|
+| `Dealer_Installer_Setup_Guide.md` | both "Not our work" boxes now read "We do no line-voltage work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage (household power) wiring…"; the checklist's hand-off line says "do not offer line-voltage work" | yes |
+| `Field_Guide_Day1_Day2.md` | the same checklist box and line, plus the dealer guide's box and the "add an outlet" call row (full public wording) | yes |
+| `Dealer_Dashboard_Guide.md`, `dealer-inventory-guide.md`, `messaging-configuration-guide.md` | dealer guide: box and call row | yes |
+| `sales-mode-guide.md` | "Line-voltage work: we do none…" line | yes |
+| `Lumina_Homeowner_Guide.md`, `User_Guide_Commercial.md` | getting-started paragraph carries the full customer wording | yes |
+| `Admin_Operations_Guide.md`, `nex-gen-operations-overview.md` | claims policy: the not-electricians row says "no line-voltage work" and quotes the public wording; a new row: no license, insurance, bonding, liability or terms statement in public text until the owner approves wording; the "Our work" line | yes |
+| `print/P1-preinstall-bench-sheet.md`, `print/P2-install-day-sheet.md`, `print/P3-site-controller-record.md` | callouts and the P3 outlet line reworded; re-rendered and checked | yes (rows G1–G3) |
+| `store-listings-and-website-notes.md` | unchanged this round; still carries the dealer-coverage sentence from the second round, flagged for the owner's look before it reaches a listing | after the owner's look |
+| `ESP32_Bridge_Setup_Guide.md`, `corporate-dashboard-guide.md`, `Media_Mode_Guide.md`, `Lumina_Privacy_Policy_corrections.md`, `README.md` | byte-identical to the second round | no |
+
+### Second round of 2026-10-12 (history)
 
 The exports were regenerated again after the owner's six decisions. Compared with the first round earlier the same day (the generated-date line is identical, so a changed file changed in content):
 
@@ -82,7 +98,7 @@ The exports were regenerated again after the owner's six decisions. Compared wit
 | `Dealer_Installer_Setup_Guide.md` | "Not our work" box rewritten (installer may plug the supply in; no outlets, no household power wiring; no working outlet = stop and tell the customer); checklist pre-install and step 1; SOP troubleshooting row; warranty sentence | yes |
 | `Field_Guide_Day1_Day2.md` | the same checklist text plus the dealer guide (box, call row, warranty sentence) | yes |
 | `Dealer_Dashboard_Guide.md`, `dealer-inventory-guide.md`, `messaging-configuration-guide.md` | dealer guide: box, "add an outlet" call row, warranty sentence | yes |
-| `sales-mode-guide.md` | warranty sentence (two places); the electrical-work line | yes |
+| `sales-mode-guide.md` | warranty sentence (two places); the line about the work we do not do | yes |
 | `Lumina_Homeowner_Guide.md`, `User_Guide_Commercial.md` | getting-started "What your installer did" paragraph | yes |
 | `Admin_Operations_Guide.md`, `nex-gen-operations-overview.md` | claims policy: warranty sentence; the not-electricians row marked owner-confirmed | yes |
 | `print/P1-preinstall-bench-sheet.md`, `print/P2-install-day-sheet.md`, `print/P3-site-controller-record.md` | callouts and outlet lines rewritten; re-rendered and checked | yes (rows G1–G3) |
@@ -110,4 +126,4 @@ Every export was regenerated on 2026-10-12 (the generated-date line changed in a
 - Everything inside "Inventory Tools", "Logo, Icons, Media" (including its "web" and "Media Video and Photo" folders), "Nex-Gen Dealer Development" and the dealer files folder.
 - Any folder not reached by the listing (the search was by name and by the folders above).
 
-*Facts: T-O8, T-SU2, T-X8, T-VA1, T-W1, T-W6, T-W10. Last verified: 2026-10-12.*
+*Facts: T-O8, T-SU2, T-X8, T-VA1, T-W1, T-W6, T-W10, T-W12. Last verified: 2026-10-12.*
