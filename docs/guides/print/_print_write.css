@@ -1,0 +1,60 @@
+/* _print_write.css — pen-ready print variant, used ONLY by the forms in docs/guides/print/.
+   White page, dark text, thin light-gray rules. No fills, header bands, background images,
+   gradients or light-coloured text. Brand = the small mark (nexgen_mark.png) and the dark
+   heading colour. The dark on-screen look of the archived guides lived in
+   docs/archive/guides-2026-09/_shared.css and the inline <style> blocks of the archived
+   August guides; this file shares nothing with them. */
+
+:root {
+  --ink: #111111;        /* body text */
+  --head: #0B1F3A;       /* headings: dark navy */
+  --rule: #B8BEC8;       /* thin light-gray rules */
+  --rule-dark: #6B7280;  /* box outlines */
+}
+
+html, body { background: #FFFFFF !important; }
+body {
+  font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+  color: var(--ink);
+  font-size: 10.5pt;         /* body text >= 10 pt */
+  line-height: 1.35;
+  margin: 0;
+}
+
+h1 { font-size: 16pt; color: var(--head); margin: 0 0 2mm 0; padding-bottom: 1.5mm; border-bottom: 0.6pt solid var(--rule-dark); }
+h2 { font-size: 12.5pt; color: var(--head); margin: 4mm 0 1.5mm 0; padding-bottom: 1mm; border-bottom: 0.5pt solid var(--rule); page-break-after: avoid; }
+h3 { font-size: 11pt; color: var(--head); margin: 3.5mm 0 1.5mm 0; page-break-after: avoid; }
+p { margin: 1mm 0 2mm 0; }
+strong { color: var(--ink); font-weight: 600; }
+em { color: var(--ink); }
+.meta { font-size: 9.5pt; color: #333333; margin: 0 0 3mm 0; }
+.brandline { font-size: 8.5pt; letter-spacing: 2px; color: var(--head); text-transform: uppercase; margin: 0 0 1mm 0; }
+.mark { float: right; height: 14mm; margin: 0 0 2mm 4mm; }
+
+table { border-collapse: collapse; width: 100%; margin: 2mm 0 2.5mm 0; font-size: 10pt; page-break-inside: avoid; }
+th, td { border: 0.5pt solid var(--rule); padding: 1.5mm 2mm; text-align: left; vertical-align: top; }
+th { font-weight: 600; color: var(--head); background: none; }
+td.w  { height: 10mm; min-width: 25mm; }   /* short answer: at least 25 x 10 mm */
+td.wl { height: 16mm; }                    /* longer answer */
+td.n  { width: 6mm; }
+
+.cb { display: inline-block; width: 5mm; height: 5mm; border: 0.8pt solid var(--ink); vertical-align: -1mm; margin-right: 2mm; }
+.box { display: inline-block; border: 0.6pt solid var(--rule-dark); min-height: 10mm; min-width: 25mm; vertical-align: middle; margin: 0.5mm 1mm 0.5mm 0; }
+.box.wide { min-width: 60mm; }
+.note { display: block; border: 0.6pt solid var(--rule-dark); min-height: 60mm; width: 100%; margin: 1.5mm 0 3mm 0; page-break-inside: avoid; }
+.lines div { border-bottom: 0.5pt solid var(--rule); height: 8.5mm; }   /* writing lines >= 8 mm apart */
+.row { display: flex; gap: 3mm; align-items: flex-end; margin: 1.5mm 0; }
+.row .lbl { flex: 0 0 auto; }
+.row .fill { flex: 1 1 auto; border-bottom: 0.5pt solid var(--rule); height: 8.5mm; }
+.row .box { flex: 0 0 auto; }
+.row .box.wide { flex: 1 1 auto; }
+.row.top { align-items: center; }
+.callout { border: 0.8pt solid var(--rule-dark); padding: 2mm 3mm; margin: 2mm 0 3mm 0; background: none; }
+
+ol, ul { padding-left: 5mm; margin: 1mm 0 2mm 0; }
+li { margin: 1.2mm 0; }
+code { font-family: Consolas, 'Courier New', monospace; font-size: 9.5pt; color: var(--ink); background: none; padding: 0; }
+blockquote { border-left: 0.8pt solid var(--rule-dark); margin: 2mm 0; padding: 1mm 3mm; background: none; color: var(--ink); }
+hr { border: none; border-top: 0.5pt solid var(--rule); margin: 3mm 0; }
+.pagebreak { page-break-before: always; }
+a { color: var(--ink); text-decoration: none; }
