@@ -28,7 +28,7 @@ body_class: form
 <tr><th>Installer</th><td class="w"></td><th>Date</th><td class="w"></td></tr>
 </table>
 
-<div class="callout"><strong>Not our work.</strong> Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Where a job involves line-voltage power (power to the power-supply location, a new outlet, a circuit, a breaker, hardwiring), Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing. If it is not in place, do not improvise: stop and reschedule.</div>
+<div class="callout"><strong>Not our work.</strong> Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Do not improvise: reschedule.</div>
 
 ## A. Before you leave the shop
 
@@ -41,7 +41,7 @@ body_class: form
 
 ## B. At the controller
 
-<p><span class="cb"></span>1. Controller mounted; low-voltage wiring and lights connected; powered up from its supply; waited about a minute.</p>
+<p><span class="cb"></span>1. Controller mounted; low-voltage wiring and lights connected; power supply plugged into the existing outlet (no working outlet: stop and tell the customer, install none); waited about a minute.</p>
 <p><span class="cb"></span>2. Firmware version read (controller card in the installer wizard, or <code>http://4.3.2.1/json/info</code> on its setup network). Never flash, update or downgrade.</p>
 <div class="row top"><span class="lbl"><code>ver</code></span><span class="box"></span><span class="lbl"><code>release</code></span><span class="box wide"></span></div>
 <p><span class="cb"></span>3. On the customer's Wi-Fi (if not: joined the setup network named on the label, opened <code>http://4.3.2.1</code>, entered the Wi-Fi name and password, saved; controller restarted and joined).</p>
@@ -105,4 +105,4 @@ body_class: form
 <tr><th style="width:22%">Installer</th><td class="w"></td><th style="width:18%">Date</th><td class="w"></td></tr>
 </table>
 
-*Facts: T-W1, T-W2, T-W5, T-W6, T-F2, T-A2, T-A3, T-A5, T-X5, T-X11, T-X13, T-X25, T-X26, T-R9, T-R10, T-GD3, T-O8, T-SU1, T-SU2.*
+*Facts: T-W1, T-W2, T-W5, T-W6, T-W8, T-F2, T-A2, T-A3, T-A5, T-X5, T-X11, T-X13, T-X25, T-X26, T-R9, T-R10, T-GD3, T-O8, T-SU1, T-SU2.*

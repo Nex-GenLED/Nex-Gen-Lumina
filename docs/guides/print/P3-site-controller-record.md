@@ -33,7 +33,7 @@ body_class: form
 <tr><th>Day 1 (pre-install)</th><td class="w"></td><th>Day 2 (install day)</th><td class="w"></td></tr>
 </table>
 
-<p>Line-voltage power at the power-supply location: <span class="cb"></span>in place &nbsp; <span class="cb"></span>arranged by the customer through a licensed professional of their own choosing &nbsp; <span class="cb"></span>not needed. &nbsp; Nex-Gen LED does no electrical work.</p>
+<p>Working outlet at the power-supply location: <span class="cb"></span>in place &nbsp; <span class="cb"></span>arranged by the homeowner &nbsp; <span class="cb"></span>not needed. &nbsp; Nex-Gen LED does no electrical work: our installer may plug the supply into an existing outlet, and does not install outlets or run household power wiring.</p>
 
 ## B. Runs
 
@@ -87,4 +87,4 @@ body_class: form
 
 <div class="note"></div>
 
-*Facts: T-W1, T-W2, T-W6, T-F2, T-F12, T-A2, T-A3, T-A5, T-X4, T-X5, T-X11, T-X13, T-R9, T-R10, T-GD8, T-O8, T-SU2.*
+*Facts: T-W1, T-W2, T-W6, T-W8, T-F2, T-F12, T-A2, T-A3, T-A5, T-X4, T-X5, T-X11, T-X13, T-R9, T-R10, T-GD8, T-O8, T-SU2.*

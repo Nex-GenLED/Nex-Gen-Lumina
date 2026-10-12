@@ -29,7 +29,7 @@ body_class: form
 <tr><th>Prepared by</th><td class="w"></td><th>Date</th><td class="w"></td></tr>
 </table>
 
-<div class="callout"><strong>Not our work.</strong> Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Where a job involves line-voltage power (power to the power-supply location, a new outlet, a circuit, a breaker, hardwiring), Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing, before install day.</div>
+<div class="callout"><strong>Not our work.</strong> Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer.</div>
 
 ## A. Captured from the customer
 
@@ -38,7 +38,7 @@ body_class: form
 <p><span class="cb"></span>Customer's Wi-Fi password recorded privately in the dealer's secure record (never on this sheet).</p>
 <p><span class="cb"></span>Not a guest network. &nbsp; <span class="cb"></span>Not a hidden network.</p>
 <p><span class="cb"></span>Runs and light counts are on the record (P3). &nbsp; Bridge sold: <span class="cb"></span>yes &nbsp; <span class="cb"></span>no</p>
-<p>Line-voltage power at the power-supply location: <span class="cb"></span>in place &nbsp; <span class="cb"></span>arranged by the customer &nbsp; <span class="cb"></span>not needed</p>
+<p>Working outlet at the power-supply location: <span class="cb"></span>in place &nbsp; <span class="cb"></span>arranged by the homeowner &nbsp; <span class="cb"></span>not needed</p>
 
 ## B. Controller
 
@@ -97,4 +97,4 @@ body_class: form
 <tr><th style="width:22%">Prepared by</th><td class="w"></td><th style="width:18%">Checked by</th><td class="w"></td></tr>
 </table>
 
-*Facts: T-W1, T-W2, T-W6, T-F2, T-F3, T-F9, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R9, T-X1.*
+*Facts: T-W1, T-W2, T-W6, T-W8, T-F2, T-F3, T-F9, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R9, T-X1.*
