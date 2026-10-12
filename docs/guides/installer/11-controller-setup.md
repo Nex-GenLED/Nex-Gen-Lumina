@@ -1,6 +1,6 @@
 # Controller setup: outputs, channels and the roofline
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09 · For installers*
+*Describes build: 2.5.10+116 · Last verified: 2026-10-12 · For installers*
 
 ## Outputs are channels
 
@@ -36,7 +36,7 @@ Do it in the app, never on the controller's own web page.
 1. Set the new output on the controller's own LED settings page with its canonical GPIO number (2, 14, 16 or 18) and its light count; do not add it in the app's editor (bug #187 would give it the wrong number). Then, in the customer's account (Installer Mode → **Existing Customer**), open System & Device Management → My Lights and confirm the app shows the new row with the right number.
 2. Open the app on the home Wi-Fi and wait a minute, so the channels are re-read.
 3. Re-check the roofline map and any schedule that targets specific channels.
-4. Email general@nex-genled.com that an output was added. Game Day checks that the everyday lighting presets describe every output; after a change they may not, and until that is corrected Game Day stays blocked for the house. An in-app repair is coming; today support corrects it.
+4. Email general@nex-genled.com that an output was added, and note it on the site and controller record. Game Day checks that the everyday lighting presets describe every output; after a change they may not, and until that is corrected Game Day stays blocked for the house. An in-app repair is coming; today support corrects it.
 
 A change made on the controller's own page bypasses all of this and can leave Game Day blocked and the house stuck in team colours after a game.
 
@@ -47,6 +47,6 @@ A change made on the controller's own page bypasses all of this and can leave Ga
 
 ## Firmware
 
-Record the version. Never flash, update or downgrade. See the [install checklist](10-install-checklist.md).
+Record the version (`ver` and `release`) on the site and controller record. Never flash, update or downgrade; the controller's own settings page offers an update, do not use it. The app never checks the version and treats every unit in service the same, so the version matters only for support: a version you have not seen before, note it and email general@nex-genled.com, and change nothing. See the [install checklist](10-install-checklist.md) and the [print forms](../print/README.md).
 
-*Facts: T-G1, T-G2, T-X4, T-X5, T-X25, T-GD8, T-GD7, T-D2, T-F2, T-SU2.*
+*Facts: T-G1, T-G2, T-X4, T-X5, T-X25, T-GD8, T-GD7, T-D2, T-F2, T-F9, T-F12, T-W6, T-SU2.*

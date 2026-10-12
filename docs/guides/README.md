@@ -1,6 +1,6 @@
 # Lumina guides
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09*
+*Describes build: 2.5.10+116 · Last verified: 2026-10-12*
 
 One source of truth: [`docs/FACTS.md`](../FACTS.md). Every page below states facts from it and lists the ids it used at the bottom. If a page and FACTS disagree, FACTS wins and the page is wrong.
 
@@ -23,10 +23,11 @@ Each page opens with `Describes build:` and `Last verified:`. Nothing unshipped 
 
 | Page | Answers |
 |---|---|
-| [10 Install checklist](installer/10-install-checklist.md) | The day-of list, including firmware (record, never flash) and the setup network |
+| [10 Install checklist](installer/10-install-checklist.md) | Pre-install, install day, handoff, the not-our-work box, firmware (record, never flash), the setup network |
 | [11 Controller setup](installer/11-controller-setup.md) | Outputs, channels, roofline marking, adding an output after install |
 | [12 Bridge guide](installer/12-bridge-guide.md) | Pair, test, replace, move, reset, the ten-minute gap |
-| [13 Installer SOP](installer/13-installer-sop.md) | Bench prep before an install |
+| [13 Pre-install SOP](installer/13-installer-sop.md) | Bench prep, Day 1, the line-voltage boundary |
+| [Print forms](print/README.md) | Pen-ready sheets: pre-install bench, install day, site and controller record |
 
 ## Dealer
 

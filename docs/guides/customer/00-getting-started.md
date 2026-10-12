@@ -1,6 +1,6 @@
 # Get started with Lumina
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09*
+*Describes build: 2.5.10+116 · Last verified: 2026-10-12*
 
 Your lights were installed and set up by a professional. This page takes you from the invitation your installer sent to your first look on the house. It takes about five minutes.
 
@@ -59,6 +59,10 @@ You can change both later in your phone's Settings.
 
 You now know enough to use Lumina every day. The next page covers power, brightness, channels and favorites in more detail.
 
+## What your installer did
+
+Your installer ran the low-voltage wiring on the pre-install visit, mounted the controller, put up the lights on install day, created your account, sent the invitation and showed you the app. Their phone and email are under **System → Support & Resources**. Nex-Gen LED does no electrical work: if your home needed power at the power-supply location, a new outlet, a circuit or a breaker, that was arranged by you through a licensed professional of your own choosing. Your controller's firmware was recorded at install and nobody updates it.
+
 ## The five tabs
 
 | Tab | What it is for |
@@ -73,4 +77,4 @@ You now know enough to use Lumina every day. The next page covers power, brightn
 
 Open [Troubleshooting](06-troubleshooting.md), or in the app go to **System → Support & Resources** and tap **Contact Nex-Gen Support**. It shows your installer's phone and email. You can also email general@nex-genled.com.
 
-*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-SU2, T-S2.*
+*Facts: T-O8, T-B5, T-R10, T-X19, T-X20, T-SU1, T-SU2, T-S2, T-W1, T-W2, T-F2.*
