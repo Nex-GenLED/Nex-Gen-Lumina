@@ -1,6 +1,6 @@
 # Prepared merge of docs/overhaul-2026-10 into release — NOT RUN
 
-Updated 2026-10-12 for the Phase 6 head (the SHA in the Phase 6 hand-back). Documents only. No tag, no version bump, no code, no `codemagic.yaml` change. The owner runs it when ready; nothing below has been executed.
+Updated 2026-10-12 for the Phase 7 head (the SHA in the Phase 7 hand-back); the trigger was re-read from `codemagic.yaml` on 2026-10-12 (lines 24–29: `events: [tag]`, `tag_patterns: build-*`; a branch push or merge starts nothing). Documents only. No tag, no version bump, no code, no `codemagic.yaml` change. The owner runs it when ready; nothing below has been executed.
 
 ## Why a push to release starts no build
 

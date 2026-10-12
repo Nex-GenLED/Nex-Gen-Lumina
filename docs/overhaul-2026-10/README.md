@@ -16,6 +16,7 @@ Nothing outside this directory was changed. Phase 3 (rewrite) starts only on the
 | `05_…`–`11_…` | The raw audit reports the tables were built from (values redacted) |
 | `PHASE5_REPORT.md` | Owner decisions of 2026-10-09 applied (mailbox, setup access point, outputs, Drive swap) |
 | `PHASE6_REPORT.md` | Owner decisions of 2026-10-12 applied: we are not electricians; the install family rebuilt; pen-ready print forms; the firmware-version analysis; OWNER DECISION blocks |
+| `PHASE7_REPORT.md` | The owner's answers to the six OWNER DECISION blocks applied (warranty sentence, the outlet boundary, "Nex-Gen installers", Drive names, firmware option 1, the guard rule) |
 | `MERGE_PLAN.md` | The prepared, not run, docs-only merge into release |
 
 Privacy rule for this directory: no customer name, email, uid, MAC, bridge id, home address, password,

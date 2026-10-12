@@ -1,6 +1,6 @@
 # WLED firmware versions in the fleet — read-only analysis
 
-*Maintained. Describes build: 2.5.10+116 · Written 2026-10-12 · No controller, bridge, Firestore document, configuration or Drive file was changed to produce this page. Facts it establishes are rows T-F1 to T-F13 in `docs/FACTS.md`.*
+*Maintained. Describes build: 2.5.10+116 · Written 2026-10-12 · No controller, bridge, Firestore document, configuration or Drive file was changed to produce this page. Facts it establishes are rows T-F1 to T-F14 in `docs/FACTS.md`; the owner's decision of 2026-10-12 is T-F14.*
 
 The owner's question: can controllers be moved to 0.15.1 without risking their integrity? This page answers what the documents say, what the code expects, what the fleet runs, what changed upstream, how a unit actually moves between versions, and then gives options. It decides nothing and runs nothing. Anything not provable from the repository, the official WLED sources read today, or a recorded bench measurement is marked UNVERIFIED.
 
@@ -111,7 +111,7 @@ What the 0.15.2 "old-version check" and "OTA validation" do to an older image is
 
 **The home unit is never a test unit.** The owner's home controller, also the bench unit, carries seven bad bytes in its presets file (one stored preset, slot 41, cannot be parsed; `docs/BUGS_AND_DEBT.md:618`; FACTS T-F11). Its presets file cannot be trusted as a before-image, and a write that resaves the file could lose or spread the damage. The unregistered spare unit (0.15.4, four outputs) is the only unit on which anything destructive may be tried.
 
-## 6. Verdict, as options
+## 6. Verdict (options; option 1 decided by the owner on 2026-10-12)
 
 ### (a) Which version should be the fleet standard
 
@@ -121,7 +121,7 @@ What the 0.15.2 "old-version check" and "OTA validation" do to an older image is
 | 2. 0.15.1 as the **reference** version: what new bench proofs are taken against, what a new unit is checked against at the bench, no fielded unit moved | Majority version; every ledger proof; the effect catalog verification; the July observation. Costs nothing on the fleet. | Units arrive from the vendor on 0.15.4 now (T-F1, §3), so "reference" cannot mean "what ships" without a flash the rules forbid. |
 | 3. 0.15.4 as the standard | Vendor's current image; adds OTA validation, bootloop recovery and the presets file protection, which is the only upstream change aimed at the kind of damage the home unit shows. | The July pause is unexplained; the 0.15.1-measured behaviours are unverified on it; reaching it on 16 units means 16 OTA updates with UNVERIFIED retention and no recovery path. |
 
-**Safest single option: 1 with 2's reference clause.** Keep "record, never change" for every fielded unit; name 0.15.1 as the reference the app was measured against (a FACTS statement, not an instruction to flash); treat a 0.15.4 unit as supported, as today. Nothing moves.
+**Decided by the owner on 2026-10-12: option 1 (FACTS T-F14).** Record, never change, for every fielded unit. 0.15.1 is named as the reference the app was measured against; that is a FACTS statement, not an instruction to flash and not a claim that 0.15.1 is what ships or is newer. A 0.15.4 unit is supported as today. Nothing moves. Option 2 was not chosen, so the bench plan in (b) is unauthorized.
 
 ### (b) Is a move supported, safe and reversible for our units
 
@@ -129,11 +129,11 @@ What the 0.15.2 "old-version check" and "OTA validation" do to an older image is
 - **Down, 0.15.4 → 0.15.1:** the route the vendor documents is USB, which `a84aec2` forbids; the OTA route may be refused by the old-version check (UNVERIFIED). Not supported under our rules today.
 - **Vendor "16.0.1" image:** not an upstream release; nothing known. Not an option.
 
-**Bench test plan (prepared, NOT run; the spare unit only; never the home unit).**
+**Bench test plan: written, NOT authorized (option 2 was not chosen on 2026-10-12), never run; no controller to be touched. If it is ever authorized it applies to the spare unit only, never the home unit with the seven bad bytes.**
 
 1. Baseline, read-only: `GET /json/info`, `/json/state`, `/json/cfg`, `/presets.json`, `/json/effects`, `/json/palettes`; save each with its SHA-256; record `ver`, `vid`, `release`, `mac`, `leds.count`, the four buses, every timer row, the setup-network settings (behaviour value only, never the key) and the effect-list hash. Confirm the spare is unregistered in Firestore (read-only) before anything else.
 2. Backup through the controller's own backup page as well (presets and configuration JSON), so there is a restore path that does not depend on the file system surviving.
-3. Decide the direction with the owner. The only direction the rules allow without an exception is none; the plan assumes a one-off exception for the spare, in writing.
+3. Nothing past this step without the owner's written one-off exception for the spare. On 2026-10-12 the owner chose option 1, so there is no exception and steps 4–9 are not to be run.
 4. OTA per §5 with the official image for `ESP32_Ethernet` of the target version. Time the upload; capture the page's response verbatim.
 5. After the restart, read the same six endpoints. Pass criteria: `ver` is the target; `release` unchanged; SHA-256 of `/presets.json` identical to the baseline (a byte change here fails the test, because it means the update rewrote or lost presets); `/json/cfg` readback equal to baseline on every key the app writes (buses, timers, `if.ntp`, `light.gc`, `ap.behav`, `def.ps`; readback is compacted, so compare parsed values, not bytes); Wi-Fi still joined; effect-list hash identical.
 6. App checks on the spare (harness, LAN): apply a look; a per-pixel design larger than 224 LEDs so that it is sent in two or more requests, then read `/json/live` and confirm every pixel of every request is lit (this is the §2.2 gap); schedule sync with one general timer and one solar timer, then read the timer rows back; preset save and delete round trip with a SHA check of `/presets.json` between steps; the on-connect healer reports zero writes on a healthy unit; a 30-minute one-second `/json/info` log on an animated effect to look for the July pause (frame rate to zero).
