@@ -8,7 +8,8 @@ Each file here replaces one file in the Google Drive "Lumina How-To's" folder (P
 | `User_Guide_Commercial.md` | `User_Guide_Commercial.pdf` | customer 00–07 (commercial customers use the standard app) |
 | `Dealer_Installer_Setup_Guide.md` | `Dealer_Installer_Setup_Guide.pdf` | installer 10–13 |
 | `ESP32_Bridge_Setup_Guide.md` | `ESP32_Bridge_Setup_Guide.pdf` | installer 12 |
-| `day1-electrician-guide.md`, `day2-install-guide.md` | the two field-guide PDFs | dealer 20 + installer 10 |
+| `Field_Guide_Day1_Day2.md` | the two Day 1 and Day 2 field-guide PDFs (both removed; one replacement, uploaded under this name) | dealer 20 + installer 10 |
+| `print/P1-preinstall-bench-sheet.md`, `print/P2-install-day-sheet.md`, `print/P3-site-controller-record.md` (+ `print/_print_write.css`, `print/nexgen_mark.png`) | new pen-ready forms (no Drive predecessor; the old pre-install PDF is removed) | guides/print |
 | `Dealer_Dashboard_Guide.md`, `dealer-inventory-guide.md`, `messaging-configuration-guide.md` | the three dealer PDFs | dealer 20 |
 | `sales-mode-guide.md` | `sales-mode-guide.pdf` | dealer 21 |
 | `Admin_Operations_Guide.md`, `corporate-dashboard-guide.md` | the two staff PDFs (the Admin Operations PDF also sits at the shared-drive root; pull both copies: they print old staff codes that were all rotated on 2026-08-29) | internal 30 (+33) |
@@ -17,4 +18,4 @@ Each file here replaces one file in the Google Drive "Lumina How-To's" folder (P
 | `Lumina_Privacy_Policy_corrections.md` | `Lumina_Privacy_Policy.docx` and the live privacy page | corrected paragraphs only |
 | `store-listings-and-website-notes.md` | App Store / Play listings, data-safety answers, website pages | what to remove and change |
 
-Re-generate after any guide change: `bash scripts/docs_exports.sh` (concatenates the source pages and strips links), then `node scripts/docs_guard.mjs`.
+Re-generate after any guide change: `bash scripts/docs_exports.sh` (concatenates the source pages and strips links; copies the print forms), then `node scripts/docs_guard.mjs`. Render the print forms with `md-to-pdf` from `print/` (their front matter sets Letter, the margins and the white print stylesheet); render everything else with the usual tool.

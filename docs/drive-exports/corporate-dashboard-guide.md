@@ -1,7 +1,7 @@
 <!-- docs_guard: allow-banned -->
 # Admin Operations Guide (internal)
 
-*Replacement text for the Drive file `corporate-dashboard-guide.pdf`. Generated 2026-10-09 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
+*Replacement text for the Drive file `corporate-dashboard-guide.pdf`. Generated 2026-10-12 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
 
 
 ---

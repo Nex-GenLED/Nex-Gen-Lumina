@@ -1,6 +1,6 @@
 # Lumina Bridge Setup
 
-*Replacement text for the Drive file `ESP32_Bridge_Setup_Guide.pdf`. Generated 2026-10-09 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
+*Replacement text for the Drive file `ESP32_Bridge_Setup_Guide.pdf`. Generated 2026-10-12 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
 
 
 ---

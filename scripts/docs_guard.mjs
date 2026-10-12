@@ -17,7 +17,8 @@
 //   4. Every fact id cited (T-…) exists in docs/FACTS.md. A fact whose status is unshipped
 //      (BUILT NOT SHIPPED, NOT BUILT, NEVER WORKED, NOT REACHABLE, NOT IN RELEASE) may be cited in a
 //      paragraph only if that paragraph says it is coming / not available / does not.
-//   5. Banned phrases from docs/guides/internal/33-claims-policy.md (that page and FACTS.md are exempt).
+//   5. Banned phrases from docs/guides/internal/33-claims-policy.md (that page and FACTS.md are exempt),
+//      plus the trade word and "electrical work" (owner 2026-10-12: we are not electricians; a negated sentence passes).
 //   6. Credential, address and identity patterns: email, phone, private IP (192.168.4.1 allowed),
 //      MAC, 12-hex id, 28-character uid, "PIN ####", password values.
 //
@@ -104,6 +105,8 @@ const BANNED = [
   [/Use this controller/i, 'Use this controller (not shipped)'],
   [/Opening the app (at home )?repairs/i, 'repair-on-open claim'],
   [/OpenAI/i, 'OpenAI'],
+  [/\belectricians?\b/i, 'electrician (Nex-Gen LED, dealers and installers are not electricians; owner 2026-10-12, FACTS T-W1)'],
+  [/\belectrical (work|pre-?wire|team|crew|visit)\b/i, 'electrical work by us (we do none; owner 2026-10-12, FACTS T-W1; a sentence that says we do not is allowed)'],
 ];
 const BANNED_NEGATION_OK = /\b(no|not|never|none|without|isn't|is not|does not|there is no|wrong|untrue|withdrawn)\b/i;
 

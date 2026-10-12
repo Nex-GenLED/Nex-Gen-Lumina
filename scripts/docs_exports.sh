@@ -21,8 +21,7 @@ exp Lumina_Homeowner_Guide.md "Lumina Homeowner Guide" Lumina_Homeowner_Guide.pd
 exp User_Guide_Commercial.md "Lumina Commercial User Guide" User_Guide_Commercial.pdf "${CUST[@]}"
 exp Dealer_Installer_Setup_Guide.md "Dealer and Installer Setup Guide" Dealer_Installer_Setup_Guide.pdf "$I"/10-install-checklist.md "$I"/11-controller-setup.md "$I"/12-bridge-guide.md "$I"/13-installer-sop.md
 exp ESP32_Bridge_Setup_Guide.md "Lumina Bridge Setup" ESP32_Bridge_Setup_Guide.pdf "$I"/12-bridge-guide.md
-exp day1-electrician-guide.md "Day 1 and Day 2 field guide" day1-electrician-guide.pdf "$D"/20-dealer-guide.md "$I"/10-install-checklist.md
-exp day2-install-guide.md "Day 1 and Day 2 field guide" day2-install-guide.pdf "$D"/20-dealer-guide.md "$I"/10-install-checklist.md
+exp Field_Guide_Day1_Day2.md "Day 1 and Day 2 field guide" "the two Day 1 and Day 2 field-guide PDFs (both removed; one replacement under this name)" "$D"/20-dealer-guide.md "$I"/10-install-checklist.md
 exp Dealer_Dashboard_Guide.md "Dealer Guide" Dealer_Dashboard_Guide.pdf "$D"/20-dealer-guide.md
 exp dealer-inventory-guide.md "Dealer Guide (inventory section)" dealer-inventory-guide.pdf "$D"/20-dealer-guide.md
 exp messaging-configuration-guide.md "Dealer Guide (messaging section)" messaging-configuration-guide.pdf "$D"/20-dealer-guide.md
@@ -31,4 +30,7 @@ ALLOWB=1 exp Admin_Operations_Guide.md "Admin Operations Guide (internal)" Admin
 ALLOWB=1 exp corporate-dashboard-guide.md "Admin Operations Guide (internal)" corporate-dashboard-guide.pdf "$N"/30-admin-operations.md
 ALLOWB=1 exp nex-gen-operations-overview.md "Nex-Gen Lumina — how the guides fit together" nex-gen-operations-overview.pdf docs/guides/README.md "$N"/33-claims-policy.md
 printf '# Media Mode Guide — withdrawn\n\n*Replacement for the Drive file `Media_Mode_Guide.pdf`. Not published.*\n\nMedia Mode has no entry point in the shipped app; nothing navigates to it. Pull the Drive PDF. If Media Mode ships later, a new page is written from `docs/FACTS.md` at that time.\n\n*Facts: T-X8.*\n' > docs/drive-exports/Media_Mode_Guide.md
-echo "docs_exports: $(ls docs/drive-exports/*.md | wc -l) files in docs/drive-exports/"
+# Pen-ready print forms: copied verbatim (their front matter names the stylesheet), with the stylesheet and the mark.
+mkdir -p docs/drive-exports/print
+cp docs/guides/print/P1-preinstall-bench-sheet.md docs/guides/print/P2-install-day-sheet.md docs/guides/print/P3-site-controller-record.md docs/guides/print/_print_write.css docs/guides/print/nexgen_mark.png docs/drive-exports/print/
+echo "docs_exports: $(ls docs/drive-exports/*.md | wc -l) files in docs/drive-exports/, $(ls docs/drive-exports/print/*.md | wc -l) print forms in docs/drive-exports/print/"

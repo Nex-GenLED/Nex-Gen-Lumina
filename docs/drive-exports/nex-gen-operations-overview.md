@@ -1,14 +1,14 @@
 <!-- docs_guard: allow-banned -->
 # Nex-Gen Lumina — how the guides fit together
 
-*Replacement text for the Drive file `nex-gen-operations-overview.pdf`. Generated 2026-10-09 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
+*Replacement text for the Drive file `nex-gen-operations-overview.pdf`. Generated 2026-10-12 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
 
 
 ---
 
 # Lumina guides
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09*
+*Describes build: 2.5.10+116 · Last verified: 2026-10-12*
 
 One source of truth: `docs/FACTS.md`. Every page below states facts from it and lists the ids it used at the bottom. If a page and FACTS disagree, FACTS wins and the page is wrong.
 
@@ -31,10 +31,11 @@ Each page opens with `Describes build:` and `Last verified:`. Nothing unshipped 
 
 | Page | Answers |
 |---|---|
-| 10 Install checklist | The day-of list, including firmware (record, never flash) and the setup network |
+| 10 Install checklist | Pre-install, install day, handoff, the not-our-work box, firmware (record, never flash), the setup network |
 | 11 Controller setup | Outputs, channels, roofline marking, adding an output after install |
 | 12 Bridge guide | Pair, test, replace, move, reset, the ten-minute gap |
-| 13 Installer SOP | Bench prep before an install |
+| 13 Pre-install SOP | Bench prep, Day 1, the line-voltage boundary |
+| Print forms | Pen-ready sheets: pre-install bench, install day, site and controller record |
 
 ## Dealer
 
@@ -66,7 +67,7 @@ It fails when a page names a screen label that is not in the app, a path that do
 
 # Claims policy — what may be said about Lumina
 
-*For Nex-Gen staff, dealers and anyone writing for the website, a store listing or a customer. Describes build: 2.5.10+116 · Last verified: 2026-10-09.*
+*For Nex-Gen staff, dealers and anyone writing for the website, a store listing or a customer. Describes build: 2.5.10+116 · Last verified: 2026-10-12.*
 
 This page lists the claims that must not be made, the reason, and what to say instead. The guard (`node scripts/docs_guard.mjs`) refuses guide text that uses the banned phrases below; this page is exempt because it quotes them.
 
@@ -90,6 +91,7 @@ This page lists the claims that must not be made, the reason, and what to say in
 | "Repair base lighting" card, "Use this controller", server celebrations | Built, not shipped. Facts T-GD7, T-S3, T-C2. | "Coming." or nothing. |
 | "Opening the app repairs your everyday lighting" | The repair is a dry run today. Facts T-GD6. | "Contact your installer." |
 | Any phone number, password, PIN, address, device id, customer name, or any email address other than the support mailbox, in a document | The repository is public. | "Email general@nex-genled.com" (lowercase; the only address a document carries). |
+| "Our electrician", "electrical pre-wire", "electrical work" (by us), any statement that an installer or dealer is an electrician or needs electrician qualifications | We are not electricians. Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install and no electrical work. Facts T-W1, T-W2. | "Our installer runs the low-voltage wiring on the pre-install visit." Where line-voltage power is involved: "Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing." (the only place a licensed professional is mentioned; no trade is named) |
 
 ## Always say
 
@@ -100,9 +102,10 @@ This page lists the claims that must not be made, the reason, and what to say in
 - Schedules: "Up to 20 saved schedules; the controller holds 8 timed changes at once. Edits made away from home apply when you are home." (T-L4, T-R8)
 - Favorites: "Keep up to 2." (T-V1)
 - Support: "Email general@nex-genled.com, or in the app open Settings → Support & Resources → Contact Nex-Gen Support." Always lowercase; no other support address. (T-SU1, T-SU2)
+- Our work: "We do the low-voltage wiring and the pre-install, and the install. We do no electrical work." (T-W1, T-W2)
 
 ## Store listings and the website
 
 Until the listings and the site are rewritten from this page and FACTS, treat them as unverified. The archived website prompts in `docs/archive/root-drafts/LANDINGSITE_AI_PROMPTS.md` are marked DO NOT USE for the reasons above. Replacement text for Drive and the stores is prepared under `docs/drive-exports/`; nothing there is published until the owner uploads it.
 
-*Facts: T-VA1, T-VA2, T-F2, T-F3, T-O8, T-O6, T-R1, T-R4, T-R6, T-R7, T-R9, T-GD1, T-GD2, T-GD3, T-GD5, T-GD6, T-GD7, T-S3, T-C2, T-X14, T-X15, T-X16, T-O4, T-L4, T-R8, T-V1, T-SU1, T-SU2.*
+*Facts: T-VA1, T-VA2, T-F2, T-F3, T-O8, T-O6, T-R1, T-R4, T-R6, T-R7, T-R9, T-GD1, T-GD2, T-GD3, T-GD5, T-GD6, T-GD7, T-S3, T-C2, T-X14, T-X15, T-X16, T-O4, T-L4, T-R8, T-V1, T-SU1, T-SU2, T-W1, T-W2.*

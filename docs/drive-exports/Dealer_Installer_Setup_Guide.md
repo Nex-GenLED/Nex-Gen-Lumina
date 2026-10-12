@@ -1,37 +1,47 @@
 # Dealer and Installer Setup Guide
 
-*Replacement text for the Drive file `Dealer_Installer_Setup_Guide.pdf`. Generated 2026-10-09 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
+*Replacement text for the Drive file `Dealer_Installer_Setup_Guide.pdf`. Generated 2026-10-12 from docs/guides/; not published until the owner uploads it. Describes build: 2.5.10+116.*
 
 
 ---
 
 # Install checklist
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09 · For installers*
+*Describes build: 2.5.10+116 · Last verified: 2026-10-12 · For installers*
 
-Work down this list on install day. Each step says what you should see. The two rules that matter most are in bold.
+The job in order: what the dealer does before install day (pre-install), what you do on install day, and what the customer must have before you leave (handoff). Each step says what you should see. The rules that matter most are in bold. The pen version of this page is the install-day sheet in the print forms.
 
-## Before you leave the shop
+## Not our work
 
-- [ ] The install sheet from the sale: customer name, address, email, the runs and their LED counts, which outputs they go on, and whether a Lumina Bridge was sold.
-- [ ] Your installer PIN (your dealer code plus your installer code).
-- [ ] A phone with Lumina signed in, with Bluetooth and location on.
-- [ ] The customer's Wi-Fi name and password, confirmed with the customer. The controller needs the 2.4 GHz network; if the router splits bands, use that one.
-- [ ] The controller and bridge, bench-prepared per the installer SOP and labelled.
+Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Where a job involves line-voltage power (power to the power-supply location, a new outlet, a circuit, a breaker, hardwiring), Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing, before install day.
 
-## At the controller
+Not yet decided by the owner, so do not improvise an answer on site (ask): plugging the power supply into the customer's outlet; GFCI and weatherproof outlets; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
 
-1. Mount, wire and power the controller. Wait about a minute.
-2. **Read the firmware version and write it on the install sheet.** It shows on the controller's card in the installer wizard once the controller is on the network, or at `http://4.3.2.1/json/info` while you are on its setup network. **Never flash, update or downgrade a controller.** Never load a generic WLED image.
+## Pre-install (the dealer, before install day)
+
+- [ ] The site and controller record from the sale (print form): customer name, address, email, the runs and their LED counts, which outputs they go on, and whether a Lumina Bridge was sold.
+- [ ] Line-voltage power at the power-supply location confirmed in place, or confirmed arranged by the customer (see *Not our work*). Note it on the record.
+- [ ] The 50 % deposit marked collected on the job's card in the **Day 1 Queue** (**Mark Deposit Collected**); the app will not schedule Day 1 before that.
+- [ ] Day 1, the pre-install visit: the dealer's installer runs the low-voltage wiring for each run back to the controller location and labels every wire end by run, so install day is lights, controller and app. No lights go up on Day 1.
+- [ ] The controller and bridge bench-prepared per the pre-install SOP and labelled; the pre-install bench sheet completed and filed.
+- [ ] Your installer PIN (your dealer code plus your installer code), and a phone with Lumina signed in, with Bluetooth and location on.
+- [ ] The customer's Wi-Fi name, confirmed with the customer. The controller needs the 2.4 GHz network; if the router splits bands, use that one. The password is recorded privately, never on a sheet.
+
+## Install day
+
+### At the controller
+
+1. Mount the controller, connect the low-voltage wiring and the lights, and power it up from its power supply. Wait about a minute.
+2. **Read the firmware version and write it on the record.** It shows on the controller's card in the installer wizard once the controller is on the network, or at `http://4.3.2.1/json/info` while you are on its setup network. **Never flash, update or downgrade a controller.** Never load a generic WLED image. The controller's own settings page offers an update; do not use it.
 3. If the controller is not yet on the customer's Wi-Fi: join its setup network from your phone (the network named on the controller's label), open `http://4.3.2.1`, enter the customer's Wi-Fi name and password, and save. The controller restarts and joins the home Wi-Fi.
 4. **Set a unique AP password on this controller.** Controllers ship broadcasting their setup network with the manufacturer's public default password. On the controller's Wi-Fi settings page, replace it with a password unique to this unit and record it privately in your dealer's own record: never in a document, a message, a photo or the repo.
-5. On the same page (the controller's own settings, "Wi-Fi Setup"), set the option that decides when the setup network opens to one of the "when there is no connection" choices. Never choose "never": if the home network ever disappears, the setup network is how an installer reaches the controller again. The exact option labels, and which choice is right for Skikbily builds, are UNVERIFIED until someone observes them on a spare unit; write on the install sheet what the page offered and what you chose. Do not experiment beyond that one setting.
+5. On the same page (the controller's own settings, "Wi-Fi Setup"), set the option that decides when the setup network opens to one of the "when there is no connection" choices. Never choose "never": if the home network ever disappears, the setup network is how an installer reaches the controller again. The exact option labels, and which choice is right for Skikbily builds, are UNVERIFIED until someone observes them on a spare unit; write on the record what the page offered and what you chose. Do not experiment beyond that one setting.
 6. **Confirm the controller still answers on the home network after the change.** On the installer phone, open the controller's card and tap **Test Lights**, or reload the controller's page at its home-network address. Do not leave the site until it answers.
-7. Map each run to one of the controller's four outputs. The canonical outputs are: output 1 = GPIO 2, output 2 = GPIO 14, output 3 = GPIO 16, output 4 = GPIO 18. Write each run's output number on the install sheet. Never use more than four; how many outputs a Skikbily unit has beyond these four is UNVERIFIED.
+7. Map each run to one of the controller's four outputs. The canonical outputs are: output 1 = GPIO 2, output 2 = GPIO 14, output 3 = GPIO 16, output 4 = GPIO 18. Write each run's output number on the record. Never use more than four; how many outputs a Skikbily unit has beyond these four is UNVERIFIED.
 
 **If the controller stays on its setup network:** the Wi-Fi name or password is wrong, the network is 5 GHz-only, or the name is hidden. Fix the network and repeat step 3.
 
-## In the app: Installer Mode
+### In the app: Installer Mode
 
 1. On the sign-in screen tap the Lumina logo five times within three seconds, or tap **Installer** under **Nex-Gen Professional Access** on the Link Account screen. You'll see **Staff Access**.
 2. Enter your PIN. You'll see the Installer Mode landing screen with **New Install**, **Existing Customer**, **Day 1 Queue**, **Day 2 Queue** and **Dealer Dashboard**.
@@ -47,36 +57,41 @@ Work down this list on install day. Each step says what you should see. The two 
 
 **If a controller did not transfer to the customer's account**, the wizard says so and tells you to finish before you leave; do not stop at that screen.
 
-## Bridge (if one was sold)
+### Bridge (if one was sold)
 
 Follow the Bridge guide: join its setup network, set the home Wi-Fi, then in the customer's account pair it under **System & Device Management → Remote Access → Set Up Bridge**, and test it from your phone on mobile data. Bridges are paired by installers only.
 
-## Five things to show the customer
+## Handoff (what the customer gets)
 
-1. Power and brightness on Home, and a favorite.
-2. The Schedule tab: one repeating schedule you set together, and the **Turn lights off at sunrise daily** switch under System.
-3. Game Day, if they follow a team: add the team, and tell them the one rule: **open the app at home in the two days before a game**. Score celebrations need the app open.
-4. Away from home: works only with the bridge; a change takes a few seconds; about every seven hours the bridge is quiet for ten minutes.
-5. Support: **System → Support & Resources → Contact Nex-Gen Support** shows your dealer's phone and email, and anyone can email general@nex-genled.com.
+1. Their account, created in the Day 2 wrap-up with **Send Account Setup Email**, and the app invitation (TestFlight on iPhone, a Play testing link on Android). The app is not in the public stores.
+2. Their own phone signed in, the lights responding, and the Home badge reading **Direct**.
+3. Five things shown on their phone:
+   1. Power and brightness on Home, and a favorite.
+   2. The Schedule tab: one repeating schedule you set together, and the **Turn lights off at sunrise daily** switch under System.
+   3. Game Day, if they follow a team: add the team, and tell them the one rule: **open the app at home in the two days before a game**. Score celebrations need the app open.
+   4. Away from home: works only with the bridge; a change takes a few seconds; about every seven hours the bridge is quiet for ten minutes.
+   5. Support: **System → Support & Resources → Contact Nex-Gen Support** shows your dealer's phone and email, and anyone can email general@nex-genled.com.
+4. The homeowner guide (the dealer's copy), and the final payment confirmed on the Day 2 wrap-up's close step.
+5. Nothing on paper that carries a password, a PIN or a key. The site and controller record stays in the dealer's file.
 
-Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life.
+Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life. Do not describe anyone from Nex-Gen LED or the dealer as an electrician, and do not offer electrical work.
 
 ## Before you leave
 
-- [ ] Firmware version, output numbers (GPIO 2, 14, 16, 18) and LED counts written on the install sheet.
+- [ ] Firmware version, output numbers (GPIO 2, 14, 16, 18) and LED counts written on the record.
 - [ ] Customer signed in on their own phone, lights responding, badge reads **Direct**.
 - [ ] One repeating schedule saved and the header reads "Schedules synced to controller".
 - [ ] Bridge paired and tested from mobile data, if supplied.
 - [ ] A unique AP password set on the controller and recorded privately; the setup network set to open only when there is no connection (never "never"); the controller confirmed answering on the home network afterwards.
 - [ ] Your phone out of Installer Mode.
 
-*Facts: T-F2, T-F3, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-SU1, T-SU2, T-R10.*
+*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X11, T-X13, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-O8, T-SU1, T-SU2, T-R10.*
 
 ---
 
 # Controller setup: outputs, channels and the roofline
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09 · For installers*
+*Describes build: 2.5.10+116 · Last verified: 2026-10-12 · For installers*
 
 ## Outputs are channels
 
@@ -112,7 +127,7 @@ Do it in the app, never on the controller's own web page.
 1. Set the new output on the controller's own LED settings page with its canonical GPIO number (2, 14, 16 or 18) and its light count; do not add it in the app's editor (bug #187 would give it the wrong number). Then, in the customer's account (Installer Mode → **Existing Customer**), open System & Device Management → My Lights and confirm the app shows the new row with the right number.
 2. Open the app on the home Wi-Fi and wait a minute, so the channels are re-read.
 3. Re-check the roofline map and any schedule that targets specific channels.
-4. Email general@nex-genled.com that an output was added. Game Day checks that the everyday lighting presets describe every output; after a change they may not, and until that is corrected Game Day stays blocked for the house. An in-app repair is coming; today support corrects it.
+4. Email general@nex-genled.com that an output was added, and note it on the site and controller record. Game Day checks that the everyday lighting presets describe every output; after a change they may not, and until that is corrected Game Day stays blocked for the house. An in-app repair is coming; today support corrects it.
 
 A change made on the controller's own page bypasses all of this and can leave Game Day blocked and the house stuck in team colours after a game.
 
@@ -123,9 +138,9 @@ A change made on the controller's own page bypasses all of this and can leave Ga
 
 ## Firmware
 
-Record the version. Never flash, update or downgrade. See the install checklist.
+Record the version (`ver` and `release`) on the site and controller record. Never flash, update or downgrade; the controller's own settings page offers an update, do not use it. The app never checks the version and treats every unit in service the same, so the version matters only for support: a version you have not seen before, note it and email general@nex-genled.com, and change nothing. See the install checklist and the print forms.
 
-*Facts: T-G1, T-G2, T-X4, T-X5, T-X25, T-GD8, T-GD7, T-D2, T-F2, T-SU2.*
+*Facts: T-G1, T-G2, T-X4, T-X5, T-X25, T-GD8, T-GD7, T-D2, T-F2, T-F9, T-F12, T-W6, T-SU2.*
 
 ---
 
@@ -207,28 +222,42 @@ Questions: general@nex-genled.com.
 
 ---
 
-# Bench preparation SOP
+# Pre-install SOP: bench preparation
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09 · For dealer shop staff*
+*Describes build: 2.5.10+116 · Last verified: 2026-10-12 · For dealer shop staff*
 
-Prepare each controller and bridge at the shop so install day is wiring and testing, not configuration. Do the whole sheet once per unit.
+Prepare each controller and bridge at the shop so install day is lights, controller and app, not configuration. Do the whole sheet once per unit; the pen version is the pre-install bench sheet in the print forms.
+
+## Not our work
+
+Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Where a job involves line-voltage power (power to the power-supply location, a new outlet, a circuit, a breaker, hardwiring), Nex-Gen LED does not perform that work; the customer arranges it through a licensed professional of their own choosing, before install day. Confirm it on the site and controller record before Day 1 is scheduled.
+
+Not yet decided by the owner (ask; nothing in this SOP answers them): plugging the power supply into the customer's outlet; GFCI and weatherproof outlets; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
+
+## The pre-install, in order
+
+1. Capture the customer's information on the site and controller record (below).
+2. Confirm the line-voltage side is the customer's and is in place or arranged (above).
+3. Bench-prepare the controller (Section 1) and, if sold, the bridge (Section 2).
+4. Day 1, the pre-install visit: the dealer's installer runs the low-voltage wiring for each run back to the controller location and labels every wire end by run. No lights go up on Day 1.
+5. Install day (Day 2) follows the install checklist.
 
 ## What you need
 
 - The controller, its power supply, and (for a bridge) the bridge and a USB power adapter.
 - A laptop or phone with Wi-Fi.
-- The customer's Wi-Fi name and password, confirmed with the customer. If the router splits 2.4 GHz and 5 GHz under different names, use the 2.4 GHz one. Avoid guest networks; they usually block devices from talking to each other.
+- The customer's Wi-Fi name, confirmed with the customer, and their password, recorded privately. If the router splits 2.4 GHz and 5 GHz under different names, use the 2.4 GHz one. Avoid guest networks; they usually block devices from talking to each other.
 - Labels and a marker.
 
 ## Information to capture from the customer first
 
-Name, email (the one the account will use), phone, address (used for sunrise and sunset), Wi-Fi name and password, number of runs and the light count of each, and whether a bridge was sold.
+Name, email (the one the account will use), phone, address (used for sunrise and sunset), Wi-Fi name (password recorded privately, never on the sheet), number of runs and the light count of each, whether a bridge was sold, and whether line-voltage power at the power-supply location is in place or arranged by the customer.
 
 ## Section 1 — Controller
 
 ### 1.0 Firmware: record it, never change it
 
-Controllers arrive with their firmware installed. **Never flash, update or downgrade a controller. Never load a generic WLED image.** Read the version at `http://4.3.2.1/json/info` while on the controller's setup network (the `ver` and `release` values) and write it on the install sheet and the controller label. Every version in service is supported as shipped.
+Controllers arrive with their firmware installed. **Never flash, update or downgrade a controller. Never load a generic WLED image.** Read the version at `http://4.3.2.1/json/info` while on the controller's setup network (the `ver` and `release` values) and write it on the record and the controller label. Every version in service is supported as shipped; the app never checks the version and treats every unit the same. The controller's own settings page offers an update; do not use it.
 
 ### 1.1 Power up
 
@@ -243,11 +272,11 @@ A new unit broadcasts its setup network with the manufacturer's public default p
 3. On the same Wi-Fi settings page, set a unique AP password for this unit. Record it privately in the dealer's secure record: never in a document, a message, a photo or the repo. Never keep the default.
 4. The controller restarts and tries the customer's Wi-Fi. At the shop it cannot reach it, so after about 30 seconds its setup network returns, now with the unit's own password. That is expected.
 5. On the same page, set the option that decides when the setup network opens to one of the "when there is no connection" choices, never "never", so an installer can always reach a controller whose network is gone. The exact option labels, and which choice is right for Skikbily builds, are UNVERIFIED until observed on a spare unit; note what the page offers. Do not experiment beyond that setting.
-6. On site, after the controller joins the home network, confirm it still answers there before leaving (install checklist step 6).
+6. On site, after the controller joins the home network, confirm it still answers there before leaving (install checklist, install day step 6).
 
 ### 1.3 Lights settings
 
-Set the outputs at the bench on the controller's own LED settings page (the app's hardware editor proposes wrong GPIO numbers for new rows today, app bug #187; it keeps numbers it reads from the controller). Use: one output per run, the number of lights per run, the Nex-Gen standard LED type (RGBW), colour order RGB, and the four canonical outputs: output 1 = GPIO 2, output 2 = GPIO 14, output 3 = GPIO 16, output 4 = GPIO 18. Never use more than four; how many outputs a Skikbily unit has beyond these is UNVERIFIED. Write the mapping on the install sheet.
+Set the outputs at the bench on the controller's own LED settings page (the app's hardware editor proposes wrong GPIO numbers for new rows today, app bug #187; it keeps numbers it reads from the controller). Use: one output per run, the number of lights per run, the Nex-Gen standard LED type (RGBW), colour order RGB, and the four canonical outputs: output 1 = GPIO 2, output 2 = GPIO 14, output 3 = GPIO 16, output 4 = GPIO 18. Never use more than four; how many outputs a Skikbily unit has beyond these is UNVERIFIED. Write the mapping on the record.
 
 ### 1.4 Time and location
 
@@ -278,9 +307,9 @@ Set a phone hotspot with the customer's exact Wi-Fi name and password. The bridg
 
 Customer name, date, and "bridge". Pairing happens on site, in the customer's account, by the installer. See the Bridge guide.
 
-## Section 3 — On site
+## Section 3 — Day 1 and install day
 
-Use the install checklist. Questions: general@nex-genled.com.
+Day 1 is the low-voltage pre-install visit (above). Install day follows the install checklist. Questions: general@nex-genled.com.
 
 ## Section 4 — Troubleshooting at the bench or on site
 
@@ -292,11 +321,13 @@ Use the install checklist. Questions: general@nex-genled.com.
 | "Could not read WiFi name" when tapping Detect Home Network | Location permission denied | Allow Location for Lumina "While Using the App" |
 | A power change takes 30 seconds or fails while off Wi-Fi | Normal bridge latency is a few seconds; longer means the bridge's quiet window | Wait ten minutes and retry |
 | Lights come on briefly then go dark at power-on | Normal start-up, then the schedule | Open the app at home for a minute |
+| The controller has no power at the power-supply location | The line-voltage side is not in place | Not our work: the customer arranges it through a licensed professional of their own choosing; reschedule install day |
 
 ## What this SOP no longer contains
 
 - Any firmware pin or flash step. Withdrawn.
 - Any password, address or device id. The only pin map is the four canonical outputs above; passwords live in the dealer's own record.
 - Bridge firmware flashing. That is an internal Nex-Gen procedure (see the internal bridge firmware page).
+- Any description of our work as anything other than low-voltage, or of our people as any trade. Withdrawn (owner 2026-10-12).
 
-*Facts: T-F2, T-F3, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1, T-SU2.*
+*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1, T-SU2.*
