@@ -14,7 +14,7 @@ Changed (file:line):
 | `docs/guides/installer/10-install-checklist.md` | 9, 70 | Not-our-work box; "do not offer line-voltage work" |
 | `docs/guides/installer/13-installer-sop.md` | 9 | Not-our-work box |
 | `docs/guides/dealer/20-dealer-guide.md` | 30, 66 | the inline box; the "add an outlet" call row now gives the full public wording |
-| `docs/guides/dealer/21-sales-mode.md` | 34 | "Line-voltage work: we do none…" |
+| `docs/guides/dealer/21-sales-mode.md` | 34 | "Line-voltage work: we do none." |
 | `docs/guides/internal/33-claims-policy.md` | 27, 39 | the not-electricians row (why and say-instead cells quote T-W12); the "Our work" line |
 | `docs/guides/print/P1-preinstall-bench-sheet.md` | 32 | callout |
 | `docs/guides/print/P2-install-day-sheet.md` | 31 | callout |
