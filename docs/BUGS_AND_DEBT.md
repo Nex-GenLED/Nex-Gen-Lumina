@@ -4692,6 +4692,71 @@ commit — merging `main` into this tree will collide with the untracked copies.
     checked after offline and before the away-from-home reasons; `chooseController` when two or
     more controllers answered and none is chosen yet. Related: #175.
 
+- [ ] **#187 — HARDWARE CONFIG ASSIGNS NEW PORTS FROM A GPIO LIST THAT MATCHES NO SKIKBILY OUTPUT
+  (a fourth port gets GPIO 3); the standard push's fallback list is a different wrong four**
+  - Status: **OPEN — filed 2026-10-09 from the documentation overhaul (owner decision: the
+    canonical outputs are the Skikbily controller's, output 1 = GPIO 2, 2 = GPIO 14, 3 = GPIO 16,
+    4 = GPIO 18). Fix goes in the next app build with the strings changes and after the
+    bus-repair branch.** · Severity: **P2** (a port added in the app drives no output; on
+    2026-10-05 a fourth bus on the bench stranded Game Day) · Evidence: **verified-by-source**
+    (lines below, at `c283d62`) + owner statement of the installed units' outputs. No code
+    changed on `docs/overhaul-2026-10`. Number checked against `docs/BUGS_AND_DEBT.md` on
+    `origin/release/store-submission-consolidated` (highest #176), `origin/fix/118-controller-selection`
+    (#176), `origin/fix/ladder-repair-bus-change` (#184) and `origin/fix/gameday-espn-slate` (#186).
+  - Where the list is hardcoded or derived:
+    - `lib/features/wled/hardware_config_screen.dart:60` — `_defaultPins = [0, 1, 2, 3, 4, 5, 12, 13]`
+      (the comment calls it the Dig-Octa map); `:57` `_portCount = 8`; `:84` copies it into `_pins`;
+      `:145` overwrites a row's pin from the device's bus when one exists; `:223` passes `pins: _pins`
+      into the save; `:38` builds `'pin': [pins[i]]` in the cfg payload; `:498` shows `gpioPin:
+      _pins[i]` on the row. The row cannot be edited by the installer, so a port the device does
+      not have takes the list's value (port 4 → GPIO 3).
+    - `lib/services/wled_config_pusher.dart:263` — `defaultPins = [16, 3, 1, 4]` ("SKIKBILY default
+      GPIOs"); `:297` `'pin': existing?.pin ?? [defaultPins[i]]`; `:254` `defaultChannelCount = 4`.
+      A fresh (unprovisioned) Skikbily gets 16/3/1/4, none of which is an output.
+    - `lib/features/wled/wled_hardware_config.dart:9, 28–36` — the bus model parses `pin` from the
+      device cfg (device-owned; correct). `lib/features/wled/device_channel.dart:15, 45` derives
+      `gpioPin` from `bus.pin` for display only. `lib/features/wled/wled_service.dart:219–246`
+      `validateControllerMatch` checks `maxseg` (8 / 4), not pins — unchanged by the fix.
+    - The healer's geometry step (`controller_defaults_healer.dart` d.5) and the ladder code compare
+      bus bounds and ids, never pins — no change needed, but every segment the healer creates for a
+      GPIO-3 bus is a channel that lights nothing (the 10-05 `gated_ladder_bad` shape).
+    - `lib/features/installer/screens/hardware_config_step.dart:74` and
+      `lib/features/site/manage_controllers_page.dart:145` call the push with
+      `ControllerType.skikbily` for every type; `lib/models/controller_type.dart:52` names the type
+      "SKIKBILY 4-Channel".
+    - Tests and fixtures: `test/features/wled/hardware_config_buses_test.dart:43` expects
+      `[0, 1, 2, 3, 4, 5, 12, 13]`; `test/services/wled_config_pusher_test.dart:31` expects `[3]` and
+      `:39` expects `[16, 3, 1, 4]`. Fixtures that already use the canonical pins (2/14/16):
+      `test/features/wled/base_ladder_repair_test.dart:39–41`,
+      `controller_defaults_healer_publish_test.dart:177–178`, `hardware_config_buses_test.dart:9–10`.
+      Bench fixtures (`test/bench/bench_core_test.dart:20–61`) describe the bench rig's own wiring and
+      stay as they are.
+  - Proposed replacement: one canonical list per controller type, owned by `ControllerType`:
+    Skikbily `[2, 14, 16, 18]` (four outputs; never more). Both `hardware_config_screen.dart:60`
+    and `wled_config_pusher.dart:263` read it from there. The Dig-Octa list is NOT decided here
+    (the current `[0, 1, 2, 3, 4, 5, 12, 13]` carries a Dig-Octa comment; confirm it against the
+    board's documented map before changing it).
+  - UI beyond four buses: for a Skikbily type the editor shows four rows only and refuses to
+    enable a fifth ("This controller has four outputs"); a row's pin is pre-filled from the device
+    when present, else from the type's list, and is shown read-only with the output number ("Output
+    3 · GPIO 16"); the push keeps preserving device pins (`:297`) and uses the type's list only for an
+    unprovisioned device. If a device reports a pin outside the type's list, the row shows it with a
+    warning rather than silently keeping the list's value.
+  - Tests and goldens that change: `hardware_config_buses_test.dart:43` (expected default pins);
+    `wled_config_pusher_test.dart:31, 39` (expected fallback pins); a new test that a Skikbily editor
+    refuses a fifth port; any golden of the hardware-config screen at 1.0 / 1.75 / 2.0 text scale
+    (none found under `test/` at `c283d62`; add one if the row layout changes). Run the
+    accessibility harness on the edited screen.
+  - Risk: fielded units are unaffected on save because both code paths preserve pins the device
+    already has; the change bites only when a port is ADDED in the app or a fresh device is
+    provisioned, which is exactly where today's values are wrong. A Dig-Octa install that relied on
+    the editor's defaults would change only if the Dig-Octa list is changed, which this entry does
+    not propose. Installer guidance until fixed: set outputs on the controller's own LED settings
+    page at the bench and never add a port in the app (docs/guides/installer/11-controller-setup.md).
+  - Files: `lib/features/wled/hardware_config_screen.dart`, `lib/services/wled_config_pusher.dart`,
+    `lib/models/controller_type.dart`, `test/features/wled/hardware_config_buses_test.dart`,
+    `test/services/wled_config_pusher_test.dart`. Related: **#147**, **#153**, FACTS T-X5.
+
 ## Features promised (post-cleanup)
 
 - [ ] **F-18 — One-shot date-specific schedules**

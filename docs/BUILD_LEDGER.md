@@ -154,6 +154,24 @@ tag, poll the GitHub check-run on the tag SHA until `completed` and read its ste
 list; a red "Test and analyze" step means the tag shipped nothing, and the fix
 goes on a NEW bump + tag (never rewrite a public tag).
 
+**6. Before the bump, the guides are verified against the facts file.** Adopted
+2026-10-09 out of the documentation overhaul (`docs/overhaul-2026-10/`): every guide
+had drifted two or more builds behind, three documents told dealers to flash
+controllers, and voice assistants that never worked were advertised. From now on:
+
+```
+node scripts/docs_guard.mjs              # 0 failures required; under a second; no Flutter needed
+node scripts/docs_guard.mjs --links-all  # optional: every markdown link under docs/
+```
+
+- Re-stamp every `docs/FACTS.md` row the build changes (statement, status, build,
+  verified date) in the same commit as the bump, and add the build's entry to
+  `docs/guides/internal/31-release-notes.md` with the tester text from its ledger row.
+- The ledger row records the guard's summary line.
+- Nothing unshipped is described as available in any guide; the guard refuses it.
+- `codemagic.yaml` is not changed for this (owner decision 2026-10-09); the guard is
+  run by hand on this PC, like the gates in convention 5.
+
 ## Operational flags
 
 ### +116 — build-116 tagged 2026-10-07 02:27Z (the evening of 2026-10-06 CDT) (Codemagic build number: pending) — compact Recent Patterns card, and the selected controller belongs to the account that chose it

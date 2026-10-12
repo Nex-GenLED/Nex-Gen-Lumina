@@ -1,0 +1,930 @@
+READ-ONLY SEARCH REPORT: lumina-docs-overhaul @ c283d62 (non-code text files)
+
+I changed nothing. I used ripgrep in case-insensitive PCRE mode and perl only to format output. Nothing was built or run.
+
+## 0. Scope, method and conventions
+
+**What was searched (268 files):**
+- Root `*.md` and `firestore_learning_rules.txt`.
+- `docs/**/*.md`, except `BUILD_LEDGER.md` and `BUGS_AND_DEBT.md`.
+- `audit/*.md`, plus `audit/verification_evidence/*.json` and `*.txt`.
+- `esp32-bridge/README.md`, `platformio.ini`, `src/config.h.example` and `.gitignore`.
+- `alexa-skill/DEPLOYMENT.md` and `lambda/package.json`.
+- `google-home/DEPLOYMENT.md` and `functions/package.json`.
+- `web/index.html` and `web/manifest.json`.
+- Android and iOS text config: AndroidManifests, `res/values` and `res/xml`, `Info.plist`, `PrivacyInfo`, `.xcscheme` and similar.
+- `bench/` README and json, `scripts/*.md`, `.env.example` and `*.json`, `assets/demo/*.json`.
+- `pubspec.yaml`, `codemagic.yaml`, `firebase.json`, `firestore.indexes.json`, `package.json`, `analysis_options.yaml`, `.metadata`, `.gitignore`.
+- In `functions/`: only `index.js` plus 17 `src` files that build user-facing strings. Those are: claude-client, scheduling-system-prompt, processScheduleCommand, sendSyncNotification, sendWeeklyBrief, notifyDay2Team, notifyReferrerOfApproval, onReferralStatusChanged, onSalesJobStatusChanged, initiateSyncSession, endSyncSession, triggerSyncFailover, sendInstallReminders, collectControllerHealth, claudeProxy, messaging-helpers, dealerContact. Also `functions/test/emulator/README.md`.
+- A stray root file named `C<U+F03A>UsershoneyAppDataLocalTempwled_config.json`. It is a WLED cfg dump committed under a mangled Windows temp path. I call it "stray-wled_config.json" below.
+
+**Not searched:**
+- Everything you excluded.
+- `functions/lib` (compiled duplicates) and `functions/test` unit/emulator js/ts.
+- `package-lock.json` files.
+- `*.dart`, `*.ps1`, `*.sh`, `*.bat`, `*.cpp`, `alexa-skill/lambda/*.js`, `google-home/functions/index.js`, `firestore.rules`, `storage.rules`.
+- **The 15 `docs/*.pdf` files.** They are binary mirrors of the `.md` guides and were not searched. They probably carry the same content, including the PIN values flagged in Topic 17.
+
+**Pattern refinements, to remove obvious substring noise (raw counts in brackets):**
+- `stall` became `\bstall(s|ed|ing)?\b` [raw 1,728 hits, mostly "install"].
+- `bus` became `\bbus(es)?\b` [raw 383: business, robust].
+- `lease` became `\blease`. Raw matched "release" and "please".
+- `dated` became `\bdated\b`. Raw matched "updated" and "validated".
+- `0\.14` excludes CSS `rgba(...0.14)`.
+- Android and iOS are word-bounded.
+
+**Output conventions:**
+- **User-facing files** are the 2026-09 guide set, the 16 legacy published guides, README/CHANGELOG/LANDINGSITE, esp32-bridge README and config template, the alexa and google-home DEPLOYMENT docs, `web/`, Android res/manifest, iOS `Info.plist` and bench README. Every hit line is printed if the file has 5 or 6 hits or fewer. Denser files show as `path (N hits) L<line list> | e.g. :line: text`.
+- **Internal files** (audit/, docs/audits, docs/submissions, other engineering docs, functions code) get per-file counts.
+- Count-list abbreviations, with ".md" omitted: `a/`=audit/, `ve/`=audit/verification_evidence/, `d/`=docs/, `da/`=docs/audits/, `ds/`=docs/submissions/, `g26/`=docs/guides-2026-09/, `fs/`=functions/src/. `=1: x, y` means each of those files has 1 hit.
+- **Redaction in printed lines:** personal emails show as [email], private IPs as [private-IP], 12-hex ids as [id12], Firebase uids or uid prefixes as [uid], customer names as [name]. AP credential values are never printed.
+
+## Key findings (summary)
+
+1. **Live staff/master PIN values in a legacy guide.** `d/Admin_Operations_Guide.md` contains them (Topic 17 lists the lines), and the PDF probably does too. `g26/06-admin-guide.md:24-26` itself says any copy carrying PINs is a security incident.
+2. **WLED AP credential value present** at `d/dealer_preinstall_setup.md:170` and `:181`.
+3. **Customer personal data in internal audit docs:** names, personal emails, home LAN IPs, MAC-derived bridge ids and Firebase uids. Concentrated in `a/BRIDGE_TRIAGE`, `CONTROLLER_HEALTH`, `UNATTENDED_OPERATION`, `P0-5_EXPOSURE`, `COMMAND_SAFETY`, `SOLAR_FAILURE`, `ELLIE_SUNSET` and `d/STREET_TEST_RUNBOOK`.
+4. **Literal Google API keys:**
+   - `functions/index.js:652` and `:1601` (Firebase web key).
+   - `android/app/src/main/AndroidManifest.xml:110`.
+5. **Version drift:**
+   - `pubspec.yaml:5` is 2.5.10+116.
+   - The g26 guides describe +98.
+   - 15 legacy docs describe +89. Only 6 of them carry the "SUPERSEDED 2026-09-17" banner: Admin_Operations, Dealer_Dashboard, Dealer_Installer_Setup, ESP32_Bridge_Setup, Lumina_Homeowner, User_Guide_Commercial.
+   - The 9 without a banner: Media_Mode_Guide, corporate-dashboard-guide, day1-electrician-guide, day2-install-guide, dealer-inventory-guide, full-job-lifecycle, messaging-configuration-guide, nex-gen-operations-overview, sales-mode-guide.
+6. **App-store contradiction:**
+   - Says "download from App Store / Google Play": `d/nex-gen-operations-overview:120`, `d/Dealer_Installer_Setup_Guide:558`, `d/Lumina_Homeowner_Guide:63`, `d/messaging-configuration-guide:164`, `:185`.
+   - Says "not in public stores": `g26/02:39`, `d/Lumina_Homeowner_Guide:115`, `d/Admin_Operations_Guide:703`.
+   - `fs/onSalesJobStatusChanged.ts:40`, `:42` ship store URLs containing `[PLACEHOLDER_APP_ID]` and `[PLACEHOLDER_PACKAGE_ID]`.
+7. **Support address sprawl.** support@Nex-GenLED.com appears in g26 and the ESP32 guide. The legacy guides and LANDINGSITE use support@nexgenled.com, support@nex-genled.com, security@nexgenled.com, security@nex-genled.com, payouts@/media@nexgenled.com, info@Nex-GenLED.com, General@Nex-GenLED.com and support@nex-gen.io. `g26/README:94-95` already flags this.
+8. **Zero hits anywhere in scope:** "just this day", "Set as Active", "Use this controller", "switch account(s)", "Lumina Blue", "Repair base", "from this phone", "tonight at", "esptool", "install.wled", "help@", "NGL-WLED", "3076f5", MACs written with colon or dash separators.
+9. **Limited to one spec doc:** celebration Short/Medium/Long appears only in `d/game_day_celebration_length_spec_2026-10-02.md`, never in a guide. "from our servers" appears only in that same spec, at :154.
+10. **Zero hits in the g26 guide set for:** "segment", "bus", every Topic-2 AP term, every Topic-4 term.
+11. **Stray committed file** stray-wled_config.json. It contains AP SSID WLED-AP, AP IP array 4,3,2,1, a station Wi-Fi SSID value, an mDNS name with a MAC suffix, and "ota"/"alexa"/"linked_remote" keys.
+
+---
+
+## 1. FIRMWARE — 71 files / 300 hits
+
+Subcounts: 0.15.1=36f/110; 0.15.4=9f/18; 0.14=6f/7 raw, of which 2 are CSS false positives (excluded); quinled=1f/6; flash/flashing/flashed=47f/133; esptool=0; install.wled=0; firmware update/upgrade/downgrade=2f/2; \bOTA\b=12f/43, including the "ota" JSON keys in the cfg dumps; pinned-to-version=1f/1.
+
+**User-facing:**
+```
+docs/guides-2026-09/07-bridge-setup-guide.md:171: > **support@Nex-GenLED.com** and we'll walk through it, or reflash the bridge. *(Installers: the
+docs/guides-2026-09/07-bridge-setup-guide.md:200: > **Note** — **Firmware updates are not over-the-air.** Updating a bridge means physically
+docs/guides-2026-09/07-bridge-setup-guide.md:201: > reflashing it over USB. Your dealer handles this; there is nothing for you to check or install.
+docs/guides-2026-09/07-bridge-setup-guide.md:232: The bridge needs reflashing to a current firmware. Contact your dealer.
+esp32-bridge/README.md:13: - **NVS persistence** — settings survive firmware updates
+esp32-bridge/README.md:31: 1. Flash the new firmware from `lumina-firmware/` using PlatformIO
+docs/ESP32_Bridge_Setup_Guide.md (7 hits) L79,85,98,111,114,181,273 | e.g. :79: ## Part 1 — Flash the bridge firmware
+docs/Dealer_Installer_Setup_Guide.md:58: <strong>Before you flash or install anything:</strong> every controller must be on the <strong>pinned WLED version</strong> — <code>0.15.1</code> for both SKIKBILY 4-channel and Dig-Octa 8-channel. Flashing "latest" (0.15.4) produces a contro...
+docs/Dealer_Installer_Setup_Guide.md:615: ...bridge holds its paired uid in NVS (its own flash) and re-asserts that uid on every heartbeat...
+docs/Dealer_Installer_Setup_Guide.md:634: 1. **Flash the Lumina Bridge firmware** (see the **ESP32 Bridge Setup Guide**)
+docs/Dealer_Installer_Setup_Guide.md:887: - **Dealer Pre-Install Setup SOP** — bench prep, firmware pinning, flash procedure (read this first)
+docs/Lumina_Homeowner_Guide.md:883: <div class="faqq">Will score celebrations flash while I'm out?</div>
+docs/full-job-lifecycle.md:432: ...the bridge stores its paired uid in NVS (its own flash) and re-asserts that uid on every heartbeat...
+docs/dealer_preinstall_setup.md (42 hits) L52,111,117,119,120,121,125,127,129,130,132,134,137,138,144,146,150,154,158,161,162,187,204,256,258,260,277,300,309,310,349,464,466,468,472,474,476,499,502,525,527,579
+```
+
+Key lines in `docs/dealer_preinstall_setup.md`:
+```
+  :52 ESP32 bridge — already flashed with Lumina v1.2 firmware
+  :117 ### 2.0 Flash the PINNED WLED version FIRST (REQUIRED — do not skip)
+  :120 to flash via **quinled.info** — correct. But quinled.info's web flasher serves
+  :121 **the LATEST** WLED release, which today is **0.15.4**.
+  :129 | **SKIKBILY 4-channel** (ESP32_Ethernet) | **0.15.1** | ...
+  :130 | Dig-Octa 8-channel | 0.15.1 | ...
+  :134 1. **A confirmed 0.15.4 stall regression on this exact board.**
+  :144 2. **The Lumina app's effect catalog is pinned to 0.15.1 fx IDs**
+  :154 # SKIKBILY 4-channel MUST read: release ESP32_Ethernet | ver 0.15.1
+  :472 ## Appendix A — Flashing bridge firmware (if not pre-flashed)
+  :579 ... pin the WLED version (SKIKBILY 4-channel → 0.15.1) with a post-flash curl /json/info verify. Field finding: WLED 0.15.4 (quinled.info "latest")...
+```
+
+**Internal counts:** a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=20 a/SCHEDULING_ARCHITECTURE=15 a/FEATURE_STATUS_MATRIX=12 a/SCHEDULING_ARCHITECTURE_V2=11 a/OFF_LAN_CAPABILITY=11 a/GAMMA_BUG=10 a/VERIFICATION_REPORT=9 a/CONTROLLER_HEALTH=9 a/SOLAR_BENCH_GATE=8 a/BRIDGE_TRIAGE=7 a/SYNC_PACING_FIX_P1=6 a/SOLAR_PREP=6 a/GAMMA_FIX=6 a/COMMAND_SAFETY=5; =4: d/hardcoded_identifier_audit_2026-05-08, d/esp32_firmware_audit, a/SOLAR_FAILURE, a/RELEASE_READINESS, a/PRESET_FIX_REPORT, a/LAUNCH_PLAN, a/HARNESS_AUDIT, a/FROZEN_SEGMENT, a/COMPLIANCE_AND_SECURITY, a/COLOR_FIDELITY_AUDIT; =3: ds/TEST_PROTOCOL_PHASE1, a/U6_PSAVE_PROBE, a/RELEASE_2.5.10+59, a/PART_B_RESULTS, a/FROZEN_SEGMENT_FIX, a/BASE_LADDER; =2: ds/BRIDGE_PHASE1_APP_AUDIT, d/memory_directory_verification, d/design/controller_replacement, da/DESIGN_STUDIO_AUDIT_2026-07, da/BRIDGE_LATENCY_AUDIT_2026-05, a/U7_ABSENT_SEGMENT_PROBE, a/SOLAR_FIRING_PATH_AUDIT, a/SOLAR_COMPARATOR, a/SCHEDULE_V3_P3, a/S3B_CHANNELS, a/PRESET_REGRESSION, a/HARDWARE_VERIFICATION_+60; =1: neighborhood_sync_audit_report, d/project_preview_followups_2026_05_22, d/commercial_mode_smoke_test, d/SPORTS_ALERTS_RESTRUCTURE_PLAN, d/DESIGN_STUDIO_REQUIREMENTS (:525 "v0.14+"), bench/config.json, ve/pre_session_cfg.json, ve/post_session_cfg.json, ve/lease_exposure_bench_cfg_2026-07-30.json, stray-wled_config.json ("ota" key), a/SCHEDULE_V3_P2, a/S4_RESTORE, a/ORIENTATION_ON_THE_WIRE, a/LEASE_TRISTATE, a/LEASE_EXPOSURE, a/GAME_DAY_SPEC_AUDIT, a/GAME_DAY_CELEBRATIONS_P1, a/BLOCK_E_MISSING_ROW, a/ALL_STUB_GUARD, a/ALL_STUB_CLOBBER, TASK_TEST_PLAN, .gitignore.
+
+Other notes:
+- `a/CONTROLLER_HEALTH.md:829` says one customer controller runs WLED 16.0.0 instead of the pinned 0.15.1.
+- `a/RELEASE_READINESS.md:254` and `:327` discuss field controllers on 0.14.x or 0.15.4.
+
+## 2. CONTROLLER AP / SETUP ACCESS POINT — 10 files / 52 hits
+
+Subcounts: WLED-AP=4f/5; access point=1f/1; captive portal=3f/20; 4.3.2.1=1f/7; AP password=1f/1; hotspot=4f/17; wled1234=1f/2; NGL-WLED=0.
+
+```
+docs/dealer_preinstall_setup.md:153: curl -s http://4.3.2.1/json/info | python3 -c "import sys,json;..."
+docs/dealer_preinstall_setup.md:169: 3. On your laptop or phone WiFi list, look for `WLED-AP` (or similar — the SSID may include the chip's MAC suffix).
+docs/dealer_preinstall_setup.md:170: AP credential value present
+docs/dealer_preinstall_setup.md:171: 5. The captive portal page should auto-open at `http://4.3.2.1`. If not, open a browser and navigate there manually.
+docs/dealer_preinstall_setup.md:175: 1. In the WLED captive portal, click **WiFi Settings**.
+docs/dealer_preinstall_setup.md:181: AP credential value present (line is the "AP password" row)
+docs/dealer_preinstall_setup.md:192/229/246/262/271: Navigate to `http://4.3.2.1` → Config → LED Preferences / Time & Macros / Segments / Usermods; `curl http://4.3.2.1/json/cfg`
+docs/dealer_preinstall_setup.md:312: 5. The captive portal page should auto-open. If not, navigate to `http://[private-IP: ESP32 SoftAP default]`.
+docs/dealer_preinstall_setup.md:316: 1. In the WiFiManager captive portal, click **Configure WiFi**.
+docs/dealer_preinstall_setup.md:325,327,328,329,331,332,333: phone-hotspot impersonating the customer's SSID to bench-test the bridge
+docs/dealer_preinstall_setup.md:375,376,380,383: same hotspot procedure (shop pre-pair)
+docs/dealer_preinstall_setup.md:415,416: Test off-wifi: enable phone hotspot ...
+docs/dealer_preinstall_setup.md:435: **Symptom**: After plug-in, controller stays in AP mode (`WLED-AP-XXXX` still visible).
+docs/dealer_preinstall_setup.md:438: - **Wrong SSID or password**: re-enter via the AP captive portal. ...
+docs/dealer_preinstall_setup.md:440: - **Hidden SSID**: ... Re-enter via captive portal manually.
+docs/Lumina_Homeowner_Guide.md:895: ...connect to the controller's own Wi-Fi access point (named **Lumina-XXXX**) and update its Wi-Fi settings...
+esp32-bridge/README.md:3: ... branded setup experience with a captive portal wizard, web dashboard, and NVS-based configuration ...
+esp32-bridge/README.md:11: - **Captive portal WiFi setup** — no hardcoded WiFi credentials
+docs/submissions/TEST_PROTOCOL_PHASE1.md (14 hits) L36,44,46,51,58,61,75,176,179,187,189,208,286,287 | e.g. :36: ## Step 1 — Captive portal appears when unconfigured
+audit/SOLAR_BENCH_GATE.md:38: That `/28` on `[private-IP]` is the standard iPhone Personal Hotspot subnet.
+audit/verification_evidence/pre_session_cfg.json:1: ..."ap":{"ssid":"WLED-AP","pskl":8,"chan":1,"hide":0,"behav":2,"ip":[4,3,2,1]}...
+audit/verification_evidence/post_session_cfg.json:1: (same)
+audit/verification_evidence/lease_exposure_bench_cfg_2026-07-30.json:1: (same)
+stray-wled_config.json:1: "ap":{"ssid":"WLED-AP","pskl":8,...,"ip":[4,3,2,1]}
+android/gradle.properties:5: org.gradle.java.home=...jdk-17.0.17.10-hotspot   (false positive; also a local machine path)
+```
+
+The cfg dumps store only `pskl`, the password length, never the value.
+
+Adjacent terms not in your list (`Lumina-XXXX`, 192.168.4.1, "setup network", "AP mode", "SoftAP"): g26/07-bridge-setup-guide=11, d/ESP32_Bridge_Setup_Guide=11, d/dealer_preinstall_setup=10, ds/TEST_PROTOCOL_PHASE1=13, d/Lumina_Homeowner_Guide=1, d/Dealer_Installer_Setup_Guide=1, esp32-bridge/README=1. The g26 set has zero hits on the requested Topic-2 patterns.
+
+## 3. BRIDGE / REMOTE
+
+### 3a. `\bbridge` — 87 files / 1,331 hits
+
+```
+README.md:3: ...Fi control and remote control via the Lumina Bridge (ESP32 + Firestore command relay)...
+CHANGELOG.md:43: - TeamColorResolver: unified lookup bridge between two team color databases   (false positive)
+docs/guides-2026-09/README.md (6 hits) L3,16,64,96,97,98 | e.g. :3: **Rev 2026.09 · Edition date 2026-09-17 · Describes Lumina app 2.5.10+98 and Lumina Bridge firmware v1.2.**
+docs/guides-2026-09/01-feature-overview.md:93: Away from home, they route automatically through the **Lumina Bridge**, a small device on the home
+docs/guides-2026-09/01-feature-overview.md:115: | **Remote path** | Lumina Bridge on the home network — no inbound ports |
+docs/guides-2026-09/02-homeowner-guide.md (11 hits) L415,418,420,422,427,429,432,437,530,596,598 | e.g. :415: through your **Lumina Bridge**. The switch between the two is automatic.
+docs/guides-2026-09/03-commercial-guide.md:186: Bridge**. Set it up once:
+docs/guides-2026-09/03-commercial-guide.md:189: 2. Leave **Connection Mode** on **ESP32 Bridge**.
+docs/guides-2026-09/03-commercial-guide.md:191: 4. **Test Bridge**.
+docs/guides-2026-09/03-commercial-guide.md:193: See the *Lumina Bridge Setup* guide for the hardware side.
+docs/guides-2026-09/03-commercial-guide.md:204: 1. Are you on the property Wi-Fi? Off-site control needs the bridge.
+docs/guides-2026-09/04-installer-guide.md:241: > **Note** — If you set up a Lumina Bridge, also show them that remote control works, and tell them
+docs/guides-2026-09/04-installer-guide.md:374: - Bridge paired and round-trip tested, if one was supplied
+docs/guides-2026-09/05-dealer-guide.md:163: | **Committed to active jobs** | Not yet available — shows an *"Inventory bridge required"* card |   (false positive: inventory)
+docs/guides-2026-09/06-admin-guide.md:208: > - **A live bridge stays claimed.** The bridge holds its pairing in its own memory and re-asserts
+docs/guides-2026-09/06-admin-guide.md:210: > factory reset — see the *Lumina Bridge Setup* guide, and note the reset path itself is currently
+docs/guides-2026-09/07-bridge-setup-guide.md (62 hits) L2,10,18,22,26,31,35,43,47,53,64,66,68,70,75,86,87,91,94,95,101,103,104,109,110,112,123,125,129,134,140,144,145,156,160,161,162,164,167,170,171,172,175,177,181,185,192,196,197,200,209,217,227,230,232,234,236,238,242,243,245,257
+docs/ESP32_Bridge_Setup_Guide.md (87 hits) L2,9,30,33,37,39,43,44,51,60,61,63,68,69,71,74,79,81,89,91,93,111,120,130,133,137,139,141,143,147,155,158,160,169,170,171,172,175,177,181,184,191,197,213,214,215,216,224,225,227,230,235,238,241,242,245,250,254,259,262,264,265,269,273,276,280,285,299,300,301,313,314,316,320,323,324,327,329,333,334,336,337,338,339,342,344,348
+docs/dealer_preinstall_setup.md (57 hits) L3,43,52,54,143,304,306,308,309,310,317,321,325,330,331,332,333,337,339,344,345,349,353,364,365,366,373,375,376,378,379,380,381,383,389,396,399,406,407,443,445,447,449,451,454,455,464,472,474,483,486,497,506,551,563,565,568
+docs/Dealer_Installer_Setup_Guide.md (20 hits) L612,615,619,630,632,634,635,637,638,640,642,650,651,653,660,762,805,806,809,893 | e.g. :612: ...it does not free the bridge.</strong> Account deletion removes the customer's profile,...
+docs/User_Guide_Commercial.md (8 hits) L424,430,431,434,592,604,643,655 | e.g. :424: Your installer set up a small **bridge device** on your property network...
+docs/Media_Mode_Guide.md (6 hits) L83,85,136,146,157,163 | e.g. :83: ### Check the bridge status first
+docs/Lumina_Homeowner_Guide.md:546: **ESP32 Bridge (recommended).** A small Nex-Gen bridge stays plugged in at your house...
+docs/Lumina_Homeowner_Guide.md:552: Tap **Test Bridge** to confirm. You want **Bridge Connected**.
+docs/Lumina_Homeowner_Guide.md:765: 3. Bridge mode: tap **Test Bridge**. You want **Bridge Connected**. **Bridge Not Responding** means the bridge...
+docs/Lumina_Homeowner_Guide.md:926: - **A bridge that's still plugged in stays claimed.** ...
+docs/full-job-lifecycle.md:427: ...releases the paired-user field on any Lumina Bridge registered to them...
+docs/full-job-lifecycle.md:432: - **The bridge does not actually get released.** ...
+docs/full-job-lifecycle.md:596: 3. **Off-LAN schedule writes.** In Bridge Mode — the default — schedule and configuration writes cannot be del...
+docs/Admin_Operations_Guide.md:623: - `commands` — cloud relay commands (ESP32 bridge can read/write too)
+docs/Admin_Operations_Guide.md:624: - `bridge_status` — ESP32 bridge heartbeat
+docs/Admin_Operations_Guide.md:749: | 2 | **Bridge release** | ...
+docs/Admin_Operations_Guide.md:757: <strong>Releasing a bridge does not free a bridge that is still plugged in.</strong> ...
+docs/nex-gen-operations-overview.md:348: | **Lumina Bridge Setup** | Installers and technical customers — remote access hardware |
+docs/dealer-inventory-guide.md:78,82,94: "inventory bridge"   (false positives)
+esp32-bridge/README.md (9 hits) L1,3,5,9,12,14,15,29,36 | e.g. :1: # Lumina ESP32 Bridge (Legacy — Firebase Polling)
+esp32-bridge/src/config.h.example (11 hits) L1,23,27,28,30,36,46,47,52,56,58 | e.g. :1: // Lumina ESP32 Bridge Configuration — TEMPLATE
+```
+
+**Internal counts:** a/BRIDGE_TRIAGE=85 a/CONTROLLER_HEALTH=74 ds/BRIDGE_PHASE1_APP_AUDIT=71 a/OFF_LAN_CAPABILITY=67 a/SCHEDULING_ARCHITECTURE_V2=66 a/UNATTENDED_OPERATION=64 d/bridge_command_routing_context_2026-05-11=63 a/COMMAND_SAFETY=54 ds/TEST_PROTOCOL_PHASE1=49 fs/collectControllerHealth.ts=39 a/SCHEDULING_ARCHITECTURE=34 a/COMPLIANCE_AND_SECURITY=34 da/BRIDGE_LATENCY_AUDIT_2026-05=31 d/esp32_firmware_audit=29 a/FEATURE_STATUS_MATRIX=27 d/hardcoded_identifier_audit_2026-05-08=21 a/SOLAR_FAILURE=19 functions/index.js=17 a/S3_DISPATCHER=16 a/LAUNCH_PLAN=14 d/design/controller_replacement=13 a/S3B_CHANNELS=9 a/LEASE_EXPOSURE=8 CLAUDE=8 a/S5_GAMEDAY=7 a/HANDOFF_TO_WINDOW_B=7 a/ELLIE_SUNSET=7 da/AUDIT_brand_polish_2026-06=6 a/BASE_LADDER=6 d/game_day_celebration_length_spec_2026-10-02=5 .gitignore=5 d/neighborhood_fanout_activation_runbook=4 a/SOLAR_FIRING_PATH_AUDIT=4 a/HEALER_PUBLISH=4; =3: functions/test/emulator/README, d/unified_preview_interpreter_design_2026-05-22, da/SCHEDULES_SUBCOLLECTION_MIGRATION_PLAN_2026-06, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, a/SPORTS_ALERTS_SYNC_AUDIT, a/SOLAR_FIX_PLAN, a/SOLAR_BENCH_GATE, a/PART_B_RESULTS, a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02, a/COMMISSIONING_FIXES; =2: esp32-bridge/platformio.ini, ds/SUBMISSION_AUDIT_v1.0.0, d/memory_directory_verification, d/STREET_TEST_RUNBOOK, a/TEAM_SURFACES, a/SOLAR_UI_GATE, a/BASE_LAYER_GATE; =1: firestore.indexes.json, da/DESIGN_STUDIO_AUDIT_2026-07, da/CHANNEL_MAPPING_AUDIT_2026-05, d/DESIGN_STUDIO_REQUIREMENTS, demo_review_report, a/S4_RESTORE, a/PRESET_FIX_REPORT, a/MULTI_ENTRY_DISPLAY, a/GAMMA_FIX, a/GAMMA_BUG, a/GAME_DAY_CELEBRATIONS_P1, a/DIAGNOSTICS_FIX, a/COLOR_FIDELITY_AUDIT, a/ALL_STUB_CLOBBER.
+
+### 3b. Remote access terms — 57 files / 244 hits
+
+Subcounts: remote access=17f/77; away from home=8f/19; off-LAN=32f/85; port forward=8f/11; DDNS=2f/2; webhook=20f/48; cloud relay=11f/16.
+
+```
+docs/guides-2026-09/01-feature-overview.md:93: Away from home, they route automatically through the **Lumina Bridge**, a small device on the home
+docs/guides-2026-09/01-feature-overview.md:94: Wi-Fi. No port forwarding. No dynamic DNS. No router configuration. The handoff between the two is
+docs/guides-2026-09/02-homeowner-guide.md (11 hits) L66,84,295,410,412,414,418,419,436,506,622 | e.g. :66: ...directly or route remotely | First run, and Remote Access setup |
+docs/guides-2026-09/03-commercial-guide.md:40: power and brightness, the same design library, the same scheduling, the same remote access.
+docs/guides-2026-09/03-commercial-guide.md:43: > Design Studio, Explore, schedules and timer slots, Autopilot, remote access, troubleshooting. This
+docs/guides-2026-09/03-commercial-guide.md:183: **System → System & Device Management → Remote Access.**
+docs/guides-2026-09/03-commercial-guide.md:190: 3. Turn on **Enable Remote Access**.
+docs/guides-2026-09/03-commercial-guide.md:240: | Control off site | System → System & Device Management → Remote Access |
+docs/guides-2026-09/07-bridge-setup-guide.md (9 hits) L27,30,84,117,119,124,144,198,244 | e.g. :27: from the office, from a hotel, from the end of the driveway. No port forwarding. No dynamic DNS. No
+docs/Lumina_Homeowner_Guide.md (15 hits) L83,143,530,532,534,548,554,558,563,564,677,715,763,767,949 | e.g. :83: 12. Controlling your lights away from home
+docs/Dealer_Installer_Setup_Guide.md (12 hits) L628,630,644,646,648,650,660,662,664,737,762,809 | e.g. :628: ## 9. Configuring remote access
+docs/ESP32_Bridge_Setup_Guide.md (20 hits) L39,56,61,63,169,186,195,201,204,208,215,225,228,229,241,302,307,313,324,344 | e.g. :39: ...No port forwarding, no tinkering with your router...
+docs/User_Guide_Commercial.md:155: | **System** | Gear | Settings, team management, remote access |
+docs/User_Guide_Commercial.md:418: ## 11. Remote access — control from anywhere
+docs/User_Guide_Commercial.md:428: 1. **System → Remote Access**
+docs/User_Guide_Commercial.md:625: | Check remote access | System → **Remote Access** |
+docs/User_Guide_Commercial.md:643: - Off-site remote access works — the bridge indicator stays green week over week
+docs/full-job-lifecycle.md:596: 3. **Off-LAN schedule writes.** In Bridge Mode — the default — schedule and configuration writes cannot be delivered rem...
+docs/full-job-lifecycle.md:649: **Schedules never fire?** Controller clock, missing coordinates, or a schedule that was pushed off-LAN. See Failure 9.
+docs/dealer_preinstall_setup.md:409: [ ] 8. In Lumina app: System → System Management → Remote Access → tap
+docs/dealer_preinstall_setup.md:417: Lights should respond in ~5-10 seconds through the cloud relay.
+docs/dealer_preinstall_setup.md:451: **Symptom**: Open app → Remote Access settings → "no bridges found".
+docs/dealer_preinstall_setup.md:562: Away from home
+docs/Admin_Operations_Guide.md:623: - `commands` — cloud relay commands (ESP32 bridge can read/write too)
+docs/nex-gen-operations-overview.md:348: | **Lumina Bridge Setup** | Installers and technical customers — remote access hardware |
+esp32-bridge/README.md:5: ...enabling remote control without requiring port forwarding.
+```
+
+`functions/index.js:308` (internal) is a webhook comment using the example DDNS base URL `https://myhome.duckdns.org:8080`.
+
+**Internal counts:** a/OFF_LAN_CAPABILITY=19 a/SCHEDULING_ARCHITECTURE=16 d/bridge_command_routing_context_2026-05-11=11 a/BRIDGE_TRIAGE=10 functions/index.js=9 CLAUDE=7 da/AUDIT_assumption_gaps_2026-06=6 a/SCHEDULING_ARCHITECTURE_V2=6 da/FEATURE_COMPLETENESS_INVENTORY_2026-06=5 a/ALL_STUB_GUARD=5; =4: ds/BRIDGE_PHASE1_APP_AUDIT, d/game_day_celebration_length_spec_2026-10-02, da/AUDIT_brand_polish_2026-06, a/S4_RESTORE, a/GAMMA_BUG, SECURITY; =3: a/S5_GAMEDAY, a/ALL_STUB_CLOBBER, SECURITY_SUMMARY; =2: ds/TEST_PROTOCOL_PHASE1, a/SOLAR_FIRING_PATH_AUDIT, a/SOLAR_FAILURE, a/GAMMA_FIX; =1: d/memory_directory_verification, d/STREET_TEST_RUNBOOK, codemagic.yaml, a/UNATTENDED_OPERATION, a/TOKEN_REFRESH_REPORT, a/SOLAR_PREP, a/SOLAR_FIX_PLAN, a/S3B_CHANNELS, a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01, a/PRESET_FIX_REPORT, a/LEASE_TRISTATE, a/LEASE_EXPOSURE, a/HEALER_PUBLISH, a/FEATURE_STATUS_MATRIX, a/ELLIE_SUNSET, a/DEVICE_DIAGNOSTIC_2026-08-24, a/COMMAND_SAFETY, a/BLOCK_E_MISSING_ROW, a/BASE_LAYER_GATE, a/BASE_LADDER, GUIDED_MODE_IMPLEMENTATION.
+
+## 4. ACCOUNT / CONTROLLER SELECTION — 8 files / 11 hits (all printed)
+
+Subcounts: Set as Active=0; Use this controller=0; switch(ing) account(s)=0; sign(ed) out=4f/7; multiple controllers=4f/4.
+
+```
+docs/User_Guide_Commercial.md:189: If a zone spans multiple controllers (common for larger buildings), those controllers stay in sync automatically — no action from you...
+docs/Media_Mode_Guide.md:123: | **Ending a session** | Tap the X on the View As banner to leave a customer's system. Sign out of the app when you're finished for the day |
+docs/Media_Mode_Guide.md:128: ...Exit View As and sign out when you finish a shoot rather than relying on the app to do it for you.
+docs/Media_Mode_Guide.md:149: - You exited View As and signed out when you were done
+audit/UNATTENDED_OPERATION.md:535: multiple controllers per user and the bridge holds only one paired IP. Their safety is
+audit/INSTALLER_ENTRY.md:455: ...the screen already has a **"Sign out"** button at [link_account_screen.dart:179]...
+audit/INSTALLER_ENTRY.md:578: we sign out and re-establish the anonymous baseline"*).
+audit/LEASE_TRISTATE.md:293: global key `'calendar_leases_v1'`: sign out of account A and into B on the same handset and B
+audit/DESIGN_CARD_P3.md:174: (#85 preserved). Signed out → absent.
+audit/COMMAND_SAFETY.md:84: **multiple controllers per user** — omitting the field would silently retarget every command at the
+CLAUDE.md:426: For zones with multiple controllers (Commercial mode):
+```
+
+## 5. LUMINA AI — 60 files / 109 hits
+
+Subcounts: Lumina AI=25f/42; tonight at=0; every night=9f/13; this week=14f/20; `"show`=1f/1; all channels=13f/21; one channel=9f/14.
+
+```
+docs/guides-2026-09/02-homeowner-guide.md:223: - *Turn the lights on at seven every night*
+docs/guides-2026-09/02-homeowner-guide.md:280: If you have more than one channel, the editor includes a **Channels** picker. Leave it on all
+docs/guides-2026-09/03-commercial-guide.md:101: The schedule editor's **Channels** picker is the tool for this. Leave it on all channels for a
+docs/User_Guide_Commercial.md:197: ## 6. Lumina AI — your zone-aware assistant
+docs/Lumina_Homeowner_Guide.md:229: ...open the channel bar and tap <strong>All Channels On</strong>...
+docs/Lumina_Homeowner_Guide.md:400: If your system has more than one channel, the schedule editor includes a **Channels** picker. Leave it on **All channels...
+docs/Lumina_Homeowner_Guide.md:429: - **Generate this week** builds a plan you can review day by day.
+docs/Lumina_Homeowner_Guide.md:749: 3. Tap **All Channels On**.
+docs/Lumina_Homeowner_Guide.md:837: <div class="faqq">Do I have to use the app every night?</div>
+docs/Lumina_Homeowner_Guide.md:938: | Get everything back on | Channel bar → **All Channels On** |
+docs/Dealer_Installer_Setup_Guide.md:597: ... the schedule editor offers a **Channels** row: **All channels**, or specific ones.
+docs/Dealer_Installer_Setup_Guide.md:603: ...ly appears when that controller reports more than one channel...
+docs/Dealer_Installer_Setup_Guide.md:799: **"The customer wants to schedule just one channel."**
+docs/Dealer_Installer_Setup_Guide.md:800: Confirm the controller actually reports more than one channel ...
+docs/sales-mode-guide.md:148: ...If the LEDs turn a corner, that's still one channel...
+docs/sales-mode-guide.md:175: Add **at least one channel** to continue...
+docs/sales-mode-guide.md:461: ...Step 3 needs at least one channel...
+docs/day2-install-guide.md:131: - **Power on and verify all channels respond**
+docs/day2-install-guide.md:145: 4. **Plug in the controller.** All channels should illuminate.
+docs/nex-gen-operations-overview.md:22: ...lighting system that runs every night automatically (dusk to dawn)...
+docs/nex-gen-operations-overview.md:134: - Set schedules (e.g., "warm white every night, red and green in December")
+docs/corporate-dashboard-guide.md:135: | **This week** | Jobs created in the last 7 days |
+docs/corporate-dashboard-guide.md:413: **"A dealer shows Stalled even though they closed a job this week."**
+bench/README.md:4: this week against the bench controller...
+LANDINGSITE_AI_PROMPTS.md:97: - Text: "Lumina AI is rate-limited to prevent abuse and protect your wallet. Max 10 requests per hour..."
+LANDINGSITE_AI_PROMPTS.md:189: - OpenAI: Lumina AI chat (rate-limited)
+LANDINGSITE_AI_PROMPTS.md:230: Lumina AI is now rate-limited to 10 requests per hour...
+LANDINGSITE_AI_PROMPTS.md:275: ...When you talk to Lumina AI, only the text transcription is sent...
+LANDINGSITE_AI_PROMPTS.md:401: Lumina AI is now rate-limited to prevent abuse...
+LANDINGSITE_AI_PROMPTS.md:716: Lumina AI is now rate-limited to 10 requests per hour...
+```
+
+The phrase "Lumina AI" appears in the g26 set 0 times. g26 uses "chat" wording instead; I did not search for that.
+
+LANDINGSITE names OpenAI. `SECURITY.md:460` flags an Anthropic-disclosure discrepancy for Lumina AI.
+
+**Internal counts:** da/CHANNEL_MAPPING_AUDIT_2026-05=6; =3: da/FEATURE_COMPLETENESS_INVENTORY_2026-06, da/AUDIT_assumption_gaps_2026-06, d/DESIGN_STUDIO_REQUIREMENTS, demo_review_report, a/LEASE_EXPOSURE; =2: fs/scheduling-system-prompt.ts, da/SPLIT_SCHEDULE_GROUNDING_2026-05, da/DESIGN_STUDIO_AUDIT_2026-07, a/SCHEDULING_ARCHITECTURE, a/S4_RESTORE, a/S3_DISPATCHER, a/LEASE_LEDGER_MIGRATION, a/GAME_DAY_SPEC_AUDIT, a/FEATURE_STATUS_MATRIX, a/BRIDGE_TRIAGE, a/BLOCK_E_MISSING_ROW, LEARNING_SYSTEM, INTEGRATION_COMPLETE, GUIDED_MODE_IMPLEMENTATION, CLAUDE; =1: scripts/preview_unification_design_2026-05-22, ios/Runner/PrivacyInfo.xcprivacy, fs/claudeProxy.js (:154 user-facing error "Lumina AI error: ..."), functions/package.json, functions/index.js, d/unified_preview_interpreter_design_2026-05-22 (the only `"show` hit, :594), d/game_day_one_shot_vs_recurring_audit, d/commercial_ux_phase_4b_audit, d/commercial_ux_audit, d/commercial_mode_smoke_test, d/SYNC_GEOMETRY_LAYER, bench/known_layout.json, a/VERIFICATION_REPORT, a/UNATTENDED_OPERATION, a/TEAM_SURFACES, a/SCHEDULE_V3_P3, a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01, a/ORIENTATION_ON_THE_WIRE, a/MY_DESIGNS_AUDIT, a/LAUNCH_PLAN, a/INSTALLER_ENTRY, a/DIAGNOSTICS_FIX, a/COMPLIANCE_AND_SECURITY, a/COLOUR_FIDELITY_ADDENDUM, a/CHANNEL_GROUPING_SCOPE, a/BASE_LADDER, SECURITY, ANALYTICS_SYSTEM.
+
+## 6. FAVORITES — 25 files / 188 hits (favorite=25f/185, favourite=2f/4)
+
+```
+docs/guides-2026-09/README.md:86: - **A Scenes screen, a Favorites screen, an analytics screen** — none exist.
+docs/guides-2026-09/02-homeowner-guide.md:80: ...The house photo, power, brightness, presets, favourites, and the buttons into Design Studio, Game Day and Neighborhood S...
+docs/guides-2026-09/02-homeowner-guide.md:126: ### My Favorites
+docs/guides-2026-09/02-homeowner-guide.md:149: From a collection you can also **Save to Favorites** or **Save** the look for later.
+docs/guides-2026-09/02-homeowner-guide.md:478: two slots of the Favorites grid.
+docs/Lumina_Homeowner_Guide.md (9 hits) L139,186,277,300,303,657,809,829,831 | e.g. :139: | **Home** | Your house photo, power, brightness, favorites, tonight's schedule |
+docs/User_Guide_Commercial.md:133: | **Custom Favorites** | Any patterns you've saved |
+docs/User_Guide_Commercial.md:347: 5. Tap the **heart icon** to favorite it for one-tap access later
+docs/User_Guide_Commercial.md:356: ...Build a handful of business-signature favorites...
+docs/day2-install-guide.md:338: - Customer walked through basics — they've turned lights on, changed a color, saved a favorite
+docs/Dealer_Installer_Setup_Guide.md:458: **Favorite Teams** — teams the customer follows, used for automatic game-day lighting...
+docs/Dealer_Installer_Setup_Guide.md:464: **Favorite Holidays** — Christmas, Halloween, ...
+docs/Dealer_Installer_Setup_Guide.md:565: ...toggle a favorite, drag brightness, and say "Try asking Lumina to set the lights to ...
+docs/Dealer_Installer_Setup_Guide.md:612: ...scenes, designs, favorites, house photo, Game Day / Autopilot / Neighborhood Sync settings, ...
+CHANGELOG.md:6: - Warm White and Bright White home screen favorites no longer crash the app
+CHANGELOG.md:30: - Home screen: unified For You strip (favorites + smart suggestions merged)
+```
+
+The g26 guides use both spellings: "favourites" at g26/02:80, "Favorites" at :126, :149, :478.
+
+**Internal counts:** GUIDED_MODE_IMPLEMENTATION=46 LEARNING_SYSTEM=41 INTEGRATION_COMPLETE=27 da/UI_POLISH_AUDIT_2026-05=15 da/BUG_VERIFY_2026-05=10 firestore_learning_rules.txt=7 a/MY_DESIGNS_AUDIT=6 ANALYTICS_SYSTEM=2; =1: fs/scheduling-system-prompt.ts, d/commercial_ux_phase_5_audit, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, da/AUDIT_assumption_gaps_2026-06, a/FEATURE_STATUS_MATRIX, a/DESIGN_CARD_P2, a/COMMISSIONING_FIXES, a/COMMAND_SAFETY, a/COLOR_FIDELITY_AUDIT, CLAUDE.
+
+## 7. EFFECTS / DESIGN — 72 files / 195 hits
+
+Subcounts: effect name=4f/4; Design card=6f/9; Recent Patterns=1f/1; \bBlocks\b=40f/77 (mostly the generic verb "blocks"); Alternating=6f/25; layout=37f/92.
+
+**User-facing:**
+```
+docs/guides-2026-09/03-commercial-guide.md:261: Your installing dealer first — they know your channel layout and your brand configuration. Beyond
+docs/guides-2026-09/04-installer-guide.md:263: site, the planned channel layout, and the power and hardware list.
+docs/guides-2026-09/06-admin-guide.md:191: > **Note** — Several of these are missing Firestore rules blocks rather than missing code. That
+docs/corporate-dashboard-guide.md:58: ## 3. Dashboard layout
+docs/Dealer_Installer_Setup_Guide.md:169: - **Deactivate** an installer — blocks their PIN immediately
+docs/Dealer_Installer_Setup_Guide.md:437: ...Setup → Setup Wizard</strong> (or <strong>Edit Layout</strong>). See Appendix A.
+docs/Dealer_Installer_Setup_Guide.md:488: ...timezone, and location. It **warns but never blocks**:
+docs/Dealer_Installer_Setup_Guide.md:818: ...still available for detailed edits, unusual layouts, and systems mapped before pixel-walk shipped...
+docs/dealer_preinstall_setup.md:80: Guest network? [ ] yes [ ] no (avoid — usually blocks LAN device-to-device)
+docs/Lumina_Homeowner_Guide.md:678: - **Roofline Setup** — review the layout of your peaks and runs; powers the Design Studio preview.
+docs/Lumina_Homeowner_Guide.md:685: ...only be changed on your home Wi-Fi — the app blocks them remotely on purpose.
+bench/README.md:26: ...prints ver/vid/uptime/layout; flags layout drift vs `known_layout.json` (P1-42)...
+LANDINGSITE_AI_PROMPTS.md:42: 2. "What We Encrypt" (3-column layout)
+LANDINGSITE_AI_PROMPTS.md:151: Style: Modern table with alternating row colors
+LANDINGSITE_AI_PROMPTS.md:345: Badge layout: Horizontal row of 6 badges
+android/app/src/main/AndroidManifest.xml:117: ...configChanges ...layoutDirection|fontScale|screenLayout...   (false positive)
+```
+
+None of "Design card", "Recent Patterns", "Blocks" (as the layout mode) or "Alternating" (as the layout mode) appears in any user-facing guide.
+
+**High-signal internal lines:**
+```
+audit/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02.md:1: # Design card — Static setup and grouping controls (audit + fix)
+audit/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02.md:8: Opening a design card (Explore Patterns → a palette → the tuner, `ColorwayEffectSelectorPage`) shows
+audit/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02.md:70: - **Solid-mode design card: switching to Blocks does not divide the preview** ...
+audit/DESIGN_CARD_P2.md:1 / audit/DESIGN_CARD_P3.md:1 / audit/DESIGN_CARD_P4.md:1: "# Design Card — Phase A/B/C"
+audit/DESIGN_CARD_P2.md:106: Shows name, description, derived type, effect name + fx id, colour count,
+audit/MY_DESIGNS_AUDIT.md:386: ### 4.6 Brand custom-design cards (commercial)
+GUIDED_MODE_IMPLEMENTATION.md:1004: 2. **Recent Patterns Stream**: Limits to 5 items, indexed on `lastUsed`
+docs/audits/PREVIEW_PARITY_AUDIT_2026-05.md:159: - Now Playing bar (frosted glass with effect name, brightness slider,
+docs/audits/UI_POLISH_AUDIT_2026-05.md:300,369: design card mentions
+scripts/preview_unification_design_2026-05-22.md:108: | fx ID | Effect name | primary | background | accent |
+audit/GAME_DAY_CELEBRATIONS_P1.md:309: ...no single effect named "Pulse" driving it...
+```
+
+Alternating per file: a/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02=15, d/lumina_design_pipeline_audit=4, a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=3, fs/scheduling-system-prompt.ts=1, a/COLOR_FIDELITY_AUDIT=1, LANDINGSITE=1.
+
+**Internal counts:** a/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02=39 da/CHANNEL_MAPPING_AUDIT_2026-05=13 a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=10 da/UI_POLISH_AUDIT_2026-05=7 demo_review_report=6 a/HARNESS_AUDIT=6 d/lumina_design_pipeline_audit=5 a/DESIGN_CARD_P4=5; =4: da/PREVIEW_PARITY_AUDIT_2026-05, a/PRESET_FIX_REPORT, a/MY_DESIGNS_AUDIT, a/COLOR_FIDELITY_AUDIT; =3: fs/messaging-helpers.ts, a/TEAM_SURFACES, a/OFF_LAN_CAPABILITY, a/HARDWARE_VERIFICATION_+60; =2: fs/claudeProxy.js, d/unified_preview_interpreter_design_2026-05-22, d/commercial_ux_audit, d/SYNC_GEOMETRY_LAYER, d/ACCESSIBILITY_TEXT_SCALE_TESTING, a/TOKEN_REFRESH_REPORT, a/SOLAR_FAILURE, a/S3B_CHANNELS, a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01, a/PART_B_RESULTS, a/MULTI_ENTRY_DISPLAY, a/DESIGN_CARD_P2, a/COMPLIANCE_AND_SECURITY, GUIDED_MODE_IMPLEMENTATION; =1: scripts/preview_unification_design_2026-05-22, neighborhood_sync_audit_report, fs/scheduling-system-prompt.ts, fs/onSalesJobStatusChanged.ts, fs/initiateSyncSession.ts, fs/claude-client.ts, functions/index.js, ds/NEIGHBORHOOD_SYNC_PERMISSION_DENIED_DIAGNOSIS, d/project_preview_followups_2026_05_22, d/neighborhood_fanout_activation_runbook, d/commercial_ux_phase_4b_audit, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, da/DESIGN_STUDIO_AUDIT_2026-07, d/DESIGN_STUDIO_REQUIREMENTS, codemagic.yaml, bench/known_layout.json, a/SYNC_PACING_FIX_P1, a/SCHEDULING_ARCHITECTURE_V2, a/RELEASE_2.5.10+59, a/PARTICIPATION_REENTRY, a/ORIENTATION_ON_THE_WIRE, a/LAUNCH_PLAN, a/INSTALLER_ENTRY, a/GAME_DAY_CELEBRATIONS_P1, a/FEATURE_STATUS_MATRIX, a/DESIGN_CARD_P3, a/CONTROLLER_HEALTH, a/COMMAND_SAFETY, a/COLOUR_FIDELITY_ADDENDUM, a/BLOCK_E_MISSING_ROW, SECURITY, CLAUDE.
+
+## 8. SCHEDULING — 90 files / 714 hits
+
+Subcounts: just this day=0; \bdated\b=20f/61; one-shot=17f/47; recurring=19f/112; sunrise=60f/326; sunset=57f/305; clock time=29f/56.
+
+```
+docs/guides-2026-09/01-feature-overview.md:70: Schedules anchor to a clock time or to the property's **actual sunrise and sunset**, computed from
+docs/guides-2026-09/01-feature-overview.md:77: There is also a single switch worth more than it looks: **turn the lights off at sunrise, every
+docs/guides-2026-09/02-homeowner-guide.md (15 hits) L81,241,259,260,261,264,268,274,308,310,506,544,570,574,617 | e.g. :81: | **Schedule** | Your recurring schedules, the weekly view, and Autopilot |   (:264 "If dated calendar entries are holding slots, it says so: *"(2 held by calendar days)"*")
+docs/guides-2026-09/03-commercial-guide.md:124: > **Note** — **Sunset and sunrise schedules don't consume slots.** They run from dedicated slots. For
+docs/guides-2026-09/03-commercial-guide.md:125: > a business this is usually the right answer anyway — *"on at sunset, off at close"* tracks the
+docs/guides-2026-09/03-commercial-guide.md:138: **System → Turn lights off at sunrise daily.** The controller kills the lights at sunrise every
+docs/guides-2026-09/03-commercial-guide.md:236: | Kill the lights every sunrise | System → Turn lights off at sunrise daily |
+docs/guides-2026-09/04-installer-guide.md:236: 4. **The sunrise-off switch.** *System → Turn lights off at sunrise daily.* Turn it on with them.
+docs/guides-2026-09/04-installer-guide.md:249: Sunrise and sunset schedules are live, and they depend on coordinates stored on the controller.
+docs/guides-2026-09/04-installer-guide.md:252: > recomputes sunrise and sunset when it syncs its clock — overnight, or on restart. If you change a
+docs/guides-2026-09/04-installer-guide.md:373: - Sunrise-off switch on
+docs/guides-2026-09/06-admin-guide.md:143: | `config/solar_scheduling.enabled` | **true** | Sunrise/sunset schedules. Bench-verified firing on hardware. |
+docs/guides-2026-09/06-admin-guide.md:144: ...`calendar_leases.liveWritesEnabled` | **true** | Dated calendar entries reserving controller timer slots. |
+docs/guides-2026-09/06-admin-guide.md:231: ## 7. Runbook — recurring tasks
+docs/Lumina_Homeowner_Guide.md (12 hits) L349,364,365,393,396,410,652,741,845,847,849,851 | e.g. :410: Tap any schedule under **Recurring Schedules** to edit it...
+docs/Dealer_Installer_Setup_Guide.md (14 hits) L498,502,503,504,506,577,743,744,745,746,764,797,802,803 | e.g. :498: <strong>Coordinates are what make sunset schedules work.</strong>...  (:502 "The controller has 8 general clock timer slots"; :577 "Game Day no longer needs a recurring schedule")
+docs/User_Guide_Commercial.md:263: - **Start Time** — a clock time, or **Sunset** (see the note below)
+docs/User_Guide_Commercial.md:281: <strong>Sunset is a useful anchor</strong> for "on when it gets dark, whatever the season"...
+docs/User_Guide_Commercial.md:334: - **Nature** — Ocean, forest, sunset, aurora
+docs/dealer_preinstall_setup.md (6 hits) L43,232,233,237,239,418 | e.g. :43: ...Pre-config is one-shot per controller/bridge...
+docs/full-job-lifecycle.md:595: 2. **Coordinates, for sunrise/sunset schedules.** The app refuses to arm a solar timer when latitude/longitude are ...
+docs/nex-gen-operations-overview.md:135: - Use AI-powered chat to describe a look ("make it look like a sunset over the ocean")
+LANDINGSITE_AI_PROMPTS.md:176: | Home Address | Sunrise/sunset calculations | AES-256 encrypted | Until account deletion |
+LANDINGSITE_AI_PROMPTS.md:281: 3. Sunrise/sunset times for scheduling
+```
+
+**Internal counts:** a/MULTI_ENTRY_DISPLAY=71 a/SOLAR_BENCH_GATE=38 a/SOLAR_FIRING_PATH_AUDIT=34 d/game_day_one_shot_vs_recurring_audit=30 a/SOLAR_FIX_PLAN=27 a/SOLAR_FAILURE=27 a/SOLAR_FIX=26 a/SCHEDULING_ARCHITECTURE=26 fs/processScheduleCommand.ts=20 a/SOLAR_COMPARATOR=20 fs/scheduling-system-prompt.ts=19 a/BLOCK_E_MISSING_ROW=19 a/S4_RESTORE=18 a/SCHEDULING_ARCHITECTURE_V2=17 a/ELLIE_SUNSET=17 d/lumina_split_schedule_audit=16 a/SCHEDULE_V3_P2=16 a/ALL_STUB_GUARD=15 a/SOLAR_PREP=14 a/S5_GAMEDAY=13 a/ALL_STUB_CLOBBER=12 da/SPLIT_SCHEDULE_GROUNDING_2026-05=11 a/VERIFICATION_REPORT=11 a/SESSION_CLOSEOUT_2026-08-03=7 a/OFF_LAN_CAPABILITY=7 LEARNING_SYSTEM=7 d/game_time_display_audit_2026-05-08=6 a/HEALER_PUBLISH=6; =5: neighborhood_sync_audit_report, da/BRIDGE_LATENCY_AUDIT_2026-05, a/LEASE_EXPOSURE, a/BASE_LADDER; =4: da/SCHEDULES_SUBCOLLECTION_MIGRATION_PLAN_2026-06, a/HARNESS_AUDIT; =3: da/BUG_VERIFY_2026-05, a/SOLAR_UI_GATE, a/RELEASE_2.5.10+59, a/PRESET_REGRESSION; =2: fs/claudeProxy.js, functions/index.js, d/unified_preview_interpreter_design_2026-05-22, d/commercial_mode_smoke_test, da/UI_POLISH_AUDIT_2026-05, a/SCHEDULE_V3_P3, a/RELEASE_READINESS, a/PRESET_FIX_REPORT, a/ORIENTATION_ON_THE_WIRE, a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02, a/LEASE_LEDGER_MIGRATION, a/FEATURE_STATUS_MATRIX, a/DIAGNOSTICS_FIX, a/CONTROLLER_HEALTH, a/COMMAND_SAFETY, INTEGRATION_COMPLETE, GUIDED_MODE_IMPLEMENTATION; =1: scripts/preview_unification_design_2026-05-22, ios/Runner/PrivacyInfo.xcprivacy, d/urgent_findings_overnight, ds/NEIGHBORHOOD_SYNC_PERMISSION_DENIED_DIAGNOSIS, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, da/CHANNEL_MAPPING_AUDIT_2026-05, da/AUDIT_assumption_gaps_2026-06, a/UNATTENDED_OPERATION, a/TOKEN_REFRESH_REPORT, a/TEAM_CONSOLIDATION, a/P0-5_EXPOSURE, a/MY_DESIGNS_AUDIT, a/LEASE_TRISTATE, a/GAMMA_FIX, a/GAME_DAY_SPEC_AUDIT, a/FROZEN_SEGMENT_FIX, a/FROZEN_SEGMENT, a/DESIGN_CARD_P4, a/BRIDGE_TRIAGE, a/BASE_LAYER_GATE, SECURITY, CLAUDE, .gitignore.
+
+## 9. ROOFLINE / SEGMENTS (per-file counts plus 10 representative lines)
+
+Totals: roofline 68f/576; segment 78f/693; \bbus(es)?\b 27f/160; channel 97f/1,149 (union 133f/2,235). The g26 guides have 0 "segment" hits and 0 "bus" hits.
+
+**roofline:** da/CHANNEL_MAPPING_AUDIT_2026-05=103 ds/HALFMOON_DIAGNOSIS=47 a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01=40 demo_review_report=36 d/unified_preview_interpreter_design_2026-05-22=32 scripts/preview_unification_design_2026-05-22=31 da/PREVIEW_PARITY_AUDIT_2026-05=30 d/DESIGN_STUDIO_REQUIREMENTS=30 a/CHANNEL_GROUPING_SCOPE=18 da/DESIGN_STUDIO_AUDIT_2026-07=17 d/Dealer_Installer_Setup_Guide=14 a/PARTICIPATION_REENTRY=13 da/UI_POLISH_AUDIT_2026-05=11 a/FEATURE_STATUS_MATRIX=11 a/COMMISSIONING_FIXES=11 a/P0-5_EXPOSURE=9 g26/04-installer-guide=8 g26/02-homeowner-guide=6; =5: d/design/controller_replacement, d/Lumina_Homeowner_Guide, a/PART_B_RESULTS, a/HEALER_PUBLISH, a/HARDWARE_VERIFICATION_+60, a/FROZEN_SEGMENT, a/COLOR_FIDELITY_AUDIT; =4: ds/REVIEWER_GATE_DIAGNOSIS, d/sales-mode-guide; =3: d/nex-gen-operations-overview, d/lumina_design_pipeline_audit, g26/01-feature-overview, da/SCHEDULES_SUBCOLLECTION_MIGRATION_PLAN_2026-06, a/TOKEN_REFRESH_REPORT, a/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02; =2: fs/scheduling-system-prompt.ts, ds/REVIEWER_CONTROLLER_GATE, d/project_preview_followups_2026_05_22, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, da/BUG_VERIFY_2026-05, d/Admin_Operations_Guide, a/RELEASE_READINESS, a/P0-6_FIX, a/ORIENTATION_ON_THE_WIRE, a/INSTALLER_ENTRY, a/DESIGN_CARD_P4, a/COMPLIANCE_AND_SECURITY, a/COMMAND_SAFETY; =1: neighborhood_sync_audit_report, ios/Runner/PrivacyInfo.xcprivacy, d/dealer_preinstall_setup, d/dealer-inventory-guide, d/day2-install-guide, d/day1-electrician-guide, d/commercial_ux_phase_4b_audit, da/AUDIT_brand_polish_2026-06, d/SYNC_GEOMETRY_LAYER, a/VERIFICATION_REPORT, a/UNATTENDED_OPERATION, a/SPORTS_ALERTS_SYNC_AUDIT, a/S3B_CHANNELS, a/MY_DESIGNS_AUDIT, a/GAME_DAY_SPEC_AUDIT, a/DIAGNOSTICS_FIX, a/DESIGN_CARD_P2, a/COLOUR_FIDELITY_ADDENDUM, a/BLOCK_E_MISSING_ROW, a/BASE_LADDER, assets/demo/demo_home_trace.json, android/app/src/main/AndroidManifest.xml.
+
+**segment:** da/CHANNEL_MAPPING_AUDIT_2026-05=93 a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=71 a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01=53 d/DESIGN_STUDIO_REQUIREMENTS=52 a/SCHEDULE_V3_P3=33 a/CHANNEL_GROUPING_SCOPE=28 a/FROZEN_SEGMENT=26 a/BASE_LADDER=24 a/U7_ABSENT_SEGMENT_PROBE=20 da/DESIGN_STUDIO_AUDIT_2026-07=19 a/FROZEN_SEGMENT_FIX=19 a/U6_PSAVE_PROBE=15 a/HEALER_PUBLISH=13 d/lumina_design_pipeline_audit=11 d/Dealer_Installer_Setup_Guide=10 scripts/preview_unification_design_2026-05-22=9; =8: ds/HALFMOON_DIAGNOSIS, d/commercial_ux_phase_4b_audit, a/PART_B_RESULTS, a/HARNESS_AUDIT; =7: d/SYNC_GEOMETRY_LAYER, a/SOLAR_FAILURE, a/S4_RESTORE, a/PRESET_REGRESSION, a/ORIENTATION_ON_THE_WIRE, a/COLOR_FIDELITY_AUDIT; =6: d/dealer_preinstall_setup, a/S3B_CHANNELS; =5: da/AUDIT_brand_polish_2026-06, a/VERIFICATION_REPORT, a/UNATTENDED_OPERATION, a/SOLAR_UI_GATE, a/SOLAR_FIX; =4: d/commercial_ux_phase_4a_decisions, d/bridge_command_routing_context_2026-05-11, da/PREVIEW_PARITY_AUDIT_2026-05, a/OFF_LAN_CAPABILITY; =3: d/memory_directory_verification, a/SCHEDULE_V3_P2, a/S5_GAMEDAY, a/PARTICIPATION_REENTRY, a/LEASE_EXPOSURE, a/ELLIE_SUNSET; =2: functions/index.js, d/game_day_celebration_length_spec_2026-10-02, d/commercial_ux_phase_5_audit, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, da/BUG_VERIFY_2026-05, d/STREET_TEST_RUNBOOK, a/SOLAR_COMPARATOR, a/SCHEDULING_ARCHITECTURE, a/RELEASE_2.5.10+59, a/MY_DESIGNS_AUDIT, a/MULTI_ENTRY_DISPLAY, a/INSTALLER_ENTRY, a/HARDWARE_VERIFICATION_+60, a/GAMMA_BUG, a/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02, a/COMPLIANCE_AND_SECURITY, a/BRIDGE_TRIAGE; =1: d/unified_preview_interpreter_design_2026-05-22, da/AUDIT_assumption_gaps_2026-06, demo_review_report, a/SPORTS_ALERTS_SYNC_AUDIT, a/SOLAR_BENCH_GATE, a/SCHEDULING_ARCHITECTURE_V2, a/S3_DISPATCHER, a/PRESET_FIX_REPORT, a/GAMMA_FIX, a/FEATURE_STATUS_MATRIX, a/DEVICE_DIAGNOSTIC_2026-08-24, a/DESIGN_CARD_P2, a/CONTROLLER_HEALTH, a/COMMAND_SAFETY, a/COLOUR_FIDELITY_ADDENDUM, assets/demo/demo_home_trace.json, CLAUDE, ANALYTICS_SYSTEM. The stray cfg file has 1 `"seg"` key hit.
+
+**bus:** da/CHANNEL_MAPPING_AUDIT_2026-05=27 da/AUDIT_assumption_gaps_2026-06=27 a/S3B_CHANNELS=20 a/HEALER_PUBLISH=20 a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=12 a/CHANNEL_GROUPING_SCOPE=9 d/dealer_preinstall_setup=6 da/FEATURE_COMPLETENESS_INVENTORY_2026-06=6; =3: da/AUDIT_brand_polish_2026-06, d/Dealer_Installer_Setup_Guide, a/UNATTENDED_OPERATION, a/PARTICIPATION_REENTRY, a/ORIENTATION_ON_THE_WIRE; =2: d/commercial_ux_phase_4b_audit, a/SOLAR_FAILURE, a/S5_GAMEDAY, a/OFF_LAN_CAPABILITY; =1: scripts/preview_unification_design_2026-05-22, da/DESIGN_STUDIO_AUDIT_2026-07, d/SYNC_GEOMETRY_LAYER, bench/known_layout.json, a/SCHEDULE_V3_P3, a/SCHEDULE_V3_P2, a/HARNESS_AUDIT, a/GAMMA_FIX, a/GAMMA_BUG, a/ELLIE_SUNSET.
+
+**channel:** da/CHANNEL_MAPPING_AUDIT_2026-05=255 a/CHANNEL_GROUPING_SCOPE=81 a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=53 da/AUDIT_assumption_gaps_2026-06=42 a/S3B_CHANNELS=41 a/PARTICIPATION_REENTRY=33 a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01=31 a/BASE_LADDER=31 d/sales-mode-guide=30 a/UNATTENDED_OPERATION=27 d/dealer_preinstall_setup=26 a/HEALER_PUBLISH=26 d/day2-install-guide=23 d/Dealer_Installer_Setup_Guide=20 a/SCHEDULE_V3_P3=20 d/commercial_ux_audit=18 a/DESIGN_CARD_P4=17 d/User_Guide_Commercial=16; =14: d/day1-electrician-guide, da/DESIGN_STUDIO_AUDIT_2026-07, d/Lumina_Homeowner_Guide, d/DESIGN_STUDIO_REQUIREMENTS; =12: d/lumina_design_pipeline_audit, da/FEATURE_COMPLETENESS_INVENTORY_2026-06; =11: g26/04-installer-guide, d/commercial_mode_smoke_test, d/SYNC_GEOMETRY_LAYER, a/U7_ABSENT_SEGMENT_PROBE, a/MY_DESIGNS_AUDIT, a/COLOR_FIDELITY_AUDIT; =10: d/commercial_ux_phase_5_audit, d/commercial_ux_phase_4b_audit, a/COLOUR_FIDELITY_ADDENDUM; =9: d/full-job-lifecycle, a/U6_PSAVE_PROBE; =8: g26/03-commercial-guide, a/FEATURE_STATUS_MATRIX; =7: g26/02-homeowner-guide, a/SCHEDULE_V3_P2, a/S5_GAMEDAY, a/HARDWARE_VERIFICATION_+60, assets/demo/demo_home_trace.json; =6: d/nex-gen-operations-overview, a/HARNESS_AUDIT; =5: d/Admin_Operations_Guide, bench/README, a/S4_RESTORE; =4: d/design/controller_replacement, da/SCHEDULES_SUBCOLLECTION_MIGRATION_PLAN_2026-06, a/INTEGRATION_TEST_BUILD; =3: scripts/preview_unification_design_2026-05-22, da/AUDIT_brand_polish_2026-06, a/SOLAR_FAILURE, a/SCHEDULING_ARCHITECTURE, a/ORIENTATION_ON_THE_WIRE, a/INSTALLER_ENTRY, a/FROZEN_SEGMENT_FIX, a/ELLIE_SUNSET, a/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02; =2: fs/endSyncSession.ts, da/BRIDGE_LATENCY_AUDIT_2026-05, a/VERIFICATION_REPORT, a/TEAM_CONSOLIDATION, a/SOLAR_FIX_PLAN, a/P0-6_FIX, a/P0-5_EXPOSURE, a/OFF_LAN_CAPABILITY, a/LAUNCH_PLAN, a/DESIGN_CARD_P2; =1: fs/sendWeeklyBrief.ts, fs/sendSyncNotification.ts, fs/onSalesJobStatusChanged.ts, fs/onReferralStatusChanged.ts, fs/initiateSyncSession.ts, ds/TEST_PROTOCOL_PHASE1, ds/HALFMOON_DIAGNOSIS, d/project_preview_followups_2026_05_22, d/messaging-configuration-guide, d/memory_directory_verification, g26/01-feature-overview, d/corporate-dashboard-guide, d/bridge_command_routing_context_2026-05-11, da/PREVIEW_PARITY_AUDIT_2026-05, d/SPORTS_ALERTS_RESTRUCTURE_PLAN, a/SCHEDULING_ARCHITECTURE_V2, a/S3_DISPATCHER, a/PRESET_REGRESSION, a/PART_B_RESULTS, a/MULTI_ENTRY_DISPLAY, a/GAME_DAY_SPEC_AUDIT, a/GAME_DAY_CELEBRATIONS_P1, a/COMPLIANCE_AND_SECURITY, a/COMMISSIONING_FIXES, a/BRIDGE_TRIAGE, LEARNING_SYSTEM, CHANGELOG, .metadata. The stray cfg file has 1 `"chan"` hit.
+
+**10 representative lines:**
+```
+docs/guides-2026-09/01-feature-overview.md:41: | **Channels** | Target one roofline section, accent run, or column on its own |
+docs/guides-2026-09/02-homeowner-guide.md:121: > **Warning** — Smart Presets need a roofline map. Without one the section collapses to a single
+docs/guides-2026-09/02-homeowner-guide.md:181: | **Channel 1…N** | Pick which run you're painting |
+docs/guides-2026-09/03-commercial-guide.md:95: > **Note** — Zones are defined from **hardware channels**, not drawn on a photo. Adding or
+docs/guides-2026-09/04-installer-guide.md:90: | 6 | **Map Roofline** | Yes — *"Map later"* |
+docs/guides-2026-09/04-installer-guide.md:177: > **Warning** — Get the counts right on install day. Diode count drives the roofline map, the
+docs/Dealer_Installer_Setup_Guide.md:265: | 5 | **Hardware Config** | LED type, color order, per-channel bus assignments |
+docs/Dealer_Installer_Setup_Guide.md:417: This is the pixel-walk mapping step. Instead of typing segment tables, you drive a lit pixel along the run and mark the features
+docs/Dealer_Installer_Setup_Guide.md:437: The older segment-and-anchor <strong>Roofline Setup Wizard</strong> still exists for detailed edits and for systems mapped before
+docs/Lumina_Homeowner_Guide.md:216: Most homes are wired in several runs — front eave, garage, back fascia, and so on. Lumina calls these **channels**, or **zones** if y...
+```
+
+## 10. CELEBRATION — 30 files / 203 hits
+
+```
+docs/guides-2026-09/01-feature-overview.md:84: entirely in daylight. During the game, scores land on the house as celebrations, and the lights
+docs/guides-2026-09/02-homeowner-guide.md:353: | **Celebration** | What fires when they do |
+docs/guides-2026-09/02-homeowner-guide.md:359: > **Warning** — **"Live Scoring" on its own does nothing.** Score celebrations need *both*
+docs/guides-2026-09/02-homeowner-guide.md:363: > **Note** — **Game Day needs the app open.** Team turnovers and score celebrations run while Lumina
+docs/guides-2026-09/02-homeowner-guide.md:552: ### Score celebrations aren't happening
+docs/guides-2026-09/02-homeowner-guide.md:574: Schedules and the sunrise-off switch, yes. Game Day, score celebrations and Neighborhood Sync need
+docs/guides-2026-09/03-commercial-guide.md:174: > **Warning** — **Game Day needs the app open on a phone.** Team turnovers and score celebrations
+docs/Lumina_Homeowner_Guide.md:457: | **Celebration** | *What* fires when they do — the motion for a score or a win. |
+docs/Lumina_Homeowner_Guide.md:471: Your lights return to whatever was playing once the celebration finishes.
+docs/Lumina_Homeowner_Guide.md:474: Score celebrations run while the Lumina app is open on your phone...
+docs/Lumina_Homeowner_Guide.md:883: <div class="faqq">Will score celebrations flash while I'm out?</div>
+docs/Lumina_Homeowner_Guide.md:885: Score celebrations play while the Lumina app is open on your phone, so keep the app up during the game.
+docs/Dealer_Installer_Setup_Guide.md:461: ...a <strong>Celebration</strong> row for the effect that fires on a score or a win...
+docs/Dealer_Installer_Setup_Guide.md:574: ...the **Celebration** effect that fires when their team scores or wins, **Skip day ...
+docs/Dealer_Installer_Setup_Guide.md:588: ...it still lights the house and arms celebrations, but <strong>without</strong> the auto-revert...
+docs/Dealer_Installer_Setup_Guide.md:735: | Per-team alerts & celebrations | Customer's app → **Game Day** → the team's card |
+docs/sales-mode-guide.md:297: ...with a celebration effect that fires when their team scores.
+CHANGELOG.md:18: - Neighborhood Sync: live score celebration propagation to all group members
+```
+
+**Short / Medium / Long within ±5 lines of "celebration"** (no user-facing guide has these):
+```
+docs/game_day_celebration_length_spec_2026-10-02.md:1: # Game Day celebration length: Short / Medium / Long
+docs/game_day_celebration_length_spec_2026-10-02.md:73: - **Maximum 60 s** for any single celebration, including all of its stages. The win at Long is exactly 60 s...
+docs/game_day_celebration_length_spec_2026-10-02.md:103: In the celebration picker (`ColorwayEffectSelectorPage`, celebration mode), directly under the **Speed** slider...
+docs/game_day_celebration_length_spec_2026-10-02.md:107: - **Control:** a three-way segmented control: **Short · Medium · Long** (Medium selected when unset).
+docs/game_day_celebration_length_spec_2026-10-02.md:109: - Short: "About half as long — a touchdown plays 8 seconds, a win 15."
+docs/game_day_celebration_length_spec_2026-10-02.md:110: - Medium: "The usual length — a touchdown plays 15 seconds, a win 30."
+docs/game_day_celebration_length_spec_2026-10-02.md:111: - Long: "Twice as long — a touchdown plays 30 seconds, a win a full minute."
+docs/game_day_celebration_length_spec_2026-10-02.md:144: - Long (30 s) for about 90 s.
+docs/game_day_celebration_length_spec_2026-10-02.md:146: That is too coarse for Short and Medium.
+docs/game_day_celebration_length_spec_2026-10-02.md:150: - **Result:** about exact (± bridge latency) for Short and Medium, and for Long when detected at t+0.
+docs/game_day_celebration_length_spec_2026-10-02.md:189: - it changes nothing until a customer picks Short or Long;
+audit/UNATTENDED_OPERATION.md:190,193,196: "Medium" effort-estimate column (false positive)
+```
+
+**Internal counts:** a/GAME_DAY_CELEBRATIONS_P1=37 d/game_day_celebration_length_spec_2026-10-02=34 a/GAME_DAY_SPEC_AUDIT=20 neighborhood_sync_audit_report=19 d/SPORTS_ALERTS_RESTRUCTURE_PLAN=19 a/ORIENTATION_ON_THE_WIRE=12 a/UNATTENDED_OPERATION=11 a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=6 a/S5_GAMEDAY=4; =3: da/AUDIT_assumption_gaps_2026-06, TASK_TEST_PLAN; =2: da/FEATURE_COMPLETENESS_INVENTORY_2026-06, demo_review_report, a/TEAM_SURFACES, a/TEAM_CONSOLIDATION, a/FROZEN_SEGMENT; =1: fs/scheduling-system-prompt.ts, fs/initiateSyncSession.ts, ds/NEIGHBORHOOD_SYNC_PERMISSION_DENIED_DIAGNOSIS, d/project_preview_followups_2026_05_22, d/game_day_one_shot_vs_recurring_audit, a/SYNC_PACING_FIX_P1, a/SPORTS_ALERTS_SYNC_AUDIT.
+
+## 11. GAME DAY — 118 files / 939 hits
+
+Subcounts: Game Day=74f/457; \blease=54f/385; from our servers=1f/1; from this phone=0; Lumina Blue=0; `0, 212, 255`=7f/7, all CSS `rgba(0, 212, 255, …)` brand-cyan styles in legacy guides (false positives); base look/lighting/ladder=7f/7; Repair base=0; ladder=18f/90.
+
+```
+docs/guides-2026-09/01-feature-overview.md:83: turns over on game day on its own, with configurable lead time and an option to skip games played
+docs/guides-2026-09/README.md:53: **real in-app names** — "Game Day", "Neighborhood Sync", "Autopilot" — because a how-to guide has to
+docs/guides-2026-09/README.md:68: | **Sports Alerts removed as a destination.** | Screen retired; settings moved onto the Game Day team card. |
+docs/guides-2026-09/02-homeowner-guide.md (12 hits) L80,133,142,335,337,344,363,367,539,574,619,620 | e.g. :363: > **Note** — **Game Day needs the app open.**...
+docs/guides-2026-09/03-commercial-guide.md:171: If your property trades on local sport, **Home → Game Day** puts team colours up automatically on
+docs/guides-2026-09/03-commercial-guide.md:172: game days, with a configurable lead time and an option to skip daytime games.
+docs/guides-2026-09/03-commercial-guide.md:174: > **Warning** — **Game Day needs the app open on a phone.** Team turnovers and score celebrations
+docs/guides-2026-09/03-commercial-guide.md:238: | Team colours on game days | Home → Game Day |
+docs/guides-2026-09/06-admin-guide.md (6 hits) L147,154,183,189,218,266 | e.g. :147: | `config/gameday_planner.write_jobs` | **false** | Unattended server-side Game Day firing. Log-only today. |
+docs/Lumina_Homeowner_Guide.md (18 hits) L29,81,184,252,319,349,437,439,446,449,478,482,608,609,741,873,946,947 | e.g. :482: Corrected 2026-09-17 — Game Day crews are only partly working.   (:29 is the CSS false positive)
+docs/Dealer_Installer_Setup_Guide.md (13 hits) L29,461,572,574,577,583,607,612,735,743,765,796,797 | (:29 CSS false positive; :797 is the only user-facing "ladder"-pattern hit... actually it matched "Game Day")
+docs/User_Guide_Commercial.md:24: .tip { background: rgba(0, 212, 255, 0.12); ...   (CSS false positive)
+docs/User_Guide_Commercial.md:573: | **Game Day Alert** | A followed team is playing — Game Day mode is available |
+docs/ESP32_Bridge_Setup_Guide.md:24 / docs/Media_Mode_Guide.md:24 / docs/Dealer_Dashboard_Guide.md:24 / docs/Admin_Operations_Guide.md:24: rgba(0, 212, 255, …)   (CSS false positives)
+bench/README.md:30: ...lease slots (26/28/41) present/untouched. Read-only. |
+bench/README.md:77: **NEVER** the lease slots (26/28/41), system presets (1-5), or live schedule
+android/app/src/main/res/xml/actions.xml:10: - "Hey Google, activate Game Day in Lumina"
+CHANGELOG.md:17: - Neighborhood Sync: Game Day team selection with dynamic team colors
+```
+
+**Rare terms (all occurrences):**
+```
+docs/game_day_celebration_length_spec_2026-10-02.md:154: **Copy, honestly:** "Score celebrations from our servers run for about the length you chose; the end can land up to half...
+docs/game_day_celebration_length_spec_2026-10-02.md:138: ... The game's end job restores the base look regardless.
+audit/GAME_DAY_SPEC_AUDIT.md:208: taken by the base look. There is no second slot — no `celebrationEffectId`, no
+audit/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02.md:139: branch replaces this with a named base look (`base_look.dart`).
+audit/BASE_LADDER.md:1: # BASE LADDER — ON presets capture ambient segment state and fire dark
+audit/COLOR_FIDELITY_AUDIT.md:242: | Smart presets / base ladder | per preset | 1–3 | ...
+docs/SYNC_GEOMETRY_LAYER.md:102: from baking wrong geometry into the base ladder, specified now because the
+docs/STREET_TEST_RUNBOOK.md:46: the sync design? Watch hers specifically; Tyler's rig has a base ladder and
+```
+
+The word "ladder" appears in no user-facing guide.
+
+**Internal counts:** a/LEASE_LEDGER_MIGRATION=58 neighborhood_sync_audit_report=54 a/SCHEDULING_ARCHITECTURE=46 a/LEASE_EXPOSURE=42 d/game_day_one_shot_vs_recurring_audit=41 a/LEASE_TRISTATE=41 a/BASE_LADDER=35 a/TEAM_SURFACES=32 a/OFF_LAN_CAPABILITY=30 a/S4_RESTORE=26 a/UNATTENDED_OPERATION=24 a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02=24 a/BLOCK_E_MISSING_ROW=20 a/ALL_STUB_CLOBBER=20 a/SPORTS_ALERTS_SYNC_AUDIT=19 a/TEAM_CONSOLIDATION=17 a/SCHEDULING_ARCHITECTURE_V2=17 a/MULTI_ENTRY_DISPLAY=16 a/SCHEDULE_V3_P3=15 da/CHANNEL_MAPPING_AUDIT_2026-05=14 a/HEALER_PUBLISH=14 a/CHANNEL_GROUPING_SCOPE=12 a/SCHEDULE_V3_P2=11 a/S5_GAMEDAY=11 a/VERIFICATION_REPORT=10 a/PRESET_REGRESSION=10 a/ALL_STUB_GUARD=10; =8: da/AUDIT_assumption_gaps_2026-06, a/BASE_LAYER_GATE; =7: d/commercial_ux_audit, a/WINDOW_RECONCILIATION_2026-08-03, a/U7_ABSENT_SEGMENT_PROBE, a/S3B_CHANNELS; =6: ve/lease_exposure_bench_presets26plus_2026-07-30.json, a/SOLAR_BENCH_GATE, a/GAME_DAY_SPEC_AUDIT, a/COLOR_FIDELITY_AUDIT; =5: fs/scheduling-system-prompt.ts, d/commercial_mode_smoke_test, d/SYNC_GEOMETRY_LAYER, a/SYNC_PACING_FIX_P1, a/MY_DESIGNS_AUDIT, a/HARNESS_AUDIT; =4: d/unified_preview_interpreter_design_2026-05-22, d/game_day_celebration_length_spec_2026-10-02, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, a/GAMMA_BUG, a/DESIGN_CARD_P2; =3: a/U6_PSAVE_PROBE, a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01, a/RELEASE_2.5.10+59, a/INSTALLER_ENTRY, a/GAMMA_FIX, a/FROZEN_SEGMENT, a/FEATURE_STATUS_MATRIX, a/COLOUR_FIDELITY_ADDENDUM; =2: functions/index.js, d/project_preview_followups_2026_05_22, da/SPLIT_SCHEDULE_GROUNDING_2026-05, da/BUG_VERIFY_2026-05, da/AUDIT_brand_polish_2026-06, d/STREET_TEST_RUNBOOK, a/SESSION_CLOSEOUT_2026-08-03, a/S3_DISPATCHER, a/RELEASE_READINESS, a/PARTICIPATION_REENTRY, a/HARDWARE_VERIFICATION_+60, a/COMPLIANCE_AND_SECURITY, a/COMMAND_SAFETY, LEARNING_SYSTEM, ANALYTICS_SYSTEM; =1: scripts/preview_unification_design_2026-05-22, ios/Runner/PrivacyInfo.xcprivacy, fs/sendWeeklyBrief.ts, ds/NEIGHBORHOOD_SYNC_PERMISSION_DENIED_DIAGNOSIS, d/neighborhood_fanout_activation_runbook, d/memory_directory_verification, d/lumina_split_schedule_audit, d/game_time_display_audit_2026-05-08, d/design/controller_replacement, d/bridge_command_routing_context_2026-05-11, da/UI_POLISH_AUDIT_2026-05, da/SCHEDULES_SUBCOLLECTION_MIGRATION_PLAN_2026-06, d/SPORTS_ALERTS_RESTRUCTURE_PLAN, codemagic.yaml, ve/presets_post_session.json, ve/presets-backup-1785446782.json, ve/presets-after-release-build-connect.json, ve/presets-after-2nd-connect.json, ve/presets-BROKEN-before-app-connect.json, ve/prefix_presets.json, a/TOKEN_REFRESH_REPORT, a/SOLAR_PREP, a/SOLAR_FIRING_PATH_AUDIT, a/SOLAR_FAILURE, a/PRESET_FIX_REPORT, a/ORIENTATION_ON_THE_WIRE, a/LAUNCH_PLAN, a/GAME_DAY_CELEBRATIONS_P1, a/DEVICE_DIAGNOSTIC_2026-08-24, a/DESIGN_CARD_P4, a/BRIDGE_TRIAGE, CLAUDE.
+
+## 12. POWER OUTAGE — 66 files / 177 hits
+
+Subcounts: power outage/cycle/loss/blip=8f/13; reboot=33f/101; collapse=46f/77 (8 of these are CSS `border-collapse` false positives).
+
+```
+docs/guides-2026-09/02-homeowner-guide.md:121: > **Warning** — Smart Presets need a roofline map. Without one the section collapses to a single
+docs/guides-2026-09/04-installer-guide.md:253: > customer's location, either **reboot the controller** before you leave, or tell them the solar
+docs/guides-2026-09/06-admin-guide.md:264: ...Solar coordinates changed recently without a reboot? |
+docs/guides-2026-09/07-bridge-setup-guide.md:64: Choose your home network, enter its password, and save. The bridge reboots and joins your Wi-Fi.
+docs/ESP32_Bridge_Setup_Guide.md:191: The bridge reboots and starts listening for commands from the cloud.
+docs/ESP32_Bridge_Setup_Guide.md:238: ...with Re-run Setup, Reboot and Factory Reset buttons. Firmware v1.2 serves six JSON API endpoin...
+docs/ESP32_Bridge_Setup_Guide.md:264: A factory reset is what actually frees a bridge. It erases the stored pairing, reboots, and the
+docs/Lumina_Homeowner_Guide.md:711: ...Your controller likely dropped off Wi-Fi. Reboot it (unplug 10 seconds)...
+docs/Lumina_Homeowner_Guide.md:727: ... **Time Zone** to your local zone, save, and reboot if prompted.
+docs/Dealer_Installer_Setup_Guide.md:640: 4. The bridge reboots and begins relaying
+docs/dealer_preinstall_setup.md (9 hits) L23,141,187,223,245,266,275,300,321 | e.g. :300: ...The controller's saved WiFi creds and LED config persist in flash across power cycles.   (:23 CSS false positive)
+docs/{User_Guide_Commercial,Dealer_Dashboard_Guide,Media_Mode_Guide,ESP32_Bridge_Setup_Guide,Admin_Operations_Guide}.md:21, docs/{Lumina_Homeowner_Guide,Dealer_Installer_Setup_Guide}.md:24: table { border-collapse: ... }   (CSS false positives)
+```
+
+**All "power cycle/loss/blip" hits:** ds/TEST_PROTOCOL_PHASE1:4,159,281; a/S4_RESTORE:309; d/dealer_preinstall_setup:300; a/GAMMA_BUG:126; a/OFF_LAN_CAPABILITY:391; a/FROZEN_SEGMENT:108,110,111,201; a/BRIDGE_TRIAGE:170; a/SYNC_PACING_FIX_P1:104. "Power outage" itself: 0 hits.
+
+**Internal counts:** a/SOLAR_BENCH_GATE=20 a/FROZEN_SEGMENT=11 ds/TEST_PROTOCOL_PHASE1=9; =6: d/lumina_design_pipeline_audit, a/SOLAR_PREP; =5: a/S3B_CHANNELS, a/OFF_LAN_CAPABILITY, a/CONTROLLER_HEALTH; =4: a/SYNC_PACING_FIX_P1, a/MULTI_ENTRY_DISPLAY, a/HEALER_PUBLISH; =3: d/SYNC_GEOMETRY_LAYER, a/UNATTENDED_OPERATION, a/SOLAR_COMPARATOR, a/SCHEDULING_ARCHITECTURE, a/GAMMA_FIX, a/GAMMA_BUG, a/COMPLIANCE_AND_SECURITY; =2: d/unified_preview_interpreter_design_2026-05-22, ds/BRIDGE_PHASE1_APP_AUDIT, d/commercial_ux_audit, d/bridge_command_routing_context_2026-05-11, da/UI_POLISH_AUDIT_2026-05, da/CHANNEL_MAPPING_AUDIT_2026-05, a/SCHEDULING_ARCHITECTURE_V2, a/SCHEDULE_V3_P2, a/S4_RESTORE, a/RELEASE_READINESS, a/ORIENTATION_ON_THE_WIRE, a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02, a/LEASE_TRISTATE, a/INSTALLER_ENTRY, GUIDED_MODE_IMPLEMENTATION; =1: ds/SUBMISSION_AUDIT_v1.0.0, d/design/controller_replacement, da/DESIGN_STUDIO_AUDIT_2026-07, da/BRIDGE_LATENCY_AUDIT_2026-05, d/CLEANUP_PLAN, a/VERIFICATION_REPORT, a/U7_ABSENT_SEGMENT_PROBE, a/U6_PSAVE_PROBE, a/SOLAR_UI_GATE, a/SCHEDULE_V3_P3, a/S5_GAMEDAY, a/S3_DISPATCHER, a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01, a/PRESET_REGRESSION, a/PART_B_RESULTS, a/MY_DESIGNS_AUDIT, a/HANDOFF_TO_WINDOW_B, a/CHANNEL_GROUPING_SCOPE, a/BRIDGE_TRIAGE, a/BLOCK_E_MISSING_ROW, a/ALL_STUB_CLOBBER.
+
+## 13. STALLS — 91 files / 366 hits
+
+Subcounts: stall/stalls/stalled/stalling=24f/60; 10-minute=10f/11; heartbeat=15f/51; stale=74f/245.
+
+```
+docs/guides-2026-09/02-homeowner-guide.md:291: header shows a stale time.
+docs/guides-2026-09/02-homeowner-guide.md:548: - Did you tap **Sync**? Check the header for a stale time.
+docs/guides-2026-09/05-dealer-guide.md:132: call, and the Pipeline tab is the only place that shows you it's stalled.
+docs/guides-2026-09/05-dealer-guide.md:206: 2. **Pipeline** — anything stalled at *estimate sent*? Those are today's calls.
+docs/dealer_preinstall_setup.md (9 hits) L122,134,137,138,140,142,159,258,579 | e.g. :122: "latest" to the letter produces a **stalling controller with no error surfaced
+docs/Dealer_Installer_Setup_Guide.md:58: ..."latest" (0.15.4) produces a controller that stalls periodically in the field...
+docs/Dealer_Installer_Setup_Guide.md:615: ...re-asserts that uid on every heartbeat</strong>...
+docs/corporate-dashboard-guide.md (12 hits) L98,113,126,157,160,168,384,400,410,411,413,414 | e.g. :98: | **Health chip** (top-right) | Color-coded — Active / Quiet / Stalled |
+docs/full-job-lifecycle.md:13: - If you're debugging a stalled or broken job: dealer admin access or backend access
+docs/full-job-lifecycle.md:432: ...re-asserts that uid on every heartbeat**...
+docs/full-job-lifecycle.md:448: Check this **first** on any job that appears stalled at Signed...
+docs/full-job-lifecycle.md:517: **For genuinely stalled jobs:**
+docs/full-job-lifecycle.md:630: ... — this is the pipeline's most common silent stall
+docs/Admin_Operations_Guide.md (7 hits) L274,275,585,624,782,799,832 | e.g. :274: ...cards are classified as active, quiet, or stalled.
+docs/Dealer_Dashboard_Guide.md:415: **"Numbers look stale or don't match what my installer just did."**
+docs/Lumina_Homeowner_Guide.md:66: - About 10 minutes
+docs/nex-gen-operations-overview.md:108: - **Pipeline** — cross-dealer view of every job, with stall indicators
+esp32-bridge/README.md:15: - **Heartbeat** — writes to `/users/{uid}/bridge_status/current` every 30 seconds
+bench/README.md:29: ...posts, absorbs any stall (patient poll), readback-asserts via `timersInsLanded`. |
+bench/README.md:79: - A mid-stall controller is WAITED on (patient poll), never spurious-failed.
+```
+
+**All 10-minute hits:** d/commercial_mode_smoke_test:51,52; d/Lumina_Homeowner_Guide:66; a/S5_GAMEDAY:45; a/TOKEN_REFRESH_REPORT:136; a/BRIDGE_TRIAGE:141; a/UNATTENDED_OPERATION:644; INTEGRATION_COMPLETE:380; a/SOLAR_FIRING_PATH_AUDIT:279; a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01:96; TASK_TEST_PLAN:28.
+
+**Internal counts:** a/UNATTENDED_OPERATION=21 a/CONTROLLER_HEALTH=20 a/BRIDGE_TRIAGE=20 da/CHANNEL_MAPPING_AUDIT_2026-05=17 a/OFF_LAN_CAPABILITY=14 da/PREVIEW_PARITY_AUDIT_2026-05=13 a/SCHEDULING_ARCHITECTURE=10; =9: a/S3B_CHANNELS, a/COMPLIANCE_AND_SECURITY; a/TOKEN_REFRESH_REPORT=8; =6: d/project_preview_followups_2026_05_22, d/design/controller_replacement, a/SOLAR_FIRING_PATH_AUDIT, a/SOLAR_BENCH_GATE, a/RELEASE_READINESS, a/BLOCK_E_MISSING_ROW, CLAUDE; =5: a/SCHEDULING_ARCHITECTURE_V2, a/S4_RESTORE, a/S3_DISPATCHER, a/LEASE_TRISTATE, a/HARNESS_AUDIT, a/COMMAND_SAFETY; =4: d/esp32_firmware_audit, d/bridge_command_routing_context_2026-05-11, a/SPORTS_ALERTS_SYNC_AUDIT, a/S5_GAMEDAY, a/LEASE_LEDGER_MIGRATION, a/FEATURE_STATUS_MATRIX, a/DIAGNOSTICS_FIX; =3: fs/sendSyncNotification.ts, fs/collectControllerHealth.ts, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, a/WINDOW_RECONCILIATION_2026-08-03, a/VERIFICATION_REPORT, a/SOLAR_UI_GATE, a/SESSION_CLOSEOUT_2026-08-03, a/MY_DESIGNS_AUDIT, a/LAUNCH_PLAN, a/FROZEN_SEGMENT_FIX; =2: d/game_time_display_audit_2026-05-08, d/commercial_mode_smoke_test, da/BUG_VERIFY_2026-05, demo_review_report, codemagic.yaml, a/SOLAR_COMPARATOR, a/PRESET_REGRESSION, a/PARTICIPATION_REENTRY, a/HEALER_PUBLISH, a/GAMMA_FIX, a/ALL_STUB_GUARD; =1: neighborhood_sync_audit_report, fs/sendWeeklyBrief.ts, functions/index.js, ds/REVIEWER_GATE_DIAGNOSIS, d/hardcoded_identifier_audit_2026-05-08, d/commercial_ux_phase_5_audit, da/BRIDGE_LATENCY_AUDIT_2026-05, da/AUDIT_assumption_gaps_2026-06, d/SYNC_GEOMETRY_LAYER, d/SPORTS_ALERTS_RESTRUCTURE_PLAN, a/SYNC_PACING_FIX_P1, a/SOLAR_PREP, a/SOLAR_FIX_PLAN, a/SOLAR_FIX, a/SCHEDULE_V3_P3, a/SCHEDULE_V3_P2, a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01, a/PRESET_FIX_REPORT, a/P0-6_FIX, a/INSTALLER_ENTRY, a/DEVICE_DIAGNOSTIC_2026-08-24, a/DESIGN_CARD_P3, a/DESIGN_CARD_P2, a/BASE_LAYER_GATE, a/ALL_STUB_CLOBBER, TASK_TEST_PLAN, SECURITY, INTEGRATION_COMPLETE.
+
+## 14. BUILDS / PLATFORMS — 161 files / 1,066 hits (per-file counts plus 10 representative lines)
+
+Subcounts: TestFlight=15f/45; closed testing=4f/7; Play Console=8f/21; App Store=18f/47; build 1[01][0-9]=3f/6; 2.5.10=59f/122; version/versionCode=128f/359; Android=60f/368; iOS=46f/222.
+
+**Version strings:**
+- `pubspec.yaml:5` is 2.5.10+116.
+- 2.5.10+98 (22 hits) appears in all 8 g26 files. `g26/README:25` says +97 was "bumped to +98". `d/Lumina_Homeowner_Guide:623` mentions a fix "in 2.5.10+98".
+- 2.5.10+89 (35 hits) appears in 15 legacy docs: Lumina_Homeowner_Guide, User_Guide_Commercial, Dealer_Installer_Setup_Guide, Dealer_Dashboard_Guide, Admin_Operations_Guide, ESP32_Bridge_Setup_Guide, Media_Mode_Guide, corporate-dashboard-guide, day1-electrician-guide, day2-install-guide, dealer-inventory-guide, full-job-lifecycle, messaging-configuration-guide, nex-gen-operations-overview, sales-mode-guide.
+- "build 98" at `d/ESP32_Bridge_Setup_Guide:273`.
+- build 109/112/113/114 at `a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01:4,68`, `a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02:4,33`, `a/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02:4`.
+- Audit history covers 2.5.10+50 through +81 and versionCode 58/59/61/62.
+- `codemagic.yaml` references +71, +72, +98, +99 and iOS build numbers 187/288.
+
+**Per-file counts:** a/LAUNCH_PLAN=75 android/app/src/main/AndroidManifest.xml=73 ds/SUBMISSION_AUDIT_v1.0.0=70 .gitignore=59 a/COMPLIANCE_AND_SECURITY=36 a/RELEASE_2.5.10+59=34 android/app/src/main/res/xml/shortcuts.xml=34 codemagic.yaml=29 CLAUDE=25 d/Admin_Operations_Guide=23 da/AUDIT_brand_polish_2026-06=20 a/RELEASE_READINESS=20 a/SESSION_CLOSEOUT_2026-08-03=18 a/DEVICE_DIAGNOSTIC_2026-08-24=17 a/CONTROLLER_HEALTH=16 a/FEATURE_STATUS_MATRIX=15 d/dealer_preinstall_setup=14; =12: demo_review_report, a/INSTALLER_ENTRY, LANDINGSITE_AI_PROMPTS; =11: d/Lumina_Homeowner_Guide, a/TOKEN_REFRESH_REPORT; a/HARDWARE_VERIFICATION_+60=10; =9: ios/Runner/Info.plist, a/UNATTENDED_OPERATION, android res/values/styles.xml, res/values-night/styles.xml; =8: pubspec.yaml, d/messaging-configuration-guide, a/INTEGRATION_TEST_BUILD, android drawable ic_warm_light/ic_schedule/ic_power_off/ic_bright_light.xml; =7: d/bridge_command_routing_context_2026-05-11, a/SCHEDULING_ARCHITECTURE, a/SCHEDULE_V3_P2; =6: ios/Flutter/AppFrameworkInfo.plist, functions/index.js, g26/02-homeowner-guide, d/Dealer_Installer_Setup_Guide, a/VERIFICATION_REPORT, a/SOLAR_PREP, a/SCHEDULING_ARCHITECTURE_V2, a/OFF_LAN_CAPABILITY, a/CHANNEL_GROUPING_SCOPE, android/app/src/debug/AndroidManifest.xml; =5: ios Runner.xcscheme, fs/onSalesJobStatusChanged.ts, firebase.json, d/ESP32_Bridge_Setup_Guide, a/DIAGNOSTICS_DECLARATION, android res/xml/data_extraction_rules.xml, android drawable/launch_background.xml, drawable-v21/launch_background.xml, .metadata; =4: fs/collectControllerHealth.ts, d/unified_preview_interpreter_design_2026-05-22, d/nex-gen-operations-overview, da/FEATURE_COMPLETENESS_INVENTORY_2026-06, d/User_Guide_Commercial, d/Dealer_Dashboard_Guide, a/S3_DISPATCHER, a/PRESET_FIX_REPORT, a/DIAGNOSTICS_FIX, a/BRIDGE_TRIAGE; =3: ios/ExportOptions.plist, g26/README, g26/06-admin-guide, g26/04-installer-guide, g26/03-commercial-guide, d/game_time_display_audit_2026-05-08, d/day2-install-guide, d/commercial_ux_phase_4a_decisions, d/commercial_ux_audit, da/AUDIT_assumption_gaps_2026-06, d/Media_Mode_Guide, d/DESIGN_STUDIO_REQUIREMENTS, a/WINDOW_RECONCILIATION_2026-08-03, a/ROOFLINE_SEGMENT_STACKING_AUDIT_2026-10-01, a/MULTI_ENTRY_DISPLAY, a/LEASE_EXPOSURE, a/HEALER_PUBLISH, a/COMMAND_SAFETY, android/gradle.properties; =2: neighborhood_sync_audit_report, ios Runner.entitlements, ios PrivacyInfo.xcprivacy, ios AppIcon Contents.json, 6 iOS workspace files (contents.xcworkspacedata, IDEWorkspaceChecks.plist, WorkspaceSettings.xcsettings, each under Runner.xcodeproj and Runner.xcworkspace), fs/sendWeeklyBrief.ts, fs/endSyncSession.ts, ds/TEST_PROTOCOL_PHASE1, d/hardcoded_identifier_audit_2026-05-08, g26/07-bridge-setup-guide, g26/05-dealer-guide, d/full-job-lifecycle, d/esp32_firmware_audit, d/dealer-inventory-guide, d/day1-electrician-guide, d/corporate-dashboard-guide, da/DESIGN_STUDIO_AUDIT_2026-07, d/CLEANUP_PLAN, a/SOLAR_FAILURE, a/S4_RESTORE, a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02, a/LEASE_LEDGER_MIGRATION, android/app/src/profile/AndroidManifest.xml, SECURITY; =1: web/index.html, ios LaunchImage README.md + Contents.json, google-home/functions/package.json, google-home/DEPLOYMENT, fs/triggerSyncFailover.ts, fs/sendSyncNotification.ts, fs/onReferralStatusChanged.ts, fs/notifyDay2Team.ts, fs/initiateSyncSession.ts, fs/claudeProxy.js, firestore_learning_rules.txt, esp32-bridge/README, d/sales-mode-guide, g26/01-feature-overview, d/game_day_celebration_length_spec_2026-10-02, d/design/controller_replacement, d/commercial_ux_phase_4b_audit, d/commercial_mode_smoke_test, da/UI_POLISH_AUDIT_2026-05, da/SCHEDULES_SUBCOLLECTION_MIGRATION_PLAN_2026-06, da/PREVIEW_PARITY_AUDIT_2026-05, da/CHANNEL_MAPPING_AUDIT_2026-05, d/SPORTS_ALERTS_RESTRUCTURE_PLAN, d/ROLLOUT_RUNBOOK, a/TEAM_SURFACES, a/TEAM_CONSOLIDATION, a/S5_GAMEDAY, a/S3B_CHANNELS, a/PRESET_REGRESSION, a/PART_B_RESULTS, a/P0-6_FIX, a/GAMMA_FIX, a/GAMMA_BUG, a/FROZEN_SEGMENT_FIX, a/DESIGN_CARD_P4, a/DESIGN_CARD_P2, a/DESIGN_CARD_LAYOUT_CONTROLS_AUDIT_2026-10-02, a/COLOR_FIDELITY_AUDIT, a/BLOCK_E_MISSING_ROW, a/BASE_LAYER_GATE, a/ALL_STUB_GUARD, android res/xml/actions.xml, android res/values/strings.xml, alexa-skill/lambda/package.json, SECURITY_SUMMARY, ANALYTICS_SYSTEM.
+
+**10 representative lines:**
+```
+pubspec.yaml:5: version: 2.5.10+116
+docs/guides-2026-09/README.md:3: **Rev 2026.09 · Edition date 2026-09-17 · Describes Lumina app 2.5.10+98 and Lumina Bridge firmware v1.2.**
+docs/Lumina_Homeowner_Guide.md:53: **Describes Lumina app version 2.5.10+89.**
+docs/guides-2026-09/02-homeowner-guide.md:39: > **Note** — Lumina isn't in the public App Store or Google Play yet, so searching for it won't find
+docs/guides-2026-09/02-homeowner-guide.md:40: > it. Your installer sends you an **invitation link** instead — TestFlight on iPhone, a Play testing
+docs/nex-gen-operations-overview.md:120: The customer downloads the Lumina app from the App Store or Google Play, sets their password using the link in their account setup emai...
+docs/Dealer_Installer_Setup_Guide.md:558: 1. **Download the Lumina app** from the App Store or Google Play
+docs/Admin_Operations_Guide.md:674: | Add an Android tester | Play Console → Testing → Closed testing → Testers, then send the opt-in URL |
+functions/src/onSalesJobStatusChanged.ts:40: "https://apps.apple.com/app/lumina/id[PLACEHOLDER_APP_ID]";   (and :42 Play URL with [PLACEHOLDER_PACKAGE_ID])
+docs/ESP32_Bridge_Setup_Guide.md:273: ...Before build 98 the app's own reset call targeted <code>/api/bridg...
+```
+
+## 15. VOICE — 43 files / 281 hits
+
+Subcounts: Alexa=28f/127; Google Home/Assistant=13f/33; Siri=13f/23; voice=29f/137.
+
+```
+docs/guides-2026-09/01-feature-overview.md:100: - Siri Shortcuts for saved looks, on iPhone.
+docs/guides-2026-09/02-homeowner-guide.md (11 hits) L452,454,456,457,459,461,462,463,505,599,624 | e.g. :452: ## 14. Siri
+docs/guides-2026-09/06-admin-guide.md:184: | **Alexa and Google Home linking** | **Fixed 2026-09-17.** The missing rules block on `users/{uid}/integrations/{provid...
+docs/guides-2026-09/06-admin-guide.md:212: > - **Residual data.** Crew membership and voice-assistant links aren't purged automatically. Clear
+docs/Lumina_Homeowner_Guide.md (12 hits) L85,598,600,602,607,609,613,615,617,623,927,952 | e.g. :85: 14. Voice assistants
+docs/User_Guide_Commercial.md:208: Type or tap the **microphone icon** to speak. Voice commands auto-submit after a 2-second pause.
+docs/User_Guide_Commercial.md:644: ...a "Lumina, what's on the patio right now?" voice query without opening a screen
+docs/Admin_Operations_Guide.md:765: - **Voice-assistant tokens.** OAuth refresh tokens are not revoked.
+alexa-skill/DEPLOYMENT.md (13 hits) L1,3,11,13,33,39,45,52,70,78,81,82,83 | e.g. :1: # Amazon Alexa Skill Deployment Guide
+google-home/DEPLOYMENT.md:73: 3. Use the simulator or link to your Google Home app
+google-home/DEPLOYMENT.md:75: ### Using Google Home App
+google-home/DEPLOYMENT.md:77: 1. Open Google Home app on your phone
+google-home/DEPLOYMENT.md:181: ...This keeps Google Home in sync with actual device state.
+google-home/DEPLOYMENT.md:185: 2. The function will automatically notify Google Home
+LANDINGSITE_AI_PROMPTS.md (10 hits) L51,53,57,178,190,239,244,274,275,295 | e.g. :51: - Column 3: Voice & AI Data
+ios/Runner/Info.plist:111: <string>Microphone access enables voice-to-text control and audio-reactive lighting in Nex-Gen.</string>
+ios/Runner/Info.plist:113: <string>Lumina uses speech recognition to enable voice control of your lighting system.</string>
+ios/Runner/Info.plist:122: <!-- URL Scheme for Siri Shortcuts and deep linking -->
+ios/Runner/Info.plist:134: <!-- Siri Shortcuts user activity types -->
+android/app/src/main/res/xml/actions.xml:3: Google Assistant App Actions for Nex-Gen Lumina.
+android/app/src/main/res/xml/actions.xml:5: These built-in intents allow Google Assistant to control the app
+android/app/src/main/res/xml/actions.xml:6: via voice commands like:
+android/app/src/main/res/xml/actions.xml:69: <!-- Capability Binding: Link shortcuts to voice commands -->
+android/app/src/main/res/xml/actions.xml:72: <!-- Maps dynamic shortcuts to voice activation -->
+android/app/src/main/AndroidManifest.xml:143: <!-- Google Assistant App Actions -->
+```
+
+**Internal counts:** functions/index.js=51 (Alexa/Google OAuth code) d/design/controller_replacement=25 GUIDED_MODE_IMPLEMENTATION=18 da/AUDIT_brand_polish_2026-06=14 SECURITY=14 a/RELEASE_READINESS=10 LEARNING_SYSTEM=9 a/SCHEDULING_ARCHITECTURE_V2=8; =7: a/MY_DESIGNS_AUDIT, a/COMPLIANCE_AND_SECURITY; a/CONTROLLER_HEALTH=6; =5: a/COMMAND_SAFETY, SECURITY_SUMMARY; =4: ds/SUBMISSION_AUDIT_v1.0.0, da/AUDIT_assumption_gaps_2026-06, alexa-skill/lambda/package.json, INTEGRATION_COMPLETE; da/FEATURE_COMPLETENESS_INVENTORY_2026-06=3; =2: d/bridge_command_routing_context_2026-05-11, a/UNATTENDED_OPERATION, a/FEATURE_STATUS_MATRIX; =1: ios/Runner/Runner.entitlements, d/hardcoded_identifier_audit_2026-05-08, ve/pre_session_cfg.json, ve/post_session_cfg.json, ve/lease_exposure_bench_cfg_2026-07-30.json, stray-wled_config.json (the "alexa" key), a/SOLAR_FIRING_PATH_AUDIT, a/LAUNCH_PLAN, a/DESIGN_CARD_P2, CLAUDE.
+
+## 16. SUPPORT — 125 files / 598 hits
+
+Subcounts: support@=12f/18; @nex-gen=23f/53; @nexgen=10f/18; text me/us=3f/4; call me/us=1f/1; \bphone=76f/269; contact=34f/128; help@=0; http(s)://=62f/147.
+
+"text me/us" false positives come from "context menus" and "text messages", at d/DESIGN_STUDIO_REQUIREMENTS:326, d/messaging-configuration-guide:242, 248 and a/LAUNCH_PLAN:319.
+
+### Core addresses, user-facing (all printed)
+
+```
+docs/guides-2026-09/README.md:94: 1. **Support mailbox.** The drafts use `support@Nex-GenLED.com`. The repo currently carries
+docs/guides-2026-09/README.md:95: `support@nexgenled.com`, `support@nex-gen.io`, and `info@Nex-GenLED.com`. Confirm the canonical one.
+docs/guides-2026-09/02-homeowner-guide.md:656: For anything they can't resolve, email **support@Nex-GenLED.com**. If you're reporting a problem,
+docs/guides-2026-09/03-commercial-guide.md:79: > isn't right, email **support@Nex-GenLED.com** or contact your dealer — don't rebuild it by hand,
+docs/guides-2026-09/03-commercial-guide.md:262: that, email **support@Nex-GenLED.com**, and use **System → Help Center → Upload system logs** before
+docs/guides-2026-09/04-installer-guide.md:381: Your dealer admin first. For anything that needs Nex-Gen, email **support@Nex-GenLED.com** with the
+docs/guides-2026-09/05-dealer-guide.md:149: > customer's driveway. If it happens, email **support@Nex-GenLED.com** with the dealer code and the
+docs/guides-2026-09/05-dealer-guide.md:243: **support@Nex-GenLED.com** with the two customers' emails and the job, and we'll look at it.
+docs/guides-2026-09/05-dealer-guide.md:270: Email **support@Nex-GenLED.com**. Include your dealer code, and for anything job-specific the
+docs/guides-2026-09/07-bridge-setup-guide.md:171: > **support@Nex-GenLED.com** and we'll walk through it, or reflash the bridge. *(Installers: the
+docs/guides-2026-09/07-bridge-setup-guide.md:256: Your installing dealer first. For anything else, email **support@Nex-GenLED.com** — include your
+docs/ESP32_Bridge_Setup_Guide.md:269: ...bridge. Contact your dealer or email <strong>support@Nex-GenLED.com</strong>.
+docs/User_Guide_Commercial.md:669: - **Email:** support@nexgenled.com
+docs/Dealer_Installer_Setup_Guide.md:752: Email: **support@nexgenled.com**
+docs/Dealer_Installer_Setup_Guide.md:785: ...Don't create a duplicate — email **support@nexgenled.com** to link the existing account.
+docs/Dealer_Dashboard_Guide.md:422: ...email **payouts@nexgenled.com** with the job number.
+docs/Dealer_Dashboard_Guide.md:429: - **General support:** support@nexgenled.com
+docs/Dealer_Dashboard_Guide.md:430: - **Payout questions:** payouts@nexgenled.com
+docs/Media_Mode_Guide.md:168: - **Media team** — media@nexgenled.com
+docs/Media_Mode_Guide.md:169: - **Technical support** — support@nexgenled.com
+docs/dealer_preinstall_setup.md:570: - If neither helps, call us at <dealer phone>
+LANDINGSITE_AI_PROMPTS.md:201: - Privacy questions: privacy@nex-genled.com
+LANDINGSITE_AI_PROMPTS.md:202: - Security issues: security@nex-genled.com
+LANDINGSITE_AI_PROMPTS.md:203: - General support: support@nex-genled.com
+LANDINGSITE_AI_PROMPTS.md:247,332,420,600,726: ...contact security@nex-genled.com...
+SECURITY.md:117: email.matches('.*@nexgenled.com') ||
+SECURITY.md:517: - **Email:** security@nexgenled.com
+```
+
+### Core addresses, internal
+
+These are role or staff addresses; personal addresses are covered in Topic 17.
+- da/AUDIT_brand_polish_2026-06:41 says `info@Nex-GenLED.com` is hardcoded in `lib/auth/link_account_screen.dart:220-222`.
+- a/COMPLIANCE_AND_SECURITY:35 and :375 say the privacy policy directs users to `General@Nex-GenLED.com`.
+- Remaining lines: ds/SUBMISSION_AUDIT_v1.0.0:253,262,289; d/hardcoded_identifier_audit_2026-05-08:50; functions/index.js:209; fs/messaging-helpers.ts:107; fs/collectControllerHealth.ts:72; ds/REVIEWER_GATE_DIAGNOSIS:1,25,102,195; a/UNATTENDED_OPERATION:378,386; a/CONTROLLER_HEALTH:598,707,710,851,893,897; a/P0-5_EXPOSURE:45,52,58; a/BLOCK_E_MISSING_ROW:4; a/BRIDGE_TRIAGE:38,133,134,146,278; a/INSTALLER_ENTRY:179; a/TEAM_CONSOLIDATION:151,169; a/LAUNCH_PLAN:629; a/COMPLIANCE_AND_SECURITY:24,459,551; a/COMMAND_SAFETY:633,634.
+
+### phone / contact, user-facing (file: lines)
+
+- LANDINGSITE_AI_PROMPTS (10): 200,247,332,420,428,507,525,600,726,743
+- android/app/src/main/res/xml/data_extraction_rules.xml: 7
+- d/Admin_Operations_Guide (12): 44,151,163,166,196,222,240,452,503,515,561,633
+- d/Dealer_Dashboard_Guide (9): 43,180,188,213,352,394,425,431,432
+- d/Dealer_Installer_Setup_Guide (16): 53,54,93,117,119,131,134,157,171,261,302,307,318,570,635,782
+- d/ESP32_Bridge_Setup_Guide (9): 48,71,143,175,231,269,315,321,344
+- d/Lumina_Homeowner_Guide (16): 63,115,359,375,474,518,565,583,653,699,799,801,807,885,913,988
+- d/Media_Mode_Guide (3): 36,157,165
+- d/User_Guide_Commercial (14): 42,86,103,192,249,434,556,598,606,649,652,655,661,670
+- d/corporate-dashboard-guide (6): 11,54,176,279,280,424
+- d/day1-electrician-guide (3): 12,15,262
+- d/day2-install-guide (7): 12,15,210,219,348,360,367
+- d/dealer-inventory-guide (4): 11,243,255,259
+- d/dealer_preinstall_setup (14): 55,71,169,310,325,327,364,375,400,415,445,556,570,572
+- d/full-job-lifecycle (13): 100,163,450,457,460,493,495,552,566,573,643,648,651
+- d/messaging-configuration-guide (6): 11,14,222,228,414,427
+- d/nex-gen-operations-overview (4): 11,307,328,373
+- d/sales-mode-guide (9): 11,13,15,69,452,455,458,467,480
+- g26/01 (2): 71,78
+- g26/02 (10): 31,47,290,364,395,483,534,535,559,573
+- g26/03 (6): 31,64,79,131,174,176
+- g26/04 (8): 32,76,117,239,309,310,371,375
+- g26/05 (3): 31,73,131
+- g26/06 (2): 32,157
+- g26/07 (7): 39,52,67,170,214,223,232
+- g26/README (1): 42
+- esp32-bridge/README (2): 12,32
+- google-home/DEPLOYMENT (1): 77
+
+**phone/contact internal counts:** fs/dealerContact.ts=24 fs/sendInstallReminders.ts=12 demo_review_report=12 fs/onSalesJobStatusChanged.ts=10 a/UNATTENDED_OPERATION=8 a/DIAGNOSTICS_DECLARATION=7; =6: ds/TEST_PROTOCOL_PHASE1, a/S3B_CHANNELS, a/LEASE_LEDGER_MIGRATION; =5: d/game_day_celebration_length_spec_2026-10-02, a/SOLAR_BENCH_GATE, a/HEALER_PUBLISH, a/HARDWARE_VERIFICATION_+60, a/DIAGNOSTICS_FIX, a/COMPLIANCE_AND_SECURITY; =4: fs/messaging-helpers.ts, da/AUDIT_brand_polish_2026-06; =3: a/VERIFICATION_REPORT, a/TOKEN_REFRESH_REPORT, a/SCHEDULING_ARCHITECTURE_V2, a/SCHEDULING_ARCHITECTURE, a/S3_DISPATCHER, a/OFF_LAN_CAPABILITY, a/LAUNCH_PLAN, SECURITY; =2: fs/processScheduleCommand.ts, a/SOLAR_PREP, a/SOLAR_FIRING_PATH_AUDIT, a/SOLAR_FAILURE, a/PARTICIPATION_REENTRY, a/BRIDGE_TRIAGE, a/BASE_LAYER_GATE, GUIDED_MODE_IMPLEMENTATION; =1: ios PrivacyInfo.xcprivacy, ds/SUBMISSION_AUDIT_v1.0.0, d/neighborhood_fanout_activation_runbook, d/design/controller_replacement, d/bridge_command_routing_context_2026-05-11, a/SOLAR_FIX, a/SESSION_CLOSEOUT_2026-08-03, a/P0-6_FIX, a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02, a/LEASE_TRISTATE, a/GAMMA_FIX, a/GAMMA_BUG, a/FEATURE_STATUS_MATRIX, a/ELLIE_SUNSET, a/CONTROLLER_HEALTH, a/COMMAND_SAFETY, a/BLOCK_E_MISSING_ROW, a/ALL_STUB_CLOBBER, SECURITY_SUMMARY.
+
+The only phone numbers found are 555-style placeholders: fs/messaging-helpers.ts:309-311 and da/AUDIT_brand_polish_2026-06:99-100.
+
+### Distinct URLs (count, URL, where)
+
+Device-local and placeholders:
+- 10× `http://$ip` [GUIDED_MODE_IMPLEMENTATION, a/BRIDGE_TRIAGE, a/SYNC_PACING_FIX_P1, +3 more]
+- `http://4.3.2.1` ×5, plus `/json/cfg` ×1 and `/json/info` ×1 [d/dealer_preinstall_setup]
+- `http://[private-IP]` ×6 [a/LEASE_TRISTATE, d/dealer_preinstall_setup, g26/07, +1]
+- `http://[private-IP]/api/bridge/status` ×2, `/cfg.json`, `/json/cfg` ×2, `/json/effects`, `/json/fxdata`, `/json/info` ×3, `/json/palettes`, `/presets.json` [audits]
+- `http://[private-IP]/setup` ×2 [d/ESP32_Bridge_Setup_Guide]
+- `http://<bridge-ip>` ×4 [d/Dealer_Installer_Setup_Guide, d/full-job-lifecycle, g26/README]
+- `http://&lt;bridge-ip&gt;/` and `/api/reset` [d/ESP32_Bridge_Setup_Guide, d/Dealer_Installer_Setup_Guide]
+- `http://<controller-ip>` ×2, `http://<controller` ×2, `http://<ip` ×3, `http://0.0.0.0/json/info`
+- `http://lumina-xxxx.local/` [d/ESP32_Bridge_Setup_Guide]; `http://lumina-xxxx.local/api/bridge/reset`, `/api/bridge/status` ×2, `/api/info` [ds/TEST_PROTOCOL_PHASE1]
+- `http://localhost:3000` ×2 [ds/SUBMISSION_AUDIT_v1.0.0]
+- `https://myhome.duckdns.org:8080` [functions/index.js:308, example]
+- `https://apps.apple.com/app/lumina/id[PLACEHOLDER_APP_ID]` and `https://play.google.com/store/apps/details?id=[PLACEHOLDER_PACKAGE_ID]` [fs/onSalesJobStatusChanged.ts:40,42]
+- `https://YOUR_FIREBASE_PROJECT.firebaseapp.com/__/auth/handler` [alexa-skill/DEPLOYMENT]; `https://YOUR_PROJECT.firebaseapp.com/__/auth/handler`, `https://us-central1-YOUR_PROJECT.cloudfunctions.net/smarthome`, `https://oauth-redirect(-sandbox).googleusercontent.com/r/YOUR_PROJECT_ID` [google-home/DEPLOYMENT]
+- `https://securetoken.googleapis.com/v1/token?key=YOUR_API_KEY` [google-home] and `?key=YOUR_FIREBASE_API_KEY` [alexa-skill]
+- `https://youtube.com/playlist?list=YOUR_PLAYLIST_ID` [GUIDED_MODE_IMPLEMENTATION]
+
+Google, Firebase and project-scoped URLs:
+- `https://console.firebase.google.com/project/<project-id>/firestore/indexes?...` [ds/DEMO_CODE_SCHEMA]
+- `https://firestore.googleapis.com/v1/projects/<project-id>/databases/(default...` [a/HARDWARE_VERIFICATION_+60, a/OFF_LAN_CAPABILITY]
+- `https://firebaserules.googleapis.com/v1/projects/{proj}/releases | /rulesets/{id} | :test` [a/P0-5_EXPOSURE]
+- `https://console.actions.google.com` ×2 and `https://console.cloud.google.com` ×2 [google-home]
+- `https://developer.amazon.com`, `/alexa/console/ask`, `https://console.aws.amazon.com/lambda` [alexa-skill]
+- `https://api.codemagic.io/builds` [a/RELEASE_2.5.10+59]
+- `https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js` ×2 and `firebase-auth-compat.js` ×2 [functions/index.js]
+
+Vendor, reference and schema URLs:
+- `https://github.com/Aircoookie/WLED/blob/v0.15.1/wled00/...` ×17 [a/MULTICHANNEL_GAMEDAY_AUDIT_2026-10-02]
+- `https://github.com/Aircoookie/WLED/blob/main/wled00/palettes.h` ×2 [d/unified_preview_interpreter_design_2026-05-22]
+- `https://github.com/tzapu/WiFiManager.git` [esp32-bridge/platformio.ini]; `https://github.com` [a/DESIGN_CARD_P2]
+- `https://kno.wled.ge/`, `https://kno.wled.ge/interfaces/json-api/`, `https://firebase.flutter.dev/`, `https://pub.dev/packages/go_router`, `https://riverpod.dev/` [CLAUDE]
+- `https://firebase.google.com/docs/app-check` [SECURITY]
+- `https://platformio.org/install/ide?install=vscode` [d/ESP32_Bridge_Setup_Guide]
+- `https://brandfetch.com` [scripts/.env.example]
+- `https://images.unsplash.com/photo-...` ×2 [da/UI_POLISH_AUDIT_2026-05]
+- `https://dart.dev/guides/language/analysis-options`, `/lints`, `/tools#ides-and-editors` [analysis_options.yaml]
+- `https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT`, `/training/package-visibility` [AndroidManifest]
+- `https://developers.google.com/assistant/app/action-schema` [actions.xml]
+- `https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base` [web/index.html]
+- `https://flutter.dev/to/reference-keystore` [android/.gitignore]
+- `http://schemas.android.com/apk/res/android` ×10, `http://schemas.android.com/tools` ×2 [android]
+- `http://www.apple.com/DTDs/PropertyList-1.0.dtd` ×9 [ios]
+
+No nex-genled.com website URL with an http(s) scheme exists anywhere in scope.
+
+## 17. SECURITY-ISH (file:line plus KIND only; no values)
+
+To fit the report I grouped hits per file and kind: `path:L1,L2,…: KIND=…`.
+
+**Union:** 157 files / 1,481 matching lines. Per-pattern: email 41f/180; private IP 59f/179; MAC with separators 0; 28-char alnum 36f/101; password 40f/140; passwd 0; PIN 33f/291; API key 20f/70; keystore 6f/11; secret 12f/44; token 62f/491; 12-hex 12f/62; 80_f3_da 4f/6; 3076f5 0; AP credential 1f/2; possible customer name 45f/336 lines.
+
+### AP credential
+- docs/dealer_preinstall_setup.md:170,181: KIND=AP credential value present (WLED default AP password)
+
+### PIN values (concrete 4-digit values present)
+- docs/Admin_Operations_Guide.md:45,58,59,61,68,74,114,131,246,252,634,653,691,692: KIND=live staff/master PIN value. These are the Admin PIN, the Master Installer PIN, and a Dev/Test PIN marked "disable before launch". Line 74 holds 2 values.
+- docs/Admin_Operations_Guide.md:134,135,136,139,140,143,207,208,210: KIND=example installer PIN (sample names)
+- audit/P0-5_EXPOSURE.md:111,120,122: KIND=PIN value (installer/master)
+- audit/INSTALLER_ENTRY.md:164: KIND=PIN value
+- audit/HARDWARE_VERIFICATION_+60.md:36,78: KIND=PIN value
+- audit/TOKEN_REFRESH_REPORT.md:330: KIND=PIN value
+- docs/hardcoded_identifier_audit_2026-05-08.md:70: KIND=PIN value (the line prints the PIN while stating it is absent)
+- docs/Dealer_Installer_Setup_Guide.md:72 and docs/Dealer_Dashboard_Guide.md:224: KIND=example PIN arithmetic
+- The g26 set has none. g26/06-admin-guide.md:24-26 explicitly says "contains no PIN values".
+- Other PIN mentions with no value: g26/04 (5), g26/05 (15), g26/06 (18), g26/README (1), d/Admin_Operations_Guide (75 total), d/Dealer_Installer_Setup_Guide (25), d/corporate-dashboard-guide (23), d/Dealer_Dashboard_Guide (15), d/day1/day2 (7 each), a/INSTALLER_ENTRY (47), a/P0-5_EXPOSURE (7), a/TOKEN_REFRESH_REPORT (6), a/COMPLIANCE_AND_SECURITY (5), d/nex-gen-operations-overview (5), a/HARDWARE_VERIFICATION_+60 (4), d/sales-mode-guide (4), da/FEATURE_COMPLETENESS (3), and 1–2 each in a/COMMISSIONING_FIXES, a/ELLIE_SUNSET, a/ROOFLINE…, a/SCHEDULING_ARCHITECTURE_V2, d/commercial_ux_audit, d/commercial_ux_phase_5_audit, d/dealer-inventory-guide, d/full-job-lifecycle, d/hardcoded_identifier_audit, d/memory_directory_verification, d/messaging-configuration-guide, ds/SUBMISSION_AUDIT, functions/index.js, fs/onSalesJobStatusChanged.ts, fs/sendInstallReminders.ts.
+
+### Passwords
+- docs/Dealer_Installer_Setup_Guide.md:537: KIND=password value (sample temporary password in a UI mock)
+- docs/submissions/BRIDGE_PHASE1_APP_AUDIT.md:58: KIND=password value (historical hardcoded bridge credential)
+- esp32-bridge/src/config.h.example:31,40: KIND=password placeholder
+- All other password hits (40 files / 140) are mentions or UI labels with no value. That includes functions/index.js:639,640,666,677,1591,1592,1611,1619, which hold login-page HTML/JS.
+
+### API keys and secrets
+- functions/index.js:652,1601: KIND=literal Google/Firebase web API key
+- android/app/src/main/AndroidManifest.xml:110: KIND=literal Google API key (Maps meta-data)
+- functions/src/claudeProxy.js:8; SECURITY.md:62,379; SECURITY_SUMMARY.md:85,87; scripts/.env.example:8; esp32-bridge/src/config.h.example:18; google-home/DEPLOYMENT.md:26,28; alexa-skill/DEPLOYMENT.md:55,57; functions/src/processScheduleCommand.ts:663; SECURITY.md:165: KIND=API key/secret placeholder
+- audit/CONTROLLER_HEALTH.md:710: KIND=truncated API-key prefix (Resend, 4 chars)
+- audit/COMPLIANCE_AND_SECURITY.md:473: KIND=secret mention. It records that the project SCRYPT signerKey was read; the value is not reproduced, and the doc recommends rotation.
+- The remaining API-key/secret hits are env-var names or code mentions: fs/processScheduleCommand, fs/claude-client, fs/messaging-helpers, fs/sendWeeklyBrief, fs/claudeProxy, functions/index.js:219,223,231,723-742,1686-1693, d/hardcoded_identifier_audit, d/Admin_Operations_Guide:583,603,832, SECURITY, a/COMPLIANCE_AND_SECURITY, a/CONTROLLER_HEALTH:709, CLAUDE:148,150, AndroidManifest:85-100, ds/SUBMISSION_AUDIT:245, ds/BRIDGE_PHASE1_APP_AUDIT:29,124,178, a/DIAGNOSTICS_DECLARATION:84, a/RELEASE_READINESS:27, .gitignore:104,126,127,133,180,197.
+
+### Keystore (mentions only; no keystore file or contents in scope)
+- android/.gitignore:10,11,13; .gitignore:109,205; android/app/src/main/res/xml/data_extraction_rules.xml:9,17; android/app/src/main/AndroidManifest.xml:65; CLAUDE.md:224: KIND=keystore mention
+- audit/RELEASE_READINESS.md:28,339: KIND=keystore filename, expiry and algorithm
+
+### Tokens (mentions only)
+I scanned for JWT `eyJ…`, `sk-ant-…`, `re_…`, `ghp_`, `xox*`, `AKIA` and PEM shapes. None carries a value: the `sk-ant-` hits are placeholders, and the `re_` hit is the truncated prefix noted above.
+
+Per-file counts: functions/index.js=93 fs/sendSyncNotification.ts=28 a/TOKEN_REFRESH_REPORT=25 a/COMPLIANCE_AND_SECURITY=22 a/HARDWARE_VERIFICATION_+60=22 a/UNATTENDED_OPERATION=19 fs/endSyncSession.ts=19 d/commercial_ux_phase_5_audit=19 a/INSTALLER_ENTRY=17 fs/claudeProxy.js=16 SECURITY=15 da/AUDIT_brand_polish_2026-06=13 fs/initiateSyncSession.ts=13 TASK_TEST_PLAN=13 fs/notifyDay2Team.ts=12 fs/claude-client.ts=10 fs/sendWeeklyBrief.ts=10 a/COMMISSIONING_FIXES=9 a/COMMAND_SAFETY=8 LANDINGSITE_AI_PROMPTS=7 fs/notifyReferrerOfApproval.ts=7 fs/triggerSyncFailover.ts=7 a/P0-5_EXPOSURE=6; =5: SECURITY_SUMMARY, a/LAUNCH_PLAN, a/SOLAR_UI_GATE, d/Admin_Operations_Guide, d/commercial_ux_phase_4b_audit, fs/messaging-helpers.ts, fs/onReferralStatusChanged.ts; =3: a/SOLAR_BENCH_GATE, fs/processScheduleCommand.ts; =2: a/DIAGNOSTICS_DECLARATION, a/OFF_LAN_CAPABILITY, a/SESSION_CLOSEOUT, a/SOLAR_FIRING_PATH_AUDIT, da/DESIGN_STUDIO_AUDIT, d/corporate-dashboard-guide, d/hardcoded_identifier_audit, d/lumina_split_schedule_audit, d/memory_directory_verification, fs/collectControllerHealth.ts; =1: alexa-skill/DEPLOYMENT, google-home/DEPLOYMENT, esp32-bridge/src/config.h.example, functions/test/emulator/README, a/CONTROLLER_HEALTH, a/DIAGNOSTICS_FIX, a/GAME_DAY_CELEBRATIONS_P1, a/GAME_DAY_SPEC_AUDIT, a/HANDOFF_TO_WINDOW_B, a/P0-6_FIX, a/RELEASE_2.5.10+59, a/RELEASE_READINESS, a/SCHEDULE_V3_P2, a/SOLAR_COMPARATOR, a/WINDOW_RECONCILIATION, d/bridge_command_routing_context, d/design/controller_replacement, d/full-job-lifecycle, d/neighborhood_fanout_activation_runbook, d/project_preview_followups.
+
+### Emails
+- audit/BRIDGE_TRIAGE.md:19,20,21,22,23,24,25,147,148,149,150,151,172,192,223,236,264,275,276,277: KIND=customer personal/business email
+- audit/CONTROLLER_HEALTH.md:327,328,329,330,331,339,340,597,598,600,601,747,793,818: KIND=customer personal email
+- audit/P0-5_EXPOSURE.md:41,42,43,44,46,47,48,49,50,51: KIND=customer personal email
+- audit/UNATTENDED_OPERATION.md:379,380,381,382,383,384,385,386,399,409,410,415,420,705: KIND=customer personal email
+- audit/TEAM_CONSOLIDATION.md:75,286,287,288; audit/TEAM_SURFACES.md:68,132; audit/S4_RESTORE.md:211,212; audit/ELLIE_SUNSET.md:3; audit/LEASE_EXPOSURE.md:78: KIND=customer personal email
+- audit/COMMAND_SAFETY.md:461; audit/LEASE_EXPOSURE.md:6; audit/P0-5_EXPOSURE.md:5; audit/SOLAR_FIX_PLAN.md:13: KIND=owner's personal email
+- audit/BLOCK_E_MISSING_ROW.md:4; audit/BRIDGE_TRIAGE.md:134,146; audit/CONTROLLER_HEALTH.md:707,893; audit/P0-5_EXPOSURE.md:52; audit/UNATTENDED_OPERATION.md:378: KIND=individual staff email (company domain)
+- Company role/support addresses: all lines listed under Topic 16 "Core addresses", plus a/BRIDGE_TRIAGE:38,133,278, a/CONTROLLER_HEALTH:598,710,851,897, a/P0-5_EXPOSURE:45,58, a/COMMAND_SAFETY:633,634: KIND=company role email
+- demo_review_report.md:44: KIND=example email (personal domain)
+- functions/src/collectControllerHealth.ts:171: KIND=personal-email fragment in a code comment
+- KIND=placeholder email: docs/Dealer_Installer_Setup_Guide.md:536; docs/messaging-configuration-guide.md:357,379; docs/hardcoded_identifier_audit_2026-05-08.md:9,54,66; docs/submissions/BRIDGE_PHASE1_APP_AUDIT.md:25,30,58,178; esp32-bridge/src/config.h.example:30; functions/index.js:636,1588; functions/src/collectControllerHealth.ts:71; functions/src/messaging-helpers.ts:112,114; audit/LAUNCH_PLAN.md:80,628
+- False positives: ios/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json (19 lines, `@2x.png` filenames), LaunchImage.imageset/Contents.json:10,15, docs/submissions/SUBMISSION_AUDIT_v1.0.0.md:115
+
+### Private IPs
+- KIND=private IP, customer/fleet LAN:
+  - audit/BRIDGE_TRIAGE.md:146,147,148,149,150,151,176,177,180,196,197,200,326,404,405,406,407,408,409,411,412,413,414,420
+  - audit/COMMAND_SAFETY.md:599,600,601,602,603,604,605,606,607,608,609,610,612,613,633
+  - audit/CONTROLLER_HEALTH.md:98,99,100,111,379,387,672,801,822,826,831,872
+  - audit/UNATTENDED_OPERATION.md:378,379,380,381,382,383,384,385,403,422,423
+  - audit/ELLIE_SUNSET.md:45,46,47,209
+  - audit/SOLAR_FAILURE.md:51
+  - docs/STREET_TEST_RUNBOOK.md:19
+- KIND=private IP, owner bench/home LAN:
+  - audit/: ALL_STUB_CLOBBER:3; ALL_STUB_GUARD:3,96; BASE_LADDER:6; BLOCK_E_MISSING_ROW:3; COLOR_FIDELITY_AUDIT:29,438,439,440,441; COMMISSIONING_FIXES:285; FEATURE_STATUS_MATRIX:643; FROZEN_SEGMENT:3; FROZEN_SEGMENT_FIX:3,101,125; GAMMA_BUG:23; GAMMA_FIX:141,145; HARDWARE_VERIFICATION_+60:19,35,61,79; HARNESS_AUDIT:4; HEALER_PUBLISH:408,411; INSTALLER_ENTRY:500,876; LEASE_EXPOSURE:7,171; LEASE_TRISTATE:5,126,235; PART_B_RESULTS:3; PRESET_FIX_REPORT:3; PRESET_REGRESSION:3; RELEASE_2.5.10+59:115; S3_DISPATCHER:280; SCHEDULING_ARCHITECTURE:152,968; SESSION_CLOSEOUT_2026-08-03:48; SOLAR_BENCH_GATE:1,14,30,40,44,411,437 (31,37,38 are the iPhone-hotspot subnet; 31,39 are x-placeholders); SOLAR_COMPARATOR:3; SYNC_PACING_FIX_P1:92; TOKEN_REFRESH_REPORT:330; U6_PSAVE_PROBE:11; U7_ABSENT_SEGMENT_PROBE:23; VERIFICATION_REPORT:4
+  - bench/README.md:18; bench/config.json:2; codemagic.yaml:71
+  - docs/: ROLLOUT_RUNBOOK:92; audits/DESIGN_STUDIO_AUDIT_2026-07:6,85,184; neighborhood_fanout_activation_runbook:94; STREET_TEST_RUNBOOK:19; SPORTS_ALERTS_RESTRUCTURE_PLAN:229; project_preview_followups_2026_05_22:230; unified_preview_interpreter_design_2026-05-22:494; submissions/REVIEWER_CONTROLLER_GATE:209; submissions/SUBMISSION_AUDIT_v1.0.0:237
+  - TASK_TEST_PLAN.md:23
+- KIND=private IP, example or dev default:
+  - docs/Admin_Operations_Guide.md:435
+  - docs/ESP32_Bridge_Setup_Guide.md:126,187
+  - docs/dealer_preinstall_setup.md:86
+  - docs/hardcoded_identifier_audit_2026-05-08.md:9,38,47,48,49,53,64
+  - docs/submissions/BRIDGE_PHASE1_APP_AUDIT.md:3,11,15,16,17,19,49,177,183,195
+  - docs/submissions/SUBMISSION_AUDIT_v1.0.0.md:22,235,238
+  - docs/submissions/TEST_PROTOCOL_PHASE1.md:66,140,146
+  - esp32-bridge/src/config.h.example:49
+- KIND=private IP, ESP32 SoftAP default: docs/ESP32_Bridge_Setup_Guide.md:128,145,301; docs/dealer_preinstall_setup.md:312; docs/guides-2026-09/07-bridge-setup-guide.md:62,189,215; docs/submissions/TEST_PROTOCOL_PHASE1.md:61
+- KIND=private IP in Firestore doc-id form (192_168_…): audit/HEALER_PUBLISH.md:389; audit/PARTICIPATION_REENTRY.md:49; audit/S3B_CHANNELS.md:198,230
+- KIND=private IP in array form (Hue IP default): audit/verification_evidence/pre_session_cfg.json:1, post_session_cfg.json:1, lease_exposure_bench_cfg_2026-07-30.json:1; stray-wled_config.json:1
+
+### MAC addresses and bridge ids
+- MAC addresses with `:` or `-` separators: 0 hits.
+- KIND=bridge/controller id (12-hex MAC, no separators):
+  - audit/BRIDGE_TRIAGE.md:31,146,147,148,149,150,151,176,196,226,404,405,406,407,408,409,410,411,412,413,414,418,419,442,449,450,474
+  - audit/CONTROLLER_HEALTH.md:262,327,328,329,330,331,600,601,865
+  - audit/UNATTENDED_OPERATION.md:378,379,380,381,382,383,384,385,402,416
+  - audit/GAMMA_BUG.md:3,293 (controller MAC)
+  - docs/dealer_preinstall_setup.md:344,506 (real-looking example)
+- KIND=controller doc id with 80_f3_da prefix: audit/BRIDGE_TRIAGE.md:197; docs/Admin_Operations_Guide.md:777; audit/P0-5_EXPOSURE.md:114,226. The 3076f5 prefix: 0 hits.
+- KIND=mDNS name carrying a MAC suffix: stray-wled_config.json:1; audit/verification_evidence/pre_session_cfg.json:1, post_session_cfg.json:1, lease_exposure_bench_cfg_2026-07-30.json:1
+- KIND=12-hex false positive (UUID tail or image id): audit/COMMAND_SAFETY.md:692,809; audit/COMMISSIONING_FIXES.md:5,244; audit/COMPLIANCE_AND_SECURITY.md:42; audit/P0-5_EXPOSURE.md:136; audit/SOLAR_UI_GATE.md:8; docs/neighborhood_fanout_activation_runbook.md:7,40; docs/audits/UI_POLISH_AUDIT_2026-05.md:459,464; audit/CONTROLLER_HEALTH.md:893
+
+### UIDs
+- KIND=Firebase uid, full 28-char or truncated prefix:
+  - audit/BLOCK_E_MISSING_ROW.md:4
+  - audit/BRIDGE_TRIAGE.md:39,42,418
+  - audit/COMMAND_SAFETY.md:511,512,513,514,524,599,602,603,604,605,606,607,611,613,633
+  - audit/CONTROLLER_HEALTH.md:115,339,793
+  - audit/DIAGNOSTICS_FIX.md:321,322,323
+  - audit/ELLIE_SUNSET.md:3
+  - audit/HANDOFF_TO_WINDOW_B.md:116,117,137,138
+  - audit/HEALER_PUBLISH.md:389
+  - audit/LEASE_EXPOSURE.md:76,77,78,79,80,81
+  - audit/LEASE_LEDGER_MIGRATION.md:123
+  - audit/P0-5_EXPOSURE.md:37,41,42,43,44,45,46,47,48,49,51,52,55,57,78,79,80,81,82,83,84,85,115
+  - audit/PARTICIPATION_REENTRY.md:49
+  - audit/S3B_CHANNELS.md:198,230
+  - audit/S5_GAMEDAY.md:627
+  - audit/SCHEDULE_V3_P2.md:69,133
+  - audit/SOLAR_FAILURE.md:3
+  - audit/UNATTENDED_OPERATION.md:378,383,384,385,386,399,400,969
+  - docs/STREET_TEST_RUNBOOK.md:16,20,54,62
+- KIND=28-char false positive (camelCase identifiers or plist keys): the other ~75 hits in ANALYTICS_SYSTEM, CLAUDE, AndroidManifest:12,152, ios IDEWorkspaceChecks.plist ×2, ios Info.plist:110, Runner.xcscheme, docs/commercial_ux_audit, ds/HALFMOON_DIAGNOSIS, da/CHANNEL_MAPPING_AUDIT, demo_review_report and others.
+
+### Other identifiers (not requested, flagged for completeness)
+- KIND=Firebase project id (not secret): firebase.json:6,13; functions/index.js:653; ds/SUBMISSION_AUDIT_v1.0.0.md:7,262; ds/NEIGHBORHOOD_SYNC_PERMISSION_DENIED_DIAGNOSIS.md:13,234,248,253; ds/DEMO_CODE_SCHEMA.md:123; ds/REVIEWER_GATE_DIAGNOSIS.md:102
+- KIND=Firebase app ids: firebase.json:7,15,16,17
+- KIND=Wi-Fi station SSID value: stray-wled_config.json:1. The verification_evidence cfg dumps carry the placeholder "Your_Network".
+
+### Possible customer names (file: lines)
+The names cover named homeowners, businesses, and commercial-customer contacts. The repo owner "Tyler" is not counted.
+- audit/BRIDGE_TRIAGE.md:19,20,21,22,23,24,25,29,124,125,134,146,147,148,149,150,151,154,157,172,192,223,252,264,267,275,276,277,280,293,326,330,365,404,405,406,407,408,409,410,411,412,413,419,424,426,466,468,469,470,474,476,479,480
+- audit/UNATTENDED_OPERATION.md:378,379,380,381,382,383,384,385,386,388,393,400,403,405,411,414,416,420,421,422,458,459,585,655,659,705,897,934
+- audit/SOLAR_FAILURE.md:3,11,160,239,246,260,261,262,263,264,265,266,267,271,273,274,279,284,322,332,351,356,387
+- audit/CONTROLLER_HEALTH.md:38,237,250,252,253,262,273,313,335,357,362,397,554,583,758,761,815,829,865,872,873
+- audit/ELLIE_SUNSET.md:4,11,26,107,131,163,178,184,222,223,224,225,229,235,245,265,266,270. The filename itself also carries a customer first name.
+- audit/COMMAND_SAFETY.md:524,599,600,601,602,604,605,606,607,608,609,610,611
+- audit/LEASE_EXPOSURE.md:77,78,79,80,81,82,89,90,91,92,93,244,250
+- audit/BASE_LAYER_GATE.md:21,22,23,24,25,27,28,29,30,32,33,172
+- audit/SOLAR_COMPARATOR.md:77,78,80,143,175,176,177,178,179,180
+- audit/SOLAR_FIX_PLAN.md:65,84,119,151,194,209,214,224,236,248
+- audit/ALL_STUB_CLOBBER.md:15,16,17,18,54,60,62,160,164
+- audit/SOLAR_FIX.md:35,64,107,168,170,171,172,184
+- audit/S5_GAMEDAY.md:365,421,422,423,424,478
+- audit/ALL_STUB_GUARD.md:49,83,134,152,156
+- audit/BASE_LADDER.md:348,349,350,351,361
+- audit/SESSION_CLOSEOUT_2026-08-03.md:83,86,98,101,110
+- audit/DIAGNOSTICS_FIX.md:333,334,335,336
+- audit/LEASE_LEDGER_MIGRATION.md:417,418,423
+- audit/LAUNCH_PLAN.md:365,627
+- One line each in audit/: DIAGNOSTICS_DECLARATION:159, HANDOFF_TO_WINDOW_B:139, LEASE_TRISTATE:304, P0-5_EXPOSURE:219, S3B_CHANNELS:99, S4_RESTORE:243, SCHEDULE_V3_P3:251, SOLAR_UI_GATE:51, TEAM_SURFACES:232, U7_ABSENT_SEGMENT_PROBE:150, WINDOW_RECONCILIATION_2026-08-03:149
+- docs/STREET_TEST_RUNBOOK.md:19,20,21,34,44,56,71,78,84,91
+- docs/lumina_split_schedule_audit.md:9,15,17,25,70,97,135,141,159,192,255,265,273,295,331,337,345,354,355
+- docs/game_day_one_shot_vs_recurring_audit.md:6,17,19,72,82,140,197,199,201,202,203,205,213,220,224,239,247,249
+- docs/game_time_display_audit_2026-05-08.md:5,98,112,116,183
+- docs/audits/AUDIT_assumption_gaps_2026-06.md:14,58,65,182,185
+- docs/commercial_ux_phase_5_audit.md:53,419,425,434
+- docs/commercial_ux_audit.md:402,439
+- docs/commercial_ux_phase_4b_audit.md:127,219
+- docs/lumina_design_pipeline_audit.md:12,114
+- One line each in docs/: commercial_ux_phase_4a_decisions:19, audits/FEATURE_COMPLETENESS_INVENTORY_2026-06:45, memory_directory_verification:31, urgent_findings_overnight:29
+- functions/src/collectControllerHealth.ts:13,208,636 (code comments)
+- scripts/brands_to_seed.json:1700,1720 (commercial-customer brand seed entries)
+
+---
+
+## Summary table
+
+| # | Topic | Files hit | Total hits |
+|---|---|---|---|
+| 1 | Firmware | 71 | 300 |
+| 2 | Controller AP / setup AP | 10 | 52 |
+| 3a | Bridge (`\bbridge`) | 87 | 1,331 |
+| 3b | Remote-access terms | 57 | 244 |
+| 3 | Bridge + remote (union) | 99 | 1,501 |
+| 4 | Account / controller selection | 8 | 11 |
+| 5 | Lumina AI | 60 | 109 |
+| 6 | Favorites | 25 | 188 |
+| 7 | Effects / design | 72 | 195 |
+| 8 | Scheduling | 90 | 714 |
+| 9 | Roofline / segment / bus / channel (union) | 133 | 2,235 (576 / 693 / 160 / 1,149) |
+| 10 | Celebration | 30 | 203 (+13 S/M/L proximity lines in 2 files) |
+| 11 | Game Day | 118 | 939 |
+| 12 | Power outage | 66 | 177 (8 CSS false positives) |
+| 13 | Stalls (refined) | 91 | 366 |
+| 14 | Builds / platforms | 161 | 1,066 |
+| 15 | Voice | 43 | 281 |
+| 16 | Support / contact / URLs | 125 | 598 (147 URL hits) |
+| 17 | Security-ish (union) | 157 | 1,481 lines (incl. 45 files / 336 lines of possible customer names) |
+
+To print every hit line for any topic, re-run the same patterns with `rg -n -i -P` over the file set in section 0. Copy the redaction rules from this report if the output is shared.
