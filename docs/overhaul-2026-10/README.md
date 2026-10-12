@@ -17,6 +17,7 @@ Nothing outside this directory was changed. Phase 3 (rewrite) starts only on the
 | `PHASE5_REPORT.md` | Owner decisions of 2026-10-09 applied (mailbox, setup access point, outputs, Drive swap) |
 | `PHASE6_REPORT.md` | Owner decisions of 2026-10-12 applied: we are not electricians; the install family rebuilt; pen-ready print forms; the firmware-version analysis; OWNER DECISION blocks |
 | `PHASE7_REPORT.md` | The owner's answers to the six OWNER DECISION blocks applied (warranty sentence, the outlet boundary, "Nex-Gen installers", Drive names, firmware option 1, the guard rule) |
+| `PHASE8_REPORT.md` | The public wording "no line-voltage work" everywhere (T-W12); insurance and licensing recorded as owner statements in FACTS only (T-W13); no license or insurance claim in public text |
 | `MERGE_PLAN.md` | The prepared, not run, docs-only merge into release |
 
 Privacy rule for this directory: no customer name, email, uid, MAC, bridge id, home address, password,
