@@ -22,12 +22,12 @@ Both files are byte-identical at `a836a3e`, at the 2026-09-30 deploy commit `8b3
 
 Triggers, unchanged: `onSalesJobStatusChanged` is a Firestore `onDocumentUpdated` on `sales_jobs/{jobId}` (us-central1); `sendInstallReminders` is `onSchedule` every day 18:00 America/Chicago (us-central1, 540 s, 256 MiB). Resulting customer text: the booking email's Step 1 and access list, the Day 1 reminder ("…will be there at your home to run all wiring. Please make sure we have access to: your controller and power-supply location, garage or utility area, and exterior eaves. No lights go up tomorrow — that's Day 2!") and the Day 2 reminder ("…complete the full installation. Nothing is needed inside tomorrow — just the exterior of your home."). The words "electrician" and "electrical" no longer appear in either file. No price, license, insurance or warranty statement was added (the only "licensed" is inside the owner's public sentence).
 
-The complete text as the customer reads it (placeholders in angle brackets are the values the code fills in at send time):
+The complete text as the customer reads it (placeholders in square brackets are the values the code fills in at send time):
 
 **Booking email, plain-text part (onSalesJobStatusChanged.ts, the text array)**
 
 ```
-Hi <firstName>,
+Hi [firstName],
 
 Your permanent LED lighting system is confirmed. Here's what happens next:
 
@@ -42,7 +42,7 @@ Before we arrive, please make sure we'll have access to:
   • your garage or utility area
   • the exterior eaves of your home
 
-Questions or scheduling changes? Reach out to <dealerName> anytime.
+Questions or scheduling changes? Reach out to [dealerName] anytime.
 
 Welcome to the Nex-Gen LED family!
 ```
@@ -51,7 +51,7 @@ Welcome to the Nex-Gen LED family!
 
 ```
 You're booked! 🎉
-Hi ,
+Hi [firstName],
 Your permanent LED lighting system is confirmed. Here's what happens next:
 STEP 1 — DAY 1
 Our installer visits to run the low-voltage wiring. No lights go up on this day. We do no line-voltage (household power) work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing.
@@ -62,107 +62,21 @@ Before we arrive, please make sure we'll have access to:
 the controller and power-supply location
 your garage or utility area
 the exterior eaves of your home
-Questions or scheduling changes? Reach out to  anytime.
+Questions or scheduling changes? Reach out to [dealerName] anytime.
 Welcome to the Nex-Gen LED family!
-`.trim();
-return { subject, html, text };
-}
-function buildInstallCompleteEmail(
-prospect: ProspectInfo,
-dealerName: string,
-): { subject: string; html: string; text: string } {
-const firstName = prospect.firstName || "there";
-const subject = "Your Nex-Gen LED system is live! 💡";
-const text = [
-`Hi ,`,
-"",
-"Your permanent LED lighting system is installed and ready.",
-"",
-"Download Lumina to control your lights:",
-`  • iPhone: ${APP_STORE_URL}`,
-`  • Android: ${PLAY_STORE_URL}`,
-"",
-`Your login was sent to ${prospect.email}. Check your inbox for your account setup email.`,
-"",
-"Welcome to the Nex-Gen LED family — we can't wait to see your home lit up.",
-"",
-`Questions?  is here for you.`,
-].join("\n");
-const html = `
-Your system is live! 💡
-Hi ,
-Your permanent LED lighting system is installed and ready.
-Download Lumina to control your lights
-Download for iPhone
-Download for Android
-Your login was sent to ${prospect.email}. Check your inbox for your account setup email.
-Welcome to the Nex-Gen LED family — we can't wait to see your home lit up.
-Questions?  is here for you.
-`.trim();
-return { subject, html, text };
-}
-// ── Cloud Function ──────────────────────────────────────────────────────────
-export const onSalesJobStatusChanged = onDocumentUpdated(
-{
-document: "sales_jobs/{jobId}",
-region: "us-central1",
-},
-async (event) => {
-const before = event.data?.before.data();
-const after = event.data?.after.data();
-if (!before || !after) {
-logger.warn(
-"onSalesJobStatusChanged: missing before/after snapshot, ignoring",
-);
-return;
-}
-const jobId = event.params.jobId;
-const beforeStatus = before.status as string | undefined;
-const afterStatus = after.status as string | undefined;
-const prospect = readProspect(after);
-const firstName = prospect.firstName || "there";
-// ── Load dealer messaging config (toggles + sign-off) ─────────────────
-//
-// Load once up front since both the day1-completed branch and the
-// status-transition branch need it. loadDealerMessagingConfig
-// returns defaults on missing/invalid configs and never throws.
-const dealerCode = (after.dealerCode as string) ?? "";
-const config: DealerMessagingConfig =
-await loadDealerMessagingConfig(dealerCode);
-const signOff = resolveSignOff(config);
-// ── Day 1 completion detection (independent of status change) ─────────
-//
-// markDay1Complete in sales_job_service.dart writes BOTH status:
-// prewireComplete AND day1CompletedAt: now in the same atomic update.
-// We detect day1CompletedAt becoming non-null specifically rather
-// than the prewireComplete status, because the spec wants this
-// message tied to the completion event, not the queue transition.
-//
-// Not toggle-controlled — the spec only puts toggles on the two
-// emails and the two day-before reminders. This SMS always sends.
-const day1CompletedBefore = before.day1CompletedAt;
-const day1CompletedAfter = after.day1CompletedAt;
-const day1JustCompleted =
-day1CompletedBefore == null && day1CompletedAfter != null;
-if (day1JustCompleted) {
-const body =
-`Great news, ! Wiring prep is complete at your home. ` +
-"Your light installation day is coming soon — we'll text you the " +
-`night before. — ${signOff}
 ```
 
 **Day 1 reminder, SMS text (sendInstallReminders.ts, the first body)**
 
 ```
-Hi <firstName>! 👋 Just a reminder — tomorrow is your <signOff> prep day. <techName> will be there at your home to run the low-voltage wiring. Please make sure we have access to: your controller and power-supply location, garage or utility area, and exterior eaves. No lights go up tomorrow — that's Day 2! See you then. — <signOff>
+Hi [firstName]! 👋 Just a reminder — tomorrow is your [signOff] prep day. [techName] will be there at your home to run the low-voltage wiring. Please make sure we have access to: your controller and power-supply location, garage or utility area, and exterior eaves. No lights go up tomorrow — that's Day 2! See you then. — [signOff]
 ```
 
 **Day 2 reminder, SMS text (the second body)**
 
 ```
-Hi <firstName>! 🎉 Big day tomorrow — your <signOff> lights go up! Our install team will be at your home to complete the full installation. Nothing is needed inside tomorrow — just the exterior of your home. Get ready to see it light up! — <signOff>
+Hi [firstName]! 🎉 Big day tomorrow — your [signOff] lights go up! Our install team will be at your home to complete the full installation. Nothing is needed inside tomorrow — just the exterior of your home. Get ready to see it light up! — [signOff]
 ```
-
 
 ## 3. Proof that the change is text only
 
