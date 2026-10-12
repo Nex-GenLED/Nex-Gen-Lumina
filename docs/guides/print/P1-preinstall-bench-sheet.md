@@ -29,7 +29,7 @@ body_class: form
 <tr><th>Prepared by</th><td class="w"></td><th>Date</th><td class="w"></td></tr>
 </table>
 
-<div class="callout"><strong>Not our work.</strong> Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer.</div>
+<div class="callout"><strong>Not our work.</strong> Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no line-voltage work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage (household power) wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer.</div>
 
 ## A. Captured from the customer
 
@@ -97,4 +97,4 @@ body_class: form
 <tr><th style="width:22%">Prepared by</th><td class="w"></td><th style="width:18%">Checked by</th><td class="w"></td></tr>
 </table>
 
-*Facts: T-W1, T-W2, T-W6, T-W8, T-F2, T-F3, T-F9, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R9, T-X1.*
+*Facts: T-W1, T-W2, T-W6, T-W8, T-W12, T-F2, T-F3, T-F9, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R9, T-X1.*

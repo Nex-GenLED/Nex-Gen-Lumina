@@ -6,7 +6,7 @@ Prepare each controller and bridge at the shop so install day is lights, control
 
 ## Not our work
 
-Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day; confirm it on the site and controller record before Day 1 is scheduled.
+Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no line-voltage work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage (household power) wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day; confirm it on the site and controller record before Day 1 is scheduled.
 
 Not yet decided by the owner (ask; nothing in this SOP answers them): whether the installer may plug into an outlet that is not weatherproof or GFCI; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
 
@@ -106,4 +106,4 @@ Day 1 is the low-voltage pre-install visit (above). Install day follows the [ins
 - Bridge firmware flashing. That is an internal Nex-Gen procedure (see the internal bridge firmware page).
 - Any description of our work as anything other than low-voltage, or of our people as any trade. Withdrawn (owner 2026-10-12).
 
-*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W8, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1, T-SU2.*
+*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W8, T-W12, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X4, T-X5, T-R4, T-R9, T-R7, T-X1, T-G2, T-P1, T-SU2.*

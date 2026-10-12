@@ -31,8 +31,8 @@ There is no separate estimate wizard; the three steps above are the whole visit.
 - Game Day: runs from the customer's phone; they open the app at home in the two days before a game; score celebrations play while the app is open. Do not promise that it runs from our servers.
 - The app: the customer gets it by invitation from the installer. It is not in the public app stores.
 - Firmware: recorded at install, never updated.
-- Electrical work: we do none. Our installer may plug the power supply into an existing outlet. We do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing, before Day 1. Say nothing about who does anything beyond that; the open questions (outlets that are not weatherproof or GFCI, junction boxes, where the supply mounts, fusing, extension cords, permits and inspections) are the owner's to answer, not yours on the doorstep.
+- Line-voltage work: we do none. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage (household power) wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing, before Day 1. Say nothing about who does anything beyond that; the open questions (outlets that are not weatherproof or GFCI, junction boxes, where the supply mounts, fusing, extension cords, permits and inspections) are the owner's to answer, not yours on the doorstep.
 
 See [Claims policy](../internal/33-claims-policy.md) for the full list.
 
-*Facts: T-X9, T-X8, T-X11, T-O6, T-VA1, T-VA2, T-R1, T-R6, T-GD1, T-GD3, T-C2, T-O8, T-F2, T-W1, T-W2, T-W3, T-W5, T-W7, T-W8.*
+*Facts: T-X9, T-X8, T-X11, T-O6, T-VA1, T-VA2, T-R1, T-R6, T-GD1, T-GD3, T-C2, T-O8, T-F2, T-W1, T-W2, T-W3, T-W5, T-W7, T-W8, T-W12.*

@@ -6,7 +6,7 @@ The job in order: what the dealer does before install day (pre-install), what yo
 
 ## Not our work
 
-Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no electrical work. Our installer may plug the power supply into an existing customer outlet. Nex-Gen LED and its dealers do not install outlets and do not run line-voltage (household power) wiring; that is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day.
+Nex-Gen LED and its dealers do the low-voltage wiring and the pre-install. We do no line-voltage work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage (household power) wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing. If there is no working outlet at the supply location, the installer does not install one: stop and tell the customer. Anything needed on that side is arranged before install day.
 
 Not yet decided by the owner, so do not improvise an answer on site (ask): whether the installer may plug into an outlet that is not weatherproof or GFCI; junction boxes; where the power supply mounts; fusing; extension cords; permits and inspections. The exact boundary is UNVERIFIED.
 
@@ -67,7 +67,7 @@ Follow the [Bridge guide](12-bridge-guide.md): join its setup network, set the h
 4. The homeowner guide (the dealer's copy), and the final payment confirmed on the Day 2 wrap-up's close step.
 5. Nothing on paper that carries a password, a PIN or a key. The site and controller record stays in the dealer's file.
 
-Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life. Local dealers may add additional coverage at their discretion. Do not describe anyone from Nex-Gen LED or the dealer as an electrician, and do not offer electrical work.
+Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortcuts work; nothing else does today. Do not say "lifetime warranty": it is 5 years on the product, 1 year minimum on labor, 50,000-hour rated life. Local dealers may add additional coverage at their discretion. Do not describe anyone from Nex-Gen LED or the dealer as an electrician, and do not offer line-voltage work.
 
 ## Before you leave
 
@@ -78,4 +78,4 @@ Do not promise voice assistants. Siri Shortcuts on iPhone and Android app shortc
 - [ ] A unique AP password set on the controller and recorded privately; the setup network set to open only when there is no connection (never "never"); the controller confirmed answering on the home network afterwards.
 - [ ] Your phone out of Installer Mode.
 
-*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W7, T-W8, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X11, T-X13, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-O8, T-SU1, T-SU2, T-R10.*
+*Facts: T-W1, T-W2, T-W3, T-W5, T-W6, T-W7, T-W8, T-W12, T-F2, T-F3, T-F9, T-F12, T-A1, T-A2, T-A3, T-A5, T-X5, T-X9, T-X11, T-X13, T-X25, T-X26, T-R9, T-R6, T-R7, T-GD3, T-C2, T-VA1, T-VA2, T-O6, T-O8, T-SU1, T-SU2, T-R10.*
