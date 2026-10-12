@@ -14,6 +14,9 @@ Nothing outside this directory was changed. Phase 3 (rewrite) starts only on the
 | `03_GAPS.md` | Tasks no document covers, by audience |
 | `04_SECURITY_ITEMS.md` | Credentials, identities and internal addresses found in documents (file:line and kind only) |
 | `05_…`–`11_…` | The raw audit reports the tables were built from (values redacted) |
+| `PHASE5_REPORT.md` | Owner decisions of 2026-10-09 applied (mailbox, setup access point, outputs, Drive swap) |
+| `PHASE6_REPORT.md` | Owner decisions of 2026-10-12 applied: we are not electricians; the install family rebuilt; pen-ready print forms; the firmware-version analysis; OWNER DECISION blocks |
+| `MERGE_PLAN.md` | The prepared, not run, docs-only merge into release |
 
 Privacy rule for this directory: no customer name, email, uid, MAC, bridge id, home address, password,
 API key, PIN or keystore detail appears here. Where a document contains one, it is cited by file:line and kind.

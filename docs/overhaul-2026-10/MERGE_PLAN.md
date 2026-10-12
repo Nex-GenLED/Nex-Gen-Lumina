@@ -1,6 +1,6 @@
 # Prepared merge of docs/overhaul-2026-10 into release — NOT RUN
 
-Documents only. No tag, no version bump, no code, no `codemagic.yaml` change. The owner runs it when ready; nothing below has been executed.
+Updated 2026-10-12 for the Phase 6 head (the SHA in the Phase 6 hand-back). Documents only. No tag, no version bump, no code, no `codemagic.yaml` change. The owner runs it when ready; nothing below has been executed.
 
 ## Why a push to release starts no build
 
@@ -24,7 +24,7 @@ Tree check before pushing (the merge must carry exactly the branch's tree when r
 ```
 git diff --stat origin/docs/overhaul-2026-10 HEAD                         # empty if release == c283d62
 git diff --stat c283d62 HEAD -- lib test functions firestore.rules firestore.indexes.json codemagic.yaml pubspec.yaml android ios   # must be EMPTY: no code, rules, indexes, CI, version or platform files
-git show --stat --name-status HEAD | head -60                              # only docs/, scripts/docs_*, README.md, CLAUDE.md, SECURITY.md, audit/README.md, esp32-bridge/README.md, alexa-skill/DEPLOYMENT.md, google-home/DEPLOYMENT.md, the moved/removed guides and PDFs
+git show --stat --name-status HEAD | head -80                              # only docs/ (incl. docs/FIRMWARE_VERSION_ANALYSIS.md, docs/guides/print/, docs/drive-exports/print/, the two removed field-guide exports), scripts/docs_*, README.md, CLAUDE.md, SECURITY.md, audit/README.md, esp32-bridge/README.md, alexa-skill/DEPLOYMENT.md, google-home/DEPLOYMENT.md, the moved/removed guides and PDFs
 node scripts/docs_guard.mjs                                                # 0 failures
 ```
 
