@@ -209,14 +209,14 @@ function buildEstimateSignedEmail(
     "",
     "Your permanent LED lighting system is confirmed. Here's what happens next:",
     "",
-    "Step 1 — Day 1: Our electrician visits to run all wiring. No lights go up on this day.",
+    "Step 1 — Day 1: Our installer visits to run the low-voltage wiring. No lights go up on this day. We do no line-voltage (household power) work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing.",
     "",
     "Step 2 — Day 2: Our install team arrives and your lights go up.",
     "",
     "We'll send you a text reminder the night before each visit.",
     "",
     "Before we arrive, please make sure we'll have access to:",
-    "  • your electrical panel",
+    "  • the controller and power-supply location",
     "  • your garage or utility area",
     "  • the exterior eaves of your home",
     "",
@@ -236,7 +236,7 @@ function buildEstimateSignedEmail(
 
     <div style="background:#f6f9fc; border-radius:8px; padding:16px; margin:20px 0;">
       <h3 style="margin:0 0 8px 0; color:#00B7C2; font-size:14px; letter-spacing:0.6px;">STEP 1 — DAY 1</h3>
-      <p style="margin:0; font-size:14px; line-height:1.5;">Our electrician visits to run all wiring. <strong>No lights go up on this day.</strong></p>
+      <p style="margin:0; font-size:14px; line-height:1.5;">Our installer visits to run the low-voltage wiring. <strong>No lights go up on this day.</strong> We do no line-voltage (household power) work. Our installer can plug the power supply into an existing outlet, but we do not install outlets or run line-voltage wiring. That is the homeowner's responsibility, arranged through a licensed professional of the homeowner's choosing.</p>
     </div>
 
     <div style="background:#f6f9fc; border-radius:8px; padding:16px; margin:20px 0;">
@@ -248,7 +248,7 @@ function buildEstimateSignedEmail(
 
     <h3 style="font-size:14px; color:#1a1a1a; margin:24px 0 8px 0;">Before we arrive, please make sure we'll have access to:</h3>
     <ul style="font-size:14px; line-height:1.6; color:#555; padding-left:20px;">
-      <li>your electrical panel</li>
+      <li>the controller and power-supply location</li>
       <li>your garage or utility area</li>
       <li>the exterior eaves of your home</li>
     </ul>

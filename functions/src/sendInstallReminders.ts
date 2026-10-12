@@ -271,7 +271,7 @@ export const sendInstallReminders = onSchedule(
             `Hi ${firstName}! 👋 Just a reminder — tomorrow is your ` +
             `${signOff} prep day. ${techName} will be there at your home ` +
             "to run all wiring. Please make sure we have access to: your " +
-            "electrical panel, garage or utility area, and exterior eaves. " +
+            "controller and power-supply location, garage or utility area, and exterior eaves. " +
             "No lights go up tomorrow — that's Day 2! See you then. " +
             `— ${signOff}`;
 
@@ -341,7 +341,7 @@ export const sendInstallReminders = onSchedule(
           const body =
             `Hi ${firstName}! 🎉 Big day tomorrow — your ${signOff} ` +
             "lights go up! Our install team will be at your home to " +
-            "complete the full installation. No electrical access needed " +
+            "complete the full installation. Nothing is needed inside " +
             "tomorrow — just the exterior of your home. Get ready to see " +
             `it light up! — ${signOff}`;
 
