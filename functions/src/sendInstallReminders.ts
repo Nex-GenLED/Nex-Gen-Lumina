@@ -270,7 +270,7 @@ export const sendInstallReminders = onSchedule(
           const body =
             `Hi ${firstName}! 👋 Just a reminder — tomorrow is your ` +
             `${signOff} prep day. ${techName} will be there at your home ` +
-            "to run all wiring. Please make sure we have access to: your " +
+            "to run the low-voltage wiring. Please make sure we have access to: your " +
             "controller and power-supply location, garage or utility area, and exterior eaves. " +
             "No lights go up tomorrow — that's Day 2! See you then. " +
             `— ${signOff}`;
