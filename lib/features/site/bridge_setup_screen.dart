@@ -14,6 +14,12 @@ import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/ip_entry_sheet.dart';
 
+/// Strings proposal item 1 (docs/overhaul-2026-10/APP_STRINGS_PROPOSAL.md,
+/// FACTS T-R5): a bridge that cannot pair is serviced by the installer. Customers
+/// never reflash a bridge — there is no OTA, and a reflash wipes the pairing.
+const String kBridgeNeedsServicingMessage =
+    'This bridge needs servicing. Contact your installer.';
+
 /// Three-step bridge setup wizard:
 ///   1. Discover — find the bridge via Firestore self-registration
 ///   2. Pair    — write a pairing request to Firestore; bridge confirms
@@ -364,8 +370,7 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
     if (bridgeEmail.isEmpty) {
       setState(() {
         _pairing = false;
-        _pairError = 'This bridge firmware is outdated. Please reflash '
-            'the bridge with the latest firmware and try again.';
+        _pairError = kBridgeNeedsServicingMessage;
       });
       return;
     }
