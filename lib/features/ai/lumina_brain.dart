@@ -32,6 +32,13 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'dart:convert';
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 
+/// Strings proposal item 7 (docs/overhaul-2026-10/APP_STRINGS_PROPOSAL.md,
+/// FACTS T-F2): customers never update firmware, so the reply says what is
+/// true instead of what to try.
+const String kAudioModeNoEffectsReply =
+    'Your controller has AudioReactive firmware but no audio effects were '
+    "detected. Audio Mode isn't available on this controller.";
+
 /// LuminaBrain aggregates local context (who/where/when) and injects it into
 /// every Lumina AI request for improved grounding and personalization.
 class LuminaBrain {
@@ -444,8 +451,7 @@ class LuminaBrain {
     }
 
     if (cap.audioReactiveEffects.isEmpty) {
-      return 'Your controller has AudioReactive firmware but no audio '
-          'effects were detected. Try updating your firmware.';
+      return kAudioModeNoEffectsReply;
     }
 
     // Pick the best default effect: prefer GEQ or Gravimeter
