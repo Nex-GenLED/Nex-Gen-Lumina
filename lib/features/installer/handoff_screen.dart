@@ -541,7 +541,7 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
                       _buildFeatureItem(Icons.check_circle_outline, 'Only Home & Settings tabs', NexGenPalette.cyan),
                       _buildFeatureItem(Icons.check_circle_outline, '3-5 favorite patterns for quick access', NexGenPalette.cyan),
                       _buildFeatureItem(Icons.check_circle_outline, 'Simple brightness control with haptic feedback', NexGenPalette.cyan),
-                      _buildFeatureItem(Icons.check_circle_outline, 'Voice assistant setup guides', NexGenPalette.cyan),
+                      _buildFeatureItem(Icons.check_circle_outline, 'Siri Shortcuts (iPhone)', NexGenPalette.cyan),
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(12),

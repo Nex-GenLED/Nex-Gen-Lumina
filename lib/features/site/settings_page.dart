@@ -1299,7 +1299,7 @@ class _SimpleModeToggleCard extends ConsumerWidget {
           '• Only essential features (Home & Settings)\n'
           '• Your favorite lighting patterns\n'
           '• Simple brightness control\n'
-          '• Voice assistant setup\n\n'
+          '• Siri Shortcuts (iPhone)\n\n'
           'Perfect for quick, straightforward control. You can always switch back from Settings.',
         ),
         actions: [
