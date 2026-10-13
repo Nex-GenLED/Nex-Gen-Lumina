@@ -2,29 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/theme.dart';
 
+/// Strings proposal item 6 (docs/overhaul-2026-10/APP_STRINGS_PROPOSAL.md,
+/// FACTS T-R9): the strip-cutting answer is gone. The install is permanent
+/// and professional, and that advice was dangerous. The remaining questions
+/// are unchanged here (item 8 is not in this build).
+const List<(String, String)> kHelpCenterFaqs = [
+  (
+    'Lights are not responding.',
+    'Ensure controller is powered (green LED). Try unplugging for 10 seconds to reboot.'
+  ),
+  (
+    'How to reset Wi-Fi?',
+    "Go to Device Setup > Select Controller > Wi-Fi Settings. You may need to connect to the controller's AP (Lumina-XXXX) first."
+  ),
+  (
+    "Schedule didn't run.",
+    "Check 'Time & Macro' settings in Hardware Config to ensure your time zone is correct."
+  ),
+];
+
 class HelpCenterScreen extends StatelessWidget {
   const HelpCenterScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final faqs = const [
-      (
-        'Lights are not responding.',
-        'Ensure controller is powered (green LED). Try unplugging for 10 seconds to reboot.'
-      ),
-      (
-        'How to reset Wi-Fi?',
-        "Go to Device Setup > Select Controller > Wi-Fi Settings. You may need to connect to the controller's AP (Lumina-XXXX) first."
-      ),
-      (
-        'Can I cut the strips?',
-        'Yes, at the copper pads marked with cut lines. Ensure power is off first.'
-      ),
-      (
-        "Schedule didn't run.",
-        "Check 'Time & Macro' settings in Hardware Config to ensure your time zone is correct."
-      ),
-    ];
+    final faqs = kHelpCenterFaqs;
 
     final cs = Theme.of(context).colorScheme;
     final darkTile = cs.surfaceVariant; // dark grey-like surface on dark themes
