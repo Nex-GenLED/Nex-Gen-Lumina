@@ -27,10 +27,6 @@ class GoogleHomeService {
   /// Deep link to Google Home app
   static const String googleHomeAppUrl = 'googlehome://';
 
-  /// Web link to set up Smart Home Action
-  static const String setupWebUrl =
-      'https://assistant.google.com/services/invoke/uid/000000YOUR_PROJECT_ID';
-
   /// Check if the current user has linked their Google Home account
   Future<bool> isAccountLinked() async {
     final user = _auth.currentUser;
@@ -127,18 +123,15 @@ class GoogleHomeService {
         'initiatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // Try to open the Google Home app first, fall back to web
+      // Open the Google Home app. The web fallback is gone: strings proposal
+      // item 5 removed the setup URL, whose project id was a placeholder.
       final appUri = Uri.parse(googleHomeAppUrl);
-      final webUri = Uri.parse(setupWebUrl);
 
       if (await canLaunchUrl(appUri)) {
         await launchUrl(appUri, mode: LaunchMode.externalApplication);
         debugPrint('GoogleHomeService: Opened Google Home app');
-      } else if (await canLaunchUrl(webUri)) {
-        await launchUrl(webUri, mode: LaunchMode.externalApplication);
-        debugPrint('GoogleHomeService: Opened Google Home web');
       } else {
-        debugPrint('GoogleHomeService: Could not open Google Home app or web');
+        debugPrint('GoogleHomeService: Could not open Google Home app');
         return false;
       }
 
