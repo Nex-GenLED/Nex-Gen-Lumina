@@ -79,7 +79,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const SizedBox(height: 16),
           const _MyPropertiesCard(),
           const SizedBox(height: 16),
-          const _VoiceAssistantsCard(),
+          const VoiceAssistantsCard(),
           const SizedBox(height: 16),
           const SizedBox(height: 16),
           const _SunriseOffCard(),
@@ -847,30 +847,26 @@ class _MyPropertiesCard extends ConsumerWidget {
   }
 }
 
-class _VoiceAssistantsCard extends StatelessWidget {
-  const _VoiceAssistantsCard();
+/// Strings proposal item 2 (FACTS T-VA1, T-VA2): the card names what works —
+/// Siri Shortcuts on iPhone, App Shortcuts on Android — and nothing else. Alexa
+/// and Google linking have never worked and are not advertised; the permanent
+/// "New" badge is gone with the claim.
+const String kVoiceAssistantsCardTitle = 'Voice Assistants';
+const String kVoiceAssistantsCardSubtitle =
+    'Siri Shortcuts on iPhone. App shortcuts on Android.';
+
+class VoiceAssistantsCard extends StatelessWidget {
+  const VoiceAssistantsCard({super.key});
 
   @override
   Widget build(BuildContext context) {
     return PremiumIconCard(
       icon: Icons.mic,
-      title: 'Voice Assistants',
-      subtitle: 'Set up Siri, Google, or Alexa control',
+      title: kVoiceAssistantsCardTitle,
+      subtitle: kVoiceAssistantsCardSubtitle,
       accentColor: NexGenPalette.violet,
       iconBackgroundGradient: const LinearGradient(
         colors: [NexGenPalette.violet, NexGenPalette.cyan],
-      ),
-      badge: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(
-          color: NexGenPalette.violet.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: NexGenPalette.violet.withValues(alpha: 0.6)),
-        ),
-        child: Text(
-          'New',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: NexGenPalette.violet),
-        ),
       ),
       onTap: () => context.push(AppRoutes.voiceAssistants),
     );
