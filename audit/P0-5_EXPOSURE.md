@@ -108,7 +108,7 @@ reveal them:
 
 **Exactly one orphan exists — and it is NOT a P0-5 casualty.**
 
-`staff_installer_5502` = mode `installer`, PIN `5502` = dealer **55** + installer **02** —
+`staff_installer_5502` = mode `installer`, PIN `<R>` = dealer **<R>** + installer **<R>** —
 the master support PIN, and the uid behind **12 of the 13** historical installs.
 
 Its orphaned controller `80_f3_da_b3_76_64` + pixelMap were created **2026-07-27
@@ -117,9 +117,9 @@ under `staff_installer_0101` — which is now **empty**, i.e. its migration ran 
 
 The explanation is the master-PIN refusal, `68e5f04` *"refuse the reserved master PIN for
 customer installs"*, dated **2026-07-16**. By 2026-07-27 that guard was in the shipped
-build. Reconstruction: Tyler entered master PIN 5502, added a controller, walked the
+build. Reconstruction: Tyler entered master PIN <R>, added a controller, walked the
 roofline, tapped Complete Setup, and was **refused before any Firebase work** — exactly as
-`installUsesReservedDealerCode` intends. He re-entered with his real dealer PIN 0101 and
+`installUsesReservedDealerCode` intends. He re-entered with his real dealer PIN <R> and
 completed the install. The 5502 artifacts are the abandoned first attempt.
 
 Note this orphan was left by a guard **working correctly**, and it is inert: it belongs to a

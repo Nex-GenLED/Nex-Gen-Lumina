@@ -161,7 +161,7 @@ because **the legacy screen literally labels the first two PIN dots "Dealer"**
 ([installer_pin_screen.dart:223-230](lib/features/installer/installer_pin_screen.dart#L223-L230))
 and prints the format hint at
 [:184](lib/features/installer/installer_pin_screen.dart#L184). It is one
-4-digit PIN — `0101` = dealer `01` + installer `01` — the same PIN the
+4-digit PIN — `<R>` = dealer `<R>` + installer `<R>` — the same PIN the
 documented flow uses. He is describing the documented credential entered on an
 undocumented screen.
 
