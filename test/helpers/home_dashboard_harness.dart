@@ -118,20 +118,30 @@ List<Override> homeDashboardOverrides({
   List<DeviceChannel> channels = kHomeTwoChannels,
   bool smartPresets = false,
   ConnectivityStatus connectivity = ConnectivityStatus.local,
+  // When true the caller supplies effectiveUserUidProvider and
+  // controllersStreamProvider (an installer-in-a-customer-account test needs
+  // the real identity chain); every other override is unchanged.
+  bool realIdentity = false,
+  // When true the controller repository and the controller state are the real
+  // providers (the selection cascades through them); the connectivity status
+  // stays a plain value so nothing reaches a network.
+  bool realWled = false,
 }) =>
     [
-      wledRepositoryProvider.overrideWith((ref) => repo),
-      wledStateProvider.overrideWith(() => SeededWledNotifier(state)),
+      if (!realWled) wledRepositoryProvider.overrideWith((ref) => repo),
+      if (!realWled) wledStateProvider.overrideWith(() => SeededWledNotifier(state)),
       wledConnectivityStatusProvider.overrideWith(
           (ref) => Stream<ConnectivityStatus>.value(connectivity)),
       rooflineLegacyMigrationProvider.overrideWith((ref) async {}),
       activeUserProfileProvider.overrideWith((ref) => Stream.value(profile)),
       currentUserProfileProvider.overrideWith((ref) => Stream.value(profile)),
       authStateProvider.overrideWith((ref) => Stream<User?>.value(user)),
-      effectiveUserUidProvider.overrideWith((ref) => 'customer-test'),
+      if (!realIdentity)
+        effectiveUserUidProvider.overrideWith((ref) => 'customer-test'),
       isViewingAsCustomerProvider.overrideWithValue(false),
-      controllersStreamProvider.overrideWith(
-          (ref) => Stream.value(controllers ?? [homeController()])),
+      if (!realIdentity)
+        controllersStreamProvider.overrideWith(
+            (ref) => Stream.value(controllers ?? [homeController()])),
       hasCustomHouseImageProvider.overrideWithValue(true),
       fav.allFavoritesProvider.overrideWith((ref) => Stream.value(const [])),
       fav.favoritedPatternIdsProvider
