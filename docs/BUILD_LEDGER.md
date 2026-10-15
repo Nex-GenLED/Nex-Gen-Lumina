@@ -174,7 +174,28 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 
 ## Operational flags
 
-### +117 — build-117 tagged 2026-10-14 18:05Z (13:05 CDT) (Codemagic build number: pending) — Repair base lighting after a bus change, controller selection by record id, the canonical outputs for new buses, and voice, help and bridge text that no longer promises what the app cannot do
+### +118 — build-118 tagged 2026-10-15 17:45:46Z (12:45:46 CDT) (Codemagic build number: pending) — HOTFIX for the installer-mode grey screen introduced in 117
+
+| item | value |
+|---|---|
+| Tag | `build-118` = `4ad2694` (lightweight, like `build-117`; the bump commit itself, `chore(release): bump to 2.5.10+118`, so the tag is the app-bytes SHA — convention 1; this row lands after, outside the tag). Release fast-forwarded `6b5a6b8` → `4ad2694` and the tag pushed 12:45:46 CDT. |
+| Base | `6b5a6b8` (= `build-117` `fc1f24b` + its ledger row). Branch `fix/118-installer-grey`. |
+| Contents — the grey screen (hotfix) | Owner report 2026-10-14: in installer mode, opening a customer's account (Existing Customer) went grey; adding a controller in that customer's own session went grey again; a sign-out/in showed the controller connected. The device error sink held three records of Riverpod's `ConcurrentModificationError`, all `2.5.10+117`, none on any earlier build. Symbolized (Codemagic artifact `app.ios-arm64.symbols`, build `6acfc47f12cce3cb996833da`): thrown inside the provider scheduler's refresh three flushes deep, no app frame. Reproduced 2026-10-15 on the real providers (`test/features/installer/installer_switch_reentry_wide_test.dart`, "up>open") and bisected: the account change resets the controller selection, so the repository is rebuilt INSIDE the refresh (channels → hardware config → repository), and two listeners read providers synchronously from within that rebuild — the ladder bus-change watcher's two listeners (`base_ladder_repair_providers.dart`, 117 code) and the heal-on-connect listener's healer read (`wled_providers.dart`, pre-existing, proven in the chain). Both now run one microtask later with a disposal guard; order of effects and final state unchanged (`ba7c2e0`). 116 never hit it because its selection did not reset on an account change (#118), so the repository did not change in that frame. |
+| Not changed | The selection chain (#118 commits 2–3), the connection-stamp listener (bisected: not in the chain), every string, the ladder repair itself, Game Day. No friendly error screen yet (a Reload that rebuilds the shell needs a root-restart; deferred to 119). |
+| Gates on `4ad2694` | After `flutter clean`, `TZ=UTC0`: local 3.41.2 analyze 0 errors / 12 warnings / 355 infos · 5,389 pass / 37 skip / 0 fail — 3.47.5 analyze 0 / 12 / 360 · 5,389 / 37 / 0, lock + yaml restored. Gated tip `ba7c2e0`; `git diff --name-only ba7c2e0 4ad2694 -- lib test pubspec.yaml` is exactly `lib/app_version.dart` and `pubspec.yaml`. `node scripts/docs_guard.mjs`: 44 files, 119 facts, 0 failures, 0 warnings. PII and banned-phrase scan of every added line and commit message `6b5a6b8..4ad2694`: clean (synthetic accounts, documentation addresses, identifiers only). Regression test proven: "up>open" throws on the unfixed code (fix stashed), passes with it. |
+| Functions | No deploy: `git diff --stat 6b5a6b8 4ad2694 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. No rules, indexes, hosting or config change. |
+| Config | None. |
+| Check-run | GitHub check-run `116591435730` "iOS Release" on `4ad2694`: completed / **success** 2026-10-15 17:45:50Z → 18:15:13Z (29 min; opened as `116577662951`, which stays `in_progress` — the result arrived under the new id, as with +109 to +117). Codemagic build `6ad1114e45beff93db29e656`. Every step OK: Preparing build machine 0:39 · Fetching app sources 0:08 · Installing SDKs 1:30 · keychain/signing 0:12 · **Test and analyze (build gate) 18:11** · Set build number 0:02 · Install CocoaPods 0:19 · Build IPA 6:22 · Dump signed entitlements 0:03 · **Publishing 1:37** · Cleaning up 0:01. The publish step was green at its usual length; the upload itself was not read from App Store Connect. |
+| iOS build number | pending (TestFlight shows the Codemagic number; the owner records it from the walk sheet) |
+| Android | NOT built (#125). `pubspec.yaml` reads `+118`; `.android-versioncode-state` still reads 116. |
+| Rollback | below |
+
+**Rollback: what persists if build 118 is expired and testers go back to 117.** This build writes nothing new to Firestore, to the phone or to any controller. Going back to 117 brings the grey screen back for exactly the two paths above (open a customer in installer mode; add a controller while the app is open); the workaround on 117 is to force-quit and reopen — the write had already landed both times on 10-14. Build 116 is the safe fallback for installer work: it never recorded this error.
+
+**Tester text (return to 117):**
+> Build 118 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install the newest 2.5.10 below it. Your schedules, teams, designs and favorites stay. One thing comes back: the screen can go blank grey right after an installer opens your account or after a controller is added while the app is open — if it does, close the app fully and reopen it; your controller is saved. If you see anything wrong after switching, tell us the date and time. Send reports to general@nex-genled.com with the date and time.
+
+### +117 — build-117 tagged 2026-10-14 18:05Z (13:05 CDT) (Codemagic build number: 352) — Repair base lighting after a bus change, controller selection by record id, the canonical outputs for new buses, and voice, help and bridge text that no longer promises what the app cannot do
 
 | item | value |
 |---|---|
@@ -188,7 +209,7 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | Functions | No deploy with this build: `git diff --stat d454944 fc1f24b -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. No rules, indexes, hosting or config change. |
 | Config | None. |
 | Check-run | GitHub check-run `116028660246` "iOS Release" on `fc1f24b`: completed / **success** 2026-10-14 18:05:51Z → 18:27:06Z (21 min; opened as `116018356890`, which stays `in_progress` — the result arrived under the new id, as with +109 to +116). Codemagic build `6acfc47f12cce3cb996833da`. Every step OK: Preparing build machine 0:22 · Fetching app sources 0:07 · Installing SDKs 0:52 · keychain/signing 0:11 · **Test and analyze (build gate) 13:42** · Set build number 0:01 · Install CocoaPods 0:21 · Build IPA 4:05 · Dump signed entitlements 0:03 · **Publishing 1:29** · Cleaning up 0:01. The publish step was green at its usual length; the upload itself was not read from App Store Connect. |
-| iOS build number | pending |
+| iOS build number | 352 — from the Codemagic artifact bundle name `Nex-Gen-Lumina_352_artifacts.zip` of build `6acfc47f12cce3cb996833da` (downloaded 2026-10-15 for the symbols); not read from App Store Connect |
 | Android | NOT built (#125). `pubspec.yaml` now reads `+117`, so the next Android artifact is versionCode 117; `.android-versioncode-state` still reads 116 (the +116 bundle was built 2026-10-07 and never uploaded). |
 | Rollback | below |
 
