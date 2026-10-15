@@ -996,9 +996,17 @@ class WledNotifier extends Notifier<WledStateModel> {
     // rebuilds (connectivity/profile churn, each a fresh repo for the same
     // endpoint) don't re-fire the evaluation.
     ref.listen<WledRepository?>(wledRepositoryProvider, (prev, next) {
-      if (shouldHealOnConnect(prev, next)) {
+      if (!shouldHealOnConnect(prev, next)) return;
+      // Build 117 grey screen: after an account change the repository is
+      // rebuilt INSIDE the provider graph's refresh, and the healer's first
+      // reads (the selected controller, the facts publisher) re-entered a
+      // provider that was still walking its own dependencies (Riverpod's
+      // ConcurrentModificationError). The heal was already fire-and-forget;
+      // it now starts one microtask later, after the refresh has finished.
+      Future.microtask(() {
+        if (_disposed) return;
         unawaited(ref.read(controllerDefaultsHealerProvider)());
-      }
+      });
     }, fireImmediately: true);
     // Gamma watchdog: the connect heal above fires once per connect, so a
     // mid-session device-side gamma revert would persist until reconnect. This

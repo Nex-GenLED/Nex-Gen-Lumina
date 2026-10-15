@@ -525,19 +525,37 @@ final ladderBusChangeWatchProvider = Provider<LadderBusChangeWatcher>((ref) {
     clearMarker: (id) => SharedPrefsLadderRepairStore().clearRan(id),
     controllerId: () => ref.read(selectedControllerIdProvider),
   );
+  var disposed = false;
+  ref.onDispose(() => disposed = true);
   ref.listen<AsyncValue<WledHardwareConfig?>>(deviceHardwareConfigProvider,
       (_, next) {
     if (!next.hasValue) return;
     final hw = next.value;
-    final repo = ref.read(wledRepositoryProvider);
-    if (hw == null || repo is! WledService) return;
-    unawaited(watcher.onBuses(
-      repo.baseUrl,
-      deviceChannelsFromConfig(hw).map((c) => c.id).toList(),
-    ));
+    if (hw == null) return;
+    // Build 117 grey screen (installer opens a customer; a controller is
+    // added): this fires while the provider graph is still rebuilding for
+    // the account change, and reading the repository HERE re-entered a
+    // provider that was walking its own dependencies (Riverpod's
+    // ConcurrentModificationError, shown as the grey ErrorWidget). The
+    // reading moves to after the rebuild; the order of effects and the
+    // final state are unchanged.
+    Future.microtask(() {
+      if (disposed) return;
+      final repo = ref.read(wledRepositoryProvider);
+      if (repo is! WledService) return;
+      unawaited(watcher.onBuses(
+        repo.baseUrl,
+        deviceChannelsFromConfig(hw).map((c) => c.id).toList(),
+      ));
+    });
   }, fireImmediately: true);
   ref.listen<bool>(wledStateProvider.select((s) => s.connected), (prev, next) {
-    if (prev == false && next) ref.invalidate(deviceHardwareConfigProvider);
+    if (prev != false || !next) return;
+    // Same hazard as above: the connection can come up while the graph is
+    // rebuilding; invalidating here reached into a provider mid-walk.
+    Future.microtask(() {
+      if (!disposed) ref.invalidate(deviceHardwareConfigProvider);
+    });
   });
   return watcher;
 });

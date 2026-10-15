@@ -22,7 +22,6 @@ import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/dashboard/wled_dashboard_page.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/site/controller_choice_prompt.dart';
@@ -31,7 +30,6 @@ import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/site/site_models.dart';
 import 'package:nexgen_command/features/wled/base_ladder_repair_providers.dart';
-import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
