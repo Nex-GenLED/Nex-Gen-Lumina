@@ -18,6 +18,7 @@ import 'package:nexgen_command/features/auth/link_account_screen.dart';
 import 'package:nexgen_command/features/ble/device_setup_page.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/discovery/discovery_page.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
 import 'package:nexgen_command/features/onboarding/first_run_screen.dart';
 import 'package:nexgen_command/features/site/connection_method.dart';
@@ -398,7 +399,14 @@ void main() {
             .map((t) => t.data ?? '')
             .join(' ');
         expect(copy, isNot(contains('Auto-Pilot tab')));
-        expect(copy, contains('Lumina AI card in the Schedule tab'));
+        if (kAutopilotVisible) {
+          expect(copy, contains('Lumina AI card in the Schedule tab'));
+        } else {
+          // Build 119: Autopilot is hidden, so the copy must not send the
+          // customer looking for its switch; it points at what exists.
+          expect(copy, isNot(contains('Autopilot')));
+          expect(copy, contains(page == 0 ? 'Schedule tab' : 'System tab'));
+        }
       });
     }
   });
