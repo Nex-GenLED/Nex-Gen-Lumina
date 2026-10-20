@@ -472,6 +472,28 @@ class WledService
   @visibleForTesting
   Map<String, dynamic>? lastSimulatedConfigPayload;
 
+  /// The device's `cfg.hw.led.fps` as last seen by one of this service's own
+  /// cfg reads (fetchClockInfo / readAudioReactiveEnabled via _fetchCfgRaw,
+  /// fetchTimerInstances, getConfig). Null until a read lands; 0 when the
+  /// device is in the unlimited mode. Every cfg POST hands it to
+  /// [normalizeWledCfgPayload], which keeps a 1–250 value and otherwise sends
+  /// [kDefaultTargetFps]. Nothing else reads it.
+  int? _lastKnownTargetFps;
+
+  /// Read-only view of the cached rate (the config pusher passes it to its own
+  /// raw-HTTP boundary after calling [getConfig] on this service).
+  int? get lastKnownTargetFps => _lastKnownTargetFps;
+
+  void _noteTargetFps(Map<String, dynamic> cfg) {
+    final fps = targetFpsFromCfg(cfg);
+    if (fps != null) _lastKnownTargetFps = fps;
+  }
+
+  /// Simulation only: seed the cached rate so a test can assert that a cfg
+  /// body carries the device's value (no GET happens in simulation).
+  @visibleForTesting
+  void seedTargetFpsForTest(int? fps) => _lastKnownTargetFps = fps;
+
   /// Most recent simulated savePreset call. Tests check presetId +
   /// state-shape parity with what the lease manager intended.
   @visibleForTesting
@@ -775,7 +797,10 @@ class WledService
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final decoded = jsonDecode(body);
-        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map<String, dynamic>) {
+          _noteTargetFps(decoded);
+          return decoded;
+        }
       }
       return null;
     } finally {
@@ -1131,7 +1156,10 @@ class WledService
     // and every future cfg writer are covered without touching their call
     // sites. Runs before the simulate branch so tests observe the real wire
     // payload.
-    data = normalizeWledCfgPayload(data);
+    // FRAME-RATE CHOKEPOINT (2026-10-20): the same boundary carries
+    // `hw.led.fps`, keeping the device's own rate when one of this service's
+    // cfg reads has seen it, else kDefaultTargetFps. See normalizeWledCfgPayload.
+    data = normalizeWledCfgPayload(data, currentFps: _lastKnownTargetFps);
     if (_simulate) {
       // Capture for test inspection then acknowledge success (unless
       // the failure-injection flag is flipped by an integration test).
@@ -1204,6 +1232,7 @@ class WledService
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final cfg = jsonDecode(body) as Map<String, dynamic>;
+        _noteTargetFps(cfg);
         return timerInstancesFromCfg(cfg);
       }
     } catch (e) {
@@ -1291,8 +1320,9 @@ class WledService
         // Shared with ControllerClockInfo.fromMaps, which parses the cfg the
         // defaults healer has already fetched. One parser, so the bus list
         // means the same thing on both paths.
-        return hardwareConfigFromCfg(
-            jsonDecode(body) as Map<String, dynamic>);
+        final cfg = jsonDecode(body) as Map<String, dynamic>;
+        _noteTargetFps(cfg);
+        return hardwareConfigFromCfg(cfg);
       }
       debugPrint('WLED getConfig status ${res.statusCode}: $body');
     } catch (e) {

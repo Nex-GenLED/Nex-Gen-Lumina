@@ -63,19 +63,75 @@ const Map<String, dynamic> kNglLightGammaConfig = <String, dynamic>{
 /// and any future user-facing gamma control, keep working). Other `light.*`
 /// keys are preserved — the merge is one level deep into `light`, adding only
 /// the missing `gc`.
-Map<String, dynamic> normalizeWledCfgPayload(Map<String, dynamic> cfg) {
+///
+/// **Second firmware defect, same boundary (2026-10-20, source read of WLED
+/// v0.15.1, v0.15.4 and v16.0.1):** `deserializeConfig` reads the target frame
+/// rate as `strip.setTargetFps(hw_led["fps"])` (0.15.x `cfg.cpp:119`). A body
+/// without `hw.led.fps` yields 0, and 0.15.x's `setTargetFps` accepts 0 as
+/// UNLIMITED (`FX_fcn.cpp:1488-1491`, `FPS_UNLIMITED 0`), so every partial cfg
+/// write the app ever made set the render loop free-running and starved the
+/// web server. 16.0.1 defaults a missing key to 42 (`cfg.cpp:181`), so there
+/// the injection is harmless and merely explicit. The fix is the same shape as
+/// gamma: carry `hw.led.fps` on every body. [currentFps] is the device's own
+/// value from the cfg the caller last read; it is kept when it is a real rate
+/// (1–250), otherwise [kDefaultTargetFps] goes out. A body that already names a
+/// usable `hw.led.fps` is authoritative. A partial `hw.led` object is safe on
+/// all three firmwares: the bus list is only touched when `ins` is present,
+/// and total/maxpwr default to the device's current values.
+Map<String, dynamic> normalizeWledCfgPayload(
+  Map<String, dynamic> cfg, {
+  int? currentFps,
+}) {
+  final out = Map<String, dynamic>.from(cfg);
+
   final light = cfg['light'];
   final existingGc = light is Map ? light['gc'] : null;
   // Caller supplied gamma explicitly — it wins, unconditionally.
-  if (existingGc is Map && existingGc.isNotEmpty) {
-    return Map<String, dynamic>.from(cfg);
+  if (!(existingGc is Map && existingGc.isNotEmpty)) {
+    final mergedLight = light is Map
+        ? Map<String, dynamic>.from(light)
+        : <String, dynamic>{};
+    mergedLight['gc'] = Map<String, dynamic>.from(kNglLightGammaConfig);
+    out['light'] = mergedLight;
   }
 
-  final out = Map<String, dynamic>.from(cfg);
-  final mergedLight = light is Map
-      ? Map<String, dynamic>.from(light)
-      : <String, dynamic>{};
-  mergedLight['gc'] = Map<String, dynamic>.from(kNglLightGammaConfig);
-  out['light'] = mergedLight;
+  final hw = cfg['hw'];
+  final led = hw is Map ? hw['led'] : null;
+  final existingFps = led is Map ? led['fps'] : null;
+  if (!(existingFps is num && isUsableTargetFps(existingFps.toInt()))) {
+    final mergedHw =
+        hw is Map ? Map<String, dynamic>.from(hw) : <String, dynamic>{};
+    final mergedLed =
+        led is Map ? Map<String, dynamic>.from(led) : <String, dynamic>{};
+    mergedLed['fps'] = resolveTargetFps(currentFps);
+    mergedHw['led'] = mergedLed;
+    out['hw'] = mergedHw;
+  }
   return out;
+}
+
+/// The frame rate written to `cfg.hw.led.fps` when the device's own value is
+/// unknown or unusable (0 = the unlimited mode this fix exists to undo).
+/// Owner decision 2026-10-20: 60, not WLED's 42.
+const int kDefaultTargetFps = 60;
+
+/// WLED's accepted range for `hw.led.fps` (`setTargetFps`: `fps <= 250`,
+/// 0 meaning unlimited). 1–250 is a real rate; anything else is replaced.
+const int kMinTargetFps = 1;
+const int kMaxTargetFps = 250;
+
+bool isUsableTargetFps(int? fps) =>
+    fps != null && fps >= kMinTargetFps && fps <= kMaxTargetFps;
+
+/// The rate to carry: the device's own when usable, else the default.
+int resolveTargetFps(int? currentFps) =>
+    isUsableTargetFps(currentFps) ? currentFps! : kDefaultTargetFps;
+
+/// `cfg.hw.led.fps` from a raw `/json/cfg` map, or null when absent or not a
+/// number. 0 is returned as 0 (the caller decides what unusable means).
+int? targetFpsFromCfg(Map<String, dynamic>? cfg) {
+  final hw = cfg?['hw'];
+  final led = hw is Map ? hw['led'] : null;
+  final fps = led is Map ? led['fps'] : null;
+  return fps is num ? fps.toInt() : null;
 }

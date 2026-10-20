@@ -515,6 +515,10 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
     // one that MOST needs it: GammaWatchdog and the defaults healer are both
     // LAN-only, so a webhook cfg write that wiped gamma would go unrepaired
     // until the phone came home.
+    // No cfg read exists over the bridge, so the normaliser sends
+    // kDefaultTargetFps for hw.led.fps: a controller whose dealer set another
+    // rate gets the default after an off-LAN cfg write (before this change the
+    // same write set it to unlimited). Deliberate; the only change here.
     return _executeBool('applyConfig', normalizeWledCfgPayload(cfg));
   }
 

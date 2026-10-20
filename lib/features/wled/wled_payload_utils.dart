@@ -12,7 +12,13 @@ export 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 // The NGL gamma standard + the cfg gamma chokepoint live in a pure-Dart file
 // so the bench/ CLI can reach them under `dart run`; re-exported here.
 export 'package:nexgen_command/features/wled/wled_cfg_gamma.dart'
-    show kNglLightGammaConfig, normalizeWledCfgPayload;
+    show
+        kNglLightGammaConfig,
+        normalizeWledCfgPayload,
+        kDefaultTargetFps,
+        isUsableTargetFps,
+        resolveTargetFps,
+        targetFpsFromCfg;
 import 'package:nexgen_command/shared/wled_segment_defaults.dart';
 export 'package:nexgen_command/shared/wled_segment_defaults.dart';
 import 'package:nexgen_command/utils/color_naming.dart';

@@ -173,7 +173,9 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
         ),
       },
     };
-    final hwResult = await _postConfig(controllerIp, hwPayload);
+    // service.getConfig() above cached the device's hw.led.fps; carry it.
+    final hwResult = await _postConfig(controllerIp, hwPayload,
+        currentFps: service.lastKnownTargetFps);
     if (!hwResult.success) return hwResult;
   }
 
@@ -184,7 +186,8 @@ Future<WledConfigPushResult> pushDefaultsForControllerType(
       'mdns': 'ngl-skikbily-$last4',
     },
   };
-  final idResult = await _postConfig(controllerIp, idPayload);
+  final idResult = await _postConfig(controllerIp, idPayload,
+      currentFps: service.lastKnownTargetFps);
   if (!idResult.success) {
     warnings.add('mDNS rename failed: ${idResult.errorMessage}');
   }
@@ -396,7 +399,11 @@ Future<WledConfigPushResult> pushTimeLocation(
     },
   };
 
-  final result = await _postConfig(controllerIp, payload);
+  // One read so the write keeps the device's own frame rate (see
+  // normalizeWledCfgPayload); a failed read sends the default.
+  final currentCfg = await _fetchRawConfig(controllerIp);
+  final result = await _postConfig(controllerIp, payload,
+      currentFps: targetFpsFromCfg(currentCfg));
   if (!result.success) return result;
 
   if (!verifyAfterWrite) return result;
@@ -483,7 +490,8 @@ Future<WledConfigPushResult> pushGammaConfig(
     return WledConfigPushResult.skipped('color gamma already correct');
   }
 
-  final result = await _postConfig(controllerIp, buildGammaPayload());
+  final result = await _postConfig(controllerIp, buildGammaPayload(),
+      currentFps: targetFpsFromCfg(cfg));
   if (!result.success) return result;
   if (!verifyAfterWrite) return result;
 
@@ -547,8 +555,11 @@ Future<Map<String, dynamic>?> _fetchRawConfig(String ip) async {
 /// requests for /json/cfg, even when the payload is small.
 Future<WledConfigPushResult> _postConfig(
   String ip,
-  Map<String, dynamic> data,
-) async {
+  Map<String, dynamic> data, {
+  // The device's own `hw.led.fps` from the cfg the caller just read, so the
+  // normaliser keeps it; null (no read) sends kDefaultTargetFps.
+  int? currentFps,
+}) async {
   // #111 — closed in `finally`: `close(force: true)` aborts an in-flight
   // request, so a timeout no longer leaves the connection open on the
   // controller (it used to close on the success path only).
@@ -558,7 +569,7 @@ Future<WledConfigPushResult> _postConfig(
     // cfg boundary (raw HTTP, no repository), so the hw.led bus rebuild, the
     // mDNS rename and the NTP/location push all carry gamma from here. The
     // gamma push itself already supplies `light.gc` and passes through unchanged.
-    data = normalizeWledCfgPayload(data);
+    data = normalizeWledCfgPayload(data, currentFps: currentFps);
     final body = jsonEncode(data);
     final bodyBytes = utf8.encode(body);
     debugPrint('[WledConfig] Sending to /json/cfg: $body');

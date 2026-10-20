@@ -8,14 +8,49 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/audioreactive_health.dart'
+    show AudioReactiveConfigSource;
+import 'package:nexgen_command/features/wled/clock_health.dart'
+    show ClockInfoSource, ControllerClockInfo;
+import 'package:nexgen_command/features/wled/wled_payload_utils.dart'
+    show normalizeWledCfgPayload;
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
-class RecordingWledRepository implements WledRepository {
+class RecordingWledRepository
+    implements WledRepository, ClockInfoSource, AudioReactiveConfigSource {
   RecordingWledRepository({
     this.succeed = true,
     this.state,
     this.throwOnWrite = false,
+    this.clockInfo,
+    this.audioReactiveEnabled,
+    this.applyConfigSucceeds = false,
+    this.simulatedTargetFps,
   });
+
+  /// Canned answer for the healer's clock read (null = unreachable).
+  ControllerClockInfo? clockInfo;
+
+  /// Canned `cfg.um.AudioReactive.enabled` (null = no usermod / unreadable).
+  bool? audioReactiveEnabled;
+
+  /// What [applyConfig] reports. Default false, matching the helper's history
+  /// (most schedule tests exercise the refusal paths); set true to drive a
+  /// write path to completion.
+  bool applyConfigSucceeds;
+
+  /// The device's `hw.led.fps` as the real transports would have cached it
+  /// from a cfg read; feeds the wire mirror below.
+  int? simulatedTargetFps;
+
+  /// Every cfg body as the CALLER handed it over.
+  final List<Map<String, dynamic>> appliedConfigs = [];
+
+  /// Every cfg body as it would reach the controller: the real transports
+  /// (WledService._postConfig, the config pusher, the relay) run
+  /// [normalizeWledCfgPayload] at the write boundary, so this mirror lets a
+  /// test assert the wire shape — gamma and frame rate — without HTTP.
+  final List<Map<String, dynamic>> wireConfigs = [];
 
   /// What every write returns.
   bool succeed;
@@ -94,7 +129,22 @@ class RecordingWledRepository implements WledRepository {
   @override
   Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => false;
   @override
-  Future<bool> applyConfig(Map<String, dynamic> cfg) async => false;
+  Future<bool> applyConfig(Map<String, dynamic> cfg) async {
+    appliedConfigs.add(_copy(cfg));
+    wireConfigs.add(
+        normalizeWledCfgPayload(_copy(cfg), currentFps: simulatedTargetFps));
+    if (throwOnWrite) throw StateError('controller write failed');
+    if (applyConfigSucceeds && cfg.containsKey('um')) {
+      audioReactiveEnabled = false; // the device honoured the disable
+    }
+    return applyConfigSucceeds;
+  }
+
+  @override
+  Future<ControllerClockInfo?> fetchClockInfo() async => clockInfo;
+
+  @override
+  Future<bool?> readAudioReactiveEnabled() async => audioReactiveEnabled;
   @override
   Future<bool> uploadLedMapJson(String jsonContent) async => false;
   @override
