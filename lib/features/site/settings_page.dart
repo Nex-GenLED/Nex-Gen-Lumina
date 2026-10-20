@@ -21,6 +21,7 @@ import 'package:nexgen_command/features/properties/properties_providers.dart';
 import 'package:nexgen_command/features/permissions/welcome_wizard.dart';
 import 'package:nexgen_command/features/installer/installer_providers.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
@@ -84,8 +85,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const SizedBox(height: 16),
           const _SunriseOffCard(),
           const SizedBox(height: 16),
-          const _SimpleModeToggleCard(),
-          const SizedBox(height: 16),
+          // Simple Mode is hidden in build 119 (feature_visibility.dart).
+          if (kSimpleModeVisible) ...[
+            const _SimpleModeToggleCard(),
+            const SizedBox(height: 16),
+          ],
           const _GrowthCard(),
           const SizedBox(height: 16),
           const _SupportResourcesCard(),

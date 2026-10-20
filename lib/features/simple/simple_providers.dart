@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 
 /// Storage key for Simple Mode setting
 const String _simpleModeKey = 'simple_mode_enabled';
@@ -10,6 +11,11 @@ const String _simpleModeKey = 'simple_mode_enabled';
 class SimpleModeNotifier extends Notifier<bool> {
   @override
   bool build() {
+    // Build 119: Simple Mode is hidden. The shell stays on the full dock even
+    // on a device whose saved preference is ON. The saved value is neither
+    // read nor overwritten here, so it is honoured again when the feature
+    // returns; see feature_visibility.dart.
+    if (!ref.watch(simpleModeVisibleProvider)) return false;
     _loadPersistedValue();
     return false;
   }
@@ -26,6 +32,10 @@ class SimpleModeNotifier extends Notifier<bool> {
 
   @override
   set state(bool value) {
+    // Hidden: every write (enable/disable/toggle, the installer handoff) is
+    // dropped so the state stays false and the saved preference stays as it
+    // was. Nothing the customer chose is changed.
+    if (!ref.read(simpleModeVisibleProvider)) return;
     super.state = value;
     _persistValue(value);
   }
