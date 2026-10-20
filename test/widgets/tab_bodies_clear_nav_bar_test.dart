@@ -204,6 +204,9 @@ void main() {
             .overrideWith((_) => Stream.value(const <Property>[])),
       ]);
       expectScrollViewsClearTheDock(tester, 'system/settings');
+      // Build 119: the Simple Mode card is withheld from the store build.
+      expect(find.text('Simple Mode'), findsNothing,
+          reason: 'Simple Mode is hidden (kSimpleModeVisible = false)');
     });
   });
 

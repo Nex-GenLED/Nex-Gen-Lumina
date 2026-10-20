@@ -26,6 +26,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
 import 'package:nexgen_command/features/autopilot/background_learning_service.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
 
@@ -65,6 +66,9 @@ ProviderContainer _containerFor(UserModel profile) {
   final container = ProviderContainer(
     overrides: [
       currentUserProfileProvider.overrideWith((ref) => Stream.value(profile)),
+      // Build 119 hides Autopilot; this suite is about profile-type parity
+      // of the gate itself, so run it with the feature visible.
+      autopilotVisibleProvider.overrideWithValue(true),
     ],
   );
   addTearDown(container.dispose);

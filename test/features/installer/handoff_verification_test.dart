@@ -498,4 +498,28 @@ void main() {
       expect(_inVerificationSection(find.textContaining('OK')), findsOneWidget);
     });
   });
+
+  // Build 119: Autopilot and Simple Mode are withheld from the store build,
+  // so the handoff offers neither the autonomy tiles nor the Simple Mode card.
+  group('HandoffScreen build-119 hides', () {
+    testWidgets('no autonomy tiles and no Simple Mode card', (tester) async {
+      final controllers = [_ctrl('a', '192.0.2.10')];
+      final resolver = _FakeResolver({'a': ConnectionMethod.ethernet});
+      await _mountHandoff(
+        tester,
+        controllers: controllers,
+        selectedIds: const {'a'},
+        persisted: const {'a': ConnectionMethod.ethernet},
+        skipped: const {},
+        resolver: resolver,
+        onNext: (_) {},
+      );
+      expect(find.text('How should Lumina handle changes?'), findsNothing);
+      expect(find.text('Full auto-pilot'), findsNothing);
+      expect(find.text('Simple Mode'), findsNothing);
+      expect(find.text('Simple Mode Features:'), findsNothing);
+      // The rest of the handoff is still there.
+      expect(find.text('Favorite Teams'), findsOneWidget);
+    });
+  });
 }
