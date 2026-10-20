@@ -34,6 +34,8 @@ import 'package:flutter/foundation.dart';
 
 import 'package:nexgen_command/features/schedule/timer_landing.dart'
     show timerInstancesFromCfg;
+import 'package:nexgen_command/features/wled/wled_cfg_gamma.dart'
+    show targetFpsFromCfg;
 import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
 
 /// Capability interface for repositories that can read a controller's clock /
@@ -125,6 +127,11 @@ class ControllerClockInfo {
   /// can refuse to reboot a controller whose lights are off.
   final bool? turnOnAtBoot;
 
+  /// `cfg.hw.led.fps` as the device reports it. 0 is the unlimited render
+  /// mode that every partial cfg write used to leave behind (see
+  /// normalizeWledCfgPayload); null when the cfg was unreadable.
+  final int? targetFps;
+
   /// Raw `cfg.timers.ins` rows — the controller's timer table.
   ///
   /// Not clock health. Carried here for the same reason [bootPresetId] is: this
@@ -172,6 +179,7 @@ class ControllerClockInfo {
     this.ntpHost,
     this.bootPresetId,
     this.turnOnAtBoot,
+    this.targetFps,
     this.timerRows,
     this.hardware,
   });
@@ -244,6 +252,7 @@ class ControllerClockInfo {
       // Shared extractor — the same one WledService.fetchTimerInstances uses
       // for schedule readback, so a timer row means the same thing to the
       // publisher and to the sync verifier. Null-on-absent is load-bearing.
+      targetFps: targetFpsFromCfg(cfg),
       timerRows: timerInstancesFromCfg(cfg),
       // Same cfg map, same fetch — no extra device I/O. Shared parser, so the
       // bus list is identical to what WledService.getConfig would produce.

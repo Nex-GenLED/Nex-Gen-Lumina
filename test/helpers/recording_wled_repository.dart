@@ -26,7 +26,13 @@ class RecordingWledRepository
     this.audioReactiveEnabled,
     this.applyConfigSucceeds = false,
     this.simulatedTargetFps,
+    this.audioReactiveWriteSticks = true,
   });
+
+  /// When false, a successful AudioReactive disable leaves the device flag ON
+  /// (the write that "did not take"), so the healer's readback and backoff
+  /// have something to catch.
+  bool audioReactiveWriteSticks;
 
   /// Canned answer for the healer's clock read (null = unreachable).
   ControllerClockInfo? clockInfo;
@@ -134,7 +140,9 @@ class RecordingWledRepository
     wireConfigs.add(
         normalizeWledCfgPayload(_copy(cfg), currentFps: simulatedTargetFps));
     if (throwOnWrite) throw StateError('controller write failed');
-    if (applyConfigSucceeds && cfg.containsKey('um')) {
+    if (applyConfigSucceeds &&
+        audioReactiveWriteSticks &&
+        cfg.containsKey('um')) {
       audioReactiveEnabled = false; // the device honoured the disable
     }
     return applyConfigSucceeds;

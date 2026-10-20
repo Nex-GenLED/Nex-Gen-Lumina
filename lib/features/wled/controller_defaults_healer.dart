@@ -89,6 +89,9 @@ import 'package:nexgen_command/features/wled/audioreactive_health.dart';
 import 'package:nexgen_command/features/wled/base_boundary_denormalizer.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
+import 'package:nexgen_command/features/wled/heal_marker_store.dart';
+import 'package:nexgen_command/features/wled/wled_cfg_gamma.dart'
+    show isUsableTargetFps, kDefaultTargetFps;
 import 'package:nexgen_command/features/wled/base_ladder_denormalizer.dart';
 import 'package:nexgen_command/features/wled/base_ladder_repair_providers.dart'
     show ladderRepairCoordinatorProvider;
@@ -376,6 +379,21 @@ class ControllerHealReport {
   /// reboot — the controller suspends the FFT task on its next loop().
   bool audioReactiveHealed = false;
 
+  /// The AudioReactive disable was skipped: a recent attempt's readback still
+  /// said enabled, so the heal is backing off (kAudioReactiveHealBackoff)
+  /// rather than rewriting flash on every connect.
+  bool audioReactiveBackedOff = false;
+
+  /// The controller reported `hw.led.fps` 0 (the unlimited render loop every
+  /// earlier partial cfg write left behind), nothing else wrote cfg this run,
+  /// and the once-per-controller rate write went out.
+  bool targetFpsHealed = false;
+
+  /// cfg POSTs attempted this run through [ControllerDefaultsHealer._post],
+  /// any label. The frame-rate heal only spends its own write when this is 0,
+  /// because every cfg body now carries the rate anyway.
+  int cfgPosts = 0;
+
   /// The live segment layout disagreed with the controller's own buses and was
   /// re-provisioned on connect (+80). Bounds only — `rev` restoration is +81.
   bool geometryReprovisioned = false;
@@ -415,6 +433,7 @@ class ControllerHealReport {
       coordsHealed ||
       gammaHealed ||
       audioReactiveHealed ||
+      targetFpsHealed ||
       geometryReprovisioned;
 
   @override
@@ -425,6 +444,8 @@ class ControllerHealReport {
       if (coordsHealed) 'coords',
       if (gammaHealed) 'gamma',
       if (audioReactiveHealed) 'audioreactive',
+      if (audioReactiveBackedOff) 'audioreactive-backoff',
+      if (targetFpsHealed) 'target-fps',
       if (geometryReprovisioned) 'geometry',
       if (rebooted) 'reboot',
       if (rebootDeferred) 'reboot-deferred',
@@ -487,6 +508,11 @@ class ControllerDefaultsHealer {
   /// Firestore.
   final ControllerFactsPublisher publisher;
 
+  /// Per-controller markers for the once-only frame-rate heal and the
+  /// AudioReactive backoff. Null (tests, or no store wired) means: no
+  /// dedicated frame-rate write and no backoff.
+  final HealMarkerStore? markers;
+
   const ControllerDefaultsHealer({
     required this.repo,
     required this.isLan,
@@ -496,6 +522,7 @@ class ControllerDefaultsHealer {
     this.controllerId,
     this.rooflineSegments,
     this.publisher = const FirestoreControllerFactsPublisher(),
+    this.markers,
   });
 
   Future<ControllerHealReport> run() async {
@@ -695,6 +722,41 @@ class ControllerDefaultsHealer {
     // tz/coords/gamma/audioreactive. WLED re-attempts NTP only on boot. Gate on
     // device state so we don't reboot an actively-running non-boot look: defer
     // instead (the cfg write persists and applies on the next natural boot).
+    // Target frame rate (build 120). A device reporting hw.led.fps 0 is in
+    // the unlimited render mode that every earlier partial cfg write left
+    // behind; it starves the web server. Every cfg body now carries the rate,
+    // so a device is corrected by whichever cfg write happens first. Only when
+    // NOTHING else wrote this run does the healer spend one flash write of its
+    // own, and only once per controller (marker), so a healthy connect stays
+    // write-free and a healed one is never written again.
+    final targetFps = info.targetFps;
+    if (targetFps != null && !isUsableTargetFps(targetFps)) {
+      final id = controllerId;
+      final store = markers;
+      final gammaWrote = report.gammaHealed ||
+          report.log.any((l) => l.startsWith('gamma heal unverified'));
+      if (report.cfgPosts > 0 || gammaWrote) {
+        report.log.add(
+            'target fps $targetFps: corrected by this run\'s own cfg write');
+      } else if (id == null || id.isEmpty || store == null) {
+        report.log.add('target fps $targetFps: no controller id or marker '
+            'store — left for the next cfg write');
+      } else if (await store.targetFpsHealDone(id)) {
+        report.log.add('target fps $targetFps: one-time heal already ran');
+      } else if (await _post(
+        {
+          'hw': {
+            'led': {'fps': kDefaultTargetFps},
+          },
+        },
+        'target-fps',
+        report,
+      )) {
+        report.targetFpsHealed = true;
+        await store.markTargetFpsHealDone(id);
+      }
+    }
+
     if (ntpRetryFieldChanged) {
       final decision = await _decideReboot(info);
       if (decision.reboot) {
@@ -1039,6 +1101,23 @@ class ControllerDefaultsHealer {
     }
     if (!audioReactiveNeedsHeal(enabled)) return;
 
+    // Backoff (build 120): on some units the disable never takes — the
+    // readback still says enabled — and re-posting it on every connect was a
+    // flash write per connect for nothing. One failed readback parks the heal
+    // for kAudioReactiveHealBackoff on that controller.
+    final id = controllerId;
+    final store = markers;
+    if (store != null && id != null && id.isNotEmpty) {
+      final last = await store.audioReactiveLastAttempt(id);
+      if (last != null &&
+          ctx.now().difference(last) < kAudioReactiveHealBackoff) {
+        report.audioReactiveBackedOff = true;
+        report.log.add('audioreactive heal backed off: the last attempt '
+            '(${ctx.now().difference(last).inHours}h ago) did not take');
+        return;
+      }
+    }
+
     if (!await _post(audioReactiveHealPayload(), 'audioreactive', report)) {
       return;
     }
@@ -1047,6 +1126,9 @@ class ControllerDefaultsHealer {
     try {
       if (await source.readAudioReactiveEnabled() == true) {
         report.log.add('readback: audioreactive still enabled');
+        if (store != null && id != null && id.isNotEmpty) {
+          await store.markAudioReactiveAttempt(id, ctx.now());
+        }
       }
     } catch (e) {
       report.log.add('audioreactive readback error: $e');
@@ -1089,6 +1171,7 @@ class ControllerDefaultsHealer {
     String label,
     ControllerHealReport report,
   ) async {
+    report.cfgPosts++;
     try {
       final ok = await repo.applyConfig(payload);
       if (!ok) {
@@ -1157,6 +1240,12 @@ typedef GammaSelfHealAction = Future<WledConfigPushResult> Function(String ip);
 /// Test seam for the gamma half of the healer.
 final gammaSelfHealActionProvider = Provider<GammaSelfHealAction>(
   (ref) => (ip) => pushGammaConfig(ip),
+);
+
+/// Production marker store for the once-only frame-rate heal and the
+/// AudioReactive backoff (SharedPreferences, keyed by controller id).
+final healMarkerStoreProvider = Provider<HealMarkerStore>(
+  (ref) => const SharedPrefsHealMarkerStore(),
 );
 
 /// Test seam for the publish half. Overriding this with a recorder is how a
@@ -1375,6 +1464,7 @@ final controllerDefaultsHealerProvider =
       controllerId: ref.read(selectedControllerIdProvider),
       rooflineSegments: rooflineSegments,
       publisher: ref.read(controllerFactsPublisherProvider),
+      markers: ref.read(healMarkerStoreProvider),
     );
 
     final report = await healer.run();
