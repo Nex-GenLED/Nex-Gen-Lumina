@@ -91,7 +91,9 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
             // Action buttons
             _buildActionButtons(),
 
-            SizedBox(height: navBarTotalHeight(context)),
+            // The SafeArea above reserves the dock inset; a second
+            // navBarTotalHeight here doubled it (black band above the dock).
+            const SizedBox(height: 8),
           ],
         ),
       ),

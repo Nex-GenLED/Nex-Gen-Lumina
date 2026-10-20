@@ -1137,8 +1137,10 @@ class _NeighborhoodGroupListViewState
 
   Widget _buildActionButtons() {
     return Container(
-      padding: EdgeInsets.fromLTRB(
-          24, 12, 24, navBarTotalHeight(context) + 12),
+      // The enclosing SafeArea already reserves the dock inset; adding
+      // navBarTotalHeight here (read from a context above that SafeArea)
+      // doubled it and left a black band above the dock.
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.7),
         border: Border(
