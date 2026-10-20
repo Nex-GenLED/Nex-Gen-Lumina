@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
@@ -22,6 +23,11 @@ import 'package:nexgen_command/services/autopilot_scheduler.dart';
 /// Provider for the user's autopilot enabled state.
 /// Derived from the user profile.
 final autopilotEnabledProvider = Provider<bool>((ref) {
+  // Build 119: Autopilot is withheld from the store build. Reading false here
+  // is the one switch that stops the scheduler, the on-connect and Sunday
+  // regenerations and every Autopilot surface, without touching the
+  // customer's stored autopilot_enabled preference.
+  if (!ref.watch(autopilotVisibleProvider)) return false;
   final profileAsync = ref.watch(currentUserProfileProvider);
   return profileAsync.maybeWhen(
     data: (profile) => profile?.autopilotEnabled ?? false,
@@ -347,6 +353,11 @@ class AutopilotSettingsService {
   /// Enable or disable autopilot.
   /// When enabling, generates and populates schedules based on user profile.
   Future<void> setEnabled(bool enabled) async {
+    if (!_ref.read(autopilotVisibleProvider)) {
+      debugPrint('AutopilotSettingsService: Autopilot is hidden in this build '
+          '— setEnabled($enabled) ignored, stored preference left as is');
+      return;
+    }
     await _updateProfile((p) => p.copyWith(
           autopilotEnabled: enabled,
           updatedAt: DateTime.now(),
@@ -375,6 +386,11 @@ class AutopilotSettingsService {
   ///   - try/catch that surfaces errors via [autopilotGenerationStateProvider]
   ///     so the UI can display a retry affordance instead of spinning forever.
   Future<void> generateAndPopulateSchedules({bool force = false}) async {
+    if (!_ref.read(autopilotVisibleProvider)) {
+      debugPrint('AutopilotSettingsService: Autopilot is hidden in this build '
+          '— generation skipped (force=$force)');
+      return;
+    }
     final genState = _ref.read(autopilotGenerationStateProvider.notifier);
 
     // Re-entrancy guard — Case C from the bug report. If a generation is

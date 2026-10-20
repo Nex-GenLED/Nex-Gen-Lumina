@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/schedule/geocoding_service.dart';
 import 'package:nexgen_command/models/user_model.dart';
@@ -623,6 +624,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 allowPersonalization: _allowPersonalization,
                 onAllowPersonalizationChanged: (v) => setState(() => _allowPersonalization = v),
               ),
+              // Build 119: the Autopilot card is hidden; the fields it edits
+              // round-trip unchanged from the loaded profile on save.
+              if (kAutopilotVisible) ...[
               const SizedBox(height: 16),
               _AutopilotCard(
                 enabled: _autopilotEnabled,
@@ -649,6 +653,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 weeklyPreviewEnabled: _weeklySchedulePreviewEnabled,
                 onWeeklyPreviewChanged: (v) => setState(() => _weeklySchedulePreviewEnabled = v),
               ),
+              ],
             ],
           );
         },

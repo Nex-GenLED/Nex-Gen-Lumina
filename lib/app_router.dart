@@ -81,6 +81,7 @@ import 'package:nexgen_command/features/game_day/game_day_screen.dart';
 import 'package:nexgen_command/features/game_day/game_day_design_save.dart';
 import 'package:nexgen_command/features/ai/lumina_ai_screen.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_weekly_preview.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/autopilot/screens/first_week_reveal_screen.dart';
 import 'package:nexgen_command/features/autopilot/screens/autopilot_calendar_screen.dart';
 import 'package:nexgen_command/features/zones/screens/zone_setup_screen.dart';
@@ -264,10 +265,14 @@ class AppRouter {
         pageBuilder: (context, state) => const NoTransitionPage(child: FirstRunScreen()),
       ),
       // ===== AUTOPILOT REVEAL + CALENDAR (root navigator) =====
+      // Build 119: all three Autopilot routes stay registered (a stale
+      // weekly-brief push still deep-links to them) but redirect to the
+      // Schedule tab while the feature is hidden.
       GoRoute(
         path: AppRoutes.firstWeekReveal,
         name: 'first-week-reveal',
         parentNavigatorKey: _rootNavigatorKey,
+        redirect: (context, state) => hiddenAutopilotRouteTarget(),
         pageBuilder: (context, state) => const MaterialPage(
           fullscreenDialog: true,
           child: FirstWeekRevealScreen(),
@@ -277,6 +282,7 @@ class AppRouter {
         path: AppRoutes.autopilotCalendar,
         name: 'autopilot-calendar',
         parentNavigatorKey: _rootNavigatorKey,
+        redirect: (context, state) => hiddenAutopilotRouteTarget(),
         pageBuilder: (context, state) => const MaterialPage(
           fullscreenDialog: true,
           child: AutopilotCalendarScreen(),
@@ -320,6 +326,7 @@ class AppRouter {
         path: AppRoutes.autopilotSchedule,
         name: 'autopilot-schedule',
         parentNavigatorKey: _rootNavigatorKey,
+        redirect: (context, state) => hiddenAutopilotRouteTarget(),
         pageBuilder: (context, state) {
           final initialDate = state.extra as DateTime?;
           return MaterialPage(

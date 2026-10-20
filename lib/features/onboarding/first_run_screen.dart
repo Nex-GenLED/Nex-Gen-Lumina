@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/auth/account_session.dart';
 import 'package:nexgen_command/features/auth/sign_out_button.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 
@@ -199,13 +200,19 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
           // +110 (walk finding 3): this named an "Auto-Pilot tab" that the
           // tab bar does not have. The switch is on the Lumina AI card at the
           // top of the Schedule tab.
-          const Text(
-            'Your lights are ready to go. Autopilot can take over your '
-            'schedule with seasonal themes, game day colors, and holiday '
-            'displays — turn it on with the Autopilot switch on the Lumina AI '
-            'card in the Schedule tab whenever you\'re ready.',
-            key: ValueKey('first-run-welcome-copy'),
-            style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.5),
+          // Build 119: the Autopilot switch is hidden, so the copy must not
+          // send the customer looking for it.
+          Text(
+            kAutopilotVisible
+                ? 'Your lights are ready to go. Autopilot can take over your '
+                    'schedule with seasonal themes, game day colors, and holiday '
+                    'displays — turn it on with the Autopilot switch on the Lumina AI '
+                    'card in the Schedule tab whenever you\'re ready.'
+                : 'Your lights are ready to go. Build your week from the '
+                    'Schedule tab, set up your teams in Game Day, and ask Lumina '
+                    'for a look whenever you\'re ready.',
+            key: const ValueKey('first-run-welcome-copy'),
+            style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.5),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 48),
@@ -490,12 +497,15 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Your installer has set up your preferences. You can adjust them '
-            'from the System tab, and turn on Autopilot with the switch on '
-            'the Lumina AI card in the Schedule tab whenever you\'re ready.',
-            key: ValueKey('first-run-done-copy'),
-            style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.4),
+          Text(
+            kAutopilotVisible
+                ? 'Your installer has set up your preferences. You can adjust them '
+                    'from the System tab, and turn on Autopilot with the switch on '
+                    'the Lumina AI card in the Schedule tab whenever you\'re ready.'
+                : 'Your installer has set up your preferences. You can adjust them '
+                    'from the System tab whenever you\'re ready.',
+            key: const ValueKey('first-run-done-copy'),
+            style: const TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.4),
             textAlign: TextAlign.center,
           ),
           const Spacer(),

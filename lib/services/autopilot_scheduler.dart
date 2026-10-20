@@ -39,6 +39,11 @@ class AutopilotScheduler {
   /// Whether the scheduler is currently running.
   bool _isRunning = false;
 
+  /// Whether [start] has run (the minute timer is live). Build 119's hide
+  /// asserts this stays false while Autopilot is withheld.
+  @visibleForTesting
+  bool get isRunning => _isRunning;
+
   /// Auto-apply confidence threshold.
   static const kAutoApplyThreshold = 0.75;
 

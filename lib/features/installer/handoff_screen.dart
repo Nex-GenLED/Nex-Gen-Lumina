@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/simple/simple_providers.dart';
 import 'package:nexgen_command/features/installer/connection_method_resolver.dart';
 import 'package:nexgen_command/features/installer/connection_method_verification.dart';
@@ -447,6 +448,9 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
                 const SizedBox(height: 28),
 
                 // ── SECTION 5: Auto-Pilot Autonomy ──
+                // Hidden in build 119 with Autopilot (feature_visibility.dart);
+                // the draft keeps the default autonomy level.
+                if (kAutopilotVisible) ...[
                 _buildSectionLabel('How should Lumina handle changes?'),
                 const SizedBox(height: 12),
                 _buildAutonomyTile(
@@ -470,8 +474,10 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
                   icon: Icons.rocket_launch_rounded,
                 ),
                 const SizedBox(height: 28),
+                ],
 
-                // ── Simple Mode Card ──
+                // ── Simple Mode Card ── (hidden in build 119)
+                if (kSimpleModeVisible) ...[
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
@@ -570,6 +576,7 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
+                ],
               ],
             ),
           ),
@@ -904,11 +911,14 @@ class _HandoffScreenState extends ConsumerState<HandoffScreen> {
       return;
     }
 
-    // Apply Simple Mode preference
-    if (_useSimpleMode) {
-      ref.read(simpleModeProvider.notifier).enable();
-    } else {
-      ref.read(simpleModeProvider.notifier).disable();
+    // Apply Simple Mode preference (the card is hidden in build 119, so the
+    // choice is never offered; the notifier also ignores writes while hidden).
+    if (kSimpleModeVisible) {
+      if (_useSimpleMode) {
+        ref.read(simpleModeProvider.notifier).enable();
+      } else {
+        ref.read(simpleModeProvider.notifier).disable();
+      }
     }
 
     final draft = InstallerPreferenceDraft(

@@ -23,7 +23,9 @@ import 'package:nexgen_command/features/autopilot/team_priority_repopulate.dart'
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
 import 'package:nexgen_command/features/neighborhood/providers/sync_event_providers.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
+import 'package:nexgen_command/services/autopilot_notification_service.dart';
 import 'package:nexgen_command/services/autopilot_scheduler.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/services/routing_diagnostics.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
@@ -97,6 +99,13 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
 
       if (!mounted) return;
       ref.read(autopilotSchedulerProvider);
+      // Build 119: Autopilot is hidden. A weekly-brief notification scheduled
+      // by an earlier build would still fire on its Sunday; cancel it once
+      // per launch (a no-op when none is pending).
+      if (!kAutopilotVisible) {
+        unawaited(
+            ref.read(autopilotNotificationServiceProvider).cancelWeeklyBrief());
+      }
 
       final isSimpleMode = ref.read(simpleModeProvider);
       if (!_tourChecked && !isSimpleMode) {

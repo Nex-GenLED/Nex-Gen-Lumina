@@ -40,6 +40,7 @@ import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_providers.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/autopilot/autopilot_suggestions_card.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/clock_health_providers.dart';
@@ -397,15 +398,26 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
           // own SafeArea + nav-bar offset.
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+              // Build 119: with the generate button hidden nothing below this
+              // list reserves the dock, so the list pads for it itself (the
+              // same term the button used).
+              padding: EdgeInsets.fromLTRB(
+                  14,
+                  16,
+                  14,
+                  kWeeklyScheduleGenerationVisible
+                      ? 16
+                      : navBarTotalHeight(context) + 16),
               children: [
                 // ── Lumina AI card (with fixed schedule creation) ──
                 const _LuminaAICard(),
                 const SizedBox(height: 14),
 
                 // ── Autopilot suggestions ──
-                const AutopilotSuggestionsCard(),
-                const SizedBox(height: 14),
+                if (kAutopilotVisible) ...[
+                  const AutopilotSuggestionsCard(),
+                  const SizedBox(height: 14),
+                ],
 
                 // ── Day Hero: selected-day full detail ──
                 _DayHeroCard(
@@ -520,8 +532,8 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
           // ── Manual generate button ──────────────────────────────────────
           // Sits above the bottom nav so it's always reachable. Tapping it
           // forces a fresh schedule generation regardless of the weekly
-          // refresh gate.
-          const _GenerateThisWeekButton(),
+          // refresh gate. Hidden in build 119 (see feature_visibility.dart).
+          if (kWeeklyScheduleGenerationVisible) const _GenerateThisWeekButton(),
         ],
       ),
 
@@ -3356,14 +3368,16 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard>
                     .toList(),
               ),
 
+              // Autopilot toggle + baseline consent. Hidden in build 119.
+              if (kAutopilotVisible) ...[
               const SizedBox(height: 10),
-
               // Autopilot toggle (unchanged from original)
               _AutopilotRow(),
               // Consent-gated daily warm-white baseline (pre-checked). Self-
               // hides when autopilot is off. Unchecking persists so a future
               // regeneration never re-adds the baseline.
               const _BaselineConsentTile(),
+              ],
             ],
           ),
         ),
@@ -3609,6 +3623,8 @@ class _AutopilotOffInvitation extends StatelessWidget {
                 ],
               ),
 
+              // The "or … turn on Autopilot" nudge. Hidden in build 119.
+              if (kAutopilotVisible) ...[
               const SizedBox(height: 18),
 
               // Divider with "or"
@@ -3642,6 +3658,7 @@ class _AutopilotOffInvitation extends StatelessWidget {
                   ),
                 ],
               ),
+              ],
             ],
           ),
         ),
