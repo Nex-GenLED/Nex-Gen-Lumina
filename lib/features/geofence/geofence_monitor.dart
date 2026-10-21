@@ -195,10 +195,35 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
     final docRef = FirebaseFirestore.instance.collection('users').doc(uid).collection('geofences').doc('welcome_home');
     _configStreamFactory = () => docRef.snapshots();
     _subscribeConfig();
+    // The position stream is NOT started here. It starts only when the config
+    // listener sees a saved Welcome Home config (see _onConfigSnapshot). It
+    // used to start on every launch with location granted, streaming GPS at
+    // best accuracy for accounts that had no geofence at all, and dropping
+    // every fix in _onPosition.
+  }
 
-    // Position stream
-    final settings = const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 25);
-    _posSub = Geolocator.getPositionStream(locationSettings: settings).listen(_onPosition, onError: (e) => debugPrint('Position stream error: $e'));
+  /// Source of position updates. Production is a best-accuracy, 25 m-filtered
+  /// Geolocator stream; a test swaps in a controllable stream.
+  @visibleForTesting
+  Stream<Position> Function() positionStreamFactory = () =>
+      Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best, distanceFilter: 25),
+      );
+
+  /// Test-only: whether the position stream is currently subscribed.
+  @visibleForTesting
+  bool get positionStreamActiveForTest => _posSub != null;
+
+  void _startPositionStream() {
+    if (_posSub != null) return;
+    _posSub = positionStreamFactory().listen(_onPosition,
+        onError: (e) => debugPrint('Position stream error: $e'));
+  }
+
+  void _stopPositionStream() {
+    _posSub?.cancel();
+    _posSub = null;
   }
 
   /// Subscribes (or re-subscribes) to the geofence config doc.
@@ -227,8 +252,13 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
   /// Handles one config-doc emission. Unchanged from the original inline
   /// listener body — the parse guard still swallows a bad doc so a single
   /// malformed config can't take down the stream.
+  ///
+  /// It also owns the position stream: on while a saved config exists, off
+  /// when the config doc is deleted.
   void _onConfigSnapshot(DocumentSnapshot<Map<String, dynamic>> snap) {
     if (!snap.exists) {
+      _config = null;
+      _stopPositionStream();
       state = state.copyWith(enabled: false);
       return;
     }
@@ -237,6 +267,7 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
       if (data == null) return;
       _config = GeofenceConfig.fromMap(data);
       state = state.copyWith(enabled: true);
+      _startPositionStream();
     } catch (e) {
       debugPrint('Geofence cfg parse error: $e');
     }
@@ -268,9 +299,8 @@ class GeofenceMonitor extends Notifier<GeofenceState> {
   Future<void> stop() async {
     _cfgResubscribeTimer?.cancel();
     _cfgResubscribeTimer = null;
-    await _posSub?.cancel();
+    _stopPositionStream();
     await _cfgSub?.cancel();
-    _posSub = null;
     _cfgSub = null;
     _configStreamFactory = null;
     _started = false;
