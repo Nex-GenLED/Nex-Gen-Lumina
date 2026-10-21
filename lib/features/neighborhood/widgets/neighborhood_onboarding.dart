@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../theme.dart';
+import '../../feature_visibility.dart';
 
 /// Engaging onboarding experience for users with no sync groups.
 /// Shows what Neighborhood Sync can do and encourages participation.
@@ -798,16 +799,21 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
               ),
             ),
 
-            const SizedBox(height: 8),
-
-            TextButton.icon(
-              onPressed: widget.onFindNearby,
-              icon: Icon(Icons.explore, color: Colors.grey.shade400, size: 18),
-              label: Text(
-                'Discover Nearby Groups',
-                style: TextStyle(color: Colors.grey.shade400),
+            // Build 120: Discover is hidden until it searches from the
+            // phone's location and in-app groups can be listed
+            // (kNeighborhoodDiscoveryVisible).
+            if (ref.watch(neighborhoodDiscoveryVisibleProvider)) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: widget.onFindNearby,
+                icon:
+                    Icon(Icons.explore, color: Colors.grey.shade400, size: 18),
+                label: Text(
+                  'Discover Nearby Groups',
+                  style: TextStyle(color: Colors.grey.shade400),
+                ),
               ),
-            ),
+            ],
           ] else ...[
             // Skip button for intro pages
             TextButton(

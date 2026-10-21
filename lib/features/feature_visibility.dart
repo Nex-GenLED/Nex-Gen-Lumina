@@ -62,6 +62,23 @@ const bool kGameDayCrewsVisible = false;
 /// the session manager mounted, hardened and tested, with members' consent.
 const bool kGroupGameDayBroadcastVisible = false;
 
+/// Neighborhood public listing and Discover Nearby (build 120): the "Public
+/// Group" toggle with its "approximate location" sentence in the create
+/// dialog, and the "Discover Nearby Groups" button on the onboarding's last
+/// page (its sheet becomes unreachable). Hidden because no location is ever
+/// read: the create dialog passes null coordinates, so no public listing is
+/// written and no in-app group can be found, and the Discover sheet searches
+/// a hard-coded coordinate instead of the phone's. The listing projection,
+/// its rules and the search code stay in place.
+///
+/// Flip to true only when: the create dialog reads the device location (with
+/// the iOS purpose strings and the App Privacy answers updated to say so);
+/// Discover uses the phone's location and is reachable from the group list;
+/// a group can be made public or private later; the owner's privacy decisions
+/// on cell size, name moderation and who may search are implemented; and the
+/// "request to join" wording matches what the callable does.
+const bool kNeighborhoodDiscoveryVisible = false;
+
 final autopilotVisibleProvider = Provider<bool>((_) => kAutopilotVisible);
 
 final weeklyScheduleGenerationVisibleProvider =
@@ -74,6 +91,9 @@ final gameDayCrewsVisibleProvider =
 
 final groupGameDayBroadcastVisibleProvider =
     Provider<bool>((_) => kGroupGameDayBroadcastVisible);
+
+final neighborhoodDiscoveryVisibleProvider =
+    Provider<bool>((_) => kNeighborhoodDiscoveryVisible);
 
 /// Where a hidden Autopilot route sends the user: the Schedule tab, which is
 /// where every Autopilot entry point used to live. Returns null (no redirect)

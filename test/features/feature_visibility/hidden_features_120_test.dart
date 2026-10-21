@@ -24,6 +24,11 @@ import 'package:nexgen_command/features/game_day/game_day_providers.dart';
 import 'package:nexgen_command/features/game_day/game_day_screen.dart';
 import 'package:nexgen_command/features/game_day/gate_status.dart';
 import 'package:nexgen_command/features/game_day/gate_status_provider.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
+import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
+import 'package:nexgen_command/features/neighborhood/widgets/neighborhood_onboarding.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/game_day_setup_screen.dart';
 import 'package:nexgen_command/features/neighborhood/services/path1_game_day_snapshot.dart';
 import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
@@ -95,6 +100,33 @@ List<Override> _gameDay(List<GameDayTeamEntry> entries) {
   ];
 }
 
+List<NeighborhoodGroup> _groups() => [
+      NeighborhoodGroup(
+        id: 'grp-a',
+        name: 'Walk Crew',
+        inviteCode: 'TESTA1',
+        creatorUid: 'customer-a',
+        createdAt: DateTime(2026, 9, 1),
+        memberUids: const ['customer-a', 'customer-b'],
+      ),
+    ];
+
+/// The returning-user group list with one group and the onboarding done.
+List<Override> _neighborhood({bool onboardingDone = true}) => [
+      authStateProvider.overrideWith((_) => Stream<User?>.value(_FakeUser())),
+      currentUserProfileProvider.overrideWith((_) => Stream.value(null)),
+      syncEngineControllerProvider.overrideWith((ref) {}),
+      userNeighborhoodsProvider.overrideWith((ref) => Stream.value(_groups())),
+      neighborhoodMembersProvider
+          .overrideWith((ref) => Stream.value(const <NeighborhoodMember>[])),
+      activeNeighborhoodProvider.overrideWith((ref) => Stream.value(null)),
+      currentUserMemberProvider.overrideWithValue(null),
+      isGroupCreatorProvider.overrideWithValue(false),
+      previousGroupsProvider.overrideWith((ref) async => const []),
+      neighborhoodSyncOnboardingCompleteProvider
+          .overrideWith((ref) async => onboardingDone),
+    ];
+
 Future<void> _pump(WidgetTester tester, Widget page, List<Override> overrides,
     {Size size = const Size(390, 2400)}) async {
   tester.view.physicalSize = size;
@@ -130,11 +162,14 @@ void main() {
         () {
       expect(kGameDayCrewsVisible, isFalse);
       expect(kGroupGameDayBroadcastVisible, isFalse);
+      expect(kNeighborhoodDiscoveryVisible, isFalse);
       final c = ProviderContainer();
       addTearDown(c.dispose);
       expect(c.read(gameDayCrewsVisibleProvider), kGameDayCrewsVisible);
       expect(c.read(groupGameDayBroadcastVisibleProvider),
           kGroupGameDayBroadcastVisible);
+      expect(c.read(neighborhoodDiscoveryVisibleProvider),
+          kNeighborhoodDiscoveryVisible);
     });
   });
 
@@ -219,6 +254,78 @@ void main() {
       ]);
       expect(tester.takeException(), isNull);
       expect(find.text('Also broadcast to my neighborhood'), findsOneWidget);
+      await _unmount(tester);
+    });
+  });
+
+  group('3. public listing and Discover Nearby hidden', () {
+    Widget onboarding() => NeighborhoodOnboarding(
+          onCreateGroup: () {},
+          onJoinGroup: () {},
+          onFindNearby: () {},
+        );
+
+    Future<void> lastPage(WidgetTester tester) async {
+      await tester.tap(find.text('Skip to Get Started'));
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+    }
+
+    testWidgets('the onboarding\'s last page has no Discover button',
+        (tester) async {
+      await _pump(tester, onboarding(), _neighborhood(),
+          size: const Size(390, 844));
+      await lastPage(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Start a Block Party'), findsOneWidget);
+      expect(find.text('Join the Party'), findsOneWidget);
+      expect(find.text('Discover Nearby Groups'), findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('returns later: Discover is back with the twin true',
+        (tester) async {
+      await _pump(tester, onboarding(), [
+        ..._neighborhood(),
+        neighborhoodDiscoveryVisibleProvider.overrideWithValue(true),
+      ], size: const Size(390, 844));
+      await lastPage(tester);
+      expect(find.text('Discover Nearby Groups'), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    Future<void> openCreateDialog(WidgetTester tester) async {
+      await tester.tap(find.text('Start a Block Party'));
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+    }
+
+    testWidgets('the create dialog has no Public Group toggle',
+        (tester) async {
+      await _pump(tester, const NeighborhoodSyncScreen(), _neighborhood(),
+          size: const Size(390, 844));
+      await openCreateDialog(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Public Group'), findsNothing);
+      expect(find.text('Allow nearby neighbors to find and request to join'),
+          findsNothing);
+      expect(
+          find.text('Your approximate location will be used to help '
+              'neighbors find your group.'),
+          findsNothing);
+      await _unmount(tester);
+    });
+
+    testWidgets('returns later: the toggle is back with the twin true',
+        (tester) async {
+      await _pump(tester, const NeighborhoodSyncScreen(), [
+        ..._neighborhood(),
+        neighborhoodDiscoveryVisibleProvider.overrideWithValue(true),
+      ], size: const Size(390, 844));
+      await openCreateDialog(tester);
+      expect(find.text('Public Group'), findsOneWidget);
       await _unmount(tester);
     });
   });

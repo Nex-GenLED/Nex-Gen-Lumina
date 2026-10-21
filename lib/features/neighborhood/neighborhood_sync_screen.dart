@@ -12,6 +12,7 @@ import 'neighborhood_providers.dart';
 import 'neighborhood_sync_engine.dart';
 import 'widgets/member_position_list.dart';
 import 'widgets/neighborhood_onboarding.dart';
+import '../feature_visibility.dart';
 import 'widgets/schedule_list.dart';
 import 'widgets/sync_control_panel.dart';
 
@@ -2257,46 +2258,49 @@ class _CreateGroupDialogState extends ConsumerState<_CreateGroupDialog> {
               ),
               const SizedBox(height: 20),
 
-              // Public/Private Toggle
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.black26,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.shade700),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Public Group',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
+              // Public/Private Toggle. Build 120: hidden until the dialog
+              // reads a real location and the listing works end to end
+              // (kNeighborhoodDiscoveryVisible). _isPublic stays false.
+              if (ref.watch(neighborhoodDiscoveryVisibleProvider))
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade700),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Public Group',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Allow nearby neighbors to find and request to join',
-                            style: TextStyle(
-                              color: Colors.grey.shade500,
-                              fontSize: 12,
+                            const SizedBox(height: 4),
+                            Text(
+                              'Allow nearby neighbors to find and request to join',
+                              style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    Switch(
-                      value: _isPublic,
-                      onChanged: (v) => setState(() => _isPublic = v),
-                      activeColor: Colors.cyan,
-                    ),
-                  ],
+                      Switch(
+                        value: _isPublic,
+                        onChanged: (v) => setState(() => _isPublic = v),
+                        activeColor: Colors.cyan,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
 
               if (_isPublic) ...[
                 const SizedBox(height: 12),

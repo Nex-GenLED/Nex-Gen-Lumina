@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:nexgen_command/app_theme.dart';
+import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
@@ -176,10 +177,13 @@ void main() {
         await tester.tap(find.text('Skip to Get Started'));
         await _settle(tester);
 
-        final discover =
-            find.widgetWithText(TextButton, 'Discover Nearby Groups');
-        expect(discover, findsOneWidget);
-        final lastBottom = tester.getRect(discover).bottom;
+        // Build 120 hides "Discover Nearby Groups" (kNeighborhoodDiscoveryVisible);
+        // the last content is then the Join button, with the same 8 px spacer.
+        final last = kNeighborhoodDiscoveryVisible
+            ? find.widgetWithText(TextButton, 'Discover Nearby Groups')
+            : find.widgetWithText(OutlinedButton, 'Join the Party');
+        expect(last, findsOneWidget);
+        final lastBottom = tester.getRect(last).bottom;
         final dockTop = tester.getRect(find.byType(GlassDockNavBar)).top;
         final band = dockTop - lastBottom;
 
