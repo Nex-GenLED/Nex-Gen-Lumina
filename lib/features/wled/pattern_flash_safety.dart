@@ -41,6 +41,8 @@
 //
 // Pure Dart: the bench CLI and the catalog import it.
 
+import 'effect_speed_profiles.dart';
+
 /// Strobe and Strobe Rainbow never run faster than this `sx` (≈1.8 Hz at
 /// 42 fps). Interim for build 120; see the header.
 const int kStrobeSpeedCap = 230;
@@ -78,15 +80,28 @@ const int kLightningCelebrationIntensity = 60;
 ///   • the strobe family (23, 24, and a retired 25 playing as 23) never above
 ///     [kStrobeSpeedCap];
 ///   • Lightning (57) mapped to [kLightningCelebrationSpeed] /
-///     [kLightningCelebrationIntensity], whatever was saved.
-/// Everything else passes through here unchanged.
+///     [kLightningCelebrationIntensity], whatever was saved;
+///   • every other effect never above its speed profile's recommended
+///     maximum (effect_speed_profiles.dart), the ceiling the slider shows
+///     without "extended" mode. Intensity is left alone for these.
 ({int sx, int ix}) capCelebration(int effectId, int sx, int ix) {
   final id = offeredEffectId(effectId);
   if (id == kLightningEffectId) {
     return (sx: kLightningCelebrationSpeed, ix: kLightningCelebrationIntensity);
   }
-  return (sx: capFlashSpeed(id, sx), ix: ix);
+  if (kSpeedCappedFlashEffectIds.contains(id)) {
+    return (sx: capFlashSpeed(id, sx), ix: ix);
+  }
+  final max = getSpeedProfile(id).rawRecommendedMax;
+  return (sx: sx > max ? max : sx, ix: ix);
 }
+
+/// What the celebration picker stores when a payload names no speed or
+/// intensity: the capped value for that effect, never a flat 240.
+int celebrationDefaultSpeedFor(int effectId) =>
+    capCelebration(effectId, 240, 240).sx;
+int celebrationDefaultIntensityFor(int effectId) =>
+    capCelebration(effectId, 240, 240).ix;
 
 /// The effect that will actually play for [effectId].
 int offeredEffectId(int effectId) =>

@@ -14,6 +14,7 @@ import 'package:nexgen_command/features/sports_alerts/models/score_alert_event.d
 import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
 import 'package:nexgen_command/features/sports_alerts/services/alert_trigger_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/celebration_contrast.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/models/commercial/commercial_team_profile.dart';
 
 final _team = kTeamColors['nfl_chiefs']!;
@@ -101,7 +102,7 @@ void main() {
           reason: 'a venue gets the same contrast protection');
     });
 
-    test('a distinct effect passes through unmodified, as residential does',
+    test('a distinct effect passes through capped the same way residential is',
         () {
       // A pick the picker actually offers (Meteor). An id outside
       // celebrationPickIds resolves to null since the 2026-09-21 withdrawal
@@ -119,7 +120,10 @@ void main() {
       );
       expect(r!.usedFallback, isFalse);
       expect(r.effectId, 76);
-      expect(r.speed, 200);
+      // Build 120: a pick's speed is capped at the effect's profile maximum
+      // (Meteor: 120) on every path, commercial included.
+      expect(r.speed, capCelebration(76, 200, cfg.celebrationIntensity).sx);
+      expect(r.speed, 120);
     });
 
     test('it renders through the same timing table', () {

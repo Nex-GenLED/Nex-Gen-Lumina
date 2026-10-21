@@ -45,6 +45,7 @@ import '../../widgets/navigation/nav_bar_inset.dart'
 import 'team_picker_sheet.dart';
 import '../autopilot/team_priority.dart';
 import '../feature_visibility.dart';
+import '../wled/pattern_flash_safety.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/services/team_registration_service.dart';
 import '../../widgets/team_priority_list.dart';
@@ -870,10 +871,12 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     if (first is! Map) return null;
     final fx = (first['fx'] as num?)?.toInt();
     if (fx == null) return null;
+    // Build 120: a payload without a speed or intensity stores the capped
+    // value for its effect, not a flat 240 (pattern_flash_safety.dart).
     return (
       fx: fx,
-      sx: (first['sx'] as num?)?.toInt() ?? 240,
-      ix: (first['ix'] as num?)?.toInt() ?? 240,
+      sx: (first['sx'] as num?)?.toInt() ?? celebrationDefaultSpeedFor(fx),
+      ix: (first['ix'] as num?)?.toInt() ?? celebrationDefaultIntensityFor(fx),
     );
   }
 

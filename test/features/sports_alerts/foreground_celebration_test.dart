@@ -19,6 +19,7 @@ import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
 import 'package:nexgen_command/features/sports_alerts/services/alert_trigger_service.dart'
     show AlertAnimationStep, AlertTriggerService;
 import 'package:nexgen_command/features/sports_alerts/services/celebration_contrast.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/sports_alerts/services/espn_api_service.dart';
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_coordinator.dart';
 import 'package:nexgen_command/features/sports_alerts/services/foreground_celebration_providers.dart';
@@ -268,7 +269,11 @@ void main() {
           reason: 'the timing table is not the user\'s to change');
       final segs = segsOf(played);
       expect(segs.map((s) => s['fx']), everyElement(76));
-      expect(segs.map((s) => s['sx']), everyElement(200));
+      // Build 120: a pick's speed is capped at the effect's profile maximum
+      // (Meteor: 120) before it reaches the wire; intensity is left alone.
+      expect(segs.map((s) => s['sx']),
+          everyElement(capCelebration(76, 200, 180).sx));
+      expect(capCelebration(76, 200, 180).sx, 120);
       expect(segs.map((s) => s['ix']), everyElement(180));
       expect(segs.map((s) => s['col']), segsOf(legacy).map((s) => s['col']),
           reason: 'a pick changes the motion, never the team colours');
