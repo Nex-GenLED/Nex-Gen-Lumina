@@ -68,6 +68,23 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
   /// off/restore repeatedly.
   String? _lastHandledTeardownId;
 
+  /// Build 120 — STALE-COMMAND GUARD (owner decision 2026-10-21). A start
+  /// command the listener first sees more than this long after its start
+  /// time is ignored: the member's app was closed when it was sent, and a
+  /// look must never land hours later. Nothing here touches a running
+  /// session — the guard runs on a newly seen emission only, never on the
+  /// scheduled execution timer.
+  static const Duration kSyncCommandMaxAge = Duration(hours: 4);
+
+  /// The guard's clock; a test seam.
+  @visibleForTesting
+  DateTime Function() clock = DateTime.now;
+
+  /// Start time of the newest teardown this engine acted on. A start command
+  /// at or before it belongs to a session that has already ended and is
+  /// ignored (second half of the guard).
+  DateTime? _newestTeardownAt;
+
   NeighborhoodSyncEngine(this._ref) {
     WidgetsBinding.instance.addObserver(this);
   }
@@ -409,6 +426,24 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       return;
     }
 
+    // Build 120 — stale-command guard (see kSyncCommandMaxAge). The query
+    // behind the listener returns the newest command with no age limit, and
+    // a start time already in the past executes immediately, so without this
+    // a member whose app was closed got the look the next time the app
+    // opened, hours or days later.
+    final age = clock().difference(command.startTimestamp);
+    if (age > kSyncCommandMaxAge) {
+      debugPrint('Ignoring stale sync command ${command.id}: its start was '
+          '${age.inMinutes} min ago (limit ${kSyncCommandMaxAge.inHours} h)');
+      return;
+    }
+    final teardownAt = _newestTeardownAt;
+    if (teardownAt != null && !command.startTimestamp.isAfter(teardownAt)) {
+      debugPrint('Ignoring sync command ${command.id}: it predates the newest '
+          'teardown (${teardownAt.toIso8601String()})');
+      return;
+    }
+
     // Dedup: same command id as the previous emission → no re-apply. New
     // command broadcasts always carry a fresh auto-id (broadcastSyncCommand),
     // so a genuine design change is never suppressed; only a redundant
@@ -447,6 +482,12 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     final myId = _ref.read(currentUserMemberProvider)?.oderId;
     if (command.targetMemberUid != null && command.targetMemberUid != myId) {
       return;
+    }
+    // Guard bookkeeping before the dedup, so a replayed teardown still marks
+    // the end of its session (idempotent: newest wins).
+    final at = _newestTeardownAt;
+    if (at == null || command.startTimestamp.isAfter(at)) {
+      _newestTeardownAt = command.startTimestamp;
     }
     if (_lastHandledTeardownId == command.id) return;
     _lastHandledTeardownId = command.id;

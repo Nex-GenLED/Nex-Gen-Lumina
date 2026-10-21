@@ -119,7 +119,11 @@ _SpyEngine _spy() {
     ],
   );
   addTearDown(container.dispose);
-  return container.read(neighborhoodSyncEngineProvider) as _SpyEngine;
+  final spy = container.read(neighborhoodSyncEngineProvider) as _SpyEngine;
+  // Build 120 stale-command guard: the fixtures start at 2026-06-03 00:00,
+  // so the engine's clock sits in that hour rather than on the wall clock.
+  spy.clock = () => DateTime.utc(2026, 6, 3, 0, 30);
+  return spy;
 }
 
 /// Records the apply / teardown seams instead of touching Firestore or WLED.

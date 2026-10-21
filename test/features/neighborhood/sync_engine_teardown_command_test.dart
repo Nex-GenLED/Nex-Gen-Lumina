@@ -74,6 +74,10 @@ void main() {
     ]);
     addTearDown(container.dispose);
     container.read(neighborhoodSyncEngineProvider);
+    // Build 120 stale-command guard: the fixtures start at 11:00 and 12:00
+    // on 2026-06-03, so the engine's clock sits in that hour, not on the
+    // wall clock (which would make every design command "stale").
+    spy.clock = () => DateTime.utc(2026, 6, 3, 12, 30);
     return spy;
   }
 
