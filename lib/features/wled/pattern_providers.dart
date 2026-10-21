@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/wled/library_visibility.dart';
 import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
@@ -31,7 +32,8 @@ import 'package:nexgen_command/models/user_model.dart';
 /// already loaded). Subsequent profile mutations (add-team writes →
 /// stream emits) re-fire and rebuild the My Teams cache.
 final patternRepositoryProvider = Provider<PatternRepository>((ref) {
-  final repo = PatternRepository();
+  final repo = PatternRepository(
+      moviesVisible: ref.watch(moviesCategoryVisibleProvider));
   ref.listen<AsyncValue<UserModel?>>(
     currentUserProfileProvider,
     (prev, next) {

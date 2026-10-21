@@ -10,6 +10,7 @@
 import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/wled/library_visibility.dart';
 import 'package:nexgen_command/data/rainbow_palettes.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
@@ -177,7 +178,8 @@ void main() {
         LibraryCategoryIds.architectural,
         LibraryCategoryIds.sports,
         LibraryCategoryIds.holidays,
-        LibraryCategoryIds.movies,
+        // Hidden for build 120 (library_visibility.dart, store window d).
+        if (kMoviesCategoryVisible) LibraryCategoryIds.movies,
         LibraryCategoryIds.nature,
         LibraryCategoryIds.parties,
         LibraryCategoryIds.seasonal,

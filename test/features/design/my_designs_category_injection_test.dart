@@ -13,6 +13,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/wled/library_visibility.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
@@ -70,6 +71,10 @@ class _FakeUser implements User {
 Future<void> _primeDesignsStream(ProviderContainer c) async {
   await c.read(designsStreamProvider.future);
 }
+
+/// Catalog roots in this build: eight, less "Movies & Superheroes" while it
+/// is hidden (library_visibility.dart, store window d).
+const int _catalogRoots = kMoviesCategoryVisible ? 8 : 7;
 
 void main() {
   group('libraryNodeByIdProvider — the dynamic root and its children', () {
@@ -213,32 +218,32 @@ void main() {
       await _primeDesignsStream(c);
       final cats = await c.read(patternCategoriesProvider.future);
       expect(cats.last.id, kMyDesignsCategoryId);
-      expect(cats, hasLength(9));
+      expect(cats, hasLength(_catalogRoots + 1));
     });
 
-    test('signed out → 8 categories, My Designs absent', () async {
+    test('signed out → the catalog categories only, My Designs absent', () async {
       final c = _container(const [], signedIn: false);
       addTearDown(c.dispose);
       final cats = await c.read(patternCategoriesProvider.future);
-      expect(cats, hasLength(8));
+      expect(cats, hasLength(_catalogRoots));
       expect(cats.map((e) => e.id), isNot(contains(kMyDesignsCategoryId)));
     });
   });
 
   group('node tree root — B4 gate', () {
-    test('9 roots authenticated, 8 unauthenticated', () async {
+    test('catalog roots + My Designs authenticated, catalog roots only unauthenticated', () async {
       final signedIn = _container(const []);
       addTearDown(signedIn.dispose);
       final inRoots =
           await signedIn.read(libraryChildNodesProvider(null).future);
-      expect(inRoots, hasLength(9));
+      expect(inRoots, hasLength(_catalogRoots + 1));
       expect(inRoots.last.id, kMyDesignsCategoryId,
           reason: 'sortOrder 8 puts it after the 8 catalog roots');
 
       final guest = _container(const [], signedIn: false);
       addTearDown(guest.dispose);
       final outRoots = await guest.read(libraryChildNodesProvider(null).future);
-      expect(outRoots, hasLength(8));
+      expect(outRoots, hasLength(_catalogRoots));
       expect(outRoots.map((n) => n.id), isNot(contains(kMyDesignsCategoryId)));
     });
 

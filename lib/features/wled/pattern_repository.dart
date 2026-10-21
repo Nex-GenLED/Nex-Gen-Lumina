@@ -11,13 +11,18 @@ import 'package:nexgen_command/data/holiday_palettes.dart';
 import 'package:nexgen_command/data/seasonal_colorways.dart';
 import 'package:nexgen_command/data/party_event_palettes.dart';
 import 'package:nexgen_command/data/movies_superheroes_palettes.dart';
+import 'package:nexgen_command/features/wled/library_visibility.dart';
 import 'package:nexgen_command/data/nature_outdoors_palettes.dart';
 import 'package:flutter/material.dart';
 
 /// In-memory data source for the Pattern Library.
 /// Provides categories, sub-categories, and procedurally generated patterns.
 class PatternRepository {
-  PatternRepository();
+  PatternRepository({this.moviesVisible = kMoviesCategoryVisible});
+
+  /// Whether Explore's "Movies & Superheroes" category and everything under
+  /// it is in the catalog (library_visibility.dart). Off for build 120.
+  final bool moviesVisible;
 
   /// Dynamic My Teams nodes based on user profile
   List<LibraryNode> _myTeamsNodes = [];
@@ -782,12 +787,15 @@ class PatternRepository {
       debugPrint('[PatternRepository] Parties & Events failed: $e');
     }
 
-    try {
-      // Movies & Superheroes: franchises + palettes
-      nodes.addAll(MoviesSuperheroesPalettes.getAllFranchiseFolders());
-      nodes.addAll(MoviesSuperheroesPalettes.getAllMoviesPaletteNodes());
-    } catch (e) {
-      debugPrint('[PatternRepository] Movies & Superheroes failed: $e');
+    // Movies & Superheroes: franchises + palettes. Hidden for build 120
+    // (library_visibility.dart, App Review 5.2).
+    if (moviesVisible) {
+      try {
+        nodes.addAll(MoviesSuperheroesPalettes.getAllFranchiseFolders());
+        nodes.addAll(MoviesSuperheroesPalettes.getAllMoviesPaletteNodes());
+      } catch (e) {
+        debugPrint('[PatternRepository] Movies & Superheroes failed: $e');
+      }
     }
 
     try {
@@ -810,9 +818,15 @@ class PatternRepository {
     return nodes;
   }
 
-  /// Build root category nodes
-  List<LibraryNode> _buildRootCategories() {
-    return const [
+  /// Build root category nodes. "Movies & Superheroes" only when
+  /// [moviesVisible].
+  List<LibraryNode> _buildRootCategories() => moviesVisible
+      ? _allRootCategories
+      : _allRootCategories
+          .where((n) => n.id != LibraryCategoryIds.movies)
+          .toList();
+
+  static const List<LibraryNode> _allRootCategories = [
       LibraryNode(
         id: 'cat_sports',
         name: 'Game Day Fan Zone',
@@ -889,7 +903,6 @@ class PatternRepository {
         metadata: {'isDynamic': true},
       ),
     ];
-  }
 
   /// True when [node] is a root whose children the repository cannot supply.
   static bool isDynamicNode(LibraryNode node) =>
