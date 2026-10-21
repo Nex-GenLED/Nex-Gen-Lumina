@@ -46,7 +46,6 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_wled._tcp</string>
-		<string>_http._tcp</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
@@ -57,10 +56,16 @@
 	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Lumina scans your local network to find and control your Nex-Gen lighting controllers.</string>
-    <!-- Location usage: required by iOS to read WiFi SSID for home-network
-         detection, and to configure the Welcome Home geofence. -->
+    <!-- Location usage, as shipped: (1) iOS requires it to read the Wi-Fi
+         network name (connectivity_service.dart getCurrentSsid), which
+         decides home vs away and pre-fills Bluetooth controller setup;
+         (2) a one-shot low-accuracy fix written into the controller's clock
+         settings so sunrise/sunset timers fire at the right time
+         (controller_defaults_healer.dart _resolvePhonePositionIfPermitted,
+         never prompts). Welcome Home is NOT named: its setup screen has no
+         entry point, so no customer can turn it on. -->
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Lumina uses your location to detect the WiFi network you are connected to (so it knows when you are on your home network) and to configure the Welcome Home geofence.</string>
+    <string>Lumina uses your location while you're using the app to read the name of the Wi-Fi network you're on, so it can tell when you're home and control your lights directly, and to set your controller's location so sunrise and sunset schedules turn on at the right time.</string>
     <!-- ITMS-90683: this key exists SOLELY because the geolocator plugin binary
          references the Always location API, and Apple's static scanner rejects
          the build (ITMS-90683) if a referenced API has no usage string. Lumina
@@ -69,7 +74,7 @@
          Do NOT re-add the 'location' UIBackgroundMode: there is no background
          location capability. -->
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Lumina uses your location only while you are using the app — to detect your home WiFi network and set up the Welcome Home geofence. It does not track your location in the background.</string>
+    <string>Lumina uses your location only while you're using the app, to read the name of the Wi-Fi network you're on and to set your controller's location for sunrise and sunset schedules. Lumina never uses your location in the background.</string>
     <!-- Background modes: declare ONLY what the binary actually implements.
          Apple 2.5.4 rejects an app that "declares support for a background
          mode but does not include functionality requiring that mode".
@@ -104,19 +109,15 @@
         <string>remote-notification</string>
     </array>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera access is required for AR spatial mapping of your lights.</string>
+	<string>Lumina uses the camera when you choose to take a photo of your home for your dashboard and lighting previews, or a job-site photo during an installation.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone access enables voice-to-text control and audio-reactive lighting in Nex-Gen.</string>
+	<string>Lumina uses the microphone only when you tap a mic button or press and hold the Lumina button to speak a request instead of typing it.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Lumina uses speech recognition to enable voice control of your lighting system.</string>
+	<string>Lumina uses speech recognition to turn your spoken request into text.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Lumina needs access to your photo library to select a photo of your home for your lighting dashboard.</string>
-	<key>NSPhotoLibraryAddOnlyUsageDescription</key>
-	<string>Lumina needs permission to save lighting design photos to your library.</string>
+	<string>Lumina lets you choose a photo of your home from your library to use on your dashboard and in lighting previews.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Nex-Gen uses Bluetooth to find and setup your lighting controller.</string>
-    <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>Nex-Gen uses Bluetooth to pair with your lighting controller during setup.</string>
+    <string>Lumina uses Bluetooth to find a new Nex-Gen lighting controller and connect it to your Wi-Fi during setup.</string>
     <!-- URL Scheme for Siri Shortcuts and deep linking -->
     <key>CFBundleURLTypes</key>
     <array>

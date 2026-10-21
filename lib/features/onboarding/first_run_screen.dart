@@ -341,7 +341,7 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
           ),
           const SizedBox(height: 40),
           const Text(
-            'Welcome Home Detection',
+            'Home Network Detection',
             style: TextStyle(
               color: Colors.white,
               fontSize: 26,
@@ -351,12 +351,14 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
           ),
           const SizedBox(height: 20),
           const Text(
-            'Lumina uses your location to detect when you\'re on your home '
-            'WiFi network — this lets your app control lights locally without '
-            'going through the cloud, and powers Welcome Home automation '
-            'when enabled.\n\n'
-            'Location is only used while you\'re using the app. We don\'t '
-            'track your location or share it with anyone.',
+            'Your phone needs location permission before an app can read '
+            'the name of the Wi-Fi network you\'re on. Lumina uses it to '
+            'tell when you\'re home, so it can control your lights directly '
+            'instead of through the cloud. It also sets your controller\'s '
+            'location so sunrise and sunset schedules turn on at the right '
+            'time.\n\n'
+            'Location is only used while you\'re using the app, and never '
+            'for advertising or tracking.',
             style: TextStyle(color: NexGenPalette.textMedium, fontSize: 15, height: 1.5),
             textAlign: TextAlign.center,
           ),
@@ -445,7 +447,7 @@ class _FirstRunScreenState extends ConsumerState<FirstRunScreen> {
         title: const Text('Location Permission Disabled'),
         content: const Text(
           'You\'ve previously denied location access. To enable '
-          'home network detection and Welcome Home automation, '
+          'home network detection and sunrise and sunset timing, '
           'open Settings and grant location access.',
         ),
         actions: [

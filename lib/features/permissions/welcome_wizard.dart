@@ -142,23 +142,6 @@ class _WelcomeWizardPageState extends ConsumerState<WelcomeWizardPage> {
     }
   }
 
-  Future<void> _requestCameraAndContinue() async {
-    setState(() => _requesting = true);
-    try {
-      final status = await Permission.camera.request();
-      debugPrint('Camera permission: $status');
-      if (!mounted) return;
-      // Advance to the white selection page
-      _controller.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-    } catch (e) {
-      debugPrint('Camera permission request error: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to request camera permission')));
-    } finally {
-      if (mounted) setState(() => _requesting = false);
-    }
-  }
-
   Future<void> _finishWizard() async {
     try {
       await markWelcomeCompleted();
@@ -187,15 +170,10 @@ class _WelcomeWizardPageState extends ConsumerState<WelcomeWizardPage> {
             onPressed: _requestNetwork,
             loading: _requesting,
           ),
-          _WizardPanel(
-            icon: Icons.photo_camera_back_outlined,
-            title: 'Camera Access',
-            description: 'To map your home for effects, we use the camera in AR.',
-            buttonText: 'Grant Camera',
-            onPressed: _requestCameraAndContinue,
-            loading: _requesting,
-          ),
-          // Step 3: Preferred White selection
+          // No camera step: the camera is only used to photograph the house,
+          // and image_picker asks for it the first time a photo is taken.
+          // (This panel used to ask up front "for AR", which does not exist.)
+          // Step 2: Preferred White selection
           PreferredWhiteSelectionPage(
             isOnboarding: true,
             onComplete: _finishWizard,
