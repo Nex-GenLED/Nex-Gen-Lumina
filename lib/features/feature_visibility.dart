@@ -79,6 +79,21 @@ const bool kGroupGameDayBroadcastVisible = false;
 /// "request to join" wording matches what the callable does.
 const bool kNeighborhoodDiscoveryVisible = false;
 
+/// Group Schedule (build 120): the "Group Schedule" section of the Sync
+/// Control Center (list, Add, "Create First Schedule", the time-config sheet,
+/// opt-out, the Game Day Autopilot shortcut inside it) and the onboarding's
+/// "Scheduled Shows" chip. Hidden because a group schedule is saved to
+/// Firestore and nothing in the app or the Cloud Functions ever reads or runs
+/// it. Stored schedules stay as they are.
+///
+/// Flip to true only when an executor exists: either members' apps reconcile
+/// the group's active schedules into their own controller timers on open
+/// (option A, no server), or a scheduled function fans each due start and
+/// end out to consenting members' command queues (option B, needs the deploy
+/// and the fan-out allow-list). Date ranges, sunset start and "Notify Group"
+/// must do what their labels say, or the labels change.
+const bool kGroupScheduleVisible = false;
+
 final autopilotVisibleProvider = Provider<bool>((_) => kAutopilotVisible);
 
 final weeklyScheduleGenerationVisibleProvider =
@@ -94,6 +109,9 @@ final groupGameDayBroadcastVisibleProvider =
 
 final neighborhoodDiscoveryVisibleProvider =
     Provider<bool>((_) => kNeighborhoodDiscoveryVisible);
+
+final groupScheduleVisibleProvider =
+    Provider<bool>((_) => kGroupScheduleVisible);
 
 /// Where a hidden Autopilot route sends the user: the Schedule tab, which is
 /// where every Autopilot entry point used to live. Returns null (no redirect)

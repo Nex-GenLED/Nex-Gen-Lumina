@@ -166,12 +166,16 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
             'Real-Time Sync',
             'Lights move together instantly',
           ),
-          const SizedBox(height: 12),
-          _buildFeatureChip(
-            Icons.calendar_month,
-            'Scheduled Shows',
-            'Plan epic displays for any occasion',
-          ),
+          // Build 120: the schedules chip is hidden with the Group Schedule
+          // section (kGroupScheduleVisible).
+          if (ref.watch(groupScheduleVisibleProvider)) ...[
+            const SizedBox(height: 12),
+            _buildFeatureChip(
+              Icons.calendar_month,
+              'Scheduled Shows',
+              'Plan epic displays for any occasion',
+            ),
+          ],
           const SizedBox(height: 12),
           _buildFeatureChip(
             Icons.palette,
@@ -598,7 +602,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
           const SizedBox(height: 16),
 
           Text(
-            'Getting started is easy. Create a new group or join one that\'s already syncing nearby.',
+            'Getting started is easy. Create a new group, or join a neighbor\'s with their invite code.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 15,

@@ -950,7 +950,7 @@ class _NeighborhoodGroupListViewState
 
         Center(
           child: Text(
-            "Create a new crew or join one that's already syncing nearby.",
+            "Create a new crew, or join a neighbor's with their invite code.",
             textAlign: TextAlign.center,
             style: TextStyle(
                 fontSize: 14, color: Colors.grey.shade400, height: 1.5),
@@ -1573,10 +1573,13 @@ class _GroupControlsSheetState extends ConsumerState<_GroupControlsSheet> {
                               error: (_, __) => const SizedBox.shrink(),
                             ),
 
-                            const SizedBox(height: 24),
-
-                            // Schedule list
-                            NeighborhoodScheduleList(group: group),
+                            // Schedule list. Build 120: hidden with its
+                            // spacer until a group schedule can run
+                            // (kGroupScheduleVisible).
+                            if (ref.watch(groupScheduleVisibleProvider)) ...[
+                              const SizedBox(height: 24),
+                              NeighborhoodScheduleList(group: group),
+                            ],
 
                             const SizedBox(height: 24),
 

@@ -28,7 +28,11 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_screen.dart';
+import 'package:nexgen_command/features/neighborhood/providers/group_autopilot_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/neighborhood_onboarding.dart';
+import 'package:nexgen_command/features/neighborhood/widgets/schedule_list.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
+import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/game_day_setup_screen.dart';
 import 'package:nexgen_command/features/neighborhood/services/path1_game_day_snapshot.dart';
 import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
@@ -163,6 +167,7 @@ void main() {
       expect(kGameDayCrewsVisible, isFalse);
       expect(kGroupGameDayBroadcastVisible, isFalse);
       expect(kNeighborhoodDiscoveryVisible, isFalse);
+      expect(kGroupScheduleVisible, isFalse);
       final c = ProviderContainer();
       addTearDown(c.dispose);
       expect(c.read(gameDayCrewsVisibleProvider), kGameDayCrewsVisible);
@@ -170,6 +175,7 @@ void main() {
           kGroupGameDayBroadcastVisible);
       expect(c.read(neighborhoodDiscoveryVisibleProvider),
           kNeighborhoodDiscoveryVisible);
+      expect(c.read(groupScheduleVisibleProvider), kGroupScheduleVisible);
     });
   });
 
@@ -326,6 +332,81 @@ void main() {
       ], size: const Size(390, 844));
       await openCreateDialog(tester);
       expect(find.text('Public Group'), findsOneWidget);
+      await _unmount(tester);
+    });
+  });
+
+  group('4. Group Schedule hidden', () {
+    List<Override> scheduleList() => [
+          ..._neighborhood(),
+          neighborhoodSchedulesProvider
+              .overrideWith((ref) => Stream.value(const <SyncSchedule>[])),
+          groupAutopilotConfigProvider
+              .overrideWith((ref) => Stream.value(null)),
+          solarSchedulingEnabledSyncProvider.overrideWithValue(false),
+          timeFormatPreferenceProvider.overrideWithValue('12h'),
+        ];
+
+    Widget list() => Scaffold(
+          body: SingleChildScrollView(
+            child: NeighborhoodScheduleList(group: _groups().first),
+          ),
+        );
+
+    testWidgets('the section renders nothing', (tester) async {
+      await _pump(tester, list(), scheduleList(), size: const Size(390, 844));
+      expect(tester.takeException(), isNull);
+      expect(find.text('Group Schedule'), findsNothing);
+      expect(find.text('No Group Schedules Yet'), findsNothing);
+      expect(find.text('Create First Schedule'), findsNothing);
+      expect(find.byType(NeighborhoodScheduleList), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    testWidgets('returns later: the section is back with the twin true',
+        (tester) async {
+      await _pump(tester, list(), [
+        ...scheduleList(),
+        groupScheduleVisibleProvider.overrideWithValue(true),
+      ], size: const Size(390, 844));
+      expect(tester.takeException(), isNull);
+      expect(find.text('Group Schedule'), findsOneWidget);
+      expect(find.text('Create First Schedule'), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    testWidgets('onboarding: no "Scheduled Shows" chip; the last page says '
+        'how joining works', (tester) async {
+      await _pump(
+          tester,
+          NeighborhoodOnboarding(
+              onCreateGroup: () {}, onJoinGroup: () {}, onFindNearby: () {}),
+          _neighborhood(),
+          size: const Size(390, 844));
+      expect(find.text('Scheduled Shows'), findsNothing);
+      expect(find.text('Real-Time Sync'), findsOneWidget);
+      await tester.tap(find.text('Skip to Get Started'));
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+      expect(
+          find.text('Getting started is easy. Create a new group, or join a '
+              'neighbor\'s with their invite code.'),
+          findsOneWidget);
+      await _unmount(tester);
+    });
+
+    testWidgets('group list empty state says how joining works',
+        (tester) async {
+      await _pump(tester, const NeighborhoodSyncScreen(), [
+        ..._neighborhood(),
+        userNeighborhoodsProvider
+            .overrideWith((ref) => Stream.value(const <NeighborhoodGroup>[])),
+      ], size: const Size(390, 844));
+      expect(
+          find.text(
+              "Create a new crew, or join a neighbor's with their invite code."),
+          findsOneWidget);
       await _unmount(tester);
     });
   });

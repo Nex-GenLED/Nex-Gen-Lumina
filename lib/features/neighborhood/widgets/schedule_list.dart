@@ -16,6 +16,7 @@ import '../../wled/pattern_theme_selection.dart' show LibraryBrowserScreen;
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../providers/group_autopilot_providers.dart';
+import '../../feature_visibility.dart';
 import 'group_autopilot_schedule_card.dart';
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 
@@ -41,6 +42,11 @@ class NeighborhoodScheduleList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Build 120: nothing runs a group schedule yet, so the section renders
+    // nothing until an executor exists (kGroupScheduleVisible).
+    if (!ref.watch(groupScheduleVisibleProvider)) {
+      return const SizedBox.shrink();
+    }
     final schedulesAsync = ref.watch(neighborhoodSchedulesProvider);
     // Convergence Phase 2 (additive): surface the persistent
     // GroupGameDayAutopilot doc as a card in the schedule list. This
