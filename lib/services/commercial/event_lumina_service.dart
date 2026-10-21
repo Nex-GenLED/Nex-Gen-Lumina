@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/ai/ai_consent.dart';
 import 'package:nexgen_command/models/commercial/commercial_brand_profile.dart';
 import 'package:nexgen_command/models/commercial/commercial_event.dart';
 
@@ -71,6 +72,11 @@ class EventLuminaService {
       ],
     };
 
+    // Lumina AI consent: this call does not go through LuminaAI._callClaude,
+    // so it checks the same gate itself.
+    if (!await AiConsentGate.ensure()) {
+      throw const AiConsentRequiredException();
+    }
     final callable = _functions.httpsCallable('claudeProxy');
     final result = await callable.call(body);
 

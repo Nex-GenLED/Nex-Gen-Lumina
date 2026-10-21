@@ -9,6 +9,7 @@ import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
+import 'package:nexgen_command/features/ai/ai_general_location.dart';
 import 'package:nexgen_command/features/ai/suggestion_history.dart';
 import 'package:nexgen_command/features/ai/command_intent_classifier.dart';
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
@@ -62,6 +63,21 @@ class LuminaBrain {
       'jailbreak',
       'developer mode',
       'dan mode',
+    ];
+    final lower = prompt.toLowerCase();
+    return patterns.any((p) => lower.contains(p));
+  }
+
+  /// Safe deflection response for extraction / jailbreak attempts.
+  static String _safeDeflectResponse() =>
+      "I'm Lumina — I'm here to help with your lighting. "
+      "What can I light up for you today?";
+
+  /// "What powers you?"-style questions. These used to be deflected like a
+  /// jailbreak. The consent sheet names the provider, so Lumina answers
+  /// honestly, on the phone, without a cloud call.
+  static bool _isProviderQuestion(String prompt) {
+    const patterns = [
       'what model',
       'which ai',
       'openai',
@@ -73,10 +89,20 @@ class LuminaBrain {
     return patterns.any((p) => lower.contains(p));
   }
 
-  /// Safe deflection response for extraction / jailbreak attempts.
-  static String _safeDeflectResponse() =>
-      "I'm Lumina — I'm here to help with your lighting. "
-      "What can I light up for you today?";
+  @visibleForTesting
+  static const String providerAnswer =
+      "I'm Lumina, Nex-Gen's lighting assistant. I'm built on Claude, an AI "
+      'model made by Anthropic.';
+
+  /// The on-phone answer chat() gives before any cloud call. Extraction
+  /// attempts are checked first, so "ignore your instructions, Claude" is
+  /// still refused.
+  @visibleForTesting
+  static String? localGuardResponse(String prompt) {
+    if (_isExtractionAttempt(prompt)) return _safeDeflectResponse();
+    if (_isProviderQuestion(prompt)) return providerAnswer;
+    return null;
+  }
 
   /// Scrubs sensitive data patterns from AI-generated responses before
   /// they are shown to the user. Applied only to Tier 3 (cloud AI) output.
@@ -189,8 +215,10 @@ class LuminaBrain {
   /// - Inject recent suggestion history so AI avoids repetition
   /// - Use slightly higher temperature for creativity
   static Future<String> chat(WidgetRef ref, String userPrompt) async {
-    // Guard: deflect prompt-extraction and jailbreak attempts immediately.
-    if (_isExtractionAttempt(userPrompt)) return _safeDeflectResponse();
+    // Guard: deflect prompt-extraction and jailbreak attempts immediately;
+    // answer "what powers you?" honestly. Both stay on the phone.
+    final guard = localGuardResponse(userPrompt);
+    if (guard != null) return guard;
 
     final historyService = SuggestionHistoryService.instance;
     final isOpenEnded = SuggestionHistoryService.isOpenEndedQuery(userPrompt);
@@ -1237,8 +1265,11 @@ class LuminaBrain {
             orElse: () => null,
           );
       if (profile != null) {
+        // City and state only. The profile's location can hold the full
+        // street address (Edit Profile copies it there); the model never
+        // gets it. See ai_general_location.dart and the consent sheet.
         if (profile.location != null && profile.location!.trim().isNotEmpty) {
-          location = profile.location!.trim();
+          location = generalLocationForAi(profile.location);
         }
         if (profile.interestTags.isNotEmpty) {
           interests = profile.interestTags.join(', ');
@@ -1354,8 +1385,11 @@ class LuminaBrain {
             orElse: () => null,
           );
       if (profile != null) {
+        // City and state only. The profile's location can hold the full
+        // street address (Edit Profile copies it there); the model never
+        // gets it. See ai_general_location.dart and the consent sheet.
         if (profile.location != null && profile.location!.trim().isNotEmpty) {
-          location = profile.location!.trim();
+          location = generalLocationForAi(profile.location);
         }
         if (profile.interestTags.isNotEmpty) {
           interests = profile.interestTags.join(', ');

@@ -4,6 +4,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:nexgen_command/features/ai/ai_consent.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_schedule_flags.dart';
@@ -52,6 +53,13 @@ class CloudAIProcessor {
       }
 
       return _parseAIResponse(aiResponse, text);
+    } on AiConsentRequiredException {
+      // Lumina AI consent not given (Not now, or a grant that didn't save).
+      // Nothing was sent. Say so plainly; this is not a connection error.
+      return const LuminaCommandResult(
+        responseText: kAiConsentOffMessage,
+        tier: ProcessingTier.cloud,
+      );
     } on LuminaResponseTruncatedException {
       // Truncation safety net (Layer 1): the reply overran the token cap and
       // its body is a partial, unbalanced payload. Never parse or post it —

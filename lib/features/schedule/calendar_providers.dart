@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.da
 import 'package:nexgen_command/features/schedule/calendar_entry_set.dart';
 import 'package:nexgen_command/features/schedule/dated_entry_compose.dart'
     show firstColorOfPayload;
+import 'package:nexgen_command/features/ai/ai_consent.dart';
 import 'package:nexgen_command/features/ai/recurring_request_phrases.dart';
 import 'package:nexgen_command/features/schedule/eviction_request.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
@@ -1039,6 +1040,10 @@ Rules:
         systemContext,
         'User schedule request: $userRequest',
       );
+    } on AiConsentRequiredException {
+      // Lumina AI consent not given; nothing was sent.
+      return const PendingCalendarChanges(
+          message: kAiConsentOffMessage, changes: []);
     } on FirebaseFunctionsException catch (e) {
       debugPrint('📅 Calendar AI: Firebase error ${e.code} — ${e.message}');
       final message = switch (e.code) {

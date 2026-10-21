@@ -255,8 +255,10 @@ void main() {
   // 3. IDENTITY PROBING
   // ══════════════════════════════════════════════════════════════════════════
   //
-  // Expected behavior (SECURITY block):
-  //   → "I'm Lumina — I'm here to help with your lighting."
+  // Expected behavior (store window c): provider questions get an honest
+  // on-phone answer naming Claude by Anthropic (LuminaBrain.providerAnswer;
+  // see lumina_provider_answer_test.dart). Extraction attempts still get
+  // "I'm Lumina — I'm here to help with your lighting."
 
   group('Identity probing — tier classification', () {
     test('"What AI model are you?" classifies as fast (≤5 words)', () {

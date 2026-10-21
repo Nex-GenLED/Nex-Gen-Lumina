@@ -17,6 +17,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_version.dart';
+import 'package:nexgen_command/features/ai/ai_consent_settings_tile.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/properties/properties_providers.dart';
@@ -511,6 +512,10 @@ class _SupportResourcesCardState extends State<_SupportResourcesCard> {
                 // comes back when something real collects and uploads logs —
                 // rebuild the tile then, pointed at that.
 
+                // Lumina AI: consent to send requests to the AI provider
+                // (Apple 5.1.2(i)); switching it off takes effect at once.
+                const AiConsentSettingsTile(),
+                const Divider(height: 1),
                 // Privacy Policy
                 ListTile(
                   leading: Icon(Icons.privacy_tip_outlined, color: NexGenPalette.cyan),

@@ -28,6 +28,7 @@ import 'package:nexgen_command/services/autopilot_scheduler.dart';
 import 'package:nexgen_command/features/feature_visibility.dart';
 import 'package:nexgen_command/services/routing_diagnostics.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
+import 'package:nexgen_command/features/ai/ai_consent_host.dart';
 import 'package:nexgen_command/features/ai/lumina_bottom_sheet.dart';
 import 'package:nexgen_command/theme.dart';
 
@@ -59,6 +60,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     with WidgetsBindingObserver {
   bool _tourChecked = false;
 
+  /// Unbinds the Lumina AI consent gate (registered in initState).
+  VoidCallback? _unbindAiConsent;
+
   void _onTap(int index) {
     // If tapping the already-active tab, reset to its root
     widget.navigationShell.goBranch(
@@ -83,6 +87,9 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Lumina AI consent (Apple 5.1.2(i)): keep the gate in step with the
+    // account and let a cloud request show the consent sheet.
+    _unbindAiConsent = bindAiConsentGate(ref);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // #92 GUARD (same defect as the build() callback below, once-per-mount
       // rather than looping): every `ref` touch after an await needs a mounted
@@ -123,6 +130,7 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
 
   @override
   void dispose() {
+    _unbindAiConsent?.call();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

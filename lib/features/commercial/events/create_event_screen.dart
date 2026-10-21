@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/ai/ai_consent.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
@@ -167,6 +168,13 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
       if (!mounted) return;
       setState(() {
         _aiError = e.message;
+        _isGeneratingSuggestions = false;
+      });
+    } on AiConsentRequiredException {
+      // Lumina AI consent not given; nothing was sent.
+      if (!mounted) return;
+      setState(() {
+        _aiError = kAiConsentOffMessage;
         _isGeneratingSuggestions = false;
       });
     } catch (e) {
