@@ -28,13 +28,17 @@ Map<String, dynamic> _stateMap(int fx) => {
 
 /// Two distinct Strobe-category effects, and a pulse-motion effect, taken from
 /// the catalog rather than hardcoded so the test tracks the real data.
-int get _strobeA => WledEffectsCatalog.celebrationPicks
-    .firstWhere((e) => e.category == 'Strobe')
-    .id;
-int get _strobeB => WledEffectsCatalog.celebrationPicks
+///
+/// Build 120 withdrew Lightning from the PICKER but kept it RESOLVABLE (a
+/// saved one still plays, mapped), so the picker now holds one strobe and
+/// the pair comes from the resolvable set instead.
+List<WledEffect> get _resolvableStrobes => WledEffectsCatalog
+    .celebrationResolvableIds
+    .map((id) => WledEffectsCatalog.standardEffects.firstWhere((e) => e.id == id))
     .where((e) => e.category == 'Strobe')
-    .elementAt(1)
-    .id;
+    .toList();
+int get _strobeA => _resolvableStrobes[0].id;
+int get _strobeB => _resolvableStrobes[1].id;
 int get _pulse => WledEffectsCatalog.celebrationPicks
     .firstWhere((e) =>
         WledEffectsCatalog.getMotionType(e.category) == MotionType.pulse)
@@ -43,8 +47,8 @@ int get _pulse => WledEffectsCatalog.celebrationPicks
 CelebrationResolution? _resolve(int? chosen, Map<String, dynamic>? state) =>
     resolveCelebration(
       chosenEffectId: chosen,
-      chosenSpeed: 200,
-      chosenIntensity: 180,
+      chosenSpeed: 100,
+      chosenIntensity: 100,
       capturedState: state,
     );
 
@@ -102,8 +106,8 @@ void main() {
       expect(r, isNotNull);
       expect(r!.usedFallback, isFalse);
       expect(r.effectId, _pulse);
-      expect(r.speed, 200);
-      expect(r.intensity, 180);
+      expect(r.speed, 100);
+      expect(r.intensity, 100);
     });
 
     test('a clash on CATEGORY, not just id, also falls back', () {

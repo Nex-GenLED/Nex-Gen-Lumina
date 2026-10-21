@@ -4,7 +4,7 @@
 // celebration) and shipped with no widget test at all. The simplification of
 // celebration mode is therefore guarded from both sides:
 //
-//   • what celebration mode MUST now show (the curated 17, the two knobs) and
+//   • what celebration mode MUST now show (the curated list, the two knobs) and
 //     must NOT show (filter chips, the "N EFFECTS / Clear filters" row, the
 //     LEDs-per-color selector, the roofline preview strip);
 //   • a smoke test per OTHER mode, so a change made for celebration cannot
@@ -25,6 +25,8 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
+import 'package:nexgen_command/features/sports_alerts/services/celebration_contrast.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -42,7 +44,9 @@ const List<String> kCuratedNames = [
   'Chase 3',
   'Juggle',
   'Rolling Balls',
-  'Lightning',
+  // 'Lightning' — WITHDRAWN 2026-10-21 (owner decision, build 120): its
+  // bursts run many flashes per second above speed 40. A stored one plays
+  // at speed 40 / intensity 60. See pattern_flash_safety.dart.
   'Strobe',
   // 'Strobe Mega' — RETIRED 2026-09-29 (owner decision, +110 E1): it bursts
   // at 11–15 Hz whatever the speed. See pattern_flash_safety.dart.
@@ -221,7 +225,7 @@ Future<void> _pumpCelebration(
 
 void main() {
   group('P2 — the curated list resolves against the real catalog', () {
-    test('all 13 names resolve to an id, in the order given', () {
+    test('all 12 names resolve to an id, in the order given', () {
       final resolved =
           WledEffectsCatalog.celebrationPicks.map((e) => e.name).toList();
       expect(resolved, kCuratedNames,
@@ -246,6 +250,24 @@ void main() {
     test('no id appears twice', () {
       expect(WledEffectsCatalog.celebrationPickIds.toSet().length,
           WledEffectsCatalog.celebrationPickIds.length);
+    });
+
+    test('Lightning (57) is withdrawn from the picker but still resolves, '
+        'mapped to speed 40 / intensity 60', () {
+      expect(WledEffectsCatalog.celebrationPickIds.contains(57), isFalse);
+      expect(kCuratedNames.contains('Lightning'), isFalse);
+      expect(WledEffectsCatalog.celebrationResolvableIds.contains(57), isTrue);
+      final r = resolveCelebration(
+        chosenEffectId: 57,
+        chosenSpeed: 240,
+        chosenIntensity: 240,
+        capturedState: null,
+      );
+      expect(r, isNotNull);
+      expect(r!.effectId, 57);
+      expect(r.speed, kLightningCelebrationSpeed);
+      expect(r.intensity, kLightningCelebrationIntensity);
+      expect(r.usedFallback, isFalse);
     });
 
     test('Solid is not offered — it is the absence of a celebration', () {
@@ -281,7 +303,7 @@ void main() {
   });
 
   group('celebration mode renders the simplified picker', () {
-    testWidgets('exactly the 17 curated effects, and nothing else',
+    testWidgets('exactly the curated effects, and nothing else',
         (tester) async {
       _tallViewport(tester);
       await _pumpCelebration(tester, _FakeRepo());

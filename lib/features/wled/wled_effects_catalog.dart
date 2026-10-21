@@ -1058,7 +1058,10 @@ class WledEffectsCatalog {
     54,  // Chase 3
     64,  // Juggle
     48,  // Rolling Balls
-    57,  // Lightning
+    // 57 Lightning: WITHDRAWN 2026-10-21 (owner decision, build 120). Its
+    // bursts run many flashes per second above about speed 40. Not offered;
+    // a stored one still plays, mapped to speed 40 / intensity 60
+    // (pattern_flash_safety.dart, kLightningEffectId).
     23,  // Strobe (speed capped at kStrobeSpeedCap — pattern_flash_safety.dart)
     // 25 Strobe Mega: RETIRED 2026-09-29 (bursts at 11–15 Hz whatever the
     // speed). Not offered as a celebration; a stored one plays Strobe.
@@ -1066,6 +1069,14 @@ class WledEffectsCatalog {
     90,  // Fireworks 1D
     89,  // Fireworks Starburst
   ];
+
+  /// Ids a SAVED celebration may resolve to: the picker's list plus the
+  /// withdrawn-but-mapped Lightning. A saved id outside this set plays the
+  /// legacy sequence (resolveCelebration returns null for it).
+  static const Set<int> celebrationResolvableIds = {
+    ...celebrationPickIds,
+    kLightningEffectId,
+  };
 
   /// [celebrationPickIds] resolved against the catalog, in list order.
   static List<WledEffect> get celebrationPicks => celebrationPickIds

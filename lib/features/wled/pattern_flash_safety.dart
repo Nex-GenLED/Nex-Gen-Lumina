@@ -63,6 +63,31 @@ const int kRetiredEffectFallbackIntensity = 128;
 /// True when [effectId] is never offered.
 bool isRetiredEffect(int effectId) => kRetiredEffectIds.contains(effectId);
 
+/// Lightning (57) — WITHDRAWN from the celebration picker 2026-10-21 (owner
+/// decision, build 120). The firmware fires a leader flash, then 4 to
+/// 4 + intensity/20 flashes 50–150 ms apart, then a pause that shrinks with
+/// speed; above about speed 40 the bursts run into one another, far past the
+/// 3-per-second ceiling. A SAVED Lightning choice still plays as Lightning,
+/// mapped to these values rather than failing or falling back.
+const int kLightningEffectId = 57;
+const int kLightningCelebrationSpeed = 40;
+const int kLightningCelebrationIntensity = 60;
+
+/// A celebration's speed and intensity made safe for an unattended house.
+/// Build 120 (owner decision 2026-10-21):
+///   • the strobe family (23, 24, and a retired 25 playing as 23) never above
+///     [kStrobeSpeedCap];
+///   • Lightning (57) mapped to [kLightningCelebrationSpeed] /
+///     [kLightningCelebrationIntensity], whatever was saved.
+/// Everything else passes through here unchanged.
+({int sx, int ix}) capCelebration(int effectId, int sx, int ix) {
+  final id = offeredEffectId(effectId);
+  if (id == kLightningEffectId) {
+    return (sx: kLightningCelebrationSpeed, ix: kLightningCelebrationIntensity);
+  }
+  return (sx: capFlashSpeed(id, sx), ix: ix);
+}
+
 /// The effect that will actually play for [effectId].
 int offeredEffectId(int effectId) =>
     isRetiredEffect(effectId) ? kRetiredEffectFallback : effectId;

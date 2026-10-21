@@ -141,14 +141,17 @@ CelebrationResolution? resolveCelebration({
   // mid-celebration — and nothing taken off the list may reach the lights
   // through a stale config. The picker reseeds such a config on its first
   // entry; until the user re-saves, the legacy sequence fires.
-  if (!WledEffectsCatalog.celebrationPickIds.contains(chosenEffectId)) {
+  if (!WledEffectsCatalog.celebrationResolvableIds.contains(chosenEffectId)) {
     return null;
   }
 
+  // Build 120: the saved values are capped for an unattended house before
+  // anything else looks at them (pattern_flash_safety.dart).
+  final capped = capCelebration(chosenEffectId, chosenSpeed, chosenIntensity);
   final chosen = CelebrationResolution(
     effectId: chosenEffectId,
-    speed: chosenSpeed,
-    intensity: chosenIntensity,
+    speed: capped.sx,
+    intensity: capped.ix,
   );
 
   final baseFx = currentEffectId(capturedState);
