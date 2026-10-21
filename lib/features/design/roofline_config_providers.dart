@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/ar/ar_preview_providers.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
+import 'package:nexgen_command/features/demo/demo_stock_home.dart';
+import 'package:nexgen_command/features/demo/demo_wled_repository.dart';
 import 'package:nexgen_command/features/design/roofline_repair.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
 import 'package:nexgen_command/features/installer/installer_access_providers.dart';
@@ -423,11 +425,22 @@ final currentRooflineConfigProvider =
   // migrated docs. Watching it rebuilds this provider once migration settles.
   ref.watch(pixelMapMigrationProvider);
 
+  // SIMULATED CONTROLLER (the App Store review account). Its controller is a
+  // placeholder with no stored pixel map, and its dashboard hero is the stock
+  // demo photo. With no map, Design Studio's gate said "Your roofline isn't
+  // mapped yet" and the reviewer could not open the studio. Fall back to the
+  // stock trace authored for that same photo, and ONLY when nothing is
+  // stored, so a real map always wins. `select` keeps real users from
+  // re-subscribing every time the repository instance changes.
+  final simulated = ref.watch(
+      wledRepositoryProvider.select((repo) => repo is DemoWledRepository));
+
   final uid = ref.watch(effectiveUserUidProvider);
   final controllerId = ref.watch(activePixelMapControllerIdProvider);
   if (uid == null || controllerId == null) {
     // No user / no controller yet → no per-controller map. Null preserves the
     // legacy "no config" contract for consumers.
+    if (simulated) return Stream.fromFuture(DemoStockHome.load());
     return Stream.value(null);
   }
 
@@ -435,7 +448,13 @@ final currentRooflineConfigProvider =
   // stream directly (rather than nesting an AsyncValue<List<...>>) keeps a
   // single real stream so StreamProvider.future resolves on first emission.
   final service = ref.read(rooflineConfigServiceProvider);
-  return service.streamPixelMapChannels(uid, controllerId).map(
+  final channelsStream = service.streamPixelMapChannels(uid, controllerId);
+  if (simulated) {
+    return channelsStream.asyncMap((channels) async => channels.isEmpty
+        ? await DemoStockHome.load()
+        : aggregatePixelMapChannelsToConfig(controllerId, channels));
+  }
+  return channelsStream.map(
         (channels) => channels.isEmpty
             ? null
             : aggregatePixelMapChannelsToConfig(controllerId, channels),
