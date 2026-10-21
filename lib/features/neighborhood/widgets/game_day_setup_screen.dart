@@ -49,6 +49,7 @@ import '../../wled/wled_providers.dart';
 import '../../wled/zone_providers.dart';
 import '../neighborhood_providers.dart';
 import '../providers/group_autopilot_providers.dart';
+import '../../feature_visibility.dart';
 import '../services/path1_game_day_snapshot.dart';
 import '../services/path2_setup_resolution.dart';
 
@@ -315,7 +316,12 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
         const SizedBox(height: 24),
 
         // ── Host broadcast checkbox (DECISION 1: default OFF) ──
-        if (widget.isHost) ...[
+        // Build 120: the broadcast checkbox is hidden until a mounted path
+        // carries the group config to members' lights
+        // (kGroupGameDayBroadcastVisible). _broadcastToGroup stays false, so
+        // the apply never takes the broadcast branch.
+        if (widget.isHost &&
+            ref.watch(groupGameDayBroadcastVisibleProvider)) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
@@ -327,25 +333,31 @@ class _GameDayPath2ScreenState extends ConsumerState<GameDayPath2Screen> {
                     : Colors.grey.shade800,
               ),
             ),
-            child: CheckboxListTile(
-              value: _broadcastToGroup,
-              onChanged: (v) => setState(() => _broadcastToGroup = v ?? false),
-              activeColor: team.primary,
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Also broadcast to my neighborhood',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+            // The tile paints its ink on the nearest Material; the decorated
+            // box above would hide it, which newer Flutter flags as an error
+            // in debug builds (3.47.5). Give the tile its own, transparent.
+            child: Material(
+              type: MaterialType.transparency,
+              child: CheckboxListTile(
+                value: _broadcastToGroup,
+                onChanged: (v) => setState(() => _broadcastToGroup = v ?? false),
+                activeColor: team.primary,
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Also broadcast to my neighborhood',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              subtitle: Text(
-                'Sets the group Game Day for opted-in neighbors.',
-                style: TextStyle(
-                  color: Colors.grey.shade500,
-                  fontSize: 11,
+                subtitle: Text(
+                  'Sets the group Game Day for opted-in neighbors.',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ),

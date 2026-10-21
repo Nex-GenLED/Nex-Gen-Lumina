@@ -15,6 +15,7 @@ import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/app_theme.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_service.dart';
 import 'package:nexgen_command/features/favorites/favorites_providers.dart'
     show favoritesFirestoreProvider;
 import 'package:nexgen_command/features/feature_visibility.dart';
@@ -23,6 +24,9 @@ import 'package:nexgen_command/features/game_day/game_day_providers.dart';
 import 'package:nexgen_command/features/game_day/game_day_screen.dart';
 import 'package:nexgen_command/features/game_day/gate_status.dart';
 import 'package:nexgen_command/features/game_day/gate_status_provider.dart';
+import 'package:nexgen_command/features/neighborhood/widgets/game_day_setup_screen.dart';
+import 'package:nexgen_command/features/neighborhood/services/path1_game_day_snapshot.dart';
+import 'package:nexgen_command/features/sports_alerts/data/team_colors.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/sports_alerts/models/sport_type.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -36,6 +40,14 @@ import '../../helpers/recording_wled_repository.dart';
 class _FakeUser extends Fake implements User {
   @override
   String get uid => 'customer-a';
+}
+
+/// The real notifier arms a 5 s delayed evaluation and three periodic timers
+/// in build(); the hide tests need its state, not its clock, so this twin
+/// returns an empty session map and arms nothing.
+class _QuietGameDayNotifier extends GameDayAutopilotNotifier {
+  @override
+  Map<String, AutopilotSession> build() => const {};
 }
 
 GameDayAutopilotConfig _team(String slug, String name, int p, int s,
@@ -72,6 +84,7 @@ List<Override> _gameDay(List<GameDayTeamEntry> entries) {
     gateStatusProvider.overrideWith((_) => Stream.value(GateStatus.unknown)),
     gameDayTeamPriorityProvider.overrideWithValue(const []),
     gameDayTeamPriorityHealProvider.overrideWithValue(null),
+    gameDayAutopilotNotifierProvider.overrideWith(() => _QuietGameDayNotifier()),
     upcomingGameProvider.overrideWith((ref, slug) => Stream.value(null)),
     wledRepositoryProvider.overrideWith((ref) => RecordingWledRepository()),
     wledStateProvider.overrideWith(() => SeededWledNotifier(kHomeLitState)),
@@ -101,6 +114,14 @@ Future<void> _pump(WidgetTester tester, Widget page, List<Override> overrides,
   }
 }
 
+/// Disposes the ProviderScope before the binding checks for pending timers:
+/// the Game Day notifier and the setup sheet arm periodic timers that only
+/// their dispose cancels.
+Future<void> _unmount(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump();
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -108,9 +129,12 @@ void main() {
     test('every 120 constant is off and its provider twin reads the const',
         () {
       expect(kGameDayCrewsVisible, isFalse);
+      expect(kGroupGameDayBroadcastVisible, isFalse);
       final c = ProviderContainer();
       addTearDown(c.dispose);
       expect(c.read(gameDayCrewsVisibleProvider), kGameDayCrewsVisible);
+      expect(c.read(groupGameDayBroadcastVisibleProvider),
+          kGroupGameDayBroadcastVisible);
     });
   });
 
@@ -128,6 +152,7 @@ void main() {
       expect(find.textContaining('Green Bay Packers'), findsWidgets);
       expect(find.text('Autopilot'), findsWidgets);
       expect(find.text('Live Scoring'), findsWidgets);
+      await _unmount(tester);
     });
 
     testWidgets('returns later: with the twin true the card and row are back',
@@ -140,6 +165,61 @@ void main() {
       expect(find.text('JOIN A CREW'), findsOneWidget);
       expect(find.text('Have an invite code from a neighbor?'), findsOneWidget);
       expect(find.text('Create Crew'), findsOneWidget);
+      await _unmount(tester);
+    });
+  });
+
+  group('2. "Also broadcast to my neighborhood" hidden', () {
+    List<Override> setup() => [
+          ..._gameDay(_teams()),
+          // One team in the picker so the test taps it without scrolling.
+          gameDayFilteredTeamsProvider.overrideWithValue(
+              [MapEntry('nfl_packers', kTeamColors['nfl_packers']!)]),
+          // The tap resolves the team's Path 1 snapshot with a synchronous
+          // read; nothing on step 1 has listened to the configs stream yet,
+          // so resolve it directly instead of racing the stream.
+          path1GameDaySnapshotResolutionProvider.overrideWith((ref, slug) =>
+              Path1SnapshotReady(
+                  Path1GameDaySnapshot.fromConfig(_teams().first.config))),
+        ];
+
+    Future<void> openStep2(WidgetTester tester, List<Override> ov) async {
+      // The sheet is shown inside a Material bottom sheet in the app; pumped
+      // bare, newer Flutter reports its ListTile's missing Material ancestor
+      // as an error (3.47.5), so give it one here.
+      await _pump(tester,
+          const Material(child: GameDayPath2Screen(isHost: true)), ov,
+          size: const Size(390, 1600));
+      // The picker opens on league folders; a search shows flat team rows.
+      await tester.enterText(find.byType(TextField).first, 'Packers');
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Green Bay Packers').first);
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+    }
+
+    testWidgets('the host sees no broadcast checkbox on the setup sheet',
+        (tester) async {
+      await openStep2(tester, setup());
+      expect(tester.takeException(), isNull);
+      expect(find.text('Also broadcast to my neighborhood'), findsNothing);
+      expect(find.text('Sets the group Game Day for opted-in neighbors.'),
+          findsNothing);
+      // The sheet itself still works: the team is selected.
+      expect(find.text('Light it Up Now'), findsOneWidget);
+      await _unmount(tester);
+    });
+
+    testWidgets('returns later: with the twin true the checkbox is back',
+        (tester) async {
+      await openStep2(tester, [
+        ...setup(),
+        groupGameDayBroadcastVisibleProvider.overrideWithValue(true),
+      ]);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Also broadcast to my neighborhood'), findsOneWidget);
+      await _unmount(tester);
     });
   });
 }

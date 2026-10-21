@@ -49,6 +49,19 @@ const bool kSimpleModeVisible = false;
 /// profile, not the literal "My House".
 const bool kGameDayCrewsVisible = false;
 
+/// "Also broadcast to my neighborhood" (build 120): the host-only checkbox on
+/// the Complement-theme Game Day setup sheet, with its "broadcast to N
+/// houses" toast. Hidden because the checkbox only writes the group's
+/// Game Day config document; the one reader of that document (the sync
+/// session manager) is never mounted, so no neighbour's lights change.
+/// The group config document and its card stay as they are.
+///
+/// Flip to true only when a mounted path turns that document into lights on
+/// members' controllers: either the cheap route (the checkbox dispatches an
+/// ad-hoc sync command through the walked "Start Neighborhood Sync" path) or
+/// the session manager mounted, hardened and tested, with members' consent.
+const bool kGroupGameDayBroadcastVisible = false;
+
 final autopilotVisibleProvider = Provider<bool>((_) => kAutopilotVisible);
 
 final weeklyScheduleGenerationVisibleProvider =
@@ -58,6 +71,9 @@ final simpleModeVisibleProvider = Provider<bool>((_) => kSimpleModeVisible);
 
 final gameDayCrewsVisibleProvider =
     Provider<bool>((_) => kGameDayCrewsVisible);
+
+final groupGameDayBroadcastVisibleProvider =
+    Provider<bool>((_) => kGroupGameDayBroadcastVisible);
 
 /// Where a hidden Autopilot route sends the user: the Schedule tab, which is
 /// where every Autopilot entry point used to live. Returns null (no redirect)
