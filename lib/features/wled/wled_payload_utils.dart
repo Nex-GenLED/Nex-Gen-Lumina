@@ -636,7 +636,7 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
     // this runs BEFORE the palette guard below so it is held to the same rule.
     // +110 E1 — FLASH SAFETY (owner decision 2026-09-29). Strobe Mega is
     // retired and a stored reference to it plays Strobe instead; Strobe and
-    // Strobe Rainbow never exceed sx 240 (≈2.9 Hz). Here, because every
+    // Strobe Rainbow never exceed kStrobeSpeedCap (230, ≈1.8 Hz). Here, because every
     // stored design, favourite, scene and schedule preset crosses this
     // boundary on its way out — no Firestore migration. Before completion,
     // so a degraded segment is completed as the effect it now is. See

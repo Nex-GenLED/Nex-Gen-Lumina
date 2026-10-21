@@ -1059,7 +1059,7 @@ class WledEffectsCatalog {
     64,  // Juggle
     48,  // Rolling Balls
     57,  // Lightning
-    23,  // Strobe (speed capped at 240 — pattern_flash_safety.dart)
+    23,  // Strobe (speed capped at kStrobeSpeedCap — pattern_flash_safety.dart)
     // 25 Strobe Mega: RETIRED 2026-09-29 (bursts at 11–15 Hz whatever the
     // speed). Not offered as a celebration; a stored one plays Strobe.
     42,  // Fireworks

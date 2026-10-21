@@ -18,6 +18,7 @@
 
 import 'package:flutter/foundation.dart';
 
+import '../../wled/pattern_flash_safety.dart';
 import '../../wled/wled_effects_catalog.dart';
 
 /// The always-safe fallback: a full-brightness WHITE strobe.
@@ -30,7 +31,8 @@ import '../../wled/wled_effects_catalog.dart';
 /// ONE fixed thing: Tyler's decision was a single user choice, and this exists
 /// so the automatic check has somewhere to go, not to become a second pick.
 const int kFallbackCelebrationEffectId = 23; // 'Strobe'
-const int kFallbackCelebrationSpeed = 255;
+// Build 120: the fallback runs at the strobe cap, not above it.
+const int kFallbackCelebrationSpeed = kStrobeSpeedCap;
 const int kFallbackCelebrationIntensity = 255;
 
 /// White, full RGBW.

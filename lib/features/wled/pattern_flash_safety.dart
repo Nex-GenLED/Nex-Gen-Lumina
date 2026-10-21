@@ -5,9 +5,14 @@
 // pattern_effect_speeds.dart (`kPhotosensitiveFlashEffectIds`):
 //
 //   • Strobe (23) and Strobe Rainbow (24) flash once per
-//     `(255 - sx) * 20 + 2 frames` ms: sx 240 is 2.9 Hz, 241 is 3.1 Hz. Their
-//     speed is CAPPED at 240 — at or under the 3 Hz general flash threshold
-//     (WCAG 2.3.1) — whatever a slider, a stored design or a preset says.
+//     `(255 - sx) * 20 + 2 frames` ms: sx 240 is 2.9 Hz at 42 fps and 3.3 Hz
+//     on a controller still running unlimited; sx 230 is 1.8 Hz and 2.0 Hz.
+//     Their speed is CAPPED at [kStrobeSpeedCap] — under the 3 Hz general
+//     flash threshold (WCAG 2.3.1) — whatever a slider, a stored design or a
+//     preset says. Build 120 (owner decision 2026-10-21): 230 is an INTERIM
+//     value with margin for the uncapped-rate units still in the field; it is
+//     to be replaced by the probed ceiling from effect_defaults.json once the
+//     ceiling probes are done.
 //
 //   • Strobe Mega (25) bursts at ~11–15 Hz whatever the speed; only
 //     intensity < 10 keeps it under the threshold, and the owner chose not to
@@ -36,8 +41,9 @@
 //
 // Pure Dart: the bench CLI and the catalog import it.
 
-/// Strobe and Strobe Rainbow never run faster than this `sx` (≈2.9 Hz).
-const int kStrobeSpeedCap = 240;
+/// Strobe and Strobe Rainbow never run faster than this `sx` (≈1.8 Hz at
+/// 42 fps). Interim for build 120; see the header.
+const int kStrobeSpeedCap = 230;
 
 /// Effects whose `sx` is capped at [kStrobeSpeedCap].
 const Set<int> kSpeedCappedFlashEffectIds = {23, 24};

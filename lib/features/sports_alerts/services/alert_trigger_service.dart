@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../../models/autopilot_override.dart';
 import '../../../services/autopilot_scheduler.dart';
 import '../../wled/wled_effects_catalog.dart' show WledEffectsCatalog;
+import '../../wled/pattern_flash_safety.dart';
 import '../../wled/wled_payload_utils.dart' show applyChannelFilter;
 import '../../wled/wled_service.dart';
 import '../../wled/zone_providers.dart'
@@ -497,7 +498,9 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 23, 'sx': 255, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
+              // Build 120: written at the strobe cap itself, not left to the
+              // outbound chokepoint to bring down (pattern_flash_safety.dart).
+              {'fx': 23, 'sx': kStrobeSpeedCap, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
             ],
           }, const Duration(seconds: 6)),
         ];
@@ -530,7 +533,7 @@ class AlertTriggerService {
             'on': true,
             'bri': 255,
             'seg': [
-              {'fx': 23, 'sx': 240, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
+              {'fx': 23, 'sx': kStrobeSpeedCap, 'ix': 255, 'pal': _kTeamColorPalette, 'col': primaryOnly()},
             ],
           }, const Duration(seconds: 5)),
         ];

@@ -357,14 +357,14 @@ void main() {
       expect(out['ix'], kRetiredEffectFallbackIntensity);
     });
 
-    test('Strobe and Strobe Rainbow above 240 come down to 240; anything '
+    test('Strobe and Strobe Rainbow above the cap come down to it; anything '
         'else is untouched', () {
       for (final fx in [23, 24]) {
         expect(seg0(normalizeWledPayload({
           'seg': [
             {'fx': fx, 'sx': 255}
           ]
-        }))['sx'], 240);
+        }))['sx'], kStrobeSpeedCap);
       }
       expect(seg0(normalizeWledPayload({
         'seg': [
@@ -414,7 +414,7 @@ void main() {
     });
 
     test('a bare speed tweak on a live Strobe is capped too', () {
-      expect(capAdjustmentForLiveEffect({'sx': 255}, 23), {'sx': 240});
+      expect(capAdjustmentForLiveEffect({'sx': 255}, 23), {'sx': kStrobeSpeedCap});
       expect(capAdjustmentForLiveEffect({'sx': 255}, 28), {'sx': 255});
       expect(capAdjustmentForLiveEffect({'fx': 28, 'sx': 255}, 23),
           {'fx': 28, 'sx': 255},
@@ -483,12 +483,12 @@ void main() {
       );
       await _settle(tester);
       expect(c.read(selectorEffectIdProvider), 23);
-      expect(c.read(selectorSpeedProvider), lessThanOrEqualTo(240));
+      expect(c.read(selectorSpeedProvider), lessThanOrEqualTo(kStrobeSpeedCap));
       expect(find.text('Strobe Mega'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
-    testWidgets('a stored design with Strobe Mega opens on Strobe at 240, and '
+    testWidgets('a stored design with Strobe Mega opens on Strobe at the cap, and '
         'Apply sends Strobe', (tester) async {
       final repo = RecordingWledRepository();
       final c = _container(repo);
@@ -498,7 +498,7 @@ void main() {
       await _settle(tester);
 
       expect(c.read(selectorEffectIdProvider), 23);
-      expect(c.read(selectorSpeedProvider), 240);
+      expect(c.read(selectorSpeedProvider), kStrobeSpeedCap);
 
       await tester.tap(find.byKey(const ValueKey('apply-design')));
       await _settle(tester);
@@ -506,7 +506,7 @@ void main() {
           .cast<Map>()
           .firstWhere((s) => s['fx'] != null);
       expect(seg['fx'], 23);
-      expect(seg['sx'], 240);
+      expect(seg['sx'], kStrobeSpeedCap);
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
@@ -533,7 +533,7 @@ void main() {
       expect(find.text('Strobe'), findsWidgets);
     });
 
-    testWidgets('the speed slider never offers a Strobe above 240',
+    testWidgets('the speed slider never offers a Strobe above the cap',
         (tester) async {
       final seen = <int>[];
       await tester.pumpWidget(MaterialApp(

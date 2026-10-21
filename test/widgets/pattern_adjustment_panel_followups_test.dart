@@ -11,7 +11,7 @@
 //      write when the drag settles; at home the lights still follow, with at
 //      most one write in flight.
 //   Strobe: Strobe Mega is gone from the effect menu; a Strobe speed drag
-//      never sends more than 240.
+//      never sends more than the strobe cap.
 
 import 'dart:async';
 
@@ -320,7 +320,7 @@ void main() {
       expect(find.text('Strobe'), findsWidgets);
     });
 
-    testWidgets('a speed drag on a live Strobe never sends more than 240',
+    testWidgets('a speed drag on a live Strobe never sends more than the strobe cap',
         (tester) async {
       final repo = RecordingWledRepository();
       final c = _container(repo, effectId: 23);
