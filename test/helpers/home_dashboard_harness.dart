@@ -44,7 +44,14 @@ class SeededWledNotifier extends WledNotifier {
   final WledStateModel seed;
 
   @override
-  WledStateModel build() => seed;
+  WledStateModel build() {
+    // The base build() cancels its poll timer in ref.onDispose; this override
+    // skips the base, so a poll armed later (resumePolling after an apply)
+    // used to tick on the dead container after a test tore its ProviderScope
+    // down. Pausing on dispose cancels the timer and keeps it from re-arming.
+    ref.onDispose(pausePolling);
+    return seed;
+  }
 }
 
 /// A connected house, lit, running Chase in red/blue.
