@@ -249,7 +249,7 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
       appBar: GlassAppBar(
         title: const Text('My Schedule'),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(44),
+          preferredSize: Size.fromHeight(_ViewModeBar.heightFor(context)),
           child: _ViewModeBar(
             current: viewMode,
             onSelect: _setViewMode,
@@ -562,12 +562,19 @@ class _ViewModeBar extends StatelessWidget {
       ('week', 'Week'), ('month', '1 Mo'), ('3month', '3 Mo'),
       ('6month', '6 Mo'), ('year', 'Year'),
     ];
-    return Container(
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: modes.map((entry) {
+    // +120 large-text slice: the five chips sit in the app bar's fixed
+    // bottom slot. They centre when they fit and scroll sideways when they
+    // do not (320 pt, or Larger Text), instead of overflowing; the slot's
+    // height follows the text scale (see heightFor).
+    return SizedBox(
+      height: heightFor(context),
+      child: Center(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: modes.map((entry) {
           final (mode, label) = entry;
           final selected = mode == current;
           return Padding(
@@ -602,8 +609,18 @@ class _ViewModeBar extends StatelessWidget {
             ),
           );
         }).toList(),
+          ),
+        ),
       ),
     );
+  }
+
+  /// The app-bar bottom slot was a fixed 44 pt; the chip row is 11 pt text
+  /// plus 10 pt of padding and the bar's own 12 pt, so at 2.0x it needs
+  /// about 68 pt. Linear in the text scale, never below today's 44.
+  static double heightFor(BuildContext context) {
+    final scale = MediaQuery.textScalerOf(context).scale(10) / 10;
+    return 44 + 24 * (scale - 1).clamp(0.0, 1.0);
   }
 }
 
@@ -951,10 +968,18 @@ class _SyncStatusRow extends ConsumerWidget {
       label = 'Synced · ${_formatRelative(last.syncedAt)}';
     }
 
+    // +120 large-text slice: the row keeps wrapping without ellipsis, but it
+    // is a fixed child above the list, so a long failure message at 2.0x on
+    // a 320x568 screen (522 pt of text) pushed the whole body off the screen.
+    // It now takes at most a third of the screen and scrolls inside itself,
+    // so every word is still reachable.
+    final maxRowHeight = MediaQuery.sizeOf(context).height / 3;
     final row = Container(
       width: double.infinity,
+      constraints: BoxConstraints(maxHeight: maxRowHeight),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      child: Row(
+      child: SingleChildScrollView(
+          child: Row(
         // Top-align so the icon sits with the first line when the label wraps.
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -976,7 +1001,7 @@ class _SyncStatusRow extends ConsumerWidget {
             ),
           ),
         ],
-      ),
+      )),
     );
 
     // Warnings are the only state with more to show than fits the row.
@@ -1695,12 +1720,16 @@ class _StatChip extends StatelessWidget {
             Row(children: [
               Icon(icon, size: 12, color: color),
               const SizedBox(width: 4),
-              Text(label,
-                  style: TextStyle(
-                    color: NexGenPalette.textMedium,
-                    fontSize: 9,
-                    letterSpacing: 0.6,
-                  )),
+              Flexible(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: NexGenPalette.textMedium,
+                      fontSize: 9,
+                      letterSpacing: 0.6,
+                    )),
+              ),
             ]),
             const SizedBox(height: 3),
             Text(value,
@@ -2363,44 +2392,76 @@ class _WeekStripSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Navigation row
-              Row(
-                children: [
-                  _NavBtn(icon: Icons.chevron_left_rounded, onTap: onPrevWeek),
-                  const SizedBox(width: 6),
-                  _NavBtn(icon: Icons.chevron_right_rounded, onTap: onNextWeek),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: onToday,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                            color: NexGenPalette.cyan.withValues(alpha: 0.5)),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text('Today',
-                          style: TextStyle(
-                              color: NexGenPalette.cyan,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(weekLabel,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: NexGenPalette.textMedium)),
-                  ),
-                  // Legend
+              // Navigation row. +120 large-text slice: from ~1.15x the
+              // legend moves under the nav row instead of pushing the week
+              // label out of the card (320 pt at 1.3x overflowed by 8 px).
+              Builder(builder: (context) {
+                final scale =
+                    MediaQuery.textScalerOf(context).scale(10) / 10;
+                final legendInline = scale < 1.15;
+                final legend = [
                   _LegendDot(color: NexGenPalette.green, label: 'Auto'),
                   const SizedBox(width: 8),
                   _LegendDot(color: NexGenPalette.cyan, label: 'User'),
                   const SizedBox(width: 8),
                   _LegendDot(color: NexGenPalette.amber, label: 'Pending'),
-                ],
-              ),
+                ];
+                final nav = Row(
+                  children: [
+                    _NavBtn(
+                        icon: Icons.chevron_left_rounded, onTap: onPrevWeek),
+                    const SizedBox(width: 6),
+                    _NavBtn(
+                        icon: Icons.chevron_right_rounded, onTap: onNextWeek),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: onToday,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color:
+                                  NexGenPalette.cyan.withValues(alpha: 0.5)),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('Today',
+                            maxLines: 1,
+                            style: TextStyle(
+                                color: NexGenPalette.cyan,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(weekLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: NexGenPalette.textMedium)),
+                    ),
+                    // Legend
+                    if (legendInline) ...legend,
+                  ],
+                );
+                if (legendInline) return nav;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    nav,
+                    const SizedBox(height: 6),
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: legend,
+                    ),
+                  ],
+                );
+              }),
               const SizedBox(height: 10),
 
               // Day header row
@@ -2425,9 +2486,11 @@ class _WeekStripSection extends StatelessWidget {
               ),
               const SizedBox(height: 6),
 
-              // Day cells — horizontally laid out, equal width
+              // Day cells — horizontally laid out, equal width. +120: the
+              // cell height follows the text scale (the day number, the
+              // time and the "Off" line are text; the bars are not).
               SizedBox(
-                height: 118,
+                height: _weekCellHeight(context),
                 child: Row(
                   children: List.generate(7, (i) {
                     final key = days[i];
@@ -2460,6 +2523,16 @@ class _WeekStripSection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// +120 large-text slice: 118 pt at 1.0x (unchanged); the text inside a week
+/// cell is roughly 60 pt of that, so the cell grows by that much per unit of
+/// text scale, capped at 2.0x (the app-wide clamp).
+double _weekCellHeight(BuildContext context) {
+  final scale = MediaQuery.textScalerOf(context).scale(10) / 10;
+  // 84 pt of growth covers the day number, two name lines, three time lines
+  // and the Off pill at 2.0x with Material line heights.
+  return 118 + 84 * (scale - 1).clamp(0.0, 1.0);
 }
 
 class _WeekDayCell extends ConsumerWidget {
@@ -2552,20 +2625,24 @@ class _WeekDayCell extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Day number
-                  Text(
-                    '${d.day}',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: isToday
-                          ? NexGenPalette.cyan
-                          : isPast
-                              ? NexGenPalette.textMedium
-                              : isWeekend
-                                  ? NexGenPalette.amber
-                                  : NexGenPalette.textHigh,
-                      height: 1.1,
+                  // Day number. +120: scaled down rather than wrapped when
+                  // the cell is narrower than two digits (320 pt).
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '${d.day}',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: isToday
+                            ? NexGenPalette.cyan
+                            : isPast
+                                ? NexGenPalette.textMedium
+                                : isWeekend
+                                    ? NexGenPalette.amber
+                                    : NexGenPalette.textHigh,
+                        height: 1.1,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 5),
@@ -2579,13 +2656,25 @@ class _WeekDayCell extends ConsumerWidget {
                         color: NexGenPalette.textMedium.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.nightlight_round, size: 9, color: NexGenPalette.textMedium),
-                          const SizedBox(width: 2),
-                          Text('Off', style: TextStyle(fontSize: 8, color: NexGenPalette.textMedium, fontWeight: FontWeight.w600)),
-                        ],
+                      // +120: the icon + "Off" pair is wider than a 320 pt
+                      // cell (and a 375 pt one in the real font); it scales
+                      // down to the cell instead of overflowing the pill.
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.nightlight_round,
+                                size: 9, color: NexGenPalette.textMedium),
+                            const SizedBox(width: 2),
+                            Text('Off',
+                                style: TextStyle(
+                                    fontSize: 8,
+                                    height: 1.0,
+                                    color: NexGenPalette.textMedium,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
                       ),
                     )
                   else
@@ -2627,6 +2716,9 @@ class _WeekDayCell extends ConsumerWidget {
                     Text(
                       offTime != null ? '$onTime–$offTime' : onTime,
                       textAlign: TextAlign.center,
+                      // +120: bounded; it already wraps in a 7-wide strip.
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 7,
                         color: NexGenPalette.textMedium.withValues(alpha: 0.7),
@@ -3197,13 +3289,20 @@ class _LuminaAICardState extends ConsumerState<_LuminaAICard>
                 ),
                 const SizedBox(width: 8),
                 Text('Lumina AI',
+                    maxLines: 1,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: NexGenPalette.textHigh)),
                 const SizedBox(width: 6),
-                Text('• Schedule Assistant',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: NexGenPalette.textMedium)),
+                // +120 large-text slice: the subtitle yields to the card
+                // width (it ran 126 px past a 320 pt card at 2.0x).
+                Flexible(
+                  child: Text('• Schedule Assistant',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: NexGenPalette.textMedium)),
+                ),
               ]),
 
               const SizedBox(height: 10),
