@@ -4,7 +4,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/app_theme.dart';
 import 'package:nexgen_command/models/commercial/channel_role.dart';
@@ -19,8 +18,6 @@ import 'package:nexgen_command/widgets/glass_app_bar.dart';
 // =============================================================================
 // ENUMS & STATUS MODEL
 // =============================================================================
-
-enum _FleetViewMode { list, map }
 
 enum LocationStatus { online, warning, offline, inactive }
 
@@ -87,9 +84,6 @@ class _LocationState {
 // =============================================================================
 // PROVIDERS
 // =============================================================================
-
-final _viewModeProvider =
-    StateProvider<_FleetViewMode>((ref) => _FleetViewMode.list);
 
 final _sortModeProvider =
     StateProvider<_SortMode>((ref) => _SortMode.alphabetical);
@@ -176,7 +170,6 @@ class _FleetDashboardScreenState
 
   @override
   Widget build(BuildContext context) {
-    final viewMode = ref.watch(_viewModeProvider);
     final locationsAsync = ref.watch(_locationsStreamProvider(widget.org.orgId));
     final schedulesAsync = ref.watch(_schedulesStreamProvider);
     final isCorporateAdmin = _userRole == CommercialRole.corporateAdmin;
@@ -190,25 +183,18 @@ class _FleetDashboardScreenState
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
-          // View toggle
-          _ViewToggle(
-            mode: viewMode,
-            onChanged: (m) =>
-                ref.read(_viewModeProvider.notifier).state = m,
-          ),
           // Filter
           IconButton(
             icon: const Icon(Icons.filter_list_rounded, size: 20),
             tooltip: 'Filter',
             onPressed: () => _showFilterSheet(context),
           ),
-          // Sort (list only)
-          if (viewMode == _FleetViewMode.list)
-            IconButton(
-              icon: const Icon(Icons.sort_rounded, size: 20),
-              tooltip: 'Sort',
-              onPressed: () => _showSortSheet(context),
-            ),
+          // Sort
+          IconButton(
+            icon: const Icon(Icons.sort_rounded, size: 20),
+            tooltip: 'Sort',
+            onPressed: () => _showSortSheet(context),
+          ),
           // Overflow menu
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, size: 20),
@@ -239,12 +225,6 @@ class _FleetDashboardScreenState
           final filtered = _applyFilters(states, ref.watch(_filterProvider));
           final sorted = _applySort(filtered, ref.watch(_sortModeProvider));
 
-          if (viewMode == _FleetViewMode.map) {
-            return _FleetMapView(
-              locationStates: sorted,
-              orgName: widget.org.orgName,
-            );
-          }
           return _FleetListView(locationStates: sorted);
         },
       ),
@@ -393,74 +373,6 @@ class _FleetDashboardScreenState
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => const _ManageLocksSheet(),
-    );
-  }
-}
-
-// =============================================================================
-// VIEW TOGGLE
-// =============================================================================
-
-class _ViewToggle extends StatelessWidget {
-  final _FleetViewMode mode;
-  final ValueChanged<_FleetViewMode> onChanged;
-
-  const _ViewToggle({required this.mode, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: NexGenPalette.matteBlack,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        border: Border.all(color: NexGenPalette.line),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ToggleBtn(
-            icon: Icons.list_rounded,
-            selected: mode == _FleetViewMode.list,
-            onTap: () => onChanged(_FleetViewMode.list),
-          ),
-          _ToggleBtn(
-            icon: Icons.map_rounded,
-            selected: mode == _FleetViewMode.map,
-            onTap: () => onChanged(_FleetViewMode.map),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToggleBtn extends StatelessWidget {
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _ToggleBtn({
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color:
-              selected ? NexGenPalette.cyan.withValues(alpha: 0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.sm - 2),
-        ),
-        child: Icon(icon,
-            size: 18,
-            color: selected ? NexGenPalette.cyan : NexGenPalette.textMedium),
-      ),
     );
   }
 }
@@ -1142,216 +1054,6 @@ class _MiniAction extends StatelessWidget {
                       color: color,
                       fontSize: 11,
                       fontWeight: FontWeight.w600)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// =============================================================================
-// MAP VIEW
-// =============================================================================
-
-class _FleetMapView extends StatefulWidget {
-  final List<_LocationState> locationStates;
-  final String orgName;
-
-  const _FleetMapView({required this.locationStates, required this.orgName});
-
-  @override
-  State<_FleetMapView> createState() => _FleetMapViewState();
-}
-
-class _FleetMapViewState extends State<_FleetMapView> {
-  GoogleMapController? _mapController;
-
-  @override
-  void dispose() {
-    _mapController?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.locationStates.isEmpty) {
-      return const Center(
-        child: Text('No locations to display',
-            style: TextStyle(color: NexGenPalette.textMedium)),
-      );
-    }
-
-    final markers = widget.locationStates.map((ls) {
-      final color = _statusHue(ls.status);
-      return Marker(
-        markerId: MarkerId(ls.location.locationId),
-        position: LatLng(ls.location.lat, ls.location.lng),
-        icon: BitmapDescriptor.defaultMarkerWithHue(color),
-        infoWindow: InfoWindow(title: ls.location.locationName),
-        onTap: () => _showPinSheet(context, ls),
-      );
-    }).toSet();
-
-    // Calculate bounds
-    final lats = widget.locationStates.map((s) => s.location.lat);
-    final lngs = widget.locationStates.map((s) => s.location.lng);
-    final sw = LatLng(
-      lats.reduce((a, b) => a < b ? a : b),
-      lngs.reduce((a, b) => a < b ? a : b),
-    );
-    final ne = LatLng(
-      lats.reduce((a, b) => a > b ? a : b),
-      lngs.reduce((a, b) => a > b ? a : b),
-    );
-
-    return GoogleMap(
-      initialCameraPosition: CameraPosition(
-        target: LatLng(
-          (sw.latitude + ne.latitude) / 2,
-          (sw.longitude + ne.longitude) / 2,
-        ),
-        zoom: 10,
-      ),
-      markers: markers,
-      style: _darkMapStyle,
-      onMapCreated: (controller) {
-        _mapController = controller;
-        // Auto-fit bounds after map loads
-        if (widget.locationStates.length > 1) {
-          Future.delayed(const Duration(milliseconds: 300), () {
-            _mapController?.animateCamera(
-              CameraUpdate.newLatLngBounds(
-                LatLngBounds(southwest: sw, northeast: ne),
-                60, // padding
-              ),
-            );
-          });
-        }
-      },
-      myLocationEnabled: false,
-      zoomControlsEnabled: false,
-      mapToolbarEnabled: false,
-    );
-  }
-
-  void _showPinSheet(BuildContext context, _LocationState ls) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _MapPinSheet(state: ls),
-    );
-  }
-
-  double _statusHue(LocationStatus s) {
-    switch (s) {
-      case LocationStatus.online:
-        return BitmapDescriptor.hueGreen;
-      case LocationStatus.warning:
-        return BitmapDescriptor.hueYellow;
-      case LocationStatus.offline:
-        return BitmapDescriptor.hueRed;
-      case LocationStatus.inactive:
-        return BitmapDescriptor.hueViolet;
-    }
-  }
-
-  // Minimal dark map style for the Lumina theme
-  static const _darkMapStyle = '''[
-    {"elementType":"geometry","stylers":[{"color":"#0d1117"}]},
-    {"elementType":"labels.text.fill","stylers":[{"color":"#8b949e"}]},
-    {"elementType":"labels.text.stroke","stylers":[{"color":"#0d1117"}]},
-    {"featureType":"road","elementType":"geometry","stylers":[{"color":"#161b22"}]},
-    {"featureType":"water","elementType":"geometry","stylers":[{"color":"#07091a"}]}
-  ]''';
-}
-
-// =============================================================================
-// MAP PIN BOTTOM SHEET
-// =============================================================================
-
-class _MapPinSheet extends StatelessWidget {
-  final _LocationState state;
-  const _MapPinSheet({required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    final loc = state.location;
-    final statusColor = _statusColor(state.status);
-
-    return Container(
-      decoration: const BoxDecoration(
-        color: NexGenPalette.gunmetal,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _dragHandle(),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(loc.locationName,
-                        style: const TextStyle(
-                            color: NexGenPalette.textHigh,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600)),
-                  ),
-                  if (state.isLocked)
-                    Icon(Icons.lock_rounded,
-                        size: 16, color: NexGenPalette.amber),
-                  if (state.isGameDay)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4),
-                      child: Icon(Icons.sports_football_rounded,
-                          size: 16, color: NexGenPalette.gold),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(loc.address,
-                  style: const TextStyle(
-                      color: NexGenPalette.textMedium, fontSize: 12)),
-              const SizedBox(height: 12),
-              _ChannelSummaryRow(
-                channels: loc.channelConfigs,
-                designs: state.channelDesigns,
-              ),
-              if (state.nextEvent != null) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.schedule_rounded,
-                        size: 14, color: NexGenPalette.textMedium),
-                    const SizedBox(width: 4),
-                    Text('Next: ${state.nextEvent}',
-                        style: const TextStyle(
-                            color: NexGenPalette.textMedium, fontSize: 12)),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 16),
-              Text(_statusLabel(state.status),
-                  style: TextStyle(
-                      color: statusColor,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(height: 16),
             ],
           ),
         ),
