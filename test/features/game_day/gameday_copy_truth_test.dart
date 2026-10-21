@@ -39,8 +39,11 @@ const Map<String, List<String>> _retired = {
 
 /// file → the replacement wording that must be present.
 const Map<String, List<String>> _present = {
+  // Build 120: celebrations need the team's Game Day Autopilot and a live
+  // session today, so the prompt promises only what it does. Build 121
+  // (celebration without that requirement) restores the celebrate wording.
   'lib/features/game_day/live_scoring_prompt.dart': [
-    "celebrate your team\\'s scores while the app '",
+    'The score shows on your Game Day card while the app is open',
   ],
   'lib/features/autopilot/base_layer_gate.dart': [
     'if our servers run Game Day for your home',

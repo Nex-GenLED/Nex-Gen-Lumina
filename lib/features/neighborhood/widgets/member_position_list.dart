@@ -654,7 +654,7 @@ class _MemberConfigDialogState extends ConsumerState<MemberConfigDialog> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Your home will skip group animations and run its own pattern.',
+                        'Your home will skip group animations.',
                         style: TextStyle(
                           color: Colors.orange.shade300,
                           fontSize: 12,

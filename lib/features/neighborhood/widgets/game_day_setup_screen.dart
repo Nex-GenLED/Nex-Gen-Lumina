@@ -607,7 +607,7 @@ class _GameDayAutopilotSectionState
                       ),
                     ),
                     Text(
-                      'Lights activate 30 min before game start, off 30 min after.',
+                      'Your lights change for the game when the Lumina app is open at home, about 30 min before kickoff, and go back to normal after the final.',
                       style: TextStyle(
                         color: Colors.grey.shade500,
                         fontSize: 11,

@@ -164,7 +164,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
           _buildFeatureChip(
             Icons.bolt,
             'Real-Time Sync',
-            'Lights move together instantly',
+            'Lights change together within seconds',
           ),
           // Build 120: the schedules chip is hidden with the Group Schedule
           // section (kGroupScheduleVisible).
@@ -310,7 +310,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
           _buildSyncModeCard(
             'The Pulse',
             'Simultaneous',
-            'All homes light up together in perfect unison. Every color change happens at exactly the same moment.',
+            'All homes light up together. Every color change lands on every home within a second or two.',
             Icons.favorite,
             [Colors.red, Colors.pink],
           ),
@@ -456,7 +456,7 @@ class _NeighborhoodOnboardingState extends ConsumerState<NeighborhoodOnboarding>
 
           _buildUseCaseCard(
             'Game Day Glory',
-            'Rep your team colors with the whole block. When they score, the street celebrates together.',
+            'Rep your team colors with the whole block on game day.',
             '🏈',
             Colors.orange,
           ),
