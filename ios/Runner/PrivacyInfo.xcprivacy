@@ -139,6 +139,24 @@
 			</array>
 		</dict>
 
+		<!-- FCM registration token, stored on users/{uid} (fcmToken) by
+		     sync_notification_service.dart so the backend can push Neighborhood
+		     Sync and Game Day notifications to this device. A per-device
+		     identifier, so Device ID. FirebaseMessaging's own manifest declares
+		     the same type (12.15.0). -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
 		<!-- House photo (house_photo_url) used as the dashboard hero and as the
 		     backdrop for roofline pixel mapping. -->
 		<dict>
@@ -168,6 +186,23 @@
 			</array>
 		</dict>
 
+		<!-- In-app support form (Settings → Support & Resources) writes
+		     support_requests {user_id, name, email, subject, message}, and the
+		     Lumina Studio quote request writes studio_requests. Both are
+		     messages to Nex-Gen support. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeCustomerSupport</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
 		<!-- users/{uid}/pattern_usage, ai_usage, detected_habits, suggestions —
 		     in-app interaction history used to personalise suggestions. -->
 		<dict>
@@ -184,9 +219,12 @@
 			</array>
 		</dict>
 
-		<!-- home_ssid_hash / home_ssid_encrypted — the home network identity,
-		     used to decide LAN vs cloud-relay control. Not a listed category;
-		     declared as Other Data. -->
+		<!-- The home Wi-Fi network NAME (never the password), used to decide
+		     LAN vs cloud-relay control. Stored as home_ssid_hash and
+		     home_ssid_encrypted on users/{uid}, AND in plain text: home_ssid on
+		     users/{uid} (UserModel.toJson) and ssid on each
+		     users/{uid}/controllers doc (device_discovery.dart saveController).
+		     Not a listed category; declared as Other Data. -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherDataTypes</string>
