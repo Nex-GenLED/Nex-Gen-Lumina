@@ -31,12 +31,33 @@ const bool kWeeklyScheduleGenerationVisible = false;
 /// in place and is honoured again when the feature returns).
 const bool kSimpleModeVisible = false;
 
+/// Game Day crews (build 120): the "Join a Crew" card, the team card's
+/// "Share with neighbors / Create Crew" row and the crew status row with
+/// Manage and Leave (the host's manage sheet and the Leave dialog hang off
+/// those). Hidden because join-by-code has no server half (the rules deny a
+/// non-member's invite-code query by design), the Leave button is a no-op,
+/// nothing delivers the host's design or the "(all members)" switches to a
+/// member, and creating a crew for a team with a saved design writes nested
+/// arrays that abort the app on iOS. Existing crew documents are untouched.
+///
+/// Flip to true only when ALL of these hold: a `joinGameDayCrew` callable
+/// (transaction, cooldown, size cap, one not-found for a wrong code and a
+/// closed crew) is deployed and the app joins through it; Leave calls
+/// `leaveCrew`; a member-side mirror copies the host's design and switches
+/// into the member's own per-team config and restores it on Leave; the crew
+/// document JSON-encodes `design_payload`; the host name comes from the
+/// profile, not the literal "My House".
+const bool kGameDayCrewsVisible = false;
+
 final autopilotVisibleProvider = Provider<bool>((_) => kAutopilotVisible);
 
 final weeklyScheduleGenerationVisibleProvider =
     Provider<bool>((_) => kWeeklyScheduleGenerationVisible);
 
 final simpleModeVisibleProvider = Provider<bool>((_) => kSimpleModeVisible);
+
+final gameDayCrewsVisibleProvider =
+    Provider<bool>((_) => kGameDayCrewsVisible);
 
 /// Where a hidden Autopilot route sends the user: the Schedule tab, which is
 /// where every Autopilot entry point used to live. Returns null (no redirect)

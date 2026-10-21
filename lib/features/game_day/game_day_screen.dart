@@ -44,6 +44,7 @@ import '../../widgets/navigation/nav_bar_inset.dart'
     show showDockSafeModalBottomSheet;
 import 'team_picker_sheet.dart';
 import '../autopilot/team_priority.dart';
+import '../feature_visibility.dart';
 import '../site/user_profile_providers.dart';
 import '../sports_alerts/services/team_registration_service.dart';
 import '../../widgets/team_priority_list.dart';
@@ -145,15 +146,18 @@ class GameDayScreen extends ConsumerWidget {
                 const SizedBox(height: 8),
                 _AddTeamButton(existingTeamSlugs:
                     teamEntries.map((e) => e.config.teamSlug).toSet()),
-                const SizedBox(height: 24),
-
-                // Join a crew section
-                const SectionHeader(
-                  title: 'Join a Crew',
-                  icon: Icons.group_add_rounded,
-                ),
-                const SizedBox(height: 8),
-                _JoinCrewCard(),
+                // Join a crew section. Build 120: hidden until join-by-code
+                // has its server half (kGameDayCrewsVisible says what must
+                // be true first).
+                if (ref.watch(gameDayCrewsVisibleProvider)) ...[
+                  const SizedBox(height: 24),
+                  const SectionHeader(
+                    title: 'Join a Crew',
+                    icon: Icons.group_add_rounded,
+                  ),
+                  const SizedBox(height: 8),
+                  _JoinCrewCard(),
+                ],
               ]),
             ),
           ),
@@ -471,19 +475,22 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
             ),
           ),
 
-          // ── Crew section ──
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-            decoration: BoxDecoration(
-              color: NexGenPalette.gunmetal.withValues(alpha: 0.5),
-              borderRadius:
-                  const BorderRadius.vertical(bottom: Radius.circular(15)),
+          // ── Crew section ── Build 120: hidden with the crew feature
+          // (kGameDayCrewsVisible). The card's outer radius closes the
+          // bottom when this block is absent.
+          if (ref.watch(gameDayCrewsVisibleProvider))
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              decoration: BoxDecoration(
+                color: NexGenPalette.gunmetal.withValues(alpha: 0.5),
+                borderRadius:
+                    const BorderRadius.vertical(bottom: Radius.circular(15)),
+              ),
+              child: crew != null
+                  ? _CrewStatusSection(crew: crew, isHost: entry.isHost)
+                  : _CreateCrewButton(config: config),
             ),
-            child: crew != null
-                ? _CrewStatusSection(crew: crew, isHost: entry.isHost)
-                : _CreateCrewButton(config: config),
-          ),
         ],
       ),
     );
