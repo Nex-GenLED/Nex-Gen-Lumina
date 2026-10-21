@@ -28,18 +28,16 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+    <!-- Portrait only, iPhone only (TARGETED_DEVICE_FAMILY = 1). No screen
+         has a landscape layout, and there is no tablet layout. The
+         UISupportedInterfaceOrientations~ipad list was removed with the iPad
+         slice: an iPhone-only app runs on iPad in compatibility mode and uses
+         this list. Adding iPad back later means real tablet layouts AND 13"
+         screenshots; App Store Connect will not let a later version drop a
+         device family once a version has shipped with it. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
