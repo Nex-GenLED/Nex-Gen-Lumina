@@ -30,7 +30,18 @@ class DockItem extends StatelessWidget {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, color: color, size: 24),
             const SizedBox(height: 4),
-            Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(fontSize: 10, color: color)),
+            // +120 large-text slice: the dock is a fixed-height strip, so its
+            // labels scale to 1.3x and stay on one line ("Sche/dule" wrapped
+            // at 320 pt and 2.0x); the app-wide 2.0 clamp is untouched.
+            MediaQuery.withClampedTextScaling(
+              maxScaleFactor: 1.3,
+              child: Text(label,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.fade,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(fontSize: 10, color: color)),
+            ),
           ]),
         ),
       ),

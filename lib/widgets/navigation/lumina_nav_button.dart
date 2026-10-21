@@ -140,14 +140,26 @@ class _LuminaNavButtonState extends State<LuminaNavButton>
                         ),
                       ),
                     const SizedBox(height: 4),
-                    Text(
-                      widget.isListening ? 'Listening...' : 'Lumina',
-                      style: TextStyle(
-                        color: widget.isListening
-                            ? NexGenPalette.cyan
-                            : Colors.white,
-                        fontSize: 12.0,
-                        fontWeight: FontWeight.bold,
+                    // +120 large-text slice: the button is a fixed 84 pt
+                    // circle, so its label scales to 1.3x and wraps at most
+                    // twice; past that the icon carries the meaning. The
+                    // app-wide 2.0 clamp is untouched.
+                    MediaQuery.withClampedTextScaling(
+                      maxScaleFactor: 1.3,
+                      child: Text(
+                        widget.isListening ? 'Listening...' : 'Lumina',
+                        maxLines: 2,
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: widget.isListening
+                              ? NexGenPalette.cyan
+                              : Colors.white,
+                          fontSize: 12.0,
+                          fontWeight: FontWeight.bold,
+                          // Two lines at 1.3x must fit under the 32 pt icon.
+                          height: 1.15,
+                        ),
                       ),
                     ),
                   ],
