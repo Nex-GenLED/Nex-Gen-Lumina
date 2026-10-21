@@ -135,23 +135,43 @@ class LibraryNodeGrid extends StatelessWidget {
       );
     }
 
-    // Folders: 2-column grid with hero cards
-    return GridView.builder(
-      padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: folderAspectRatio ?? 1.4,
-      ),
-      itemCount: children.length,
-      itemBuilder: (context, index) {
-        final node = children[index];
-        return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, saveDestinationLabel: saveDestinationLabel, actions: actionsBuilder?.call(node));
-      },
-    );
+    // Folders: 2-column grid with hero cards. +120 large-text slice: the
+    // cell keeps today's aspect-ratio height wherever that fits, and grows
+    // to what the card's two text lines need at the current text scale (a
+    // fixed ratio cut the name and "Tap to explore" off at 320 pt and at
+    // 1.6x+). Same idea as _subCategoryGridDelegate in
+    // pattern_category_detail.dart.
+    return LayoutBuilder(builder: (context, constraints) {
+      final scale = MediaQuery.textScalerOf(context).scale(10) / 10;
+      final cellWidth = (constraints.maxWidth - 32 - 12) / 2;
+      final aspectHeight = cellWidth / (folderAspectRatio ?? 1.4);
+      final neededHeight = kLibraryFolderCardChromeHeight +
+          kLibraryFolderCardTextHeight * scale;
+      final extent = aspectHeight > neededHeight ? aspectHeight : neededHeight;
+      return GridView.builder(
+        padding: EdgeInsets.only(left: 16, top: 16, right: 16, bottom: navBarTotalHeight(context)),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          mainAxisExtent: extent,
+        ),
+        itemCount: children.length,
+        itemBuilder: (context, index) {
+          final node = children[index];
+          return LibraryNodeCard(node: node, index: index, parentAccent: parentAccent, parentGradient: parentGradient, teamSlug: teamSlug, onDesignSelected: onDesignSelected, saveDestinationLabel: saveDestinationLabel, actions: actionsBuilder?.call(node));
+        },
+      );
+    });
   }
 }
+
+/// Vertical space a folder hero card needs besides its text: padding 12+12,
+/// icon 28, gradient bar 6, the two gaps 8+2 (pattern_grid_widgets folder
+/// card). The text part is the 13 pt name line plus the 10 pt "Tap to
+/// explore" line, ~30 pt at 1.0x, multiplied by the text scale.
+const double kLibraryFolderCardChromeHeight = 74;
+const double kLibraryFolderCardTextHeight = 34;
 
 /// Individual node card for navigation
 class LibraryNodeCard extends StatelessWidget {
