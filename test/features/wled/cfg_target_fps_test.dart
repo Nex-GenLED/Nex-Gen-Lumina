@@ -176,9 +176,22 @@ void main() {
   });
 
   group('helpers', () {
-    test('kDefaultTargetFps is 60 (owner decision) and in range', () {
-      expect(kDefaultTargetFps, 60);
+    test('kDefaultTargetFps is 42, WLED\'s own default (owner decision), '
+        'and in range', () {
+      expect(kDefaultTargetFps, 42);
       expect(isUsableTargetFps(kDefaultTargetFps), isTrue);
+    });
+
+    test('a cached 0 maps to 42 everywhere the constant is used', () {
+      // The normaliser, the healer's single write and the AudioReactive heal
+      // body all resolve through resolveTargetFps; pin the mapping once.
+      expect(resolveTargetFps(0), 42);
+      final out = normalizeWledCfgPayload({
+        'um': {
+          'AudioReactive': {'enabled': false},
+        },
+      }, currentFps: 0);
+      expect(fpsOf(out), 42);
     });
 
     test('isUsableTargetFps / resolveTargetFps', () {

@@ -5,7 +5,7 @@
 //
 // - A controller reporting hw.led.fps 0 (the unlimited mode every earlier
 //   partial cfg write left behind) with nothing else to heal gets exactly one
-//   {"hw":{"led":{"fps":60}}} write, marked per controller; a later connect
+//   {"hw":{"led":{"fps":42}}} write, marked per controller; a later connect
 //   writes nothing.
 // - When another heal writes cfg in the same run, no dedicated write is spent:
 //   the body that goes out carries the rate anyway (the wire mirror shows it).

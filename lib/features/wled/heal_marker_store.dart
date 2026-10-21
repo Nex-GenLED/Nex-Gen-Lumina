@@ -2,7 +2,7 @@
 // heals (2026-10-20):
 //
 // - the target-frame-rate heal runs ONCE per controller (a controller found
-//   in the unlimited mode gets one `{"hw":{"led":{"fps":60}}}` write when no
+//   in the unlimited mode gets one `{"hw":{"led":{"fps":42}}}` write when no
 //   other heal is writing in that run; afterwards every cfg write carries the
 //   rate anyway, so a second dedicated flash write would buy nothing);
 // - the AudioReactive disable is a flash write that, on some units, never

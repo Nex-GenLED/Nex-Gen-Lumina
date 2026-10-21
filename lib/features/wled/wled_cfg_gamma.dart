@@ -112,8 +112,10 @@ Map<String, dynamic> normalizeWledCfgPayload(
 
 /// The frame rate written to `cfg.hw.led.fps` when the device's own value is
 /// unknown or unusable (0 = the unlimited mode this fix exists to undo).
-/// Owner decision 2026-10-20: 60, not WLED's 42.
-const int kDefaultTargetFps = 60;
+/// Owner decision 2026-10-20 (revised from 60): 42, WLED's own default
+/// (`WLED_FPS`, FX.h) and the rate the effect-speed defaults were walked at.
+/// A device that already reports a real rate keeps it; only 0 becomes this.
+const int kDefaultTargetFps = 42;
 
 /// WLED's accepted range for `hw.led.fps` (`setTargetFps`: `fps <= 250`,
 /// 0 meaning unlimited). 1–250 is a real rate; anything else is replaced.
