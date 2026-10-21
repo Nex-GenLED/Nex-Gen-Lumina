@@ -2,6 +2,8 @@ import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/features/auth/support_contact.dart'
+    show kNexGenCorporateEmail;
 import 'package:nexgen_command/services/account_deletion_service.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/theme.dart';
@@ -134,13 +136,28 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
   /// account, not a pattern list) while *overstating* the effect (the flow
   /// deleted one Firestore document and orphaned ~34 subcollections). Now that
   /// `purgeUserAccount` genuinely sweeps all of it, the dialog says so.
+  ///
+  /// Store readiness 3f: the purge removes everything under `users/{uid}` and
+  /// the account's Storage folder. It does NOT touch records kept outside that
+  /// tree, so the dialog now says what stays instead of promising "your
+  /// address and contact details" and "Neighborhood Sync settings" are gone.
+  /// Keep both lists in step with functions/src/purgeUserAccount.ts.
   static const List<String> _deletionInventory = [
-    'Your profile, address and contact details',
-    'Every controller, property and geofence you have set up',
+    'Your Lumina profile and sign-in',
+    'Every controller, property and geofence saved to your account',
     'All schedules, scenes, designs, favourites and saved patterns',
     'Your house photo',
-    'Game Day, Autopilot and Neighborhood Sync settings',
+    'Your Game Day and Autopilot settings',
     'Usage history and diagnostic reports',
+  ];
+
+  /// What account deletion leaves in place, in words a customer recognises.
+  static const List<String> _keptInventory = [
+    'Your installation record held for your installer and warranty, '
+        'including your name, contact details and address',
+    'Support messages and design requests you sent us',
+    'Your home nickname in any Neighborhood Sync crew you joined. '
+        'Leave the crew first to remove it',
   ];
 
   Future<void> _confirmAndDeleteAccount() async {
@@ -149,28 +166,43 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete your account?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('This permanently deletes:'),
-            const SizedBox(height: 8),
-            for (final item in _deletionInventory)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text('•  $item'),
+        // Scrolls: the two lists outgrow a phone screen at large text sizes.
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('This permanently deletes:'),
+              const SizedBox(height: 8),
+              for (final item in _deletionInventory)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('•  $item'),
+                ),
+              const SizedBox(height: 12),
+              const Text('This does not delete:'),
+              const SizedBox(height: 8),
+              for (final item in _keptInventory)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('•  $item'),
+                ),
+              const SizedBox(height: 4),
+              const Text(
+                'To have these removed too, email $kNexGenCorporateEmail.',
               ),
-            const SizedBox(height: 12),
-            const Text(
-              'Your lights will keep running whatever schedule is already '
-              'stored on the controller until it is reset by an installer.',
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'This cannot be undone.',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ],
+              const SizedBox(height: 12),
+              const Text(
+                'Your lights will keep running whatever schedule is already '
+                'stored on the controller until it is reset by an installer.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'This cannot be undone.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
@@ -282,7 +314,7 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Delete Account', style: Theme.of(context).textTheme.titleMedium?.withColor(const Color(0xFFFF6B6B))),
               const SizedBox(height: 8),
-              Text('This permanently deletes your profile and saved patterns.', style: Theme.of(context).textTheme.bodyMedium?.withColor(NexGenPalette.textMedium)),
+              Text('Permanently deletes your Lumina account and what is saved to it. Records your installer keeps are listed before you confirm.', style: Theme.of(context).textTheme.bodyMedium?.withColor(NexGenPalette.textMedium)),
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
