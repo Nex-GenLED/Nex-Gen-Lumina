@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
@@ -862,6 +863,10 @@ const String kVoiceAssistantsCardTitle = 'Voice Assistants';
 const String kVoiceAssistantsCardSubtitle =
     'Siri Shortcuts on iPhone. App shortcuts on Android.';
 
+/// The iPhone build names only what an iPhone has. App Review flags
+/// another platform's name in an iOS app (2.3.10).
+const String kVoiceAssistantsCardSubtitleIos = 'Siri Shortcuts on iPhone.';
+
 class VoiceAssistantsCard extends StatelessWidget {
   const VoiceAssistantsCard({super.key});
 
@@ -870,7 +875,9 @@ class VoiceAssistantsCard extends StatelessWidget {
     return PremiumIconCard(
       icon: Icons.mic,
       title: kVoiceAssistantsCardTitle,
-      subtitle: kVoiceAssistantsCardSubtitle,
+      subtitle: defaultTargetPlatform == TargetPlatform.iOS
+          ? kVoiceAssistantsCardSubtitleIos
+          : kVoiceAssistantsCardSubtitle,
       accentColor: NexGenPalette.violet,
       iconBackgroundGradient: const LinearGradient(
         colors: [NexGenPalette.violet, NexGenPalette.cyan],

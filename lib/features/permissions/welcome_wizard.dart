@@ -163,9 +163,15 @@ class _WelcomeWizardPageState extends ConsumerState<WelcomeWizardPage> {
           _WizardPanel(
             icon: Icons.wifi_find,
             title: 'Local Network Access',
-            description: 'To find your Nex-Gen Controller, we need access to your local network.'
-                '\n\nAndroid: We request Location and Nearby Wi‑Fi.\n'
-                'iOS: You\'ll see a Local Network prompt when we start discovery.',
+            // Each platform names only its own prompt (App Review 2.3.10 flags
+            // Android wording on an iPhone).
+            description: Platform.isIOS
+                ? 'To find your Nex-Gen Controller, we need access to your '
+                    'local network.\n\nYour iPhone will ask for Local Network '
+                    'access when Lumina starts looking for your controller.'
+                : 'To find your Nex-Gen Controller, we need access to your local network.'
+                    '\n\nAndroid: We request Location and Nearby Wi‑Fi.\n'
+                    'iOS: You\'ll see a Local Network prompt when we start discovery.',
             buttonText: 'Grant Network Access',
             onPressed: _requestNetwork,
             loading: _requesting,

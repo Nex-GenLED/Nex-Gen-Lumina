@@ -16,6 +16,12 @@ void main() {
         'On Android, long-press the Lumina icon for shortcuts.');
   });
 
+  test('the iPhone hero names no other platform (2.3.10)', () {
+    expect(kVoiceGuideHeroTextIos,
+        'Say "Hey Siri, [your phrase]" to put a saved look on your lights.');
+    expect(kVoiceGuideHeroTextIos, isNot(contains('Android')));
+  });
+
   test('the App Shortcuts box makes no assistant claim', () {
     expect(kAppShortcutsText,
         'Long-press the Lumina app icon to access quick shortcuts without linking.');

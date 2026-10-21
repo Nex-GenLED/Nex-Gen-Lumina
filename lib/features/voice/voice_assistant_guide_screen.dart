@@ -13,6 +13,11 @@ const String kVoiceGuideHeroText =
     'Say "Hey Siri, [your phrase]" to put a saved look on your lights. '
     'On Android, long-press the Lumina icon for shortcuts.';
 
+/// The iPhone hero drops the Android sentence: App Review flags another
+/// platform's name in an iOS app (2.3.10).
+const String kVoiceGuideHeroTextIos =
+    'Say "Hey Siri, [your phrase]" to put a saved look on your lights.';
+
 /// The Android App Shortcuts box, without the assistant-linking sentence it
 /// used to carry (item 3 removes the advertising, not the shortcuts).
 const String kAppShortcutsText =
@@ -93,7 +98,7 @@ class VoiceAssistantGuideScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              kVoiceGuideHeroText,
+              Platform.isIOS ? kVoiceGuideHeroTextIos : kVoiceGuideHeroText,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),

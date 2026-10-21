@@ -2,6 +2,7 @@
 // works — Siri Shortcuts on iPhone, App Shortcuts on Android — with no Alexa
 // or Google claim and no permanent "New" badge.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/site/settings_page.dart';
@@ -26,5 +27,17 @@ void main() {
     expect(find.text('New'), findsNothing);
     expect(find.textContaining('Alexa'), findsNothing);
     expect(find.textContaining('Google'), findsNothing);
+  });
+
+  testWidgets('on iPhone the card names only what an iPhone has (2.3.10)',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: VoiceAssistantsCard()),
+    ));
+    expect(find.text(kVoiceAssistantsCardSubtitleIos), findsOneWidget);
+    expect(find.textContaining('Android'), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
   });
 }
