@@ -2046,12 +2046,12 @@ class _GlassAppBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    // Pad the AppBar down by the system status bar height so the leading
-    // back button isn't hidden under the notch / status bar.
-    return Padding(
-      padding: EdgeInsets.only(top: topPadding),
-      child: child,
-    );
+    // The AppBar inside GlassAppBar already pads itself by the status-bar
+    // inset (and the glass backdrop is sized for it), so padding here again
+    // pushed the title down by the inset a second time and clipped it at
+    // every text scale (+120 large-text slice). The extents above still
+    // reserve toolbar + inset, so the header keeps its height.
+    return child;
   }
 
   @override
