@@ -400,26 +400,31 @@ class _NeighborhoodLoadingShimmer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // +120 large-text slice: three 88 pt card shimmers do not fit a 320x568
+    // screen under the dock; the placeholder clips instead of overflowing.
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Title shimmer
-            Container(height: 28, width: 220, decoration: _shimmerDecor()),
-            const SizedBox(height: 8),
-            Container(height: 16, width: 80, decoration: _shimmerDecor()),
-            const SizedBox(height: 28),
-            // Card shimmers
-            for (int i = 0; i < 3; i++) ...[
-              Container(
-                height: 88,
-                decoration: _shimmerDecor(radius: 16),
-              ),
-              const SizedBox(height: 12),
+        child: SingleChildScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title shimmer
+              Container(height: 28, width: 220, decoration: _shimmerDecor()),
+              const SizedBox(height: 8),
+              Container(height: 16, width: 80, decoration: _shimmerDecor()),
+              const SizedBox(height: 28),
+              // Card shimmers
+              for (int i = 0; i < 3; i++) ...[
+                Container(
+                  height: 88,
+                  decoration: _shimmerDecor(radius: 16),
+                ),
+                const SizedBox(height: 12),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -451,6 +456,15 @@ class _NeighborhoodGroupListView extends ConsumerStatefulWidget {
   @override
   ConsumerState<_NeighborhoodGroupListView> createState() =>
       _NeighborhoodGroupListViewState();
+}
+
+/// +120 large-text slice: the hero painter is 120 pt on tall phones and
+/// shrinks on short screens (320x568 Display Zoom) so the group list keeps
+/// room; never below 64 pt.
+double _heroHeightFor(BuildContext context) {
+  final h = MediaQuery.sizeOf(context).height;
+  if (h >= 800) return 120;
+  return (120 * h / 800).clamp(64.0, 120.0);
 }
 
 class _NeighborhoodGroupListViewState
@@ -524,7 +538,7 @@ class _NeighborhoodGroupListViewState
                   ? _buildEmptyState(previousGroups)
                   : ListView(
                       padding: EdgeInsets.fromLTRB(
-                          16, 8, 16, navBarTotalHeight(context) + 88),
+                          16, 8, 16, navBarTotalHeight(context) + 16),
                       children: [
                         for (int i = 0; i < sorted.length; i++)
                           _buildGroupCard(sorted[i], i + 1),
@@ -551,14 +565,16 @@ class _NeighborhoodGroupListViewState
       children: [
         Column(
           children: [
-            // Compact 120px animated hero (reuses NeighborhoodHeroPainter)
+            // Compact animated hero (reuses NeighborhoodHeroPainter). +120
+            // large-text slice: 120 pt on tall phones, shorter on small
+            // screens so the group list below keeps room at 320x568.
             SizedBox(
-              height: 120,
+              height: _heroHeightFor(context),
               width: double.infinity,
               child: AnimatedBuilder(
                 animation: Listenable.merge([_pulseController, _waveController]),
                 builder: (context, child) => CustomPaint(
-                  size: const Size(double.infinity, 120),
+                  size: Size(double.infinity, _heroHeightFor(context)),
                   painter: NeighborhoodHeroPainter(
                     pulseValue: _pulseController.value,
                     waveValue: _waveController.value,
@@ -567,17 +583,26 @@ class _NeighborhoodGroupListViewState
               ),
             ),
             const SizedBox(height: 12),
-            // Gradient title
+            // Gradient title. At Larger Text the 28 pt title no longer fits
+            // one line on a 320 pt screen; it scales down to the width
+            // rather than wrapping into the hero.
             ShaderMask(
               shaderCallback: (bounds) => const LinearGradient(
                 colors: [NexGenPalette.cyan, Colors.white, NexGenPalette.violet],
               ).createShader(bounds),
-              child: const Text(
-                'Neighborhood Sync',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Neighborhood Sync',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -719,8 +744,14 @@ class _NeighborhoodGroupListViewState
                         ),
                         const SizedBox(height: 5),
 
-                        // Sync type pill + member count (sync mode card style)
-                        Row(
+                        // Sync type pill + member count (sync mode card style).
+                        // +120 large-text slice: a Wrap, so the count drops
+                        // under the pill at 320 pt or large text instead of
+                        // running off the card.
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -732,19 +763,28 @@ class _NeighborhoodGroupListViewState
                               child: Text(
                                 group.activeSyncType.displayName,
                                 style: TextStyle(
-                                    color: Colors.grey.shade400,
-                                    fontSize: 11),
+                                    color: Colors.grey.shade300,
+                                    fontSize: 12),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Icon(Icons.home,
-                                size: 12, color: Colors.grey.shade600),
-                            const SizedBox(width: 3),
-                            Text(
-                              '${group.memberUids.length} '
-                              '${group.memberUids.length == 1 ? "home" : "homes"}',
-                              style: TextStyle(
-                                  color: Colors.grey.shade500, fontSize: 12),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.home,
+                                    size: 12, color: Colors.grey.shade600),
+                                const SizedBox(width: 3),
+                                Flexible(
+                                  child: Text(
+                                    '${group.memberUids.length} '
+                                    '${group.memberUids.length == 1 ? "home" : "homes"}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color: Colors.grey.shade400,
+                                        fontSize: 13),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -846,7 +886,7 @@ class _NeighborhoodGroupListViewState
         ),
         const SizedBox(width: 6),
         Text('Idle',
-            style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+            style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
       ],
     );
   }
@@ -856,7 +896,7 @@ class _NeighborhoodGroupListViewState
   Widget _buildEmptyState(List<PreviousGroup> previousGroups) {
     return ListView(
       padding: EdgeInsets.fromLTRB(
-          24, 24, 24, navBarTotalHeight(context) + 88),
+          24, 24, 24, navBarTotalHeight(context) + 16),
       children: [
         // Animated glow circle (matches _buildGetStartedPage in onboarding)
         Center(
