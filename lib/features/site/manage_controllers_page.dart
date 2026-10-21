@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nexgen_command/features/demo/demo_wled_repository.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/site/controller_choice_prompt.dart';
@@ -121,6 +122,21 @@ class _ControllerTile extends ConsumerWidget {
   /// controllers installed before the geocoding-capture work landed; the
   /// installer flow now pushes time/location automatically.
   Future<void> _resyncConfiguration(BuildContext context, WidgetRef ref) async {
+    // The simulated controller (App Store review account, showroom demo) has
+    // no device behind it. The pusher talks HTTP straight to item.ip, which
+    // is a placeholder there, so this used to spin for 30 s or more and end
+    // in a red "Re-sync failed". Say what is true instead, and send nothing.
+    if (ref.read(wledRepositoryProvider) is DemoWledRepository) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'This is a simulated controller, so there is nothing to '
+              're-sync. Re-sync applies to a real Nex-Gen controller.'),
+        ),
+      );
+      return;
+    }
+
     final profile = ref.read(currentUserProfileProvider).valueOrNull;
     if (profile == null) {
       ScaffoldMessenger.of(context).showSnackBar(
