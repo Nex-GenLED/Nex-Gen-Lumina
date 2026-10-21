@@ -21,6 +21,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/demo/demo_wled_repository.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart'
+    show ClockInfoSource;
+import 'package:nexgen_command/features/wled/wled_providers.dart';
 
 /// Firestore document path holding the flag.
 const String kSolarSchedulingFlagCollection = 'config';
@@ -67,6 +71,22 @@ final solarSchedulingEnabledSyncProvider = Provider<bool>((ref) {
         data: (v) => v,
         orElse: () => false,
       );
+});
+
+/// Whether the schedule EDITOR offers sunrise/sunset boundaries (and defaults a
+/// new schedule's OFF to sunrise).
+///
+/// The flag alone is not enough. schedule_sync arms solar only for a
+/// [ClockInfoSource] repo, because the controller computes sunrise from its
+/// own location and clock. The simulated controller (the App Store review
+/// account and the showroom demo) has neither. So there a solar default
+/// minted a schedule that could never arm, and the reviewer's first save
+/// ended in a red "None of your schedules could be armed". Real
+/// controllers, LAN or relay, are unaffected. A null repo (offline) keeps
+/// the flag's answer so an offline user doesn't lose the option.
+final scheduleSolarSelectableProvider = Provider<bool>((ref) {
+  if (!ref.watch(solarSchedulingEnabledSyncProvider)) return false;
+  return ref.watch(wledRepositoryProvider) is! DemoWledRepository;
 });
 
 /// One-time bootstrap so the Firestore console has a doc to edit. Creates the

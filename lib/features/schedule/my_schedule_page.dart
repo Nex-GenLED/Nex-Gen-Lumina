@@ -4482,8 +4482,10 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     // control — the same way the autopilot baseline did. Fall back to the
     // clock default (_offTime, 11:00 PM) instead. An EXISTING schedule is
     // hydrated below and keeps whatever it was saved with, so a stranded
-    // solar schedule still opens showing its real setting.
-    if (!ref.read(solarSchedulingEnabledSyncProvider)) {
+    // solar schedule still opens showing its real setting. The same applies
+    // on the simulated controller (review account / showroom demo), which
+    // cannot arm solar at all: see scheduleSolarSelectableProvider.
+    if (!ref.read(scheduleSolarSelectableProvider)) {
       _offTrigger = _TriggerType.specificTime;
     }
     if (widget.initialPattern != null) {
@@ -4750,8 +4752,9 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
     // solarEvent, and a SegmentedButton whose selected value is absent from its
     // segments asserts. Disabled-but-present also leaves 'Time' selectable, so
     // an affected user can convert a stranded solar schedule in place instead
-    // of deleting and recreating it.
-    final solarEnabled = ref.watch(solarSchedulingEnabledSyncProvider);
+    // of deleting and recreating it. Also disabled on the simulated
+    // controller, which has no location or clock to compute sunrise from.
+    final solarEnabled = ref.watch(scheduleSolarSelectableProvider);
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       child: BackdropFilter(
