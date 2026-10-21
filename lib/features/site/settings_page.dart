@@ -15,6 +15,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/app_version.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/features/onboarding/feature_tour.dart';
 import 'package:nexgen_command/features/properties/properties_providers.dart';
@@ -630,10 +631,12 @@ class _VersionTile extends ConsumerWidget {
     }
 
     // Plain, non-interactive version readout. No gesture, no hidden entry.
+    // Reads the single version constant (same as the login screen). It used
+    // to be a hardcoded "Version 1.6.0 / Build 2026.01". No build line: the
+    // store build number comes from CI, not from this constant.
     return ListTile(
       leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
-      title: Text('Version 1.6.0', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7))),
-      subtitle: Text('Build 2026.01', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5))),
+      title: Text('Version $kAppVersionName', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.7))),
     );
   }
 }
