@@ -100,7 +100,9 @@ class HolidayPalettes {
       name: 'Classic Halloween',
       description: 'Orange and black spooky',
       colors: [Color(0xFFFF8C00), Color(0xFF000000)],
-      suggestedEffects: [43, 57, 0], // Twinkle, Lightning, Solid
+      // Lightning withdrawn 2026-10-22 (owner): it flashes several times a
+      // second inside every strike whatever the speed. pattern_flash_safety.dart.
+      suggestedEffects: [43, 0], // Twinkle, Solid
     ),
     NamedPalette(
       id: 'halloween_witchbrew',
@@ -121,7 +123,8 @@ class HolidayPalettes {
       name: 'Haunted House',
       description: 'Eerie purple and orange',
       colors: [Color(0xFF800080), Color(0xFFFF8C00), Color(0xFF000000)],
-      suggestedEffects: [57, 43, 0], // Lightning, Twinkle, Solid
+      // Lightning withdrawn 2026-10-22 (owner) — see Classic Halloween.
+      suggestedEffects: [43, 0], // Twinkle, Solid
     ),
     NamedPalette(
       id: 'halloween_skeleton',
@@ -149,7 +152,8 @@ class HolidayPalettes {
       name: 'Frankenstein',
       description: 'Monster green and black',
       colors: [Color(0xFF00FF00), Color(0xFF000000), Color(0xFFADFF2F)],
-      suggestedEffects: [57, 1, 0], // Lightning, Blink, Solid
+      // Lightning withdrawn 2026-10-22 (owner) — see Classic Halloween.
+      suggestedEffects: [1, 0], // Blink, Solid
     ),
     NamedPalette(
       id: 'halloween_candy',
