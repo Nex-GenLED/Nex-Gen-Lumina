@@ -4449,6 +4449,10 @@ commit — merging `main` into this tree will collide with the untracked copies.
     the customer reads is already the effect that plays (#167); the looks stay as they are.
   - Residue, no behaviour change: the comments could be corrected, and `effect_database.dart` (the
     AI decision tree's effect knowledge, shifted from fx 37 up) regenerated from the catalog.
+    - 2026-10-22 (fix/120-lightning, logged only): `effect_database.dart` labels id 57 "Sinelon
+      Rainbow"; WLED 0.15's 57 is Lightning (Sinelon Rainbow is 94). The AI decision tree and the
+      defaults engine read that table, so an AI pick of "Sinelon Rainbow" sends Lightning — which the
+      shared chokepoint now clamps to 40 / 60. No change now; folds into the regeneration above.
 
 - [ ] **#169 — GAME DAY CELEBRATION LENGTH: Short / Medium / Long; and an NFL extra point
   celebrated as a touchdown**
