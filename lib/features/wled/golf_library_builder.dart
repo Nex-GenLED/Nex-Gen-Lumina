@@ -7,28 +7,28 @@ class GolfLibraryBuilder {
   /// Folder display info: ID -> (Name, Description, SortOrder)
   static const Map<String, _FolderInfo> _folderInfo = {
     GolfThemesDatabase.mastersFolderId: _FolderInfo(
-      name: 'The Masters',
-      description: 'Augusta National\'s legendary tournament',
+      name: 'Augusta Golf',
+      description: 'Spring greens and azalea pinks',
       sortOrder: 0,
     ),
     GolfThemesDatabase.ryderCupFolderId: _FolderInfo(
-      name: 'Ryder Cup',
-      description: 'USA vs Europe biennial showdown',
+      name: 'Team Match Play',
+      description: 'USA vs Europe colors',
       sortOrder: 1,
     ),
     GolfThemesDatabase.usOpenFolderId: _FolderInfo(
-      name: 'US Open',
-      description: 'USGA\'s major championship',
+      name: 'National Championship',
+      description: 'Classic red, white and blue',
       sortOrder: 2,
     ),
     GolfThemesDatabase.theOpenFolderId: _FolderInfo(
-      name: 'The Open',
-      description: 'The British Open Championship',
+      name: 'Links Classic',
+      description: 'Seaside links golf',
       sortOrder: 3,
     ),
     GolfThemesDatabase.pgaFolderId: _FolderInfo(
-      name: 'PGA Championship',
-      description: 'PGA of America\'s major',
+      name: 'Pro Championship',
+      description: 'Navy and gold',
       sortOrder: 4,
     ),
     GolfThemesDatabase.generalFolderId: _FolderInfo(

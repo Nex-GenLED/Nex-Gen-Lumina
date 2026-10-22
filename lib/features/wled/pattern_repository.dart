@@ -1452,11 +1452,18 @@ class PatternRepository {
     return score;
   }
 
-  /// Former display names kept as hidden aliases (metadata 'searchAliases').
+  /// Former display names and hidden search keywords: metadata
+  /// 'searchAliases' (renamed palettes) and 'keywords' (golf themes). Never
+  /// shown, still found.
   bool _matchesSearchAlias(LibraryNode node, String term) {
-    final aliases = node.metadata?['searchAliases'];
-    if (aliases is! List) return false;
-    return aliases.any((a) => a is String && a.toLowerCase().contains(term));
+    for (final key in const ['searchAliases', 'keywords']) {
+      final aliases = node.metadata?[key];
+      if (aliases is List &&
+          aliases.any((a) => a is String && a.toLowerCase().contains(term))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Check if a node matches related keywords (synonyms, common associations).

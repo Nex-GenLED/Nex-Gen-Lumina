@@ -38,24 +38,24 @@ class GolfThemesDatabase {
     // ============================================
     GolfTheme(
       id: 'golf_masters_classic',
-      name: 'Masters Green',
-      description: 'The iconic Augusta National green jacket',
+      name: 'Clubhouse Green',
+      description: 'Classic clubhouse green',
       folder: mastersFolderId,
       colors: [Color(0xFF006747), Color(0xFFFFD700)], // Augusta green + gold
-      keywords: ['augusta', 'green jacket', 'tradition'],
+      keywords: ['augusta', 'masters', 'green jacket', 'tradition'],
     ),
     GolfTheme(
       id: 'golf_masters_azalea',
       name: 'Azalea Pink',
-      description: 'Famous azaleas blooming at Augusta',
+      description: 'Spring azaleas in bloom',
       folder: mastersFolderId,
       colors: [Color(0xFFFF69B4), Color(0xFF006747), Color(0xFFFFFFFF)],
       keywords: ['azalea', 'flowers', 'spring', 'augusta'],
     ),
     GolfTheme(
       id: 'golf_masters_amen_corner',
-      name: 'Amen Corner',
-      description: 'The legendary holes 11, 12, and 13',
+      name: 'Back Nine',
+      description: 'The heart of the back nine',
       folder: mastersFolderId,
       colors: [Color(0xFF006747), Color(0xFF228B22), Color(0xFFFFD700)],
       keywords: ['amen corner', 'augusta', '11', '12', '13'],
@@ -70,8 +70,8 @@ class GolfThemesDatabase {
     ),
     GolfTheme(
       id: 'golf_masters_magnolia',
-      name: 'Magnolia Lane',
-      description: 'The famous entrance drive at Augusta',
+      name: 'Magnolia Drive',
+      description: 'A tree-lined entrance drive',
       folder: mastersFolderId,
       colors: [Color(0xFFFFFFFF), Color(0xFF228B22), Color(0xFFFFF8DC)],
       keywords: ['magnolia', 'entrance', 'tradition'],
@@ -82,7 +82,7 @@ class GolfThemesDatabase {
     // ============================================
     GolfTheme(
       id: 'golf_ryder_usa',
-      name: 'Team USA',
+      name: 'USA Red, White & Blue',
       description: 'Red, white, and blue for America',
       folder: ryderCupFolderId,
       colors: [Color(0xFFB22234), Color(0xFFFFFFFF), Color(0xFF3C3B6E)],
@@ -90,7 +90,7 @@ class GolfThemesDatabase {
     ),
     GolfTheme(
       id: 'golf_ryder_europe',
-      name: 'Team Europe',
+      name: 'Europe Blue & Gold',
       description: 'European team colors',
       folder: ryderCupFolderId,
       colors: [Color(0xFF003399), Color(0xFFFFD700)],
@@ -98,8 +98,8 @@ class GolfThemesDatabase {
     ),
     GolfTheme(
       id: 'golf_ryder_classic',
-      name: 'Ryder Cup Classic',
-      description: 'Traditional Ryder Cup gold and navy',
+      name: 'Match Play Gold & Navy',
+      description: 'Traditional gold and navy',
       folder: ryderCupFolderId,
       colors: [Color(0xFFCFB53B), Color(0xFF002B5C), Color(0xFFFFFFFF)],
       keywords: ['ryder', 'classic', 'biennial'],
@@ -118,15 +118,15 @@ class GolfThemesDatabase {
     // ============================================
     GolfTheme(
       id: 'golf_usopen_classic',
-      name: 'US Open Classic',
-      description: 'Traditional USGA red and blue',
+      name: 'Championship Classic',
+      description: 'Traditional red and blue',
       folder: usOpenFolderId,
       colors: [Color(0xFF002B5C), Color(0xFFCC0000), Color(0xFFFFFFFF)],
       keywords: ['usga', 'championship', 'june'],
     ),
     GolfTheme(
       id: 'golf_usopen_rough',
-      name: 'US Open Rough',
+      name: 'Deep Rough',
       description: 'The notoriously deep rough',
       folder: usOpenFolderId,
       colors: [Color(0xFF006400), Color(0xFF228B22), Color(0xFF002B5C)],
@@ -134,8 +134,8 @@ class GolfThemesDatabase {
     ),
     GolfTheme(
       id: 'golf_usopen_pinehurst',
-      name: 'Pinehurst Sandhills',
-      description: 'Sandy tones of Pinehurst',
+      name: 'Sandhills',
+      description: 'Sandy tones',
       folder: usOpenFolderId,
       colors: [Color(0xFFD4A574), Color(0xFF006400), Color(0xFF8B7355)],
       keywords: ['pinehurst', 'sand', 'north carolina'],
@@ -154,8 +154,8 @@ class GolfThemesDatabase {
     // ============================================
     GolfTheme(
       id: 'golf_open_claret',
-      name: 'Claret Jug',
-      description: 'The famous championship trophy',
+      name: 'Links Trophy Silver',
+      description: 'Championship silver',
       folder: theOpenFolderId,
       colors: [Color(0xFF722F37), Color(0xFFC0C0C0), Color(0xFF1C1C1C)],
       keywords: ['claret', 'jug', 'trophy', 'british'],
@@ -198,23 +198,23 @@ class GolfThemesDatabase {
     // ============================================
     GolfTheme(
       id: 'golf_pga_classic',
-      name: 'PGA Championship',
-      description: 'Official PGA navy and gold',
+      name: 'Navy & Gold Classic',
+      description: 'Navy and gold',
       folder: pgaFolderId,
       colors: [Color(0xFF002B5C), Color(0xFFD4AF37), Color(0xFFFFFFFF)],
       keywords: ['pga', 'championship', 'major'],
     ),
     GolfTheme(
       id: 'golf_pga_wanamaker',
-      name: 'Wanamaker Trophy',
-      description: 'The iconic silver trophy',
+      name: 'Silver Trophy',
+      description: 'Polished championship silver',
       folder: pgaFolderId,
       colors: [Color(0xFFC0C0C0), Color(0xFF002B5C), Color(0xFFFFFFFF)],
       keywords: ['wanamaker', 'trophy', 'silver', 'champion'],
     ),
     GolfTheme(
       id: 'golf_pga_glory',
-      name: 'PGA Glory',
+      name: 'Fairway Glory',
       description: 'Golden victory celebration',
       folder: pgaFolderId,
       colors: [Color(0xFFD4AF37), Color(0xFF002B5C), Color(0xFFC0C0C0)],
