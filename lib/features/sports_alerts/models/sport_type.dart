@@ -58,8 +58,10 @@ extension SportTypeExtension on SportType {
         SportType.nhl => 'NHL',
         SportType.mls => 'MLS',
         SportType.nwsl => 'NWSL',
-        SportType.fifa => 'FIFA World Cup',
-        SportType.championsLeague => 'Champions League',
+        // Generic labels for App Review 5.2 (store window item 6). The league
+        // TOKENS ('FIFA World Cup' / 'Champions League') stay in the data.
+        SportType.fifa => 'International Soccer',
+        SportType.championsLeague => 'European Club Soccer',
         SportType.ncaaFB => 'NCAA Football',
         SportType.ncaaMB => 'NCAA Basketball',
       };

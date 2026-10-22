@@ -46,7 +46,8 @@ void main() {
       final names = GameDayTeamFolders.childFolders(LeagueFolderIds.soccer)
           .map((n) => n.name)
           .toList();
-      expect(names, ['MLS', 'NWSL', 'Champions League', 'FIFA World Cup 2026']);
+      // Generic display labels (store window item 6, App Review 5.2).
+      expect(names, ['MLS', 'NWSL', 'European Club Soccer', 'International Soccer']);
     });
 
     test('every picker folder IS the Explore node (same id, name, parent, order)',
@@ -186,8 +187,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(folder('MLS'), findsOneWidget);
       expect(folder('NWSL'), findsOneWidget);
-      expect(folder('Champions League'), findsOneWidget);
-      expect(folder('FIFA World Cup 2026'), findsOneWidget);
+      expect(folder('European Club Soccer'), findsOneWidget);
+      expect(folder('International Soccer'), findsOneWidget);
 
       await tester.tap(folder('MLS'));
       await tester.pumpAndSettle();

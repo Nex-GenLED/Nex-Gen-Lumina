@@ -115,11 +115,13 @@ const Map<String, FolderTheme> kFolderThemes = {
     gradientColors: [Color(0xFF00A3AD), Color(0xFF006D75)],
     emoji: '\u{26BD}',
   ),
-  'champions league': FolderTheme(
+  // Keyed by the folder's display name (lower case), so these follow the
+  // store-window item 6 labels.
+  'european club soccer': FolderTheme(
     gradientColors: [Color(0xFF0D47A1), Color(0xFF1A237E)],
     emoji: '\u{1F3C6}',
   ),
-  'fifa world cup 2026': FolderTheme(
+  'international soccer': FolderTheme(
     gradientColors: [Color(0xFFD4AF37), Color(0xFF1565C0)],
     emoji: '\u{1F30D}',
   ),

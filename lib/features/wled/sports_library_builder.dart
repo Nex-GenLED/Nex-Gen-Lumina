@@ -24,8 +24,10 @@ class SportsLibraryBuilder {
     'SERIE_A': 'Serie A',
     'WNBA': 'WNBA',
     'NWSL': 'NWSL',
-    'CHAMPIONS_LEAGUE': 'Champions League',
-    'FIFA_WORLD_CUP': 'FIFA World Cup 2026',
+    // Display only (App Review 5.2). The league tokens matched against team
+    // metadata stay 'Champions League' / 'FIFA World Cup' (below).
+    'CHAMPIONS_LEAGUE': 'European Club Soccer',
+    'FIFA_WORLD_CUP': 'International Soccer',
   };
 
   /// League sort order (top-level leagues under Sports)
