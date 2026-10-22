@@ -132,17 +132,33 @@ final aiConsentGrantedProvider = Provider<bool>((ref) {
 });
 
 /// Thrown by every cloud AI chokepoint when the gate stays closed. Callers
-/// turn it into [kAiConsentOffMessage]; it is never a connection error.
+/// show [userMessage]; it is never a connection error.
 class AiConsentRequiredException implements Exception {
-  const AiConsentRequiredException();
+  const AiConsentRequiredException({this.signedOut = false});
+
+  /// No account is signed in: the showroom demo (code REVIEW) runs signed
+  /// out. There is nowhere to store consent and claudeProxy refuses a
+  /// signed-out caller, so Lumina AI cannot run at all. That is a different
+  /// message from "switched off".
+  final bool signedOut;
+
+  String get userMessage =>
+      signedOut ? kAiSignInRequiredMessage : kAiConsentOffMessage;
+
   @override
-  String toString() => 'AiConsentRequiredException';
+  String toString() => 'AiConsentRequiredException(signedOut: $signedOut)';
 }
 
 /// What Lumina says when a request needed the cloud and consent is not given.
 const String kAiConsentOffMessage =
     "Lumina AI is off, so I can only do quick commands like 'turn on' or "
     "'warm white'. You can turn Lumina AI on in Settings → Lumina AI.";
+
+/// What Lumina says when a request needed the cloud and nobody is signed in
+/// (the showroom demo).
+const String kAiSignInRequiredMessage =
+    'Lumina AI needs a Nex-Gen account. In the demo you can still use quick '
+    "commands like 'turn on' or 'warm white'.";
 
 /// The gate. It is static because the chokepoints (LuminaAI._callClaude and
 /// EventLuminaService) are static or ref-less. The app shell keeps it in step
@@ -156,6 +172,19 @@ class AiConsentGate {
   static bool _revokedThisSession = false;
   static Future<bool> Function()? _prompter;
   static Future<bool>? _inFlight;
+
+  /// True when the app shell reports a signed-in account. False in the
+  /// signed-out showroom demo, and before the shell has bound the gate,
+  /// which also fails closed.
+  static bool get hasAccount => _uid != null;
+
+  /// Throws unless a request may go to the cloud: [AiConsentRequiredException]
+  /// with `signedOut: true` when no account is signed in (no sheet; nothing
+  /// could store the answer), otherwise after [ensure] says no.
+  static Future<void> requireConsent() async {
+    if (!hasAccount) throw const AiConsentRequiredException(signedOut: true);
+    if (!await ensure()) throw const AiConsentRequiredException();
+  }
 
   /// True only while the account's stored decision is a current grant and
   /// it has not been switched off on this phone since.

@@ -53,11 +53,12 @@ class CloudAIProcessor {
       }
 
       return _parseAIResponse(aiResponse, text);
-    } on AiConsentRequiredException {
-      // Lumina AI consent not given (Not now, or a grant that didn't save).
-      // Nothing was sent. Say so plainly; this is not a connection error.
-      return const LuminaCommandResult(
-        responseText: kAiConsentOffMessage,
+    } on AiConsentRequiredException catch (e) {
+      // Lumina AI consent not given (Not now, a grant that didn't save, or no
+      // account in the signed-out demo). Nothing was sent. Say so plainly;
+      // this is not a connection error.
+      return LuminaCommandResult(
+        responseText: e.userMessage,
         tier: ProcessingTier.cloud,
       );
     } on LuminaResponseTruncatedException {

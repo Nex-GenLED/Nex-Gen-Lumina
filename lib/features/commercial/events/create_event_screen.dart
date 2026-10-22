@@ -170,11 +170,11 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
         _aiError = e.message;
         _isGeneratingSuggestions = false;
       });
-    } on AiConsentRequiredException {
-      // Lumina AI consent not given; nothing was sent.
+    } on AiConsentRequiredException catch (e) {
+      // Lumina AI consent not given (or no account); nothing was sent.
       if (!mounted) return;
       setState(() {
-        _aiError = kAiConsentOffMessage;
+        _aiError = e.userMessage;
         _isGeneratingSuggestions = false;
       });
     } catch (e) {

@@ -746,10 +746,8 @@ class LuminaAI {
     // Lumina AI consent (Apple 5.1.2(i)). Nothing leaves the phone without a
     // saved grant. The first cloud request shows the consent sheet; Not
     // now, a failed save or no screen to ask on all throw, and nothing is
-    // sent.
-    if (!await AiConsentGate.ensure()) {
-      throw const AiConsentRequiredException();
-    }
+    // sent. Signed out (the showroom demo) throws at once, with no sheet.
+    await AiConsentGate.requireConsent();
 
     final messages = <Map<String, String>>[];
     if (priorAssistantMessage != null) {

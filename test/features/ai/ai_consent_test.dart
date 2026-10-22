@@ -208,13 +208,33 @@ void main() {
   group('chokepoints refuse before any network', () {
     test('LuminaAI (chat, schedule card, refinement all go through _callClaude)',
         () async {
+      AiConsentGate.syncFromStore('u1', null); // signed in, not granted
       await expectLater(
         LuminaAI.chatDirect('warm white tonight', systemPrompt: 'test'),
-        throwsA(isA<AiConsentRequiredException>()),
+        throwsA(isA<AiConsentRequiredException>()
+            .having((e) => e.signedOut, 'signedOut', isFalse)
+            .having((e) => e.userMessage, 'userMessage', kAiConsentOffMessage)),
       );
     });
 
+    test('signed out (the REVIEW showroom demo): no sheet, the account message',
+        () async {
+      var prompted = false;
+      AiConsentGate.registerPrompter(() async => prompted = true);
+      AiConsentGate.syncFromStore(null, null);
+      await expectLater(
+        LuminaAI.chatDirect('warm white tonight', systemPrompt: 'test'),
+        throwsA(isA<AiConsentRequiredException>()
+            .having((e) => e.signedOut, 'signedOut', isTrue)
+            .having((e) => e.userMessage, 'userMessage', kAiSignInRequiredMessage)),
+      );
+      expect(prompted, isFalse, reason: 'no sheet when there is no account');
+      expect(kAiSignInRequiredMessage, isNot(contains('Settings')),
+          reason: 'a signed-out user cannot turn it on in Settings');
+    });
+
     test('EventLuminaService (bypasses _callClaude)', () async {
+      AiConsentGate.syncFromStore('u1', null);
       final service = EventLuminaService(functions: _NoFunctions());
       await expectLater(
         service.generateEventDesigns(

@@ -1040,10 +1040,9 @@ Rules:
         systemContext,
         'User schedule request: $userRequest',
       );
-    } on AiConsentRequiredException {
-      // Lumina AI consent not given; nothing was sent.
-      return const PendingCalendarChanges(
-          message: kAiConsentOffMessage, changes: []);
+    } on AiConsentRequiredException catch (e) {
+      // Lumina AI consent not given (or no account); nothing was sent.
+      return PendingCalendarChanges(message: e.userMessage, changes: const []);
     } on FirebaseFunctionsException catch (e) {
       debugPrint('📅 Calendar AI: Firebase error ${e.code} — ${e.message}');
       final message = switch (e.code) {

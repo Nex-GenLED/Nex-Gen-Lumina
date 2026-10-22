@@ -74,9 +74,7 @@ class EventLuminaService {
 
     // Lumina AI consent: this call does not go through LuminaAI._callClaude,
     // so it checks the same gate itself.
-    if (!await AiConsentGate.ensure()) {
-      throw const AiConsentRequiredException();
-    }
+    await AiConsentGate.requireConsent();
     final callable = _functions.httpsCallable('claudeProxy');
     final result = await callable.call(body);
 
