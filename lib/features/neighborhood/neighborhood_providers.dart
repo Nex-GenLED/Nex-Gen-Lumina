@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../wled/wled_payload_utils.dart' show normalizeWledPayload;
 import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
 import 'sync_fanout_feature_flag.dart';
@@ -365,9 +366,14 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
     try {
       FanoutResult? result;
       if (ref.read(syncFanoutEnabledSyncProvider)) {
+        // Build 120 (owner decision 2026-10-22): the fan-out payload crosses
+        // the same normalizer every applyJson does, so a closed-app member's
+        // bridge never receives a raw Strobe-family or Lightning value. An
+        // app-open member's engine already applies through applyJson, so both
+        // deliveries now carry the identical, capped state.
         result = await _service.fanoutAdHocSync(
           groupId: command.groupId,
-          payload: _buildFanoutPayload(command),
+          payload: normalizeWledPayload(_buildFanoutPayload(command)),
         );
         if (result.rateLimited) {
           // Reject = nothing fires: skip the broadcast entirely.
