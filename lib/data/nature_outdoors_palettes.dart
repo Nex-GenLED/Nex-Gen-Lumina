@@ -370,7 +370,9 @@ class NatureOutdoorsPalettes {
         parentId: 'nature_ocean',
         themeColors: [Color(0xFF2F4F4F), Color(0xFF4682B4), Color(0xFFFFFFFF)],
         sortOrder: 5,
-        metadata: {'suggestedEffects': [57, 79, 43], 'defaultSpeed': 150, 'defaultIntensity': 200},
+        // Lightning (57) withdrawn 2026-10-22 (owner): it flashes several times
+        // a second inside every strike whatever the speed. pattern_flash_safety.dart.
+        metadata: {'suggestedEffects': [79, 43], 'defaultSpeed': 150, 'defaultIntensity': 200},
       ),
       LibraryNode(
         id: 'ocean_bioluminescence',
@@ -467,7 +469,8 @@ class NatureOutdoorsPalettes {
         parentId: 'nature_mountain',
         themeColors: [Color(0xFF2F4F4F), Color(0xFF4169E1), Color(0xFFFFFFFF)],
         sortOrder: 4,
-        metadata: {'suggestedEffects': [57, 1, 23], 'defaultSpeed': 200, 'defaultIntensity': 220},
+        // Lightning (57) withdrawn 2026-10-22 (owner) — see Stormy Seas.
+        metadata: {'suggestedEffects': [1, 23], 'defaultSpeed': 200, 'defaultIntensity': 220},
       ),
       LibraryNode(
         id: 'mountain_rainbow',
