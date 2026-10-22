@@ -110,7 +110,7 @@ class NatureOutdoorsPalettes {
       ),
       LibraryNode(
         id: 'space_darksideofmoon',
-        name: 'Dark Side of the Moon',
+        name: 'Lunar Night',
         description: 'Mysterious lunar shadows',
         nodeType: LibraryNodeType.palette,
         parentId: 'nature_space',

@@ -196,6 +196,20 @@ class GradientPattern {
   /// Higher = more universally liked, lower = more niche
   final double universalAppeal;
 
+  /// Former display names, never shown. A preset has no id, so its name is
+  /// its identity: voice "Pattern: <name>" and smart-suggestion matching
+  /// look it up by name, and a rename would orphan what was saved under the
+  /// old one. [answersTo] accepts these too.
+  final List<String> legacyNames;
+
+  /// True when [requested] is this pattern's name or one of its
+  /// [legacyNames] (case-insensitive).
+  bool answersTo(String requested) {
+    final r = requested.trim().toLowerCase();
+    return name.toLowerCase() == r ||
+        legacyNames.any((n) => n.toLowerCase() == r);
+  }
+
   const GradientPattern({
     required this.name,
     this.subtitle,
@@ -216,6 +230,7 @@ class GradientPattern {
     this.colorNames = const [],
     this.keywords = const {},
     this.universalAppeal = 0.5,
+    this.legacyNames = const [],
   });
 
   /// Check if this pattern's effect respects user colors
@@ -395,6 +410,7 @@ class GradientPattern {
       colorNames: colorNames ?? this.colorNames,
       keywords: keywords ?? this.keywords,
       universalAppeal: universalAppeal ?? this.universalAppeal,
+      legacyNames: legacyNames,
     );
   }
 

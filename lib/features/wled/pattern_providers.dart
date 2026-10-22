@@ -262,7 +262,8 @@ final publicPatternLibraryProvider = Provider<PredefinedPatterns>((ref) {
         intensity: 180,
       ),
       GradientPattern(
-        name: 'Christmas - The Grinch',
+        name: 'Christmas - Grumpy Green Guy',
+        legacyNames: ['Christmas - The Grinch'],
         subtitle: 'Green Breathe Effect',
         colors: [Color(0xFF00FF00), Color(0xFFFF0000), Color(0xFF228B22)], // Pure green, pure red
         effectId: 2,

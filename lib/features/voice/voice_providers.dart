@@ -328,7 +328,7 @@ Future<void> _runSchedule(Ref ref) async {
 
       final library = ref.read(publicPatternLibraryProvider);
       final pattern = library.all.where(
-        (p) => p.name.toLowerCase() == patternName.toLowerCase()
+        (p) => p.answersTo(patternName)
       ).firstOrNull;
 
       if (pattern != null) {

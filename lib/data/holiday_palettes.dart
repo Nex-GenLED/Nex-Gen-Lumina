@@ -22,14 +22,15 @@ class HolidayPalettes {
     ),
     NamedPalette(
       id: 'xmas_grinch',
-      name: 'The Grinch',
+      name: 'Grumpy Green Guy',
+      searchAliases: ['The Grinch'],
       description: 'Shades of green with a hint of red',
       colors: [Color(0xFF00FF00), Color(0xFF228B22), Color(0xFFFF0000)],
       suggestedEffects: [2, 41, 0], // Breathe, Running, Solid
     ),
     NamedPalette(
       id: 'xmas_frosty',
-      name: 'Frosty the Snowman',
+      name: 'Snowman',
       description: 'Icy blue and white winter tones',
       colors: [Color(0xFF87CEEB), Color(0xFFFFFFFF), Color(0xFFADD8E6)],
       suggestedEffects: [43, 2, 0], // Twinkle, Breathe, Solid
@@ -78,8 +79,8 @@ class HolidayPalettes {
     ),
     NamedPalette(
       id: 'xmas_rudolph',
-      name: 'Rudolph',
-      description: 'Red nose with brown and gold',
+      name: 'Reindeer Glow',
+      description: 'Bright red with brown and gold',
       colors: [Color(0xFFFF0000), Color(0xFF8B4513), Color(0xFFFFD700)],
       suggestedEffects: [2, 0], // Breathe, Solid
     ),

@@ -1439,6 +1439,10 @@ class PatternRepository {
       else if (descLower.contains(term)) {
         score += 10;
       }
+      // A former display name (hidden alias), e.g. after a rename
+      else if (_matchesSearchAlias(node, term)) {
+        score += 20;
+      }
       // Related keyword matching
       else if (_matchesRelatedKeywords(node, term)) {
         score += 15;
@@ -1446,6 +1450,13 @@ class PatternRepository {
     }
 
     return score;
+  }
+
+  /// Former display names kept as hidden aliases (metadata 'searchAliases').
+  bool _matchesSearchAlias(LibraryNode node, String term) {
+    final aliases = node.metadata?['searchAliases'];
+    if (aliases is! List) return false;
+    return aliases.any((a) => a is String && a.toLowerCase().contains(term));
   }
 
   /// Check if a node matches related keywords (synonyms, common associations).

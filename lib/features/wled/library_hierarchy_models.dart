@@ -8,7 +8,7 @@ enum LibraryNodeType {
   /// Intermediate folder (NFL, SEC, Christmas, Spring, Birthdays)
   folder,
 
-  /// Final selectable color palette/theme (Kansas City Chiefs, The Grinch, etc.)
+  /// Final selectable color palette/theme (Kansas City Chiefs, Grumpy Green Guy, etc.)
   palette,
 }
 
@@ -132,6 +132,10 @@ class NamedPalette {
   final int? defaultSpeed;
   final int? defaultIntensity;
 
+  /// Former display names, never shown. Library search still finds the
+  /// palette by them (metadata 'searchAliases').
+  final List<String> searchAliases;
+
   const NamedPalette({
     required this.id,
     required this.name,
@@ -140,6 +144,7 @@ class NamedPalette {
     this.suggestedEffects,
     this.defaultSpeed,
     this.defaultIntensity,
+    this.searchAliases = const [],
   });
 
   /// Convert to LibraryNode
@@ -156,6 +161,7 @@ class NamedPalette {
         if (suggestedEffects != null) 'suggestedEffects': suggestedEffects,
         if (defaultSpeed != null) 'defaultSpeed': defaultSpeed,
         if (defaultIntensity != null) 'defaultIntensity': defaultIntensity,
+        if (searchAliases.isNotEmpty) 'searchAliases': searchAliases,
       },
     );
   }

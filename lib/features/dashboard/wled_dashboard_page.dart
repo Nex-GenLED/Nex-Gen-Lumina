@@ -1252,7 +1252,7 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     final name = (s.actionData['pattern_name'] as String?)?.trim() ?? '';
     return requireExactMatch<GradientPattern>(
       candidates: ref.read(publicPatternLibraryProvider).all,
-      matches: (p) => p.name.toLowerCase() == name.toLowerCase(),
+      matches: (p) => p.answersTo(name),
       noun: 'pattern',
       requested: name,
     );

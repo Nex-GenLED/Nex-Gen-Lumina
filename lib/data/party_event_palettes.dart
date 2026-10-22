@@ -124,7 +124,7 @@ class PartyEventPalettes {
     ),
     NamedPalette(
       id: 'bday_girl_rainbow',
-      name: 'Rainbow Bright',
+      name: 'Rainbow Burst',
       description: 'Full rainbow colors',
       colors: [Color(0xFFFF0000), Color(0xFFFFFF00), Color(0xFF00FF00)],
       suggestedEffects: [41, 0], // Running, Solid
