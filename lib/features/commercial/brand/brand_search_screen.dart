@@ -124,7 +124,7 @@ class _BrandSearchScreenState extends ConsumerState<BrandSearchScreen> {
         autofocus: true,
         style: const TextStyle(color: NexGenPalette.textHigh),
         decoration: InputDecoration(
-          hintText: 'Search brands (e.g. State Farm, McDonald\'s)',
+          hintText: 'Search brands (e.g. your business name)',
           hintStyle: const TextStyle(color: NexGenPalette.textMedium),
           prefixIcon:
               const Icon(Icons.search, color: NexGenPalette.textMedium),

@@ -96,7 +96,7 @@ class PartyEventPalettes {
     ),
     NamedPalette(
       id: 'bday_girl_barbie',
-      name: 'Barbie Pink',
+      name: 'Hot Pink Glam',
       description: 'Hot pink and white',
       colors: [Color(0xFFFF1493), Color(0xFFFFFFFF), Color(0xFFFF69B4)],
       suggestedEffects: [2, 0], // Breathe, Solid
