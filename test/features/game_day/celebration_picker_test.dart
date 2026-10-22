@@ -39,7 +39,7 @@ const List<String> kCuratedNames = [
   'Chase',
   'Meteor',
   'Washing Machine',
-  'Android',
+  'Loading Chase', // was 'Android' (store window item 6, App Review 5.2)
   'Chase 2',
   'Chase 3',
   'Juggle',

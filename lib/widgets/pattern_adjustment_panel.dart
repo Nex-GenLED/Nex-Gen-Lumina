@@ -48,7 +48,7 @@ const List<_EffectOption> _commonEffects = [
   _EffectOption(13, 'Theater', Icons.theater_comedy),
   _EffectOption(15, 'Running', Icons.directions_run),
   _EffectOption(16, 'Saw', Icons.show_chart),
-  _EffectOption(27, 'Android', Icons.android),
+  _EffectOption(27, 'Loading Chase', Icons.sync),
   _EffectOption(28, 'Chase', Icons.double_arrow),
   _EffectOption(31, 'Chase Flash', Icons.flash_on_outlined),
   _EffectOption(37, 'Chase 2', Icons.fast_forward),
@@ -94,7 +94,7 @@ const List<_EffectOption> _commonEffects = [
   _EffectOption(112, 'Dancing Shadows', Icons.nightlight),
 
   // Game effects
-  _EffectOption(44, 'Tetrix', Icons.view_module),
+  _EffectOption(44, 'Falling Blocks', Icons.view_module),
   _EffectOption(91, 'Bouncing Balls', Icons.sports_basketball),
   _EffectOption(95, 'Popcorn', Icons.local_dining),
 

@@ -680,8 +680,8 @@ class EffectDatabase {
 
     27: EffectMetadata(
       id: 27,
-      name: 'Android',
-      description: 'Android-style loading animation',
+      name: 'Loading Chase',
+      description: 'Segments chase like a loading spinner',
       respectsColors: true,
       moods: {EffectMoodCategory.modern},
       vibes: {EffectVibe.subtle, EffectVibe.dynamic},
