@@ -21,13 +21,22 @@
 //     an AI suggestion — DEGRADES to Strobe at the capped speed instead of
 //     failing.
 //
+//   • Lightning (57) fires 4 + intensity/20 flashes 50–150 ms apart inside
+//     EVERY strike, whatever the speed; speed only sets the pause between
+//     strikes. Build 120 (owner decision 2026-10-22, after the Halloween
+//     palettes were found suggesting it at speed 128): on every write it is
+//     CLAMPED to the celebration mapping — `sx` never above
+//     [kLightningSpeedCap] (a long pause between strikes) and `ix` never above
+//     [kLightningIntensityCap] (few flashes per strike). Lower stored values
+//     are kept: slower and sparser is safer still.
+//
 // WHERE IT IS ENFORCED
 //   • normalizeWledPayload (wled_payload_utils.dart): every applyJson and
 //     savePreset the app sends, local and relay — so a stored blob is made
 //     safe on its way out, with no Firestore migration.
 //   • sendChannelTweak: a bare `{sx: N}` adjustment names no effect, so the
-//     normalizer cannot see it is a strobe; the sender caps it against the
-//     live effect.
+//     normalizer cannot see it is a strobe or Lightning; the sender caps
+//     `sx` (and, for Lightning, `ix`) against the live effect.
 //   • EffectSpeedSlider: the slider never offers more than the cap.
 //   • WledEffectsCatalog / EffectDatabase: Strobe Mega is left out of every
 //     offered list, but still resolves by id so an old reference can be
@@ -75,6 +84,26 @@ const int kLightningEffectId = 57;
 const int kLightningCelebrationSpeed = 40;
 const int kLightningCelebrationIntensity = 60;
 
+/// Build 120 (owner decision 2026-10-22): the same mapping, applied as a
+/// CLAMP on every write — see the header.
+const int kLightningSpeedCap = kLightningCelebrationSpeed;
+const int kLightningIntensityCap = kLightningCelebrationIntensity;
+
+/// [intensity], capped when [effectId] (after any degrade) is Lightning.
+/// Every other effect's intensity is left alone: for a strobe it is the duty
+/// cycle, not the rate.
+int capFlashIntensity(int effectId, int intensity) =>
+    offeredEffectId(effectId) == kLightningEffectId &&
+            intensity > kLightningIntensityCap
+        ? kLightningIntensityCap
+        : intensity;
+
+/// The most an intensity slider should offer for [effectId].
+int flashIntensityMax(int effectId) =>
+    offeredEffectId(effectId) == kLightningEffectId
+        ? kLightningIntensityCap
+        : 255;
+
 /// A celebration's speed and intensity made safe for an unattended house.
 /// Build 120 (owner decision 2026-10-21):
 ///   • the strobe family (23, 24, and a retired 25 playing as 23) never above
@@ -107,17 +136,23 @@ int celebrationDefaultIntensityFor(int effectId) =>
 int offeredEffectId(int effectId) =>
     isRetiredEffect(effectId) ? kRetiredEffectFallback : effectId;
 
-/// [speed], capped when [effectId] (after any degrade) is a capped strobe.
-int capFlashSpeed(int effectId, int speed) =>
-    kSpeedCappedFlashEffectIds.contains(offeredEffectId(effectId)) &&
-            speed > kStrobeSpeedCap
-        ? kStrobeSpeedCap
-        : speed;
+/// [speed], capped when [effectId] (after any degrade) is a capped strobe
+/// ([kStrobeSpeedCap]) or Lightning ([kLightningSpeedCap]).
+int capFlashSpeed(int effectId, int speed) {
+  final id = offeredEffectId(effectId);
+  if (id == kLightningEffectId) {
+    return speed > kLightningSpeedCap ? kLightningSpeedCap : speed;
+  }
+  return kSpeedCappedFlashEffectIds.contains(id) && speed > kStrobeSpeedCap
+      ? kStrobeSpeedCap
+      : speed;
+}
 
 /// Makes one WLED segment map safe, in place: a retired effect becomes
-/// Strobe, and a capped strobe's `sx` comes down to [kStrobeSpeedCap].
-/// A segment that names no effect is left alone. Returns whether anything
-/// changed.
+/// Strobe, a capped strobe's `sx` comes down to [kStrobeSpeedCap], and
+/// Lightning's `sx` / `ix` come down to [kLightningSpeedCap] /
+/// [kLightningIntensityCap]. A segment that names no effect is left alone.
+/// Returns whether anything changed.
 bool applyFlashSafetyToSegment(Map<String, dynamic> seg) {
   final fx = seg['fx'];
   if (fx is! num) return false;
@@ -136,20 +171,39 @@ bool applyFlashSafetyToSegment(Map<String, dynamic> seg) {
       changed = true;
     }
   }
+  if (id == kLightningEffectId) {
+    final sx = seg['sx'];
+    if (sx is num && sx > kLightningSpeedCap) {
+      seg['sx'] = kLightningSpeedCap;
+      changed = true;
+    }
+    final ix = seg['ix'];
+    if (ix is num && ix > kLightningIntensityCap) {
+      seg['ix'] = kLightningIntensityCap;
+      changed = true;
+    }
+  }
   return changed;
 }
 
-/// A bare adjustment (`{sx: N}`, no `fx`) against the effect that is playing:
-/// [fields] with `sx` capped when [liveEffectId] is a capped strobe.
+/// A bare adjustment (`{sx: N}` or `{ix: N}`, no `fx`) against the effect
+/// that is playing: [fields] with `sx` capped when [liveEffectId] is a capped
+/// strobe or Lightning, and `ix` capped when it is Lightning.
 Map<String, dynamic> capAdjustmentForLiveEffect(
   Map<String, dynamic> fields,
   int? liveEffectId,
 ) {
+  if (fields.containsKey('fx') || liveEffectId == null) return fields;
+  var out = fields;
   final sx = fields['sx'];
-  if (fields.containsKey('fx') || liveEffectId == null || sx is! num) {
-    return fields;
+  if (sx is num) {
+    final capped = capFlashSpeed(liveEffectId, sx.toInt());
+    if (capped != sx) out = <String, dynamic>{...out, 'sx': capped};
   }
-  final capped = capFlashSpeed(liveEffectId, sx.toInt());
-  if (capped == sx) return fields;
-  return <String, dynamic>{...fields, 'sx': capped};
+  final ix = fields['ix'];
+  if (ix is num) {
+    final capped = capFlashIntensity(liveEffectId, ix.toInt());
+    if (capped != ix) out = <String, dynamic>{...out, 'ix': capped};
+  }
+  return out;
 }

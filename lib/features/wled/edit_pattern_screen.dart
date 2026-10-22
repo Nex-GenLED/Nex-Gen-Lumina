@@ -113,10 +113,13 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
     // (pattern_flash_safety.dart).
     final initial = widget.initialPattern ?? EditablePattern.blank();
     final fx = offeredEffectId(initial.effectId);
+    final speed = capFlashSpeed(fx, initial.speed);
+    final intensity = capFlashIntensity(fx, initial.intensity);
     _pattern = fx == initial.effectId &&
-            capFlashSpeed(fx, initial.speed) == initial.speed
+            speed == initial.speed &&
+            intensity == initial.intensity
         ? initial
-        : initial.copyWith(effectId: fx, speed: capFlashSpeed(fx, initial.speed));
+        : initial.copyWith(effectId: fx, speed: speed, intensity: intensity);
     _nameController = TextEditingController(text: _pattern.name);
 
     // Sync slider to first action color

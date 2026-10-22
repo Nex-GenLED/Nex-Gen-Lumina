@@ -175,6 +175,31 @@ CustomDesign _megaDesign() => CustomDesign(
       tags: const [kPatternEditorDesignTag],
     );
 
+/// A stored design whose channel runs Lightning hot: speed 150, intensity 200
+/// (what a pre-120 save, or the Thunderstorm palette's defaults, could hold).
+CustomDesign _lightningDesign() => CustomDesign(
+      id: 'd_lightning',
+      name: 'Storm Front',
+      createdAt: DateTime(2026, 10, 1),
+      updatedAt: DateTime(2026, 10, 1),
+      ownerId: 'customer-test',
+      channels: const [
+        ChannelDesign(
+          channelId: 0,
+          channelName: 'Front',
+          colorGroups: [
+            LedColorGroup(startLed: 0, endLed: 0, color: [240, 230, 140, 0]),
+          ],
+          effectId: 57,
+          speed: 150,
+          intensity: 200,
+        ),
+      ],
+      brightness: 150,
+      brightnessStated: true,
+      tags: const [kPatternEditorDesignTag],
+    );
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -551,6 +576,162 @@ void main() {
       await tester.pump();
       expect(seen, isNotEmpty);
       expect(seen.every((v) => v <= kStrobeSpeedCap), isTrue, reason: '$seen');
+    });
+  });
+
+  // ── Lightning (build 120, owner decision 2026-10-22) ──────────────────────
+  // Inside every strike the firmware fires several flashes a second whatever
+  // the speed, and the Halloween palettes suggested it at speed 128. The
+  // shared chokepoint now clamps it to the celebration mapping (40 / 60) on
+  // every write, mirrored by the slider, the tuner and the Pattern Editor.
+  group('Lightning — clamped on every write', () {
+    Map<String, dynamic> seg0(Map<String, dynamic> p) =>
+        Map<String, dynamic>.from((p['seg'] as List).first as Map);
+
+    test('the constants are the celebration mapping', () {
+      expect(kLightningSpeedCap, 40);
+      expect(kLightningIntensityCap, 60);
+      expect(kLightningSpeedCap, kLightningCelebrationSpeed);
+      expect(kLightningIntensityCap, kLightningCelebrationIntensity);
+    });
+
+    test('the wire: speed above 40 and intensity above 60 come down; lower '
+        'values and every other effect are untouched', () {
+      final hot = seg0(normalizeWledPayload({
+        'seg': [
+          {'fx': 57, 'sx': 128, 'ix': 200}
+        ]
+      }));
+      expect(hot['fx'], 57);
+      expect(hot['sx'], kLightningSpeedCap);
+      expect(hot['ix'], kLightningIntensityCap);
+      final mild = seg0(normalizeWledPayload({
+        'seg': [
+          {'fx': 57, 'sx': 20, 'ix': 40}
+        ]
+      }));
+      expect(mild['sx'], 20);
+      expect(mild['ix'], 40);
+      final twinkle = seg0(normalizeWledPayload({
+        'seg': [
+          {'fx': 43, 'sx': 255, 'ix': 255}
+        ]
+      }));
+      expect(twinkle['sx'], 255);
+      expect(twinkle['ix'], 255);
+      final strobe = seg0(normalizeWledPayload({
+        'seg': [
+          {'fx': 23, 'sx': 200, 'ix': 255}
+        ]
+      }));
+      expect(strobe['ix'], 255, reason: 'a strobe\'s intensity is duty cycle');
+    });
+
+    test('AWAY: the relay queues the clamped Lightning', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final fs = FakeFirebaseFirestore();
+      final relay = CloudRelayRepository(
+        userId: 'u1',
+        controllerId: 'c1',
+        controllerIp: '192.0.2.10',
+        webhookUrl: '',
+        firestore: fs,
+        commandTimeout: const Duration(milliseconds: 50),
+      );
+      await relay.applyJson({
+        'on': true,
+        'seg': [
+          {
+            'id': 0,
+            'fx': 57,
+            'sx': 150,
+            'ix': 220,
+            'col': [
+              [240, 230, 140, 0]
+            ]
+          }
+        ],
+      });
+      final docs = (await fs.collection('users/u1/commands').get()).docs;
+      final sent = jsonDecode(docs.single.data()['payload'] as String)
+          as Map<String, dynamic>;
+      final segs = (sent['seg'] as List).cast<Map>().where((s) => s['fx'] != null);
+      expect(segs, isNotEmpty);
+      for (final s in segs) {
+        expect(s['fx'], 57);
+        expect(s['sx'], kLightningSpeedCap);
+        expect(s['ix'], kLightningIntensityCap);
+      }
+    });
+
+    test('a bare speed or intensity tweak on a live Lightning is clamped too',
+        () {
+      expect(capAdjustmentForLiveEffect({'sx': 128}, 57),
+          {'sx': kLightningSpeedCap});
+      expect(capAdjustmentForLiveEffect({'ix': 200}, 57),
+          {'ix': kLightningIntensityCap});
+      expect(capAdjustmentForLiveEffect({'sx': 20, 'ix': 40}, 57),
+          {'sx': 20, 'ix': 40});
+      expect(capAdjustmentForLiveEffect({'ix': 200}, 23), {'ix': 200},
+          reason: 'a strobe\'s intensity is duty cycle, not rate');
+      expect(capAdjustmentForLiveEffect({'fx': 57, 'sx': 128}, 57),
+          {'fx': 57, 'sx': 128},
+          reason: 'a tweak that names its effect is the normalizer\'s job');
+      expect(capFlashSpeed(57, 128), kLightningSpeedCap);
+      expect(capFlashIntensity(57, 200), kLightningIntensityCap);
+      expect(flashIntensityMax(57), kLightningIntensityCap);
+      expect(flashIntensityMax(23), 255);
+    });
+
+    test('the celebration mapping is unchanged: a saved Lightning plays at '
+        'exactly 40 / 60', () {
+      expect(capCelebration(57, 240, 240), (sx: 40, ix: 60));
+      expect(capCelebration(57, 10, 10), (sx: 40, ix: 60));
+    });
+
+    testWidgets('a stored design with a hot Lightning opens at the clamp, and '
+        'Apply sends it clamped', (tester) async {
+      final repo = RecordingWledRepository();
+      final c = _container(repo);
+      await _pump(tester, c,
+          ColorwayEffectSelectorPage.forDesign(design: _lightningDesign()),
+          size: const Size(1200, 3000));
+      await _settle(tester);
+
+      expect(c.read(selectorEffectIdProvider), 57);
+      expect(c.read(selectorSpeedProvider), kLightningSpeedCap);
+      expect(c.read(selectorIntensityProvider), kLightningIntensityCap);
+
+      await tester.tap(find.byKey(const ValueKey('apply-design')));
+      await _settle(tester);
+      final seg = (repo.applied.single['seg'] as List)
+          .cast<Map>()
+          .firstWhere((s) => s['fx'] != null);
+      expect(seg['fx'], 57);
+      expect(seg['sx'], kLightningSpeedCap);
+      expect(seg['ix'], kLightningIntensityCap);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('the speed slider never offers Lightning above 40',
+        (tester) async {
+      final seen = <int>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: EffectSpeedSlider(
+            rawSpeed: 20,
+            effectId: 57,
+            initialExtended: true,
+            onChanged: seen.add,
+          ),
+        ),
+      ));
+      await tester.pump();
+      await tester.drag(find.byType(Slider), const Offset(2000, 0));
+      await tester.pump();
+      expect(seen, isNotEmpty);
+      expect(seen.every((v) => v <= kLightningSpeedCap), isTrue,
+          reason: '$seen');
     });
   });
 }

@@ -477,8 +477,8 @@ class _ColorwayEffectSelectorPageState
       // unless the caller seeds a stored choice.
       ref.read(selectorSpeedProvider.notifier).state = capFlashSpeed(
           seedFx, widget.initialSpeed ?? effectDefaultSpeedOr(seedFx, 128));
-      ref.read(selectorIntensityProvider.notifier).state =
-          widget.initialIntensity ?? effectDefaultIntensity(seedFx) ?? 128;
+      ref.read(selectorIntensityProvider.notifier).state = capFlashIntensity(
+          seedFx, widget.initialIntensity ?? effectDefaultIntensity(seedFx) ?? 128);
       ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
       ref.read(selectorSpacingProvider.notifier).state = initSpacing;
       ref.read(selectorGradientPresetProvider.notifier).state = initPreset;
@@ -542,7 +542,7 @@ class _ColorwayEffectSelectorPageState
       SelectorState(
         effectId: seedFx,
         speed: capFlashSpeed(seedFx, ch?.speed ?? 128),
-        intensity: ch?.intensity ?? 128,
+        intensity: capFlashIntensity(seedFx, ch?.intensity ?? 128),
         // Were not passed at all → the tuner opened every design at grp 1 /
         // spc 0 whatever it had been saved with (followup N3b).
         grouping: ch?.grouping ?? kDesignDefaultGrp,
@@ -1642,8 +1642,12 @@ class _ColorwayEffectSelectorPageState
             child: _buildSlider(
               label: 'Intensity',
               value: intensity,
+              // Lightning never offers more than its clamp (pattern_flash_safety.dart).
+              max: flashIntensityMax(ref.watch(selectorEffectIdProvider)),
               onChanged: (v) {
-                ref.read(selectorIntensityProvider.notifier).state = v.round();
+                ref.read(selectorIntensityProvider.notifier).state =
+                    capFlashIntensity(
+                        ref.read(selectorEffectIdProvider), v.round());
                 _sendToWled(dragging: true);
               },
               onChangeEnd: _previewPacer.settled,
@@ -1976,8 +1980,11 @@ class _ColorwayEffectSelectorPageState
               child: _buildSlider(
                 label: 'Intensity',
                 value: intensity,
+                max: flashIntensityMax(ref.watch(selectorEffectIdProvider)),
                 onChanged: (v) {
-                  ref.read(selectorIntensityProvider.notifier).state = v.round();
+                  ref.read(selectorIntensityProvider.notifier).state =
+                      capFlashIntensity(
+                          ref.read(selectorEffectIdProvider), v.round());
                   _sendToWled(dragging: true);
                 },
                 onChangeEnd: _previewPacer.settled,
@@ -2722,6 +2729,7 @@ class _ColorwayEffectSelectorPageState
     required int value,
     required ValueChanged<double> onChanged,
     VoidCallback? onChangeEnd,
+    int max = 255,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -2747,9 +2755,11 @@ class _ColorwayEffectSelectorPageState
                 trackHeight: 4,
               ),
               child: Slider(
-                value: value.toDouble(),
+                // A value above the offered range (the effect changed to one
+                // with a lower ceiling) sits at the ceiling.
+                value: value.toDouble().clamp(0, max.toDouble()),
                 min: 0,
-                max: 255,
+                max: max.toDouble(),
                 onChanged: onChanged,
                 onChangeEnd:
                     onChangeEnd == null ? null : (_) => onChangeEnd(),

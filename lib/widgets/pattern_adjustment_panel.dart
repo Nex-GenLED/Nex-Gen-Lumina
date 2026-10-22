@@ -7,6 +7,7 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/site/site_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_adjustment_pacer.dart';
 import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
+import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/pattern_tweak_sender.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_effect_metadata.dart';
@@ -509,11 +510,14 @@ class _PatternAdjustmentPanelState extends ConsumerState<PatternAdjustmentPanel>
               _SliderRow(
                 icon: Icons.tune,
                 label: effectMetadata.intensityLabel!,
-                value: _intensity.toDouble(),
+                // A live Lightning never offers more than its clamp
+                // (pattern_flash_safety.dart); the bare tweak is capped too.
+                value: capFlashIntensity(_effectId ?? 0, _intensity).toDouble(),
                 min: 0,
-                max: 255,
+                max: flashIntensityMax(_effectId ?? 0).toDouble(),
                 onChanged: (v) {
-                  setState(() => _intensity = v.round().clamp(0, 255));
+                  setState(() => _intensity =
+                      v.round().clamp(0, flashIntensityMax(_effectId ?? 0)));
                   _notifyChanged();
                   _lookPacer.changed();
                 },
