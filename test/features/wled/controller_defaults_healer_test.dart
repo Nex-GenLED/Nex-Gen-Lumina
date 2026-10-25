@@ -632,7 +632,7 @@ void main() {
         profileLat: null,
         profileLon: null,
         ianaTimezone: 'CDT',
-        phoneIanaTimezone: 'America/Chicago',
+        resolvePhoneIanaTimezone: () async => 'America/Chicago',
         resolvePhonePosition: () async => null,
         now: () => _now,
         phoneUtcOffset: const Duration(hours: -5),
@@ -683,6 +683,36 @@ void main() {
       await _healer(repo, isLan: true, ctx: ctx).run();
 
       expect(repo.configPosts, isEmpty);
+    });
+
+    test('the phone zone is asked for only when a heal is due and the profile '
+        'zone does not map', () async {
+      var asked = 0;
+      ControllerHealContext ctxWith(String? iana) => ControllerHealContext(
+            profileLat: null,
+            profileLon: null,
+            ianaTimezone: iana,
+            resolvePhoneIanaTimezone: () async {
+              asked++;
+              return 'America/Chicago';
+            },
+            resolvePhonePosition: () async => null,
+            now: () => _now,
+            phoneUtcOffset: const Duration(hours: -5),
+          );
+
+      await _healer(_FakeHealRepo(_healthy()), isLan: true, ctx: ctxWith('CDT'))
+          .run();
+      expect(asked, 0, reason: 'healthy unit: no tz heal due');
+
+      await _healer(_FakeHealRepo(_tzSuspect()),
+              isLan: true, ctx: ctxWith('America/Chicago'))
+          .run();
+      expect(asked, 0, reason: 'mapped profile zone: phone not needed');
+
+      await _healer(_FakeHealRepo(_tzSuspect()), isLan: true, ctx: ctxWith('CDT'))
+          .run();
+      expect(asked, 1);
     });
 
     test('already-correct unit (tz 5 / 0) → no tz POST', () async {

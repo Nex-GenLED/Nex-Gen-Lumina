@@ -354,10 +354,10 @@ class ControllerHealContext {
   final double? profileLon;
   final String? ianaTimezone;
 
-  /// The phone's own IANA zone (e.g. "America/Chicago"), or null when the
-  /// platform could not say. Consulted only when [ianaTimezone] does not map
-  /// (see [tzHealFor]).
-  final String? phoneIanaTimezone;
+  /// Resolves the phone's own IANA zone (e.g. "America/Chicago"), or null when
+  /// the platform cannot say. Called ONLY when a tz heal is due and
+  /// [ianaTimezone] does not map (see [tzHealFor]) — never on a healthy connect.
+  final Future<String?> Function()? resolvePhoneIanaTimezone;
 
   /// Resolves the phone's position ONLY if location permission is already
   /// granted; returns null otherwise (never prompts).
@@ -376,7 +376,7 @@ class ControllerHealContext {
     required this.profileLat,
     required this.profileLon,
     required this.ianaTimezone,
-    this.phoneIanaTimezone,
+    this.resolvePhoneIanaTimezone,
     required this.resolvePhonePosition,
     required this.now,
     required this.phoneUtcOffset,
@@ -603,12 +603,19 @@ class ControllerDefaultsHealer {
       }
     }
 
-    // (b) timezone
+    // (b) timezone. The phone zone is asked for only when a heal is due and
+    // the profile zone does not map.
+    final offsetPinned = deviceTzOffsetPinned(info);
+    String? phoneZone;
+    if ((health.tzSuspect || offsetPinned) &&
+        mappedWledTzForIana(ctx.ianaTimezone) == null) {
+      phoneZone = await ctx.resolvePhoneIanaTimezone?.call();
+    }
     final tz = tzHealFor(
       tzSuspect: health.tzSuspect,
-      offsetPinned: deviceTzOffsetPinned(info),
+      offsetPinned: offsetPinned,
       ianaTimezone: ctx.ianaTimezone,
-      phoneIanaTimezone: ctx.phoneIanaTimezone,
+      phoneIanaTimezone: phoneZone,
     );
     if (tz != null) {
       if (await _post(tzHealPayload(tz), 'tz', report)) report.tzHealed = true;
@@ -1480,12 +1487,11 @@ final controllerDefaultsHealerProvider =
 
     final profile = ref.read(currentUserProfileProvider).valueOrNull;
     final nowFn = ref.read(healerPhoneNowProvider);
-    final phoneZone = await ref.read(healerPhoneIanaTimezoneProvider)();
     final ctx = ControllerHealContext(
       profileLat: profile?.latitude,
       profileLon: profile?.longitude,
       ianaTimezone: profile?.timeZone,
-      phoneIanaTimezone: phoneZone,
+      resolvePhoneIanaTimezone: ref.read(healerPhoneIanaTimezoneProvider),
       resolvePhonePosition: ref.read(healerPhonePositionProvider),
       now: nowFn,
       phoneUtcOffset: nowFn().timeZoneOffset,
