@@ -50,15 +50,29 @@ class WledConfigPushResult {
 ///
 /// Source: WLED ntp.cpp TZ_TABLE. The list is intentionally narrow — only
 /// continental-US + AK/HI/AZ are covered because that's where Lumina
-/// installs go today. Anything outside this set falls back to
-/// [kWledTzUtc]; the controller's clock will run on UTC and astronomical
-/// events will be off by the local offset. Add new entries as install
-/// regions expand; do not invent enum values that don't exist in the WLED
-/// firmware's TZ_TABLE — the device silently ignores unknown indices.
+/// installs go today. A name outside this set is NOT written to the device
+/// (see [mappedWledTzForIana] and pushTimeLocation): the controller keeps
+/// whatever zone it has. Add new entries as install regions expand; do not
+/// invent enum values that don't exist in the WLED firmware's TZ_TABLE — the
+/// device silently ignores unknown indices. Further IANA names for a zone the
+/// table already has reuse that zone's index (TD-7: Michigan, Indiana, Idaho).
 const Map<String, int> kWledTzByIana = <String, int>{
   'America/New_York': 4, // TZ_US_EASTERN  (EST/EDT)
+  'America/Detroit': 4,
+  'America/Indiana/Indianapolis': 4,
+  'America/Indianapolis': 4, // legacy alias of the above
+  'America/Fort_Wayne': 4, // legacy alias of the above
+  'America/Indiana/Marengo': 4,
+  'America/Indiana/Petersburg': 4,
+  'America/Indiana/Vevay': 4,
+  'America/Indiana/Vincennes': 4,
+  'America/Indiana/Winamac': 4,
   'America/Chicago': 5, // TZ_US_CENTRAL  (CST/CDT)
+  // The two Indiana zones that keep CENTRAL time — not Eastern.
+  'America/Indiana/Knox': 5,
+  'America/Indiana/Tell_City': 5,
   'America/Denver': 6, // TZ_US_MOUNTAIN (MST/MDT)
+  'America/Boise': 6,
   'America/Phoenix': 7, // TZ_US_ARIZONA  (MST, no DST)
   'America/Los_Angeles': 8, // TZ_US_PACIFIC  (PST/PDT)
   'America/Anchorage': 20, // TZ_ANCHORAGE   (AKST/AKDT)
@@ -70,6 +84,14 @@ const int kWledTzUtc = 0;
 
 /// Resolves the WLED tz enum for an IANA name. Unknown names map to UTC.
 int wledTzForIana(String? iana) => kWledTzByIana[iana] ?? kWledTzUtc;
+
+/// The WLED tz enum for an IANA name, or null when the name does not map
+/// (null, an abbreviation such as "CDT", or a zone outside [kWledTzByIana]).
+/// Null means "do not touch the device zone" — never "write UTC" (TD-7).
+int? mappedWledTzForIana(String? iana) {
+  final idx = iana == null ? null : kWledTzByIana[iana];
+  return (idx == null || idx == kWledTzUtc) ? null : idx;
+}
 
 // kNglLightGammaConfig — the NGL color-gamma standard — now lives in
 // wled_payload_utils.dart (see the `export` with this file's imports). It moved
@@ -373,6 +395,11 @@ bool ledInsMatches(
 /// CRITICAL: `if.ntp.offset` is ADDITIVE to the `tz` enum on the device.
 /// We send offset:0 so the enum is the sole source of truth; stacking
 /// them double-shifts the clock.
+///
+/// A zone that does not map ([mappedWledTzForIana] → null: an abbreviation
+/// like "CDT", or a zone outside [kWledTzByIana]) sends NEITHER `tz` nor
+/// `offset`, so the device keeps the zone it has. It used to send `tz:0` —
+/// UTC — which a later heal then pinned to a fixed offset (TD-7).
 Future<WledConfigPushResult> pushTimeLocation(
   String controllerIp, {
   required double? latitude,
@@ -384,20 +411,12 @@ Future<WledConfigPushResult> pushTimeLocation(
     return WledConfigPushResult.skipped('time/location data missing');
   }
 
-  final tz = wledTzForIana(ianaTimezone);
-  final payload = <String, dynamic>{
-    'if': {
-      'ntp': {
-        'en': true,
-        'host': '0.wled.pool.ntp.org',
-        'tz': tz,
-        'offset': 0,
-        'ampm': false,
-        'ln': longitude,
-        'lt': latitude,
-      },
-    },
-  };
+  final tz = mappedWledTzForIana(ianaTimezone);
+  final payload = buildTimeLocationPayload(
+    latitude: latitude,
+    longitude: longitude,
+    ianaTimezone: ianaTimezone,
+  );
 
   // One read so the write keeps the device's own frame rate (see
   // normalizeWledCfgPayload); a failed read sends the default.
@@ -417,7 +436,7 @@ Future<WledConfigPushResult> pushTimeLocation(
     if (cfg != null) {
       final ntp = (cfg['if'] as Map?)?['ntp'] as Map?;
       if (ntp == null ||
-          ntp['tz'] != tz ||
+          (tz != null && ntp['tz'] != tz) ||
           (ntp['lt'] as num?)?.toDouble() != latitude ||
           (ntp['ln'] as num?)?.toDouble() != longitude) {
         return WledConfigPushResult.warning(
@@ -429,7 +448,37 @@ Future<WledConfigPushResult> pushTimeLocation(
     // Soft-fail — write already returned 2xx.
   }
 
+  if (tz == null) {
+    return WledConfigPushResult.warning(
+      'time zone left unchanged — "$ianaTimezone" is not a supported zone',
+    );
+  }
   return result;
+}
+
+/// The `if.ntp.*` cfg payload for [pushTimeLocation]. `tz` and `offset` ride
+/// only when [ianaTimezone] maps ([mappedWledTzForIana]); otherwise the
+/// device zone is left alone.
+@visibleForTesting
+Map<String, dynamic> buildTimeLocationPayload({
+  required double latitude,
+  required double longitude,
+  required String? ianaTimezone,
+}) {
+  final tz = mappedWledTzForIana(ianaTimezone);
+  return <String, dynamic>{
+    'if': {
+      'ntp': {
+        'en': true,
+        'host': '0.wled.pool.ntp.org',
+        if (tz != null) 'tz': tz,
+        if (tz != null) 'offset': 0,
+        'ampm': false,
+        'ln': longitude,
+        'lt': latitude,
+      },
+    },
+  };
 }
 
 /// The `/json/cfg` payload that asserts the NGL color-gamma standard
