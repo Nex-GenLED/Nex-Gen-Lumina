@@ -225,7 +225,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         phoneNumber: phone.isEmpty ? null : phone,
         address: address.isEmpty ? null : address,
         location: address.isEmpty ? base.location : address, // keep location aligned with address
-        timeZone: DateTime.now().timeZoneName,
+        // TD-7: the zone is NOT written here. The phone's zone name is an
+        // abbreviation ("CDT") and the EDITOR's zone, not the customer's, and it
+        // overwrote the IANA zone the install captured. copyWith keeps the
+        // existing value.
         updatedAt: now,
         // TEAM CONSOLIDATION: `sports_teams` is NO LONGER written here. It is a
         // DERIVED MIRROR of the game_day_autopilot subcollection, maintained
