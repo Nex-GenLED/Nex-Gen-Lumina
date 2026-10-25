@@ -32,7 +32,7 @@ import 'package:nexgen_command/features/wled/controller_defaults_healer.dart'
 import 'package:nexgen_command/features/wled/wled_cfg_gamma.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart'
-    show buildGammaPayload, buildLedConfig;
+    show buildGammaPayload, buildLedConfig, buildTimeLocationPayload;
 
 int? fpsOf(Map<String, dynamic> cfg) =>
     ((cfg['hw'] as Map?)?['led'] as Map?)?['fps'] as int?;
@@ -43,7 +43,10 @@ int? fpsOf(Map<String, dynamic> cfg) =>
 final Map<String, Map<String, dynamic>> kEveryCfgBody = {
   'healer ntp host': ntpHostHealPayload(),
   'healer tz index': tzHealPayload(const TzHeal.index(5)),
-  'healer tz offset': tzHealPayload(const TzHeal.offset(-21600)),
+  // TD-7: the fixed-offset tz heal no longer exists; an unmapped zone's
+  // install/re-sync push carries no tz at all.
+  'install time/location, zone left alone': buildTimeLocationPayload(
+      latitude: 38.99, longitude: -94.25, ianaTimezone: 'CDT'),
   'healer coords': coordHealPayload(const CoordHeal(38.99, -94.25)),
   'healer audioreactive': audioReactiveHealPayload(),
   'gamma self-heal': buildGammaPayload(),

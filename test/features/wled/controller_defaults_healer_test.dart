@@ -224,49 +224,104 @@ void main() {
   });
 
   group('pure planner — tzHealFor', () {
-    test('not suspect → null', () {
-      expect(
-          tzHealFor(
-              tzSuspect: false,
-              ianaTimezone: 'America/Chicago',
-              phoneOffset: Duration.zero),
+    test('not suspect, not pinned → null', () {
+      expect(tzHealFor(tzSuspect: false, ianaTimezone: 'America/Chicago'),
           isNull);
     });
     test('mapped US zone → WLED enum index', () {
+      expect(tzHealFor(tzSuspect: true, ianaTimezone: 'America/Chicago'),
+          const TzHeal.index(5));
+      expect(tzHealFor(tzSuspect: true, ianaTimezone: 'America/New_York'),
+          const TzHeal.index(4));
+      expect(tzHealFor(tzSuspect: true, ianaTimezone: 'America/Phoenix'),
+          const TzHeal.index(7));
+    });
+  });
+
+  // TD-7 — a fixed offset never follows daylight saving, so no zone may ever
+  // be healed onto one, and a unit the old fallback pinned must come back.
+  group('TD-7 — no fixed-offset heal, pinned units re-heal', () {
+    test('null zone, no phone zone → nothing (device zone left alone)', () {
+      expect(tzHealFor(tzSuspect: true, ianaTimezone: null), isNull);
+    });
+    test('abbreviation ("CDT") → nothing — never an offset', () {
+      expect(tzHealFor(tzSuspect: true, ianaTimezone: 'CDT'), isNull);
+      expect(
+          tzHealFor(tzSuspect: true, offsetPinned: true, ianaTimezone: 'CDT'),
+          isNull);
+    });
+    test('unmapped zone → nothing — never an offset', () {
+      expect(tzHealFor(tzSuspect: true, ianaTimezone: 'Europe/Paris'), isNull);
+    });
+    test('profile zone does not map → the phone IANA zone is used', () {
       expect(
           tzHealFor(
               tzSuspect: true,
-              ianaTimezone: 'America/Chicago',
-              phoneOffset: const Duration(hours: -6)),
+              ianaTimezone: 'CDT',
+              phoneIanaTimezone: 'America/Chicago'),
           const TzHeal.index(5));
       expect(
           tzHealFor(
               tzSuspect: true,
-              ianaTimezone: 'America/New_York',
-              phoneOffset: const Duration(hours: -5)),
-          const TzHeal.index(4));
-      expect(
-          tzHealFor(
-              tzSuspect: true,
-              ianaTimezone: 'America/Phoenix',
-              phoneOffset: const Duration(hours: -7)),
-          const TzHeal.index(7));
-    });
-    test('unmapped zone → offset-seconds fallback', () {
-      expect(
-          tzHealFor(
-              tzSuspect: true,
-              ianaTimezone: 'Europe/Paris',
-              phoneOffset: const Duration(hours: 1)),
-          const TzHeal.offset(3600));
-    });
-    test('null zone → offset-seconds fallback', () {
-      expect(
-          tzHealFor(
-              tzSuspect: true,
               ianaTimezone: null,
-              phoneOffset: const Duration(hours: -6)),
-          const TzHeal.offset(-21600));
+              phoneIanaTimezone: 'America/Denver'),
+          const TzHeal.index(6));
+    });
+    test('a mapped profile zone wins over the phone zone', () {
+      expect(
+          tzHealFor(
+              tzSuspect: true,
+              ianaTimezone: 'America/Los_Angeles',
+              phoneIanaTimezone: 'America/Chicago'),
+          const TzHeal.index(8));
+    });
+    test('neither zone maps → nothing', () {
+      expect(
+          tzHealFor(
+              tzSuspect: true,
+              ianaTimezone: 'CDT',
+              phoneIanaTimezone: 'Europe/Paris'),
+          isNull);
+    });
+    test('UTC-with-offset (pinned) + mapped zone → the index', () {
+      expect(
+          tzHealFor(
+              tzSuspect: false,
+              offsetPinned: true,
+              ianaTimezone: 'America/Chicago'),
+          const TzHeal.index(5));
+    });
+    test('UTC-with-offset (pinned) + unmapped zone → nothing (left alone)', () {
+      expect(
+          tzHealFor(
+              tzSuspect: false,
+              offsetPinned: true,
+              ianaTimezone: 'Europe/Paris'),
+          isNull);
+    });
+    test('the payload always zeroes the additive offset', () {
+      expect(tzHealPayload(const TzHeal.index(5)), {
+        'if': {
+          'ntp': {'tz': 5, 'offset': 0},
+        },
+      });
+    });
+    test('deviceTzOffsetPinned: only UTC index + nonzero offset', () {
+      ControllerClockInfo d(int? tz, int? off) => ControllerClockInfo(
+          deviceTime: _now, tzIndex: tz, tzOffsetSeconds: off);
+      expect(deviceTzOffsetPinned(d(0, -18000)), true);
+      expect(deviceTzOffsetPinned(d(0, 0)), false); // plain UTC → tzSuspect
+      expect(deviceTzOffsetPinned(d(5, 0)), false); // already correct
+      expect(deviceTzOffsetPinned(d(null, null)), false); // cfg unreadable
+    });
+    test('added zones reuse existing firmware indices', () {
+      expect(mappedWledTzForIana('America/Detroit'), 4);
+      expect(mappedWledTzForIana('America/Indiana/Indianapolis'), 4);
+      expect(mappedWledTzForIana('America/Indiana/Knox'), 5); // Central
+      expect(mappedWledTzForIana('America/Indiana/Tell_City'), 5); // Central
+      expect(mappedWledTzForIana('America/Boise'), 6);
+      expect(mappedWledTzForIana('CDT'), isNull);
+      expect(mappedWledTzForIana(null), isNull);
     });
   });
 
@@ -553,24 +608,90 @@ void main() {
       expect(repo.configPosts, hasLength(1));
       expect(repo.configPosts.single, {
         'if': {
-          'ntp': {'tz': 5},
+          'ntp': {'tz': 5, 'offset': 0},
         },
       });
       expect(report.tzHealed, true);
       expect(report.rebooted, false);
     });
 
-    test('TZ_SUSPECT (unmapped zone) → offset fallback POST', () async {
+    test('TZ_SUSPECT (unmapped zone) → NO tz POST (TD-7: never an offset)',
+        () async {
       final repo = _FakeHealRepo(_tzSuspect());
       final ctx = _ctx(iana: 'Europe/Paris', phoneOffset: const Duration(hours: 1));
-      // Europe/Paris phone offset makes the device (UTC) still suspect vs phone.
-      await _healer(repo, isLan: true, ctx: ctx).run();
+      final report = await _healer(repo, isLan: true, ctx: ctx).run();
+
+      expect(repo.configPosts, isEmpty);
+      expect(report.tzHealed, false);
+    });
+
+    test('TZ_SUSPECT (abbreviation) + phone IANA zone → the phone zone index',
+        () async {
+      final repo = _FakeHealRepo(_tzSuspect());
+      final ctx = ControllerHealContext(
+        profileLat: null,
+        profileLon: null,
+        ianaTimezone: 'CDT',
+        phoneIanaTimezone: 'America/Chicago',
+        resolvePhonePosition: () async => null,
+        now: () => _now,
+        phoneUtcOffset: const Duration(hours: -5),
+      );
+      final report = await _healer(repo, isLan: true, ctx: ctx).run();
 
       expect(repo.configPosts.single, {
         'if': {
-          'ntp': {'tz': kWledTzUtc, 'offset': 3600},
+          'ntp': {'tz': 5, 'offset': 0},
         },
       });
+      expect(report.tzHealed, true);
+    });
+
+    test('offset-pinned unit (tz 0 / -18000) + mapped zone → re-healed',
+        () async {
+      final repo = _FakeHealRepo(ControllerClockInfo(
+        deviceTime: _now,
+        tzIndex: 0,
+        tzOffsetSeconds: -18000,
+        latitude: 41.88,
+        longitude: -87.63,
+        ntpHost: kHealNtpHost,
+      ));
+      final ctx = _ctx(iana: 'America/Chicago', phoneOffset: const Duration(hours: -5));
+      final report = await _healer(repo, isLan: true, ctx: ctx).run();
+
+      expect(repo.configPosts.single, {
+        'if': {
+          'ntp': {'tz': 5, 'offset': 0},
+        },
+      });
+      expect(report.tzHealed, true);
+      expect(report.rebooted, false);
+    });
+
+    test('offset-pinned unit + abbreviation, no phone zone → untouched',
+        () async {
+      final repo = _FakeHealRepo(ControllerClockInfo(
+        deviceTime: _now,
+        tzIndex: 0,
+        tzOffsetSeconds: -18000,
+        latitude: 41.88,
+        longitude: -87.63,
+        ntpHost: kHealNtpHost,
+      ));
+      final ctx = _ctx(iana: 'CDT', phoneOffset: const Duration(hours: -5));
+      await _healer(repo, isLan: true, ctx: ctx).run();
+
+      expect(repo.configPosts, isEmpty);
+    });
+
+    test('already-correct unit (tz 5 / 0) → no tz POST', () async {
+      final repo = _FakeHealRepo(_healthy());
+      final ctx = _ctx(iana: 'America/Chicago');
+      final report = await _healer(repo, isLan: true, ctx: ctx).run();
+
+      expect(repo.configPosts, isEmpty);
+      expect(report.tzHealed, false);
     });
   });
 

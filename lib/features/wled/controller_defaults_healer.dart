@@ -78,6 +78,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
 import 'package:nexgen_command/features/schedule/geometry_gate.dart';
@@ -174,47 +175,58 @@ bool ntpHostNeedsHeal({required bool clockUnset, String? currentHost}) {
   return currentHost == kKnownBadNtpHost;
 }
 
-/// A timezone heal: either a WLED tz enum index (`if.ntp.tz`) or, for a zone we
-/// can't map, a manual UTC offset in seconds (`if.ntp.offset`, with tz forced
-/// to UTC). WLED's tz field is an INDEX into a fixed firmware table, not an
-/// offset — see [kWledTzByIana].
+/// A timezone heal: a WLED tz enum index (`if.ntp.tz`). WLED's tz field is an
+/// INDEX into a fixed firmware table, not an offset — see [kWledTzByIana] — and
+/// the firmware applies daylight saving for it.
+///
+/// There is deliberately NO fixed-offset heal (TD-7). The old fallback wrote
+/// `tz:0` plus the phone's offset in seconds for a zone it could not map; a
+/// fixed offset never follows a daylight-saving change, so every such unit ran
+/// an hour wrong from the next change on — and, no longer reading UTC, never
+/// re-healed. A zone that cannot be mapped is now left alone instead.
 @immutable
 class TzHeal {
-  final int? tzIndex;
-  final int? offsetSeconds;
-  const TzHeal.index(int this.tzIndex) : offsetSeconds = null;
-  const TzHeal.offset(int this.offsetSeconds) : tzIndex = null;
-  bool get isIndex => tzIndex != null;
+  final int tzIndex;
+  const TzHeal.index(this.tzIndex);
 
   @override
-  bool operator ==(Object other) =>
-      other is TzHeal &&
-      other.tzIndex == tzIndex &&
-      other.offsetSeconds == offsetSeconds;
+  bool operator ==(Object other) => other is TzHeal && other.tzIndex == tzIndex;
   @override
-  int get hashCode => Object.hash(tzIndex, offsetSeconds);
+  int get hashCode => tzIndex.hashCode;
   @override
-  String toString() =>
-      isIndex ? 'TzHeal.index($tzIndex)' : 'TzHeal.offset($offsetSeconds)';
+  String toString() => 'TzHeal.index($tzIndex)';
 }
 
-/// Resolve the timezone heal when [tzSuspect] (device UTC, phone not).
+/// True when the device is on the UTC tz index with a nonzero manual offset —
+/// the shape the removed fixed-offset fallback wrote (TD-7). It does not read
+/// as UTC, so [ClockHealth.tzSuspect] never fires for it. Needs cfg (LAN).
+bool deviceTzOffsetPinned(ControllerClockInfo device) =>
+    device.timezoneKnown &&
+    device.tzIndex == kWledTzUtc &&
+    (device.tzOffsetSeconds ?? 0) != 0;
+
+/// Resolve the timezone heal. Two broken shapes are healed:
+///   * [tzSuspect] — the device reads UTC and the phone does not;
+///   * [offsetPinned] — the device is on the UTC index with a manual offset
+///     ([deviceTzOffsetPinned]), which the old fallback wrote and which never
+///     follows daylight saving (TD-7).
 ///
-/// Prefers the WLED tz enum index for the user's IANA zone ([kWledTzByIana] —
-/// the same mapping the installer uses); falls back to a manual [phoneOffset]
-/// when the zone is null or unmapped. Returns null when not suspect (heal-only-
-/// broken). NOTE: Dart exposes no reliable IANA name from the phone directly,
-/// so the user's stored profile timezone is the canonical zone source here; the
-/// offset fallback covers any unmapped zone.
+/// The zone is the profile's [ianaTimezone] when it maps to a WLED index
+/// ([kWledTzByIana] — the same mapping the installer uses), else the phone's
+/// own [phoneIanaTimezone] when THAT maps. The healer only runs on a LAN
+/// connect, so the phone is at the property. A null, abbreviated (`"CDT"`) or
+/// unmapped zone heals NOTHING: the device zone is left exactly as it is.
+/// Returns null when neither shape is present (heal-only-broken).
 TzHeal? tzHealFor({
   required bool tzSuspect,
+  bool offsetPinned = false,
   String? ianaTimezone,
-  required Duration phoneOffset,
+  String? phoneIanaTimezone,
 }) {
-  if (!tzSuspect) return null;
-  final idx = ianaTimezone == null ? null : kWledTzByIana[ianaTimezone];
-  if (idx != null && idx != kWledTzUtc) return TzHeal.index(idx);
-  return TzHeal.offset(phoneOffset.inSeconds);
+  if (!tzSuspect && !offsetPinned) return null;
+  final idx =
+      mappedWledTzForIana(ianaTimezone) ?? mappedWledTzForIana(phoneIanaTimezone);
+  return idx == null ? null : TzHeal.index(idx);
 }
 
 /// A coordinate heal, rounded to 2 decimals.
@@ -318,17 +330,14 @@ Map<String, dynamic> ntpHostHealPayload() => {
       },
     };
 
-Map<String, dynamic> tzHealPayload(TzHeal heal) => heal.isIndex
-    ? {
-        'if': {
-          'ntp': {'tz': heal.tzIndex},
-        },
-      }
-    : {
-        'if': {
-          'ntp': {'tz': kWledTzUtc, 'offset': heal.offsetSeconds},
-        },
-      };
+/// `offset:0` rides with every index: `if.ntp.offset` is ADDITIVE to the tz
+/// enum on the device, so healing an offset-pinned unit without zeroing it
+/// would double-shift the clock (same rule as pushTimeLocation).
+Map<String, dynamic> tzHealPayload(TzHeal heal) => {
+      'if': {
+        'ntp': {'tz': heal.tzIndex, 'offset': 0},
+      },
+    };
 
 Map<String, dynamic> coordHealPayload(CoordHeal heal) => {
       'if': {
@@ -345,6 +354,11 @@ class ControllerHealContext {
   final double? profileLon;
   final String? ianaTimezone;
 
+  /// The phone's own IANA zone (e.g. "America/Chicago"), or null when the
+  /// platform could not say. Consulted only when [ianaTimezone] does not map
+  /// (see [tzHealFor]).
+  final String? phoneIanaTimezone;
+
   /// Resolves the phone's position ONLY if location permission is already
   /// granted; returns null otherwise (never prompts).
   final Future<({double lat, double lon})?> Function() resolvePhonePosition;
@@ -352,15 +366,17 @@ class ControllerHealContext {
   /// Phone wall-clock supplier (injected for deterministic tests).
   final DateTime Function() now;
 
-  /// Phone UTC offset used for clock-health evaluation and the tz offset
-  /// fallback. Injected (not derived from [now]) so tests are deterministic
-  /// regardless of the machine timezone; the provider wires `now().timeZoneOffset`.
+  /// Phone UTC offset used for clock-health evaluation. Injected (not derived
+  /// from [now]) so tests are deterministic regardless of the machine
+  /// timezone; the provider wires `now().timeZoneOffset`. Never written to the
+  /// device (TD-7).
   final Duration phoneUtcOffset;
 
   const ControllerHealContext({
     required this.profileLat,
     required this.profileLon,
     required this.ianaTimezone,
+    this.phoneIanaTimezone,
     required this.resolvePhonePosition,
     required this.now,
     required this.phoneUtcOffset,
@@ -590,8 +606,9 @@ class ControllerDefaultsHealer {
     // (b) timezone
     final tz = tzHealFor(
       tzSuspect: health.tzSuspect,
+      offsetPinned: deviceTzOffsetPinned(info),
       ianaTimezone: ctx.ianaTimezone,
-      phoneOffset: ctx.phoneUtcOffset,
+      phoneIanaTimezone: ctx.phoneIanaTimezone,
     );
     if (tz != null) {
       if (await _post(tzHealPayload(tz), 'tz', report)) report.tzHealed = true;
@@ -1410,6 +1427,23 @@ Future<({double lat, double lon})?> _resolvePhonePositionIfPermitted() async {
   }
 }
 
+/// Resolves the phone's own IANA zone, or null when the platform cannot say.
+/// Overridable in tests (the platform channel does not exist there).
+final healerPhoneIanaTimezoneProvider = Provider<Future<String?> Function()>(
+  (ref) => _readPhoneIanaTimezone,
+);
+
+Future<String?> _readPhoneIanaTimezone() async {
+  try {
+    final zone = await FlutterTimezone.getLocalTimezone()
+        .timeout(const Duration(seconds: 3));
+    return zone.isEmpty ? null : zone;
+  } catch (e) {
+    debugPrint('[Healer] phone timezone unavailable: $e');
+    return null;
+  }
+}
+
 /// Returns a callable that runs the on-connect controller-defaults heal for the
 /// currently-connected controller. Fired imperatively by the [WledNotifier]
 /// connect listener (see [shouldHealOnConnect]) so no widget has to watch it.
@@ -1446,10 +1480,12 @@ final controllerDefaultsHealerProvider =
 
     final profile = ref.read(currentUserProfileProvider).valueOrNull;
     final nowFn = ref.read(healerPhoneNowProvider);
+    final phoneZone = await ref.read(healerPhoneIanaTimezoneProvider)();
     final ctx = ControllerHealContext(
       profileLat: profile?.latitude,
       profileLon: profile?.longitude,
       ianaTimezone: profile?.timeZone,
+      phoneIanaTimezone: phoneZone,
       resolvePhonePosition: ref.read(healerPhonePositionProvider),
       now: nowFn,
       phoneUtcOffset: nowFn().timeZoneOffset,
