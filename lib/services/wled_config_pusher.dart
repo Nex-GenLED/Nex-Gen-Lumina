@@ -82,6 +82,15 @@ const Map<String, int> kWledTzByIana = <String, int>{
 /// WLED's "no zone" / fallback index — clock runs on UTC.
 const int kWledTzUtc = 0;
 
+/// Build +121 (owner wording 2026-10-25): what an installer or customer reads
+/// when the profile's zone does not map to a firmware index, so the device's
+/// zone was left alone. Plain words, and never the raw value — an
+/// abbreviation such as the one older profiles carry would only confuse. The
+/// install-finish "Details" list and the Manage Controllers re-sync notice
+/// show push warnings verbatim, so this sentence is what they show.
+const String kTimeZoneNotRecognizedWarning =
+    "Time zone not changed: this profile's zone isn't recognized yet.";
+
 /// Resolves the WLED tz enum for an IANA name. Unknown names map to UTC.
 int wledTzForIana(String? iana) => kWledTzByIana[iana] ?? kWledTzUtc;
 
@@ -449,9 +458,7 @@ Future<WledConfigPushResult> pushTimeLocation(
   }
 
   if (tz == null) {
-    return WledConfigPushResult.warning(
-      'time zone left unchanged — "$ianaTimezone" is not a supported zone',
-    );
+    return WledConfigPushResult.warning(kTimeZoneNotRecognizedWarning);
   }
   return result;
 }
