@@ -111,6 +111,14 @@ void main() {
         await req.response.close();
         return;
       }
+      if (req.method != 'POST') {
+        // A read (the TD-10 layout guard's /json/state) is not a wire write;
+        // this fake records the POST bodies the tests assert on.
+        req.response.statusCode = 200;
+        req.response.write('{}');
+        await req.response.close();
+        return;
+      }
       bodies.add(await utf8.decoder.bind(req).join());
       req.response.statusCode = 200;
       req.response.write('{"success":true}');
