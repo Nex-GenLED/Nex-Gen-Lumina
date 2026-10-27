@@ -1068,9 +1068,14 @@ class WledService
     return _lastLiveSegmentIds;
   }
 
+  /// Bench seam only: the TD-10 guard can be switched off to record the
+  /// firmware's dropped-id behaviour on the spare. Never false in the app.
+  @visibleForTesting
+  static bool layoutGuardEnabled = true;
+
   Future<void> _repairLayoutBeforeMultiSegmentApply(
       Map<String, dynamic> payload) async {
-    if (_simulate) return;
+    if (_simulate || !layoutGuardEnabled) return;
     final addressed = addressedSegmentIds(payload);
     if (addressed.length < 2) return;
     Set<int>? live = _freshLiveSegmentIds;
