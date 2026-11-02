@@ -174,6 +174,51 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 
 ## Operational flags
 
+### ANDROID +121 — AAB built 2026-10-29 from `0dcb81a` (= tag `build-121`) — UPLOADED 2026-11-02 to Play Closed testing
+
+| item | value |
+|---|---|
+| Source | Tag `build-121` = `0dcb81a`, the bump commit (convention 1), so this bundle carries the same app code as iOS +121 below. Built in the worktree `lumina-121-td7` at `0dcb81a`; `git status` empty after. |
+| Build | Local Flutter 3.41.2 (3.47.5 cannot build Android here, #125), after `flutter clean` + `pub get`: `flutter build appbundle --release --obfuscate --split-debug-info=build/debug-info/android`. 23 min cold. |
+| Android artifact | `C:\Flutter Projects\lumina-b121-artifacts\lumina-2.5.10+121-0dcb81a.aab`, **70,383,952 bytes**, sha256 `2d762f5eeef2fca949eba3dec024eb2045e3a22d56c6d11525df1532705b07e0` (`SHA256.txt` alongside; re-hashed 2026-11-02, matches). Bundle manifest (bundletool 1.18.3): **versionCode 121** / 2.5.10 / minSdk 24 / targetSdk 36 / compileSdk 36. 16 KB page sizes: 6/6 64-bit libraries aligned. |
+| Signer | Read from the artifact on 2026-11-02 (`keytool -printcert -jarfile`): `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US`; certificate SHA-256 `96:6A:…:6D:DF`, the main checkout's upload keystore. Signing inputs came from the environment only: `CM_KEYSTORE_PATH` points at the main repo's keystore, nothing was copied, and the passwords were never printed. The only file placed in the worktree was the git-ignored `android/app/google-services.json`, which the guard byte-checks. |
+| Manifest vs 116 | Merged-manifest permissions identical to 116. The only Android shell change since 116 is the Maps removal (`04eacd0`, build 120): the Maps API-key meta-data, the Maps package query, the required glEs 2.0 feature and the Apache HTTP legacy library are gone. |
+| Symbols | `C:\Flutter Projects\lumina-b121-artifacts\debug-info-android\app.android-{arm,arm64,x64}.symbols` (6,952,332 / 7,994,464 / 7,995,504 bytes). Keep them: they are needed to read Play crash reports from this build. |
+| Upload | **UPLOADED 2026-11-02 by the owner**: manual Play Console upload to **Closed testing**. versionCode 121 is now burned on Play. No Android bundle was ever built at 117–120, and none can be uploaded now, since each is below 121. |
+| Marker | `.android-versioncode-state` (main checkout, git-ignored) set 116 → **121** on 2026-11-02. |
+| **Next Android bundle** | **versionCode must be 122 or higher.** `fix/122-segments-restore` (`76d213e`) is still numbered `2.5.10+121` in both `pubspec.yaml` and `lib/app_version.dart`. Bump it to +122 just before the Android bundle is cut, so the bump commit is the build point; a bundle cut from it as-is would be versionCode 121 and Play would reject it. Not bumped now: no version change on that branch without the owner's go. |
+| Rollback | Halt the rollout in Play Console. Testers who already have 121 keep it until a higher code ships; the rest stay on 116. |
+
+### +121 — build-121 tagged 2026-10-26 03:49Z (2026-10-25 22:49 CDT) (Codemagic build number: pending) — controller time zone from the profile's full IANA zone (TD-7)
+
+| item | value |
+|---|---|
+| Tag | `build-121` = `0dcb81a` (lightweight, the bump commit `chore(release): bump to 2.5.10+121`; convention 1). Release fast-forwarded `afc3bdc` → `0dcb81a` in `lumina-110-release` and pushed, then the tag pushed. |
+| Base | `afc3bdc` (= `build-120`). Branch `fix/121-td7-timezone`, five commits plus the bump: `1f73bb6` `dfe29dc` `caf1ccd` `658ef56` `38f2da2` `0dcb81a`. |
+| Contents | `1f73bb6`: the time/location push sends a zone only when the profile's IANA zone maps; an unmapped zone leaves the controller's zone alone, and more US zones map. `dfe29dc`: the healer never writes a fixed offset, and controllers pinned to an offset re-heal. `caf1ccd`: the profile editor stops writing its own time zone. `658ef56`: the phone's zone is read only when a heal is due. `38f2da2`: an unrecognized zone shows "Time zone not changed: this profile's zone isn't recognized yet." and never the raw abbreviation. |
+| Not changed | `git diff --stat build-120 build-121 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. |
+| Gates on `0dcb81a` | Local 3.41.2: analyze 0 / 12 / 355, tests 5,649 pass / 37 skip / 0 fail. 3.47.5: analyze 0 / 12 / 360, tests 5,649 / 37 / 0 (build-120 = 5,628, so +21). `node scripts/docs_guard.mjs`: 44 files, 119 facts, 0 failures, 0 warnings. PII scan of `afc3bdc..38f2da2`: clean. |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | GitHub check-run `121391279813` "iOS Release" on `0dcb81a`: completed / **success** 2026-10-25 23:01 CDT. It was opened as `121388307226`, which stays `in_progress`, as with +109 onward. Codemagic build `6adecdc2f2f481e66a6bd3f7`. 14/14 steps green; Test and analyze 5:58, Build IPA 3:02, Publishing 1:26. |
+| iOS build number | pending. TestFlight shows Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +121 (see the header and `codemagic.yaml` "Set build number"). Earlier 2.5.10 builds read 335 (+99) and 352 (+117), so this one is above 352. Read it from App Store Connect → TestFlight. |
+| Android | Built 2026-10-29 and uploaded 2026-11-02: see ANDROID +121 above. |
+| Rollback | Rollback note not written: this row was recorded after the fact, from the cut notes. |
+
+### +120 — build-120 tagged 2026-10-22 21:17Z (16:17 CDT) (Codemagic build number: pending) — store-readiness pass, feature hides, flash caps (Strobe family 230, Lightning 40/60), cfg writes carry the frame rate, large-text layout, Maps removed
+
+| item | value |
+|---|---|
+| Tag | `build-120` = `afc3bdc` (lightweight, the bump commit `chore(release): bump to 2.5.10+120`; convention 1). Release fast-forwarded `afcb6f8` → `afc3bdc` in `lumina-110-release` and pushed, then the tag pushed. |
+| Base | `afcb6f8` (= `build-119` `83b9ccc` + its ledger row). 45 first-parent commits `afcb6f8..afc3bdc`. |
+| Contents | Grouped from `git log --first-parent afcb6f8..afc3bdc`. **Controller writes:** `fa8ef16` `d48c057` `7baeba9`, every cfg write carries `hw.led.fps` (a missing key reads as unlimited on 0.15.x), with a one-shot frame-rate heal and 42 as the substituted rate. **Large text:** `758f5a3`–`23a4a45`. **Hides:** `05483c5` `7c8ece7` `301ee2a` `046ae07` (Game Day crews, the neighborhood broadcast, Discover Nearby and the public listing, Group Schedule) and `68dddeb` (Movies & Superheroes). **Flash safety:** `801db83` `408aeca` `048b0e7` `aebb234` `15f3fd0` `28dda44` `c1fe727`: Strobe family capped at 230, Lightning clamped to speed 40 / intensity 60 on every write and out of the celebration picker and the Halloween / Stormy Seas / Thunderstorm suggestions, the fan-out payload normalized. **Store readiness:** `d462a25`–`5c20ad9`: iPhone only, portrait only; permission strings; the simulated-controller paths; the deletion dialog; the privacy manifest. **Store window:** `0fc8cc6` `04eacd0` `e3342aa`: GPS only while a Welcome Home config exists, `google_maps_flutter` removed, Lumina AI asks before it sends anything. **Names:** `d7bcd70` `7c29e93` `b1d1891` `2e79751` `b9201f3`: names, brands and effect labels. **Also:** `6cd6d0b`, a member-side stale sync-command guard (4 h); `62663cf`, seven customer strings; `2ed68a8`, the signed-out demo says Lumina AI needs an account. **Debt note:** `fecfe17` (#168). |
+| Shell changes | `git diff --stat build-119 build-120 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` changes six files: `android/app/src/main/AndroidManifest.xml`, `ios/Runner.xcodeproj/project.pbxproj`, `ios/Runner/AppDelegate.swift`, `ios/Runner/Info.plist`, `ios/Runner/PrivacyInfo.xcprivacy`, `ios/Runner/Runner.entitlements`. No change under `functions/` or to rules, indexes or `codemagic.yaml`. |
+| Gates | Run on `fecfe17`, the bump's parent: local 3.41.2 analyze 0 / 12 / 355, tests 5,628 pass / 37 skip / 0 fail; 3.47.5 analyze 0 / 12 / 360, tests 5,628 / 37 / 0 (re-run; the first run had one wall-clock failure in a file the branch does not touch, and 3.47.5 did not run because of a pub.dev socket error). On the bump `afc3bdc`: analyze equal to the gate, 61 version tests green, `docs_guard` 44 files / 119 facts / 0 / 0. PII scan of the 43 commits: clean. |
+| Functions | No deploy. |
+| Check-run | GitHub check-run `120107372242` "iOS Release" on `afc3bdc`: completed / **success** 2026-10-22 16:46 CDT. It was opened as `120094256236`, which stays `in_progress`. Codemagic build `6ada7d526a1999f83b2564b5`. All 14 steps green; Test and analyze 18:54, Build IPA 5:00, Publishing 1:49. |
+| iOS build number | pending. Same rule as +121: Codemagic's counter, above 352. Read it from App Store Connect → TestFlight. |
+| Android | NOT built. `pubspec.yaml` read `+120`. versionCode 120 is now unusable, since 121 is on Play. |
+| Rollback | Rollback note not written: this row was recorded after the fact, from the cut notes. |
+
 ### +119 — build-119 tagged 2026-10-20 20:31:11Z (15:31:11 CDT) (Codemagic build number: pending) — first App Store candidate: Autopilot, weekly generation and Simple Mode withheld; Neighborhood Sync bottom band fixed
 
 | item | value |
