@@ -57,11 +57,27 @@ void main() {
       expect(spy.markCalls, isEmpty);
     });
 
-    test('member offline → markSelfParticipating NOT called '
-        '(participation gate runs before self-write)', () async {
+    // Sync Start window (2026-11-02): a stale `isOnline:false` no longer
+    // outranks an explicit slot in command.memberDelays — the sender keeps the
+    // initiator in the map whatever their presence flag says, and the own-apply
+    // gate honours that. An offline member WITHOUT a slot is still gated (the
+    // "not in command.memberDelays" case below).
+    test('member offline but IN command.memberDelays → markSelfParticipating '
+        'IS called (an explicit slot outranks the stale presence flag)', () async {
       final spy = _runReceive(
         currentMember: _baseMember(isParticipating: false, isOnline: false),
         command: _baseCommand(),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(spy.markCalls.length, 1);
+      expect(spy.markCalls.single.memberUid, equals('u1'));
+    });
+
+    test('member offline and NOT in command.memberDelays → markSelfParticipating '
+        'NOT called (participation gate runs before self-write)', () async {
+      final spy = _runReceive(
+        currentMember: _baseMember(isParticipating: false, isOnline: false),
+        command: _baseCommand(memberDelays: const {'someone_else': 0}),
       );
       await Future<void>.delayed(Duration.zero);
       expect(spy.markCalls, isEmpty);
