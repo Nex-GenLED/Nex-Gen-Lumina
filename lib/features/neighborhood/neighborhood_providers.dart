@@ -1,13 +1,61 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/error_sink.dart';
 import '../wled/wled_payload_utils.dart' show normalizeWledPayload;
 import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
 import 'sync_fanout_feature_flag.dart';
 import 'services/sync_notification_service.dart';
+
+/// How long Start waits for the fan-out flag's real value before giving up
+/// visibly. The flag is one small, cached document; a cold read on a working
+/// connection takes well under this.
+const Duration kSyncFanoutFlagTimeout = Duration(seconds: 5);
+
+/// Why a Start ended with NOTHING fired. [reason] is a short code
+/// (`flag_unavailable`, `write_timeout`, `client_error`); the user-facing text
+/// for each lives in sync_start_feedback.dart so it is in one place and tested.
+class SyncStartFailure {
+  final String reason;
+  final Object? error;
+  const SyncStartFailure(this.reason, {this.error});
+}
+
+/// Outcome of one Start ([NeighborhoodNotifier.broadcastSync]).
+///
+/// Replaces the old `FanoutResult?` return, whose `null` meant both "flag
+/// off" and "something threw and was swallowed" — the caller could not tell
+/// a working app-open-only sync from a Start that sent nothing.
+class SyncStartResult {
+  /// True only once the group command document was acknowledged by the
+  /// backend — the one event that turns the group on for everyone.
+  final bool commandWritten;
+
+  /// The fan-out call's outcome. Null when the flag is off (not attempted).
+  final FanoutResult? fanout;
+
+  /// Set when nothing fired because of a failure (not a rate-limit reject —
+  /// that is reported through [fanout]).
+  final SyncStartFailure? failure;
+
+  const SyncStartResult({
+    required this.commandWritten,
+    this.fanout,
+    this.failure,
+  });
+
+  const SyncStartResult.failed(SyncStartFailure f)
+      : commandWritten = false,
+        fanout = null,
+        failure = f;
+
+  bool get rateLimited => fanout?.rateLimited ?? false;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Onboarding Completion Flag
@@ -354,18 +402,49 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
 
   /// Broadcasts a sync command to all members.
   ///
-  /// Returns the [FanoutResult] when the flag is on (null otherwise) so the UI
-  /// caller can surface a rate-limit "try again" message. Ordering (flag ON):
-  /// fanout FIRST (it enforces the server-side rate limit); on a rate-limited
-  /// reject, fire NOTHING — not even the app-open broadcast — so the two
-  /// delivery paths stay consistent (Commit 2). A plain fanout failure
-  /// (network/500) still falls through to the broadcast so app-open members
-  /// aren't left dark. Flag OFF ⇒ only the broadcast, exactly as today.
-  Future<FanoutResult?> broadcastSync(SyncCommand command) async {
+  /// Returns a [SyncStartResult] so the UI can tell the four outcomes apart:
+  /// written (with or without a fan-out), rate-limited (nothing fired), and
+  /// failed (nothing fired, with a reason). Ordering (flag ON): fanout FIRST
+  /// (it enforces the server-side rate limit); on a rate-limited reject, fire
+  /// NOTHING — not even the app-open broadcast — so the two delivery paths
+  /// stay consistent (Commit 2). A plain fanout failure (network/500) still
+  /// falls through to the broadcast so app-open members aren't left dark; the
+  /// result carries the fan-out's reason so the user is told. Flag OFF ⇒ only
+  /// the broadcast.
+  ///
+  /// Sync Start window (2026-11-02):
+  ///  * The flag is AWAITED (`syncFanoutEnabledProvider.future`), bounded by
+  ///    [flagTimeout]. It used to be read synchronously through a provider
+  ///    nothing watched, so the first Start of every app session saw the
+  ///    stream loading, read `false`, and never fanned out.
+  ///  * A flag that cannot be read (stream error, timeout) is a VISIBLE
+  ///    failure and nothing fires — not a silent app-open-only sync. The
+  ///    stream is invalidated so the next tap retries.
+  ///  * Nothing is swallowed: every failure is recorded in the app's error
+  ///    sink and returned with a reason; the notifier's error state is kept
+  ///    for anything that still watches it.
+  ///  * The command write is bounded by [writeTimeout] (see
+  ///    [NeighborhoodService.broadcastSyncCommand] for what happens to a
+  ///    write that is flushed late).
+  Future<SyncStartResult> broadcastSync(
+    SyncCommand command, {
+    Duration flagTimeout = kSyncFanoutFlagTimeout,
+    Duration writeTimeout = kSyncCommandWriteTimeout,
+  }) async {
     state = const AsyncValue.loading();
     try {
+      final bool fanoutOn;
+      try {
+        fanoutOn = await ref
+            .read(syncFanoutEnabledProvider.future)
+            .timeout(flagTimeout);
+      } catch (e, st) {
+        ref.invalidate(syncFanoutEnabledProvider);
+        return _fail('flag_unavailable', e, st);
+      }
+
       FanoutResult? result;
-      if (ref.read(syncFanoutEnabledSyncProvider)) {
+      if (fanoutOn) {
         // Build 120 (owner decision 2026-10-22): the fan-out payload crosses
         // the same normalizer every applyJson does, so a closed-app member's
         // bridge never receives a raw Strobe-family or Lightning value. An
@@ -378,17 +457,32 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
         if (result.rateLimited) {
           // Reject = nothing fires: skip the broadcast entirely.
           state = const AsyncValue.data(null);
-          return result;
+          return SyncStartResult(commandWritten: false, fanout: result);
         }
       }
 
-      await _service.broadcastSyncCommand(command);
+      await _service.broadcastSyncCommand(command, writeTimeout: writeTimeout);
       state = const AsyncValue.data(null);
-      return result;
+      return SyncStartResult(commandWritten: true, fanout: result);
+    } on TimeoutException catch (e, st) {
+      return _fail('write_timeout', e, st);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
-      return null;
+      return _fail('client_error', e, st);
     }
+  }
+
+  /// One exit for every Start failure: console, error sink (the same
+  /// `debug_errors` record an uncaught error gets), notifier state, and a
+  /// result the caller can show.
+  SyncStartResult _fail(String reason, Object e, StackTrace st) {
+    debugPrint('🏘️ [NeighborhoodNotifier] broadcastSync FAILED ($reason): $e');
+    state = AsyncValue.error(e, st);
+    unawaited(ref.read(errorReporterProvider)(
+      error: e,
+      stack: st,
+      context: 'broadcastSync/$reason',
+    ));
+    return SyncStartResult.failed(SyncStartFailure(reason, error: e));
   }
 
   /// Build the shared WLED payload for the server fanout from [command]'s base
