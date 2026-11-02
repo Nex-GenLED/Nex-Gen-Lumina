@@ -189,7 +189,7 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | **Next Android bundle** | **versionCode must be 122 or higher.** `fix/122-segments-restore` (`76d213e`) is still numbered `2.5.10+121` in both `pubspec.yaml` and `lib/app_version.dart`. Bump it to +122 just before the Android bundle is cut, so the bump commit is the build point; a bundle cut from it as-is would be versionCode 121 and Play would reject it. Not bumped now: no version change on that branch without the owner's go. |
 | Rollback | Halt the rollout in Play Console. Testers who already have 121 keep it until a higher code ships; the rest stay on 116. |
 
-### +121 — build-121 tagged 2026-10-26 03:49Z (2026-10-25 22:49 CDT) (Codemagic build number: pending) — controller time zone from the profile's full IANA zone (TD-7)
+### +121 — build-121 tagged 2026-10-26 03:49Z (2026-10-25 22:49 CDT) (Codemagic build number: 356) — controller time zone from the profile's full IANA zone (TD-7)
 
 | item | value |
 |---|---|
@@ -200,11 +200,11 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | Gates on `0dcb81a` | Local 3.41.2: analyze 0 / 12 / 355, tests 5,649 pass / 37 skip / 0 fail. 3.47.5: analyze 0 / 12 / 360, tests 5,649 / 37 / 0 (build-120 = 5,628, so +21). `node scripts/docs_guard.mjs`: 44 files, 119 facts, 0 failures, 0 warnings. PII scan of `afc3bdc..38f2da2`: clean. |
 | Functions | No deploy. No rules, indexes, hosting or config change. |
 | Check-run | GitHub check-run `121391279813` "iOS Release" on `0dcb81a`: completed / **success** 2026-10-25 23:01 CDT. It was opened as `121388307226`, which stays `in_progress`, as with +109 onward. Codemagic build `6adecdc2f2f481e66a6bd3f7`. 14/14 steps green; Test and analyze 5:58, Build IPA 3:02, Publishing 1:26. |
-| iOS build number | pending. TestFlight shows Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +121 (see the header and `codemagic.yaml` "Set build number"). Earlier 2.5.10 builds read 335 (+99) and 352 (+117), so this one is above 352. Read it from App Store Connect → TestFlight. |
+| iOS build number | **356**: TestFlight `2.5.10 (356)`. The owner read it from App Store Connect on 2026-11-02 and checked it against the Codemagic run for tag `build-121`. It is Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +121 (see the header and `codemagic.yaml` "Set build number"). |
 | Android | Built 2026-10-29 and uploaded 2026-11-02: see ANDROID +121 above. |
 | Rollback | Rollback note not written: this row was recorded after the fact, from the cut notes. |
 
-### +120 — build-120 tagged 2026-10-22 21:17Z (16:17 CDT) (Codemagic build number: pending) — store-readiness pass, feature hides, flash caps (Strobe family 230, Lightning 40/60), cfg writes carry the frame rate, large-text layout, Maps removed
+### +120 — build-120 tagged 2026-10-22 21:17Z (16:17 CDT) (Codemagic build number: 355) — store-readiness pass, feature hides, flash caps (Strobe family 230, Lightning 40/60), cfg writes carry the frame rate, large-text layout, Maps removed
 
 | item | value |
 |---|---|
@@ -215,7 +215,7 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | Gates | Run on `fecfe17`, the bump's parent: local 3.41.2 analyze 0 / 12 / 355, tests 5,628 pass / 37 skip / 0 fail; 3.47.5 analyze 0 / 12 / 360, tests 5,628 / 37 / 0 (re-run; the first run had one wall-clock failure in a file the branch does not touch, and 3.47.5 did not run because of a pub.dev socket error). On the bump `afc3bdc`: analyze equal to the gate, 61 version tests green, `docs_guard` 44 files / 119 facts / 0 / 0. PII scan of the 43 commits: clean. |
 | Functions | No deploy. |
 | Check-run | GitHub check-run `120107372242` "iOS Release" on `afc3bdc`: completed / **success** 2026-10-22 16:46 CDT. It was opened as `120094256236`, which stays `in_progress`. Codemagic build `6ada7d526a1999f83b2564b5`. All 14 steps green; Test and analyze 18:54, Build IPA 5:00, Publishing 1:49. |
-| iOS build number | pending. Same rule as +121: Codemagic's counter, above 352. Read it from App Store Connect → TestFlight. |
+| iOS build number | **355**: TestFlight `2.5.10 (355)`. The owner read it from App Store Connect on 2026-11-02 and checked it against the Codemagic run for tag `build-120`. It is Codemagic's counter, as for +121. |
 | Android | NOT built. `pubspec.yaml` read `+120`. versionCode 120 is now unusable, since 121 is on Play. |
 | Rollback | Rollback note not written: this row was recorded after the fact, from the cut notes. |
 
