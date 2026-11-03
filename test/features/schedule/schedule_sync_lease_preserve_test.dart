@@ -166,8 +166,12 @@ void main() {
     final schedMacros = macros.where((m) => m >= 10 && m <= 25).toList();
     expect(schedMacros.length, 2,
         reason: 'schedules capped at 8-6=2 general slots');
-    expect(result.presetErrors.any((e) => e.contains('slots are full')), isTrue,
-        reason: 'schedule overflow surfaces the existing 8/8 warning');
+    expect(
+        result.presetErrors,
+        contains('"Pattern: c" is not on your controller: it needs 1 timer '
+            'slot and only 0 are free (6 are held by one-night or Game Day '
+            'nights). Turn off or delete another schedule, then tap Sync.'),
+        reason: 'the schedule that does not fit is named, in plain words');
     expect(h.repo.lastIns.where((t) => t['en'] == 1).length, lessThanOrEqualTo(8),
         reason: 'never more than 8 real timers on the controller');
   });

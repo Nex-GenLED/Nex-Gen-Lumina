@@ -50,6 +50,7 @@ import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/timer_table.dart';
 import 'package:nexgen_command/features/schedule/timer_table_context.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
@@ -98,27 +99,26 @@ const String _kLogPrefix = 'CalendarLease:';
 // [CalendarScheduleNotifier]. Production reads flow through the upstream
 // providers untouched.
 
-/// Slot demand from currently-enabled, non-evicted ScheduleItems.
+/// Slot demand from currently-enabled, non-evicted ScheduleItems, in ROWS.
 ///
-/// Treats each enabled ScheduleItem as occupying one timer slot. Real
-/// [ScheduleSyncService.buildCfgPayload] can consume 1–2 slots per
-/// schedule when an OFF timer is configured, but the upstream loop caps
-/// at 8 regardless. Treating each as 1 here is a conservative simplification
-/// that matches the unit-test contract and gives leases the back end of
-/// the slot range; over-allocation (counting fewer slots than reality)
-/// would have the lease manager overwrite ScheduleItem slots, which is
-/// strictly worse.
+/// Each schedule costs one general row per clock boundary (ON and OFF); a
+/// sunrise/sunset boundary costs none while solar is enabled (it lives in
+/// slot 8/9). This used to count one per SCHEDULE, so four clock schedules
+/// with on and off times (8 rows) left "4 free": a one-night was allocated a
+/// slot, then cut from the full table, and the screen still said "Saved for…".
+/// Counting rows makes that night refused honestly instead (noFreeSlots).
 ///
-/// Excludes [ScheduleItem.isCurrentlyEvicted] items so the lease
-/// manager's free-slot count agrees with what `buildCfgPayload`
-/// actually writes (Item #61 Workstream B eviction filter must match
-/// on both sides of the pipe — divergence would re-introduce silent
-/// slot overwrites).
+/// Excludes [ScheduleItem.isCurrentlyEvicted] items so the lease manager's
+/// free-slot count agrees with what the table builder writes. The solar flag
+/// is read the way schedule sync reads it; while it is loading, sun
+/// boundaries count as rows — an overcount, never an overwrite.
 final calendarLeaseScheduleSlotDemandProvider = Provider<int>((ref) {
-  final schedules = ref.watch(schedulesProvider);
-  final demand =
-      schedules.where((s) => s.enabled && !s.isCurrentlyEvicted).length;
-  return demand.clamp(0, kWledMaxTimerSlots);
+  final schedules = ref.watch(calendarLeaseSchedulesProvider);
+  final solar = ref.watch(solarSchedulingEnabledSyncProvider);
+  final rows = schedules
+      .where((s) => s.enabled && !s.isCurrentlyEvicted)
+      .fold<int>(0, (n, s) => n + generalRowsFor(s, solarEnabled: solar));
+  return rows.clamp(0, kWledMaxTimerSlots);
 });
 
 /// All CalendarEntries the sweep should consider for newly-imminent

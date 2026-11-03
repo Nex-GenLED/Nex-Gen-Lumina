@@ -88,8 +88,27 @@ Map<String, dynamic> sunRow({
 
 bool _isSunrise(String? label) => label?.trim().toLowerCase() == 'sunrise';
 
-/// Which [armable] schedules fit [maxSlots] general rows. Mirrors
-/// [cfg.buildCfgPayload]'s ON-then-OFF consumption.
+/// General (clock) rows [s] needs: one per clock ON, one per clock OFF. Sun
+/// boundaries cost nothing here when solar is enabled — they live in 8/9.
+int generalRowsFor(ScheduleItem s, {required bool solarEnabled}) {
+  final onSolar = solarEnabled && cfg.isSolarLabel(s.timeLabel);
+  final offSolar = solarEnabled &&
+      s.hasOffTime &&
+      s.offTimeLabel != null &&
+      cfg.isSolarLabel(s.offTimeLabel!);
+  var n = onSolar ? 0 : 1;
+  if (s.hasOffTime && s.offTimeLabel != null && !offSolar) n += 1;
+  return n;
+}
+
+/// Which [armable] schedules fit [maxSlots] general rows.
+///
+/// A schedule arms only if ALL of its rows fit. This used to arm a schedule
+/// whose ON fit but whose OFF did not, and the builder then dropped the OFF:
+/// "Sunset → 11 PM" was armed (its sunset row costs no general slot) with no
+/// 11 PM row at all, so the lights came on and never went off, with no
+/// warning. A schedule that does not fit is skipped and the next one is
+/// still considered, in order.
 ({List<ScheduleItem> armed, bool overflowed}) splitByCapacity(
   List<ScheduleItem> armable, {
   bool solarEnabled = false,
@@ -100,22 +119,12 @@ bool _isSunrise(String? label) => label?.trim().toLowerCase() == 'sunrise';
   var slotsUsed = 0;
   var overflowed = false;
   for (final s in armable) {
-    final onSolar = solarEnabled && cfg.isSolarLabel(s.timeLabel);
-    final offSolar = solarEnabled &&
-        s.hasOffTime &&
-        s.offTimeLabel != null &&
-        cfg.isSolarLabel(s.offTimeLabel!);
-    if (!onSolar && slotsUsed >= budget) {
+    final need = generalRowsFor(s, solarEnabled: solarEnabled);
+    if (slotsUsed + need > budget) {
       overflowed = true;
-      break;
+      continue;
     }
-    if (!onSolar) slotsUsed += 1;
-    if (s.hasOffTime &&
-        s.offTimeLabel != null &&
-        !offSolar &&
-        slotsUsed < budget) {
-      slotsUsed += 1;
-    }
+    slotsUsed += need;
     armed.add(s);
   }
   return (armed: armed, overflowed: overflowed);
@@ -258,10 +267,24 @@ TimerTable buildTimerTable({
       maxSlots: kTableGeneralSlots - leaseRows.length);
   final armed = capacity.armed;
   if (capacity.overflowed) {
-    warnings.add("Schedule saved but couldn't arm — controller timer slots "
-        'are full (8/8). Delete an old schedule.');
+    final budget = kTableGeneralSlots - leaseRows.length;
+    final used = armed.fold<int>(
+        0, (n, s) => n + generalRowsFor(s, solarEnabled: solarEnabled));
+    final free = (budget - used).clamp(0, kTableGeneralSlots);
+    final held = leaseRows.isEmpty
+        ? ''
+        : ' (${leaseRows.length} ${leaseRows.length == 1 ? 'is' : 'are'} '
+            'held by one-night or Game Day nights)';
+    for (final s in armable) {
+      if (armed.contains(s)) continue;
+      final need = generalRowsFor(s, solarEnabled: solarEnabled);
+      warnings.add('"${s.actionLabel}" is not on your controller: it needs '
+          '$need timer ${need == 1 ? 'slot' : 'slots'} and only $free '
+          '${free == 1 ? 'is' : 'are'} free$held. Turn off or delete another '
+          'schedule, then tap Sync.');
+    }
     debug?.call('TimerTable: ${armable.length - armed.length} schedule(s) '
-        'could not arm — WLED timer table full (8/8)');
+        'could not arm — not enough timer slots');
   }
 
   final clock = ((cfg.buildCfgPayload(armed,
