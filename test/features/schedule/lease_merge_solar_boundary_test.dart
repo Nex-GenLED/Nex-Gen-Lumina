@@ -90,6 +90,7 @@ void main() {
       calendarLeaseScheduleSlotDemandProvider
           .overrideWith((_) => schedules.length),
       calendarLeaseEntriesProvider.overrideWithValue(const []),
+      calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
       calendarLeaseSchedulesProvider.overrideWithValue(schedules),
       calendarLeaseScheduleUpdaterProvider.overrideWith((_) => (_) async {}),
       calendarLeaseScheduleSyncTriggerProvider
