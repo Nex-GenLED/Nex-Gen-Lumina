@@ -46,6 +46,7 @@ import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dar
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
 import 'package:nexgen_command/features/schedule/geometry_gate.dart';
+import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
@@ -387,6 +388,13 @@ class CalendarEntryLease {
   /// null holder is treated as "unknown", i.e. re-derived on any delete.
   final String? entryId;
 
+  /// 2026-11-02 — the entry's channel scope (`CalendarEntry.channels`), carried
+  /// so the device write can fire it through `scopePatternPayload`, the same
+  /// rule the recurring path uses. The editor has persisted this scope since
+  /// D4 and the lease ignored it. Null = every channel. Absent on records
+  /// persisted before the field existed, which reads as null.
+  final List<int>? channels;
+
   const CalendarEntryLease({
     required this.dateKey,
     required this.slotIndex,
@@ -399,6 +407,7 @@ class CalendarEntryLease {
     required this.wledMin,
     required this.dowMask,
     this.entryId,
+    this.channels,
   });
 
   CalendarEntryLease copyWith({
@@ -412,6 +421,11 @@ class CalendarEntryLease {
     int? wledMin,
     int? dowMask,
     String? entryId,
+    List<int>? channels,
+
+    /// Clears the scope — `channels: null` cannot express removal through the
+    /// `?? this.x` idiom (same convention as the entry and schedule models).
+    bool clearChannels = false,
   }) =>
       CalendarEntryLease(
         dateKey: dateKey,
@@ -425,6 +439,7 @@ class CalendarEntryLease {
         wledMin: wledMin ?? this.wledMin,
         dowMask: dowMask ?? this.dowMask,
         entryId: entryId ?? this.entryId,
+        channels: clearChannels ? null : (channels ?? this.channels),
       );
 
   Map<String, dynamic> toJson() => {
@@ -439,12 +454,21 @@ class CalendarEntryLease {
         'wledMin': wledMin,
         'dowMask': dowMask,
         if (entryId != null) 'entryId': entryId,
+        if (channels != null) 'channels': channels,
       };
+
+  /// Tolerant: absent, wrong type, or non-integral members collapse to null
+  /// ("all channels") rather than rejecting the whole record.
+  static List<int>? _channelsFromJson(dynamic raw) {
+    if (raw is! List) return null;
+    return raw.whereType<num>().map((n) => n.toInt()).toList(growable: false);
+  }
 
   static CalendarEntryLease? fromJson(Map<String, dynamic> json) {
     try {
       return CalendarEntryLease(
         entryId: json['entryId'] as String?,
+        channels: _channelsFromJson(json['channels']),
         dateKey: json['dateKey'] as String,
         slotIndex: (json['slotIndex'] as num).toInt(),
         presetId: (json['presetId'] as num).toInt(),
@@ -721,6 +745,8 @@ class CalendarEntryLeaseManager {
         wledMin: onHm.min,
         dowMask: dowMask,
         entryId: entry.entryId,
+        channels: entry.channels,
+        clearChannels: entry.channels == null,
       );
       _activeLeases[entry.dateKey] = updated;
       await _saveToPrefs();
@@ -821,6 +847,7 @@ class CalendarEntryLeaseManager {
       wledMin: onHm.min,
       dowMask: dowMask,
       entryId: entry.entryId,
+      channels: entry.channels,
     );
     _activeLeases[entry.dateKey] = lease;
     await _saveToPrefs();
@@ -1457,6 +1484,11 @@ class CalendarEntryLeaseManager {
         // caller 3 of 4; it was the one that had not been wired.
         final gate = await _geometryGateInputsFor(repo);
         final presetName = 'Lease ${lease.dateKey}';
+        // 2026-11-02 — the body is shaped at WRITE time, when the bus set is
+        // known: fanned out over every bus, or scoped to the entry's channels.
+        // The registry keeps the entry's raw payload so an old record and a
+        // new one render identically from the same device facts.
+        final body = await _leasePresetBody(repo, lease, gate.expected);
         final gated = await gatedSaveFn(
           presetId: lease.presetId,
           presetName: presetName,
@@ -1466,7 +1498,7 @@ class CalendarEntryLeaseManager {
           label: 'lease preset',
           save: () => repo.savePreset(
             presetId: lease.presetId,
-            state: lease.wledPayload,
+            state: body,
             presetName: presetName,
           ),
         );
@@ -1532,6 +1564,53 @@ class CalendarEntryLeaseManager {
         return (attempt: _WriteAttempt.savePresetFailed, gateSummary: null);
       }
     });
+  }
+
+  /// The preset body a lease is psaved with — 2026-11-02.
+  ///
+  /// A one-night entry carries the Explore tuner's hand-back verbatim: ONE
+  /// segment with no `id`. The firmware applies that to segment 0 only and
+  /// `psave` snapshots every other segment as it was (U7), so on a multi-bus
+  /// controller the night fired on channel 1 alone. Two shapes, same rules as
+  /// the recurring path in `ScheduleSyncService`:
+  ///
+  ///   • SCOPED (the entry named channels): `scopePatternPayload` — the
+  ///     addressed buses carry the design, every other live segment is named
+  ///     `on:false` (D2/D4 semantics: a scoped night DARKENS the rest, as the
+  ///     editor says). Needs the live layout for the census; an unreadable
+  ///     state still names the addressed ids.
+  ///   • UNSCOPED: `fanOutPatternPayloadToBuses` over [buses] — the ids of
+  ///     `deviceChannelsFromConfig(cfg)`, the controller's own bus list and the
+  ///     same device truth the gate re-provisions against. Empty (relay,
+  ///     unreadable cfg) or single-bus ⇒ the payload passes through unchanged,
+  ///     exactly as before.
+  ///
+  /// A payload with no `seg` (the OFF lease) is never reshaped: its root
+  /// `on:false` is what turns the house off, and a partition would change
+  /// what an OFF night means.
+  Future<Map<String, dynamic>> _leasePresetBody(
+    WledRepository repo,
+    CalendarEntryLease lease,
+    List<SegmentShape> buses,
+  ) async {
+    final payload = lease.wledPayload;
+    final seg = payload['seg'];
+    if (seg is! List || seg.isEmpty) return payload;
+    final channels = lease.channels;
+    if (channels != null) {
+      Map<String, dynamic>? live;
+      try {
+        live = await repo.getState();
+      } catch (_) {
+        live = null;
+      }
+      return ScheduleSyncService.scopePatternPayload(
+        payload,
+        live,
+        channels: channels,
+      );
+    }
+    return fanOutPatternPayloadToBuses(payload, buses.map((s) => s.id));
   }
 
   /// Geometry-gate inputs for the lease preset write.
