@@ -724,6 +724,14 @@ class ControllerDefaultsHealer {
     // own, and only once per controller (marker), so a healthy connect stays
     // write-free and a healed one is never written again.
     final targetFps = info.targetFps;
+    // +122 item 3: a usable rate SPENDS the one-time marker. The marker means
+    // "written, not yet seen usable" — never "healed forever" — so a later cfg
+    // write that dropped the rate (an older build, the controller's own UI)
+    // is healed again on the next connect. A device that never takes the write
+    // keeps its marker and is never written twice, as before.
+    if (targetFps != null && isUsableTargetFps(targetFps)) {
+      await _spendTargetFpsMarker(targetFps, report, 'connect');
+    }
     if (targetFps != null && !isUsableTargetFps(targetFps)) {
       final id = controllerId;
       final store = markers;
@@ -1156,9 +1164,31 @@ class ControllerDefaultsHealer {
           after.longitude == 0) {
         report.log.add('readback: coords still 0,0');
       }
+      // +122 item 3: a rate write the device honoured is confirmed here, and
+      // the marker is spent at once; one it did not take keeps the marker.
+      if (report.targetFpsHealed) {
+        final fps = after.targetFps;
+        if (isUsableTargetFps(fps)) {
+          await _spendTargetFpsMarker(fps!, report, 'readback');
+        } else {
+          report.log.add('readback: target fps still $fps (marker kept)');
+        }
+      }
     } catch (e) {
       report.log.add('readback error: $e');
     }
+  }
+
+  /// +122 item 3: the rate reads usable — clear this controller's one-time
+  /// marker so a later regression to the unlimited mode is healed again.
+  Future<void> _spendTargetFpsMarker(
+      int fps, ControllerHealReport report, String when) async {
+    final id = controllerId;
+    final store = markers;
+    if (id == null || id.isEmpty || store == null) return;
+    if (!await store.targetFpsHealDone(id)) return;
+    await store.clearTargetFpsHealDone(id);
+    report.log.add('target fps $fps usable ($when): one-time marker cleared');
   }
 }
 
