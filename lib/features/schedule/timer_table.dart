@@ -183,8 +183,12 @@ bool _isSunrise(String? label) => label?.trim().toLowerCase() == 'sunrise';
       final up = _isSunrise(s.offTimeLabel);
       assign(
         up,
-        sunRow(sunrise: up, offsetMinutes: 0, macro: cfg.kNglOffPresetIdCfg,
-            dow: dow),
+        sunRow(
+            sunrise: up,
+            offsetMinutes: 0,
+            macro: cfg.kNglOffPresetIdCfg,
+            // A Sunrise OFF that ends an evening ON fires the next morning.
+            dow: cfg.offDowFor(s, dow)),
         '${s.actionLabel} (${s.offTimeLabel} OFF)',
       );
     }

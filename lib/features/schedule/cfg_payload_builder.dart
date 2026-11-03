@@ -28,6 +28,57 @@ bool isSolarLabel(String label) {
 /// Compute the WLED dow bitmask for a list of weekday names (Mon=bit0..Sun=bit6).
 int computeDowMask(List<String> days) => wledDowMaskForDayList(days);
 
+/// The weekday bits of the day AFTER each day in [dow] (Monday = bit 0; a
+/// Sunday bit wraps to Monday). Daily (127) maps to itself.
+int nextDayDowMask(int dow) => ((dow << 1) | (dow >> 6)) & 0x7F;
+
+/// True when [s] turns off on the day AFTER it turns on — an overnight night.
+///
+/// WLED checks the weekday bit of the minute a row FIRES (ntp.cpp
+/// `weekdayMondayFirst()` of local time), so the OFF row of an overnight
+/// schedule must carry the next day's bits. With the ON days' bits a
+/// Mon–Fri "Sunset → Sunrise" turned off on Monday morning (ending nothing)
+/// and never on Saturday morning, so Friday night ran until Monday.
+///
+/// The rule, with sun times only approximately known:
+///   clock → clock    OFF earlier than ON (12:00 AM is the next day)
+///   Sunset → Sunrise always
+///   Sunset → clock   OFF before noon
+///   clock → Sunrise  ON at or after noon
+///   Sunrise → clock  OFF before 6:00 AM
+///   anything → Sunset, Sunrise → Sunrise, Sunset → Sunset: same day
+bool offFallsNextDay(ScheduleItem s) {
+  if (!s.hasOffTime || s.offTimeLabel == null) return false;
+  final on = s.timeLabel;
+  final off = s.offTimeLabel!;
+  int? minutes(String label) {
+    final t = parseTimeLabel(label);
+    return t == null ? null : t.hour * 60 + t.minute;
+  }
+
+  bool sunrise(String l) => l.trim().toLowerCase() == 'sunrise';
+  final onSun = isSolarLabel(on);
+  final offSun = isSolarLabel(off);
+  if (!onSun && !offSun) {
+    final a = minutes(on);
+    final b = minutes(off);
+    return a != null && b != null && b < a;
+  }
+  if (onSun && offSun) return !sunrise(on) && sunrise(off);
+  if (onSun) {
+    final b = minutes(off);
+    if (b == null) return false;
+    return sunrise(on) ? b < 6 * 60 : b < 12 * 60;
+  }
+  if (!sunrise(off)) return false; // clock → Sunset is the same day
+  final a = minutes(on);
+  return a != null && a >= 12 * 60;
+}
+
+/// The weekday bits for [s]'s OFF row, given its ON days' bits [onDow].
+int offDowFor(ScheduleItem s, int onDow) =>
+    offFallsNextDay(s) ? nextDayDowMask(onDow) : onDow;
+
 /// Parse "7:05 PM" (12h) / "10:11", "23:30", "0:05" (24h). Returns null for a
 /// genuinely unrecognized label — callers MUST treat null as "do not arm".
 /// NEVER defaults an unparseable time to midnight.
@@ -240,7 +291,8 @@ Map<String, dynamic> buildCfgPayload(
         timers.length < kWledMaxGeneralTimers) {
       final offTimer = buildTimerEntry(
         timeLabel: s.offTimeLabel!,
-        dow: dow,
+        // An overnight OFF fires on the NEXT day's weekday bit.
+        dow: offDowFor(s, dow),
         macro: 2, // Preset 2 = off state (convention)
         debug: debug,
       );
