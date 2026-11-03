@@ -15,6 +15,25 @@
 // sunrise-off row in slot 8; the 5:30 PM row was gone. That shape is the
 // fixture here. Timer tables carry no segment geometry, so the two-channel and
 // one-segment-after-restart fixtures of the other +122 items do not apply.
+//
+// release/122-candidate follow-up: the merged lease manager now builds the
+// SHARED 10-row table (timer_table.dart) through `resolveTimerTableContext`,
+// which reads the STREAM solar flag and the controller's coordinates. The
+// harness is set up the way the lease harness of
+// timer_table_shared_builder_test.dart is — stream flag on, sync flag on, no
+// global sunrise-off, a controller that reports coordinates — and every case
+// asserts on rows (slot, hour, minute, days, macro, enabled), never on a
+// length. Expected rows follow the builder's documented rules:
+//   * slots 0–7 hold the schedules' clock rows, then the lease rows, then
+//     all-zero stubs (assembleTable);
+//   * a sunrise OFF of an armed schedule lives in slot 8 as
+//     {en:1, hour:255, min:0, macro:2 (master off), dow}, where the OFF days
+//     of an overnight night are shifted one day forward (offDowFor) and daily
+//     (127) maps to itself;
+//   * slot 9 is an all-zero stub when nothing owns sunset;
+//   * with solar off the sun-bounded schedule is refused (timerArmRefusal) and
+//     slot 8 is the DISABLED placeholder {en:0, hour:255, min:0, macro:0,
+//     dow:0}.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,6 +44,10 @@ import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dar
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
+import 'package:nexgen_command/features/schedule/sunrise_off_service.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart'
+    show ControllerClockInfo;
+import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -51,6 +74,17 @@ const clockOnlySchedule = ScheduleItem(
   presetId: 3,
 );
 
+/// One controller that reports coordinates: the `fetchClockInfo` form of the
+/// lease controller in timer_table_shared_builder_test.dart. Timer tables
+/// carry no segment geometry, so nothing else is overridden.
+class _Controller extends WledService {
+  _Controller() : super('http://mock');
+
+  @override
+  Future<ControllerClockInfo?> fetchClockInfo() async =>
+      const ControllerClockInfo(latitude: 40.0, longitude: -95.0);
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -76,14 +110,18 @@ void main() {
         autopilot: false,
       );
 
+  /// [solarFlag] drives the stream flag and the sync flag together (the sync
+  /// provider mirrors the stream's value). [solarFlagStream] replaces the
+  /// stream for the loading / error cases; the sync flag then reads false,
+  /// which is the sync provider's own answer for both of those states.
   ({CalendarEntryLeaseManager manager, List<Map<String, dynamic>> writes})
       harness({
     required List<ScheduleItem> schedules,
     required bool solarFlag,
+    Stream<bool>? solarFlagStream,
   }) {
-    final service = WledService('http://mock');
     final container = ProviderContainer(overrides: [
-      wledRepositoryProvider.overrideWithValue(service),
+      wledRepositoryProvider.overrideWithValue(_Controller()),
       calendarLeaseLiveWritesEnabledSyncProvider.overrideWithValue(true),
       calendarLeaseLiveWritesEnabledProvider
           .overrideWith((_) => Stream.value(true)),
@@ -95,7 +133,10 @@ void main() {
       calendarLeaseScheduleUpdaterProvider.overrideWith((_) => (_) async {}),
       calendarLeaseScheduleSyncTriggerProvider
           .overrideWith((_) => () async {}),
+      solarSchedulingEnabledProvider
+          .overrideWith((_) => solarFlagStream ?? Stream.value(solarFlag)),
       solarSchedulingEnabledSyncProvider.overrideWithValue(solarFlag),
+      globalSunriseOffTimerProvider.overrideWithValue(null),
     ]);
     addTearDown(container.dispose);
     final manager = container.read(calendarEntryLeaseManagerProvider);
@@ -114,6 +155,29 @@ void main() {
   bool isRow(Map<String, dynamic> r, {required int hour, required int min}) =>
       r['en'] == 1 && r['hour'] == hour && r['min'] == min;
 
+  /// One row with every field: enabled, hour, minute, macro, days.
+  Map<String, dynamic> row({
+    required int en,
+    required int hour,
+    required int min,
+    required int macro,
+    required int dow,
+  }) =>
+      {'en': en, 'hour': hour, 'min': min, 'macro': macro, 'dow': dow};
+
+  /// An all-zero clock stub (an unused general slot, or an unowned slot 9).
+  const stub = {'en': 0, 'hour': 0, 'min': 0, 'macro': 0, 'dow': 0};
+
+  /// Slot 8 when nothing owns sunrise: disabled, hour 255 so 0.15.x keeps the
+  /// slot in cfg.json.
+  const sunrisePlaceholder = {
+    'en': 0,
+    'hour': 255,
+    'min': 0,
+    'macro': 0,
+    'dow': 0,
+  };
+
   test(
       'arming a lease keeps the 5:30 PM clock row of a sunrise-bounded '
       'repeating schedule', () async {
@@ -123,34 +187,66 @@ void main() {
     expect(result.outcome, LeaseOutcome.leased);
     expect(h.writes, hasLength(1), reason: 'one merged timer write');
     final ins = insOf(h.writes.single);
-    expect(ins, hasLength(8), reason: 'padded to every general slot');
-    final clockRow = ins.where((r) => isRow(r, hour: 17, min: 30)).toList();
-    expect(clockRow, hasLength(1),
+
+    // Slot 0: the schedule's clock ON — 5:30 PM, preset 3, every day. The
+    // general slots hold the schedules' clock rows first, then the leases.
+    expect(ins[0], row(en: 1, hour: 17, min: 30, macro: 3, dow: 127),
         reason: "the customer's 5:30 PM ON row survives the lease write");
-    expect(clockRow.single['macro'], 3);
-    expect(clockRow.single['dow'], 127);
-    final leaseRows = ins.where((r) => isRow(r, hour: 12, min: 30)).toList();
-    expect(leaseRows, hasLength(1), reason: 'the lease row is there too');
+    // Slot 1: the lease row, after the schedule rows — 12:30 on the entry's
+    // own day, firing the lease's preset.
+    expect(
+        ins[1],
+        row(
+          en: 1,
+          hour: 12,
+          min: 30,
+          macro: result.lease!.presetId,
+          dow: wledDowMaskForWeekday(noon.weekday),
+        ),
+        reason: 'the lease row follows the schedule rows');
+    for (var slot = 2; slot <= 7; slot++) {
+      expect(ins[slot], stub, reason: 'slot $slot is an all-zero stub');
+    }
+    // Slot 8: the schedule's sunrise OFF — enabled, hour 255, the master-off
+    // preset 2; an evening ON ending at sunrise is an overnight night, so the
+    // OFF days shift one day forward, and daily stays daily.
+    expect(ins[8], row(en: 1, hour: 255, min: 0, macro: 2, dow: 127),
+        reason: 'the sunrise OFF lives in slot 8, enabled');
+    // Slot 9: nothing owns sunset.
+    expect(ins[9], stub, reason: 'slot 9 is an all-zero stub');
   });
 
   test('the sunrise OFF boundary is never rendered into the general slots',
       () async {
+    // The flag is explicitly ON: the schedule arms and its OFF has a home.
     final h = harness(schedules: const [customerSchedule], solarFlag: true);
     await h.manager.initialize();
-    await h.manager.handleEntryCreated(gameDayEntry());
+    final result = await h.manager.handleEntryCreated(gameDayEntry());
+    expect(result.outcome, LeaseOutcome.leased);
     final ins = insOf(h.writes.single);
-    expect(ins.where((r) => r['hour'] == 24 || r['hour'] == 25), isEmpty,
-        reason: 'solar rows live in slots 8/9, written by the schedule sync');
+    final general = ins.sublist(0, 8);
+    expect(general.where((r) => r['hour'] == 255 || r['hour'] == 254),
+        isEmpty,
+        reason: 'sun rows never sit in slots 0–7');
+    expect(general.where((r) => r['hour'] == 24 || r['hour'] == 25), isEmpty,
+        reason: 'nor does the old 24/25 encoding');
+    expect(ins[8], row(en: 1, hour: 255, min: 0, macro: 2, dow: 127),
+        reason: 'slot 8 holds the sunrise OFF');
   });
 
   test(
       'with the solar flag OFF the schedule is left out, exactly as the '
       'schedule sync leaves it out', () async {
+    // The flag is explicitly OFF: stream false, sync false.
     final h = harness(schedules: const [customerSchedule], solarFlag: false);
     await h.manager.initialize();
-    await h.manager.handleEntryCreated(gameDayEntry());
+    final result = await h.manager.handleEntryCreated(gameDayEntry());
+    expect(result.outcome, LeaseOutcome.leased);
     final ins = insOf(h.writes.single);
-    expect(ins.where((r) => isRow(r, hour: 17, min: 30)), isEmpty);
+    expect(ins.where((r) => isRow(r, hour: 17, min: 30)), isEmpty,
+        reason: 'a sun-bounded schedule is refused while solar is off');
+    expect(ins[8], sunrisePlaceholder,
+        reason: 'nothing owns sunrise: slot 8 is the disabled placeholder');
   });
 
   test('a clock-only schedule keeps both rows (regression guard)', () async {
