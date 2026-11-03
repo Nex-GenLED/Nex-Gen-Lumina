@@ -34,6 +34,13 @@
 //   * with solar off the sun-bounded schedule is refused (timerArmRefusal) and
 //     slot 8 is the DISABLED placeholder {en:0, hour:255, min:0, macro:0,
 //     dow:0}.
+// The last groups record what the manager does while the stream flag is still
+// loading, and what the sync provider (schedule sync's own read) answers while
+// loading and after an error. The error case for the manager is NOT here: against
+// the current builder an erroring flag reads as off and a table is written (see
+// the +122 candidate report); it is recorded there, not committed.
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -178,6 +185,13 @@ void main() {
     'dow': 0,
   };
 
+  String tableOf(List<Map<String, dynamic>> writes) => [
+        for (final w in writes)
+          for (final (i, r) in insOf(w).indexed)
+            'slot $i: hour ${r['hour']} min ${r['min']} dow ${r['dow']} '
+                'macro ${r['macro']} en ${r['en']}',
+      ].join('; ');
+
   test(
       'arming a lease keeps the 5:30 PM clock row of a sunrise-bounded '
       'repeating schedule', () async {
@@ -256,5 +270,59 @@ void main() {
     final ins = insOf(h.writes.single);
     expect(ins.where((r) => isRow(r, hour: 18, min: 0)), hasLength(1));
     expect(ins.where((r) => isRow(r, hour: 23, min: 0)), hasLength(1));
+  });
+
+  group('the stream solar flag while loading and while in error', () {
+    // While the stream has not answered, the sync provider reads false (its
+    // own contract). A table built on that guess would write the sunrise
+    // placeholder over a live sunrise row and drop a sun-bounded schedule's
+    // clock row, so the manager must defer: write nothing and leave the
+    // controller's table as it was.
+
+    test('LOADING: the manager defers — writes nothing, table left as it was',
+        () async {
+      final pending = StreamController<bool>(); // never answers
+      addTearDown(pending.close);
+      final h = harness(
+        schedules: const [customerSchedule],
+        solarFlag: false,
+        solarFlagStream: pending.stream,
+      );
+      await h.manager.initialize();
+      final result = await h.manager.handleEntryCreated(gameDayEntry());
+      expect(h.writes, isEmpty,
+          reason: 'outcome ${result.outcome}; table written: '
+              '${tableOf(h.writes)}');
+      expect(result.outcome, isNot(LeaseOutcome.leased),
+          reason: 'no lease is recorded without its timer write');
+    });
+  });
+
+  group('solarSchedulingEnabledSyncProvider — what schedule sync reads', () {
+    // schedule_sync.dart reads the SYNC provider (ref.read, no await), so this
+    // is how its own flag read treats the same two states.
+
+    test('while the stream is loading it reads OFF', () {
+      final pending = StreamController<bool>();
+      addTearDown(pending.close);
+      final container = ProviderContainer(overrides: [
+        solarSchedulingEnabledProvider.overrideWith((_) => pending.stream),
+      ]);
+      addTearDown(container.dispose);
+      expect(container.read(solarSchedulingEnabledProvider).isLoading, isTrue);
+      expect(container.read(solarSchedulingEnabledSyncProvider), isFalse);
+    });
+
+    test('after a stream error it reads OFF', () async {
+      final container = ProviderContainer(overrides: [
+        solarSchedulingEnabledProvider.overrideWith(
+            (_) => Stream<bool>.error(StateError('flag read failed'))),
+      ]);
+      addTearDown(container.dispose);
+      container.listen(solarSchedulingEnabledProvider, (_, __) {});
+      await Future<void>.delayed(Duration.zero);
+      expect(container.read(solarSchedulingEnabledProvider).hasError, isTrue);
+      expect(container.read(solarSchedulingEnabledSyncProvider), isFalse);
+    });
   });
 }
