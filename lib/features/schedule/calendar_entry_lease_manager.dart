@@ -49,6 +49,7 @@ import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
     show deviceChannelsFromConfig;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
@@ -1729,7 +1730,13 @@ class CalendarEntryLeaseManager {
       };
     }
     const scheduleSync = ScheduleSyncService();
-    final schedulePayload = scheduleSync.buildCfgPayload(schedules);
+    // +122 item 1: the SAME solar decision the schedule sync renders with.
+    // Without it buildCfgPayload skips every schedule that has a sunrise or
+    // sunset boundary — its CLOCK row included — and this write, which rewrites
+    // general slots 0–7, erased the clock row the sync had armed (a field case:
+    // ON 5:30 PM / OFF Sunrise lost its 5:30 PM row after a Game Day lease).
+    final schedulePayload = scheduleSync.buildCfgPayload(schedules,
+        solarEnabled: _solarEnabledForMerge());
     final schedTimers =
         (schedulePayload['timers'] as Map?)?['ins'] as List? ?? const [];
     final leasePayload = _buildLeaseTimersPayload();
@@ -1745,6 +1752,24 @@ class CalendarEntryLeaseManager {
             [...schedTimers, ...leaseTimers].cast<Map<String, dynamic>>()),
       },
     };
+  }
+
+  /// The solar decision for the merged timer write: the solar_scheduling flag,
+  /// read the way [ScheduleSyncService.syncAll] reads it. The sync also
+  /// requires usable controller coordinates (a cfg read) before it arms a
+  /// solar boundary; this merge is synchronous and takes the flag alone. The
+  /// two differ only on a flag-on controller with no coordinates, where the
+  /// sync withholds the whole schedule and this write keeps its clock row —
+  /// the sync's next pass restores its own answer. Any read failure → false,
+  /// the sync's own default.
+  bool _solarEnabledForMerge() {
+    try {
+      return _ref.read(solarSchedulingEnabledSyncProvider);
+    } catch (e) {
+      debugPrint('$_kLogPrefix solar flag read failed — $e (merge renders '
+          'without solar schedules)');
+      return false;
+    }
   }
 
   WledRepository? _readRepo() {
