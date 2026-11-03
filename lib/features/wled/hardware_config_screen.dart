@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/segment_count_save.dart';
 
 /// Builds the `hw.led.ins` array from the per-port UI state, preserving each
 /// port's existing reverse (`rev`) flag from [originalBuses] so a Hardware
@@ -312,34 +313,25 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
       return;
     }
 
-    // Step 2: Update segment boundaries to match the new counts.
-    // This preserves segment names and per-segment settings.
-    int segIdx = 0;
-    int startAddress = 0;
-    bool allOk = true;
-
-    for (var i = 0; i < _portCount; i++) {
-      if (!_enabled[i]) continue;
-      final count = _parseCount(i);
-      if (count <= 0) continue;
-
-      final ok = await repo.updateSegmentConfig(
-        segmentId: segIdx,
-        start: startAddress,
-        stop: startAddress + count,
-      );
-      if (!ok) allOk = false;
-
-      startAddress += count;
-      segIdx++;
-    }
+    // Step 2 (+122 item 4, TD-9 defect 3): ONE geometry POST for every
+    // segment, a read-back, and one retry. The old shape — one POST per
+    // segment, no read-back — could leave segment 0 spanning the strip and
+    // segment 1 overlapping it in amber when the controller re-initialised
+    // between the POSTs, with nothing in the app showing it.
+    final counts = <int>[
+      for (var i = 0; i < _portCount; i++)
+        if (_enabled[i] && _parseCount(i) > 0) _parseCount(i),
+    ];
+    final result = await writeSegmentBoundsWithReadback(
+        repo, segmentBoundsForCounts(counts));
+    debugPrint('Segment bounds after count update: $result');
 
     // Step 3: Update local baseline so subsequent saves use the correct reference.
     _originalBusCount = _enabled.where((e) => e).length;
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(allOk ? 'LED counts updated.' : 'Some updates failed. Check your controller.'),
+        content: Text(segmentCountSaveMessage(result.outcome)),
       ));
     }
   }
