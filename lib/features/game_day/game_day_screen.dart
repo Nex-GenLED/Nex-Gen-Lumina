@@ -37,6 +37,7 @@ import '../wled/sports_library_builder.dart';
 import '../wled/wled_providers.dart';
 import '../wled/zone_providers.dart';
 import 'game_day_apply.dart';
+import 'revert_capture.dart';
 import 'game_day_crew_models.dart';
 import 'game_day_providers.dart';
 import 'game_day_config_row.dart';
@@ -569,13 +570,27 @@ class _TeamCardState extends ConsumerState<_TeamCard> {
     // than inside the session because by the time the session exists the team
     // design has already been applied, and capturing then would "revert" to
     // the Game Day look forever.
-    Map<String, dynamic> revertPayload = const {};
-    try {
-      revertPayload =
-          await container.read(wledRepositoryProvider)?.getState() ?? const {};
-    } catch (e) {
-      debugPrint('[GameDay] Light Up Now: revert capture failed: $e');
+    // +122 item 5 (TD-8 defect 1): the capture is checked against the
+    // controller's own channels. A collapsed or half-healed layout is repaired
+    // first on the LAN and re-read, or the activation is refused — a broken
+    // shape is never stored as the look to come back to.
+    final repoForCapture = container.read(wledRepositoryProvider);
+    if (repoForCapture == null) return;
+    final capture = await captureRevertLook(
+      repo: repoForCapture,
+      channels: container.read(deviceChannelsProvider),
+    );
+    if (capture.outcome == RevertCaptureOutcome.refused) {
+      debugPrint('[GameDay] Light Up Now: revert capture refused: '
+          '${capture.note}');
+      messenger.showSnackBar(SnackBar(
+        content: Text(capture.message),
+        backgroundColor: Colors.orange,
+        duration: const Duration(seconds: 3),
+      ));
+      return;
     }
+    final revertPayload = capture.payload;
     // Null when nothing named is showing — the session needs a concrete label
     // to restore the Now Playing chip to, so fall back to the neutral one.
     final revertLabel = container.read(activePresetLabelProvider) ?? 'Custom';
