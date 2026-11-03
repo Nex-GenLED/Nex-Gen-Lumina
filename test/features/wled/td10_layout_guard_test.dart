@@ -271,12 +271,19 @@ void main() {
       expect(await svc.applyJson(_twoChannelLook()), isTrue);
       expect(stateGets, 1, reason: 'no poll yet, so the guard read the layout itself');
       expect(posted, hasLength(2), reason: 'repair first, then the look');
-      expect(posted.first, {
-        'seg': [
-          {'id': 0, 'start': 0, 'stop': 90},
-          {'id': 1, 'start': 90, 'stop': 180},
-        ]
-      });
+      final repair = segsOf(posted.first);
+      expect(repair[0], {'id': 0, 'start': 0, 'stop': 90},
+          reason: 'segment 0 exists: bounds only');
+      expect(repair[1]['id'], 1);
+      expect(repair[1]['start'], 90);
+      expect(repair[1]['stop'], 180);
+      // +122 item 2: a re-created segment takes segment 0's look in the same
+      // POST, never the firmware's default amber (TD-9 defect 2).
+      expect(repair[1]['col'], (_seg(0, 0, 180)['col'] as List),
+          reason: "segment 1 is re-created with segment 0's look");
+      expect(repair[1]['fx'], 0);
+      expect(repair[1]['on'], isFalse);
+      expect(repair[1].keys, isNot(contains('rev')));
       final look = segsOf(posted.last);
       expect(look.map((s) => s['id']), [0, 1]);
       for (final s in look) {
@@ -300,6 +307,8 @@ void main() {
       expect(posted, hasLength(2));
       expect(posted.first.containsKey('seg'), isTrue);
       expect(segsOf(posted.first).first['stop'], 90);
+      expect(segsOf(posted.first)[1]['col'], (_seg(0, 0, 180)['col'] as List),
+          reason: "the hint path carries the look too (raw state is kept)");
     });
 
     test('a single-segment apply on a collapsed controller is left alone '

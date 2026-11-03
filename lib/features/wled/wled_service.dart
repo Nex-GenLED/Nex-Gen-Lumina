@@ -1050,22 +1050,31 @@ class WledService
   /// The last live layout any `/json/state` read on this service saw (the
   /// dashboard poller reads every 1.5 s), with its age — the "poller's last
   /// state" the TD-10 guard compares against before a multi-segment apply.
-  Set<int>? _lastLiveSegmentIds;
+  Map<String, dynamic>? _lastLiveState;
   DateTime? _lastLiveAt;
 
   void _noteLiveLayout(Map<String, dynamic> state) {
-    final ids = liveSegmentIds(state);
-    if (ids == null) return;
-    _lastLiveSegmentIds = ids;
+    if (liveSegmentIds(state) == null) return;
+    // The raw body, segment entries copied: the repair copies segment 0's look
+    // from it (+122 item 2), so it must not change under the poller's feet.
+    final seg = state['seg'];
+    _lastLiveState = {
+      ...state,
+      if (seg is List)
+        'seg': [
+          for (final s in seg)
+            if (s is Map) Map<String, dynamic>.from(s) else s,
+        ],
+    };
     _lastLiveAt = DateTime.now();
   }
 
-  Set<int>? get _freshLiveSegmentIds {
+  Map<String, dynamic>? get _freshLiveState {
     final at = _lastLiveAt;
     if (at == null || DateTime.now().difference(at) > kLiveLayoutHintMaxAge) {
       return null;
     }
-    return _lastLiveSegmentIds;
+    return _lastLiveState;
   }
 
   /// Bench seam only: the TD-10 guard can be switched off to record the
@@ -1078,10 +1087,12 @@ class WledService
     if (_simulate || !layoutGuardEnabled) return;
     final addressed = addressedSegmentIds(payload);
     if (addressed.length < 2) return;
-    Set<int>? live = _freshLiveSegmentIds;
+    Map<String, dynamic>? state = _freshLiveState;
+    Set<int>? live = state == null ? null : liveSegmentIds(state);
     if (live == null) {
       try {
-        live = liveSegmentIds(await getState());
+        state = await getState();
+        live = liveSegmentIds(state);
       } catch (e) {
         debugPrint('TD-10 guard: layout unreadable ($e) — stood aside');
         return;
@@ -1102,7 +1113,11 @@ class WledService
     }
     debugPrint('TD-10 guard: live segments $live lack one the apply addresses '
         '$addressed; re-provisioning $expected before the apply');
-    final ok = await applyGeometryJson(geometryPayload(expected));
+    // Bounds for every bus segment; a segment the live layout lacks also takes
+    // segment 0's look in the same POST (+122 item 2), so a channel the apply
+    // does not address never lights in the firmware's default amber.
+    final ok = await applyGeometryJson(
+        geometryRepairPayload(want: expected, liveState: state));
     debugPrint('TD-10 guard: re-provision ${ok ? 'posted' : 'FAILED — apply proceeds unrepaired'}');
   }
 
@@ -1116,7 +1131,9 @@ class WledService
   ///
   /// Legitimate callers. All but the last derive `want` from the controller's
   /// OWN hardware buses (never from the app's model of the installation):
-  ///   • `ControllerDefaultsHealer._reprovisionSegments`
+  ///   • `rehealSegmentGeometry` (segment_geometry_reheal.dart): the connect-
+  ///     time healer, the restart watch and Light Up Now's revert capture
+  ///   • the TD-10 apply guard above (`_repairLayoutBeforeMultiSegmentApply`)
   ///   • `ScheduleSyncService`'s geometry-gate re-provision
   ///   • `SunriseOffService` / `CalendarEntryLeaseManager` gate re-provision
   ///   • ⚠️ the user-facing DIRECTION control (`channel_direction.dart`) — the

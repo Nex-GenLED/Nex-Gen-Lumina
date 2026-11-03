@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/demo/demo_wled_repository.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
+import 'package:nexgen_command/features/wled/controller_restart_watch.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/site/controllers_providers.dart';
 import 'package:nexgen_command/features/site/controller_selection.dart';
@@ -874,6 +875,7 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// True while any caller holds a polling pause.
   bool get isPollingPaused => _pollPauseDepth > 0;
   GammaWatchdog? _gammaWatchdog;
+  ControllerRestartWatch? _restartWatch;
   bool _posting = false;
   bool _polling = false;
   bool _infoQueried = false;
@@ -1017,6 +1019,12 @@ class WledNotifier extends Notifier<WledStateModel> {
     final gammaWatchdog = ref.read(gammaWatchdogProvider);
     _gammaWatchdog = gammaWatchdog;
     gammaWatchdog.start();
+    // +122 item 2 (TD-9): a restart on the SAME endpoint is not a new connect,
+    // so the heal above never sees it. The watch reads uptime on the LAN and
+    // re-runs the geometry heal on a drop or a cold start.
+    final restartWatch = ref.read(controllerRestartWatchProvider);
+    _restartWatch = restartWatch;
+    restartWatch.start();
     _startPolling();
     ref.onDispose(() {
       _disposed = true;
@@ -1027,6 +1035,8 @@ class WledNotifier extends Notifier<WledStateModel> {
       _poller = null;
       _gammaWatchdog?.stop();
       _gammaWatchdog = null;
+      _restartWatch?.stop();
+      _restartWatch = null;
     });
     return s;
   }

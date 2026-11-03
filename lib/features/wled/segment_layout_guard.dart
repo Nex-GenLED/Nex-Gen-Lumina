@@ -84,10 +84,78 @@ bool needsLayoutRepairBeforeApply({
   return false;
 }
 
-/// The bounds-only re-provision body: ids with start/stop and nothing else, the
-/// same shape the connect-time geometry heal writes.
+/// The bounds-only body (the +122 item 1 shape, kept for the pure tests).
+/// Production re-provisions through [geometryRepairPayload], which also gives
+/// a re-created segment segment 0's look.
 Map<String, dynamic> geometryPayload(List<SegmentBounds> want) => {
       'seg': [
         for (final b in want) {'id': b.id, 'start': b.start, 'stop': b.stop},
       ],
     };
+
+// ── +122 item 2 (TD-9): the repair body shared by every re-provision ────────
+
+/// The look fields a re-created segment inherits from segment 0. Geometry
+/// fields (rev/mi/of/grp/spc) are deliberately NOT here: the gate compares
+/// bounds and a repair must not smuggle geometry fields (#76 with the sign
+/// flipped). Names/selection (`n`, `sel`) stay the firmware's.
+const List<String> kSegmentLookKeys = ['on', 'bri', 'col', 'fx', 'sx', 'ix', 'pal'];
+
+/// Segment 0's look as it reads in a `/json/state` body, or null when segment 0
+/// is not a live (non-empty) segment of that body.
+Map<String, dynamic>? segmentZeroLook(Map<String, dynamic>? state) {
+  final seg = state?['seg'];
+  if (seg is! List) return null;
+  for (final s in seg) {
+    if (s is! Map) continue;
+    final id = s['id'], start = s['start'], stop = s['stop'];
+    if (id != 0 || start is! int || stop is! int || stop <= start) continue;
+    final look = <String, dynamic>{};
+    for (final k in kSegmentLookKeys) {
+      final v = s[k];
+      if (v == null) continue;
+      look[k] = v is List
+          ? [for (final c in v) c is List ? List<dynamic>.from(c) : c]
+          : v;
+    }
+    return look;
+  }
+  return null;
+}
+
+/// The ids that EXIST in a `/json/state` body (stop > start).
+Set<int> _liveIds(Map<String, dynamic>? state) {
+  final seg = state?['seg'];
+  if (seg is! List) return const {};
+  return {
+    for (final s in seg)
+      if (s is Map &&
+          s['id'] is int &&
+          s['start'] is int &&
+          s['stop'] is int &&
+          (s['stop'] as int) > (s['start'] as int))
+        s['id'] as int,
+  };
+}
+
+/// The repair body: bounds for every expected segment, and for a segment the
+/// live layout LACKS, segment 0's look in the same entry. Segments that exist
+/// keep their own look (bounds only, as before).
+Map<String, dynamic> geometryRepairPayload({
+  required List<SegmentBounds> want,
+  required Map<String, dynamic>? liveState,
+}) {
+  final live = _liveIds(liveState);
+  final look = segmentZeroLook(liveState);
+  return {
+    'seg': [
+      for (final s in want)
+        {
+          'id': s.id,
+          'start': s.start,
+          'stop': s.stop,
+          if (!live.contains(s.id) && look != null) ...look,
+        },
+    ],
+  };
+}

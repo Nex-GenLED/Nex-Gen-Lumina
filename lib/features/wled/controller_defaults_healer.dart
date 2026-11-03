@@ -80,8 +80,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
-import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/neighborhood/services/channel_participation_resolver.dart';
 import 'package:nexgen_command/features/neighborhood/services/sync_event_background_persistence.dart';
@@ -103,7 +101,14 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
+import 'package:nexgen_command/features/wled/controller_restart_watch.dart';
+import 'package:nexgen_command/features/wled/segment_geometry_reheal.dart';
 import 'package:nexgen_command/services/wled_config_pusher.dart';
+
+// The geometry verdict moved to segment_geometry_reheal.dart in +122 (item 2);
+// re-exported so existing imports and tests keep working.
+export 'package:nexgen_command/features/wled/segment_geometry_reheal.dart'
+    show GeometryHealVerdict, decideGeometryHeal;
 
 // ── Constants (tunable) ──────────────────────────────────────────────────────
 
@@ -127,43 +132,8 @@ int? _asInt(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
 
 // ── Pure planners (no I/O — unit-tested directly) ────────────────────────────
 
-/// What the connect-time geometry check decided (+80).
-enum GeometryHealVerdict {
-  /// Expectation or live shape unavailable. Repair a KNOWN mismatch, never a
-  /// suspicion — one flaky read must not re-provision a controller we cannot
-  /// describe. Same stand-aside-on-ignorance boundary the geometry gate settled.
-  standAside,
-
-  /// Live layout matches the controller's own buses. Zero writes.
-  healthy,
-
-  /// Live layout disagrees with the buses. Re-provision to [expected].
-  drifted,
-}
-
-/// PURE. Decide whether the live segment layout needs re-provisioning.
-///
-/// Extracted from `_healSegmentGeometry` so the DECISION is unit-testable
-/// without a WledService or HTTP — the same reason `buildChannelPowerPayload`
-/// is pure Dart, and the reason this file has a "pure planners" section at all.
-///
-/// [expected] comes from the controller's OWN buses
-/// (`expectedShapeFromChannels(deviceChannelsFromConfig(cfg))`), never from the
-/// app's model of the installation: the check defends the installation against
-/// the app, so its expectation must not come from the app's beliefs.
-///
-/// [live] is nullable on purpose — null means the state read failed, which is
-/// ignorance, not disagreement.
-GeometryHealVerdict decideGeometryHeal({
-  required List<SegmentShape> expected,
-  required List<SegmentShape>? live,
-}) {
-  if (expected.isEmpty) return GeometryHealVerdict.standAside;
-  if (live == null || live.isEmpty) return GeometryHealVerdict.standAside;
-  return listEquals(live, expected)
-      ? GeometryHealVerdict.healthy
-      : GeometryHealVerdict.drifted;
-}
+// `GeometryHealVerdict` / `decideGeometryHeal` (+80) now live in
+// segment_geometry_reheal.dart, next to the repair they decide for.
 
 /// True when the controller's NTP host should be healed to [kHealNtpHost].
 ///
@@ -1019,91 +989,51 @@ class ControllerDefaultsHealer {
   /// The controller's expected segment shape, from its own hardware buses.
   /// Empty when unreadable — the gate then saves ungated rather than blocking
   /// every heal on a controller whose layout we could not read.
-  Future<List<SegmentShape>> _expectedShapeFor(WledService svc) async {
-    try {
-      final cfg = await svc.getConfig();
-      if (cfg == null) return const [];
-      return expectedShapeFromChannels(deviceChannelsFromConfig(cfg));
-    } catch (e) {
-      debugPrint('[Healer] expected-shape read failed: $e');
-      return const [];
-    }
-  }
-
-  /// Connect-time segment-shape check (+80, step (d.5)).
-  ///
-  /// Compares the LIVE layout against the controller's OWN buses and
-  /// re-provisions when they disagree. Heal-only-broken: a matching layout
-  /// writes nothing, so the common case costs one `/json/state` read on top of
-  /// the cfg read the healer has already done.
-  ///
-  /// STANDS ASIDE ON IGNORANCE, GATES ON DISAGREEMENT — the same boundary the
-  /// geometry gate settled. An unreadable cfg or state yields an empty
-  /// expectation and we do nothing: this repairs a KNOWN mismatch, never a
-  /// suspicion. Refusing on ignorance would let one flaky read re-provision a
-  /// controller we cannot describe.
+  /// Connect-time segment-shape check (+80, step (d.5)); since +122 (item 2,
+  /// TD-9) also the restart re-heal through [runGeometryOnly]. The repair is
+  /// the shared [rehealSegmentGeometry]: read the controller's OWN buses, read
+  /// the live layout, re-provision a KNOWN mismatch through the provisioning
+  /// door — with segment 0's look on every segment it re-creates, never the
+  /// firmware's default amber — and read back. This method only maps the
+  /// result onto the report. Stands aside on ignorance, as before.
   Future<void> _healSegmentGeometry(
-      WledService svc, ControllerHealReport report) async {
-    final want = await _expectedShapeFor(svc);
-
-    List<SegmentShape>? live;
-    try {
-      live = segmentShapeFromState(await svc.getState());
-    } catch (e) {
-      report.log.add('geometry: live shape unreadable ($e) — stood aside');
-      return;
-    }
-
-    switch (decideGeometryHeal(expected: want, live: live)) {
-      case GeometryHealVerdict.standAside:
-        report.log.add('geometry: shape unavailable — stood aside');
-        return;
-      case GeometryHealVerdict.healthy:
+    WledService svc,
+    ControllerHealReport report, {
+    String trigger = 'connect',
+  }) async {
+    final r = await rehealSegmentGeometry(svc);
+    switch (r.outcome) {
+      case GeometryRehealOutcome.standAside:
+        report.log.add('geometry: ${r.note} — stood aside');
+      case GeometryRehealOutcome.healthy:
         return; // Zero writes, and nothing to say.
-      case GeometryHealVerdict.drifted:
-        break;
-    }
-
-    report.log.add('geometry DRIFT: live=$live expected=$want');
-    final ok = await _reprovisionSegments(svc, want);
-    if (!ok) {
-      report.log.add('geometry re-provision POST failed');
-      return;
-    }
-
-    // READBACK-GATED, like every other heal here. A 2xx proves delivery, never
-    // content — the same rule the build ledger applies to a deploy. Report only
-    // what actually landed.
-    try {
-      final after = segmentShapeFromState(await svc.getState());
-      if (after != null && listEquals(after, want)) {
+      case GeometryRehealOutcome.postFailed:
+        report.log.add('geometry DRIFT ($trigger): live=${r.before} '
+            'expected=${r.expected}; re-provision POST failed');
+      case GeometryRehealOutcome.didNotLand:
+        report.log.add('geometry DRIFT ($trigger): live=${r.before} '
+            'expected=${r.expected}; re-provision did NOT land: got ${r.after}'
+            '${r.note.isEmpty ? '' : ' (${r.note})'}');
+      case GeometryRehealOutcome.repaired:
         report.geometryReprovisioned = true;
-        report.log.add('geometry re-provisioned: $after');
-      } else {
-        report.log.add('geometry re-provision did NOT land: got $after');
-      }
-    } catch (e) {
-      report.log.add('geometry re-provision readback failed: $e');
+        report.log.add('geometry re-provisioned ($trigger): ${r.after}; '
+            'look copied to ${r.lookCopiedTo}');
     }
   }
 
-  /// Write the expected segment layout. Bounds only — the gate compares bounds
-  /// and must not smuggle geometry FIELDS (rev/mi/of/grp/spc) into a repair,
-  /// which would be #76 with the sign flipped.
-  Future<bool> _reprovisionSegments(
-      WledService svc, List<SegmentShape> want) async {
-    try {
-      // applyGeometryJson, not applyJson: this is the provisioning door. The
-      // wire pin refuses bounds on every other path (+80).
-      return await svc.applyGeometryJson({
-        'seg': [
-          for (final s in want) {'id': s.id, 'start': s.start, 'stop': s.stop},
-        ],
-      });
-    } catch (e) {
-      debugPrint('[Healer] segment re-provision failed: $e');
-      return false;
+  /// +122 item 2 (TD-9): the geometry heal ALONE, for a controller that
+  /// restarted on the SAME endpoint (uptime drop) or booted moments ago (cold
+  /// start) — events [shouldHealOnConnect] never sees. LAN only; everything
+  /// else the connect heal does stays with the connect heal.
+  Future<ControllerHealReport> runGeometryOnly({required String trigger}) async {
+    final report = ControllerHealReport();
+    final svc = repo;
+    if (!isLan || svc is! WledService) {
+      report.log.add('geometry re-heal ($trigger): not a LAN service — skipped');
+      return report;
     }
+    await _healSegmentGeometry(svc, report, trigger: trigger);
+    return report;
   }
 
   /// Disables the AudioReactive usermod when it is found ON, then readback-
@@ -1535,4 +1465,60 @@ final controllerDefaultsHealerProvider =
     }
     return report;
   };
+});
+
+// ── +122 item 2 (TD-9): the restart re-heal ─────────────────────────────────
+
+/// Runs the geometry heal alone for the connected LAN controller. Fired by
+/// [controllerRestartWatchProvider] on an uptime drop or a cold start.
+final geometryRehealOnRestartProvider =
+    Provider<Future<ControllerHealReport> Function(String trigger)>((ref) {
+  return (trigger) async {
+    final repo = ref.read(wledRepositoryProvider);
+    if (repo is! WledService) {
+      return ControllerHealReport()
+        ..log.add('geometry re-heal ($trigger): no LAN service');
+    }
+    final nowFn = ref.read(healerPhoneNowProvider);
+    final healer = ControllerDefaultsHealer(
+      repo: repo,
+      isLan: true,
+      controllerIp: Uri.tryParse(repo.baseUrl)?.host,
+      ctx: ControllerHealContext(
+        profileLat: null,
+        profileLon: null,
+        ianaTimezone: null,
+        resolvePhonePosition: () async => null,
+        now: nowFn,
+        phoneUtcOffset: nowFn().timeZoneOffset,
+      ),
+      gammaAction: ref.read(gammaSelfHealActionProvider),
+      controllerId: ref.read(selectedControllerIdProvider),
+      markers: ref.read(healMarkerStoreProvider),
+    );
+    final report = await healer.runGeometryOnly(trigger: trigger);
+    debugPrint('[Healer] restart re-heal ($trigger): $report'
+        '${report.log.isEmpty ? '' : ' — ${report.log.join('; ')}'}');
+    return report;
+  };
+});
+
+/// Reads the LAN controller's uptime on a slow cadence and re-runs the
+/// geometry heal when it drops (a reboot) or starts small (a cold start).
+/// Started and stopped by [WledNotifier] next to the gamma watchdog. Relay,
+/// mock and simulation read as null and do nothing.
+final controllerRestartWatchProvider = Provider<ControllerRestartWatch>((ref) {
+  return ControllerRestartWatch(
+    readUptime: () async {
+      final repo = ref.read(wledRepositoryProvider);
+      if (repo is! WledService) return null;
+      final info = await repo.getInfo();
+      final up = info?.raw['uptime'];
+      if (up is! num) return null;
+      return (endpoint: 'lan:${repo.baseUrl}', uptimeSeconds: up.toInt());
+    },
+    onRestart: (kind) async {
+      await ref.read(geometryRehealOnRestartProvider)(kind.name);
+    },
+  );
 });
