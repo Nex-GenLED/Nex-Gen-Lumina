@@ -536,9 +536,19 @@ List<CheckResult> checkFireTestSplit({
 // verified-by-source against WLED v0.15.1 cfg.cpp.
 // ───────────────────────────────────────────────────────────────────────────
 
-/// WLED general timer slots (0-7). Slots 8/9 are sunrise/sunset and are
-/// addressed on the wire by `hour:255`, never by array index.
+/// WLED general timer slots (0-7). Slots 8/9 are sunrise/sunset. On 0.15.x the
+/// firmware finds them by POSITION (the first `hour:255` row jumps to slot 8);
+/// on 16.x by HOUR (255 = sunrise, 254 = sunset). The app's shared timer table
+/// (+122, lib/features/schedule/timer_table.dart) sends sunrise as 255 in row 8
+/// and sunset as 254 in row 9, so a readback can now carry EITHER marker.
 const int kWledGeneralTimerSlots = 8;
+
+/// Sunrise marker: 0.15.x's "jump to slot 8" value, 16.x's TH_SUNRISE.
+const int kWledSunriseHour = 255;
+
+/// Sunset marker: 16.x's TH_SUNSET. The +122 timer table writes it in row 9;
+/// 0.15.x stores it there and never reads the hour.
+const int kWledSunsetHour = 254;
 
 /// The row that CLEARS a general slot. deserializeConfig merges `timers.ins`
 /// by array index and never clears a slot the body does not mention;
@@ -552,9 +562,18 @@ const Map<String, dynamic> kEmptyTimerRow = <String, dynamic>{
   'dow': 0,
 };
 
-/// A sunrise/sunset row as WLED serializes it (`hour == 255`).
-bool isSolarTimerRow(Map<String, dynamic> t) =>
-    (t['hour'] is num) && (t['hour'] as num).toInt() == 255;
+/// A sunrise/sunset row as WLED serializes it: `hour == 255` (sunrise, or the
+/// pre-+122 encoding of either sun event) or `hour == 254` (sunset, +122).
+bool isSolarTimerRow(Map<String, dynamic> t) {
+  final h = t['hour'];
+  if (h is! num) return false;
+  final hour = h.toInt();
+  return hour == kWledSunriseHour || hour == kWledSunsetHour;
+}
+
+/// True for the sunset marker only (`hour == 254`).
+bool isSunsetTimerRow(Map<String, dynamic> t) =>
+    (t['hour'] is num) && (t['hour'] as num).toInt() == kWledSunsetHour;
 
 /// One readback row in a canonical string form so two tables can be compared
 /// field-for-field. `en` is normalised to 0/1; `start`/`end` (absent on solar
@@ -615,10 +634,11 @@ String? timerTableDiff(
 /// the captured rows at their readback indices could duplicate a row that
 /// really lived in slot 3.
 ///
-/// Solar rows (hour 255) are deliberately NOT re-posted. The harness never
-/// writes slots 8/9, and a lone re-posted 255 row always lands in slot 8
-/// (sunrise) even if it came from slot 9 (sunset). [timerTableDiff] still
-/// checks them afterwards, so a disturbed solar row is caught, not hidden.
+/// Solar rows (hour 255 or 254) are deliberately NOT re-posted. The harness
+/// never writes slots 8/9, and a lone re-posted 255 row always lands in slot 8
+/// (sunrise) even if it came from slot 9 (sunset); a re-posted 254 row would be
+/// taken for a clock row on 0.15.x and a second sun row on 16.x. [timerTableDiff]
+/// still checks them afterwards, so a disturbed solar row is caught, not hidden.
 ///
 /// Limitation, by design: general rows come back re-packed from slot 0. The
 /// app rewrites all ten slots on every schedule sync, so slot numbers carry
