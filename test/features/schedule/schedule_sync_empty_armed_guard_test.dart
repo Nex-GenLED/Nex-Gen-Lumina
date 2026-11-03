@@ -43,7 +43,7 @@ void main() {
       final ins = repo.lastIns;
       expect(ins, hasLength(10), reason: 'solar-aware 10-slot assembly');
       expect(ins[9]['macro'], 10, reason: 'slot 9 = sunset ON → pattern slot');
-      expect(ins[9]['hour'], 255);
+      expect(ins[9]['hour'], 254, reason: 'sunset = TH_SUNSET');
       expect(ins[8]['macro'], 2, reason: 'slot 8 = global sunrise-off');
       // Nothing in the general slots — that was the whole problem.
       for (var i = 0; i < 8; i++) {
@@ -157,9 +157,14 @@ void main() {
       final r = await svc.syncAll(
           ref, [patternSchedule(on: '7:00 PM', off: '11:00 PM')]);
       expect(r.success, isTrue);
-      expect(repo.lastIns, hasLength(8), reason: 'no solar slot in play');
+      expect(repo.lastIns, hasLength(10),
+          reason: 'every write is the whole table, solar in play or not');
       expect(repo.lastIns[0]['macro'], 10);
       expect(repo.lastIns[1]['macro'], 2);
+      expect(repo.lastIns[8],
+          {'en': 0, 'hour': 255, 'min': 0, 'macro': 0, 'dow': 0},
+          reason: 'slot 8 = the disabled placeholder');
+      expect(repo.lastIns[9]['macro'], 0, reason: 'slot 9 = a stub');
     });
   });
 

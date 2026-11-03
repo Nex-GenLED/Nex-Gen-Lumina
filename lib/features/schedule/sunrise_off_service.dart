@@ -51,6 +51,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart'
     show CfgPushOutcome, ScheduleSyncService, pushCfgWithVerify;
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
+    show
+        calendarLeaseActiveTimersProvider,
+        calendarLeaseSchedulesHydratedProvider,
+        calendarLeaseSchedulesProvider,
+        LeaseLedgerLoading,
+        LeaseLedgerState;
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/timer_table.dart';
+import 'package:nexgen_command/features/schedule/timer_table_context.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -121,27 +131,27 @@ enum SunriseOffWriteResult {
   failed,
 }
 
-/// Arms / disarms the reserved sunrise slot directly on the controller.
+/// Arms / disarms the reserved sunrise slot on the controller.
 ///
-/// Read-modify-write: the controller's current `timers.ins` is read, ONLY index
-/// 8 is replaced, and the full array is pushed back. That preserves every
-/// schedule timer (slots 0-7), every lease timer, and the sunset slot (9). The
-/// write goes through the shared hardened [pushCfgWithVerify] — the same
-/// verified path schedule sync and the lease writer use. Never fire-and-forget.
+/// The write is the WHOLE timer table, built by the same [composeTimerTable]
+/// the lease writer uses (timer_table.dart): every schedule row, every lease,
+/// the sunset row, and slot 8 = the sunrise-off (arm) or what the schedules
+/// put there (disarm). It used to read the controller's table back and swap
+/// index 8, and that read classified the FIRST hour-255 row as sunrise — so a
+/// lone sunset row ("Sunset → 11 PM") was taken for the sunrise slot and
+/// overwritten, and slot 9 was stubbed. Building from state has no readback to
+/// misread. The write goes through the shared hardened [pushCfgWithVerify].
+/// Never fire-and-forget.
 class SunriseOffService {
   const SunriseOffService();
 
   /// Arm the daily sunrise-off timer (toggle ON).
-  Future<SunriseOffWriteResult> arm(Ref ref) =>
-      _write(ref, buildSunriseOffTimerEntry(), ensureOffPreset: true);
+  Future<SunriseOffWriteResult> arm(Ref ref) => _write(ref, enabled: true);
 
-  /// Disarm it (toggle OFF) by writing a disabled stub into the reserved slot,
-  /// so the controller stops firing it. Same slot-reclaim mechanism the
-  /// schedule path uses for vacated slots. No preset is needed to clear a slot,
-  /// so the OFF-preset guarantee is skipped here.
-  Future<SunriseOffWriteResult> disarm(Ref ref) =>
-      _write(ref, ScheduleSyncService.disabledTimerStub(),
-          ensureOffPreset: false);
+  /// Disarm it (toggle OFF): the table is rebuilt without it, so slot 8 holds
+  /// a schedule's own sunrise boundary or the disabled placeholder. No preset
+  /// is needed to clear a slot, so the OFF-preset guarantee is skipped here.
+  Future<SunriseOffWriteResult> disarm(Ref ref) => _write(ref, enabled: false);
 
   /// Test seam over the hardened cfg write+verify, mirroring the lease writer's
   /// `cfgPushFn`. Production delegates to the shared [pushCfgWithVerify].
@@ -153,9 +163,7 @@ class SunriseOffService {
   ) cfgPushFn = (repo, payload, ins) =>
       pushCfgWithVerify(repo: repo, payload: payload, ins: ins);
 
-  Future<SunriseOffWriteResult> _write(
-      Ref ref, Map<String, dynamic> slot8Entry,
-      {required bool ensureOffPreset}) async {
+  Future<SunriseOffWriteResult> _write(Ref ref, {required bool enabled}) async {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) {
       debugPrint('SunriseOff: no controller — not armed');
@@ -176,25 +184,25 @@ class SunriseOffService {
     // loads nothing and the lights stay on — a silent no-op that still reads
     // back as a perfectly armed timer. Guarantee it exists BEFORE arming, and
     // abort rather than write a timer pointing at nothing.
-    if (ensureOffPreset && !await _ensureOffPresetSaved(repo)) {
+    if (enabled && !await _ensureOffPresetSaved(repo)) {
       debugPrint('SunriseOff: NGL Off preset (${ScheduleSyncService
           .kNglOffPresetId}) could not be saved — ABORTING the timer write');
       return SunriseOffWriteResult.presetSaveFailed;
     }
 
-    final ins = await _readModifyWrite(repo, slot8Entry);
+    final table = await _composeTable(ref, repo, enabled: enabled);
+    if (table == null) return SunriseOffWriteResult.failed;
     final outcome = await cfgPushFn(
       repo,
       <String, dynamic>{
-        'timers': {'ins': ins}
+        'timers': {'ins': table.ins}
       },
-      ins,
+      table.ins,
     );
     switch (outcome) {
       case CfgPushOutcome.confirmed:
-        debugPrint('SunriseOff: slot ${ScheduleSyncService.kWledSunriseSlot} '
-            'written + verified (macro ${slot8Entry['macro']}, '
-            'en ${slot8Entry['en']})');
+        debugPrint('SunriseOff: table written + verified (sunrise-off '
+            '${enabled ? 'armed' : 'cleared'})');
         return SunriseOffWriteResult.confirmed;
       // solarMismatch is reachable here and IS a failure for this writer: the
       // global sunrise-off IS the slot-8 solar row, so "clock timers fine, only
@@ -297,82 +305,49 @@ class SunriseOffService {
     return ok;
   }
 
-  /// Classify a `timers.ins` response WITHOUT assuming array index == firmware
-  /// slot index.
-  ///
-  /// WLED COMPACTS `ins` when serializing: it omits any timer that is entirely
-  /// empty (`macro == 0 && hour == 0 && min == 0`). Verified on 192.168.1.150
-  /// (0.15.1 / vid 2507300, 2026-07-29): a controller with 8 empty general
-  /// slots and 2 solar slots returns just TWO entries — so `ins[0]` there is
-  /// firmware slot 8, not slot 0. Indexing the response positionally copies the
-  /// solar entries into general slots and loses the sunrise slot entirely.
-  ///
-  /// The reliable discriminator is the solar marker: a clock timer's `hour` is
-  /// 0-23, and only the sunrise/sunset slots serialize `hour: 255`. So the
-  /// FIRST 255-entry is sunrise (slot 8), the SECOND is sunset (slot 9), and
-  /// everything else is a general timer in slot order. This holds whether the
-  /// firmware returns a compacted array or a full positional 10 — in the full
-  /// case the general entries already occupy 0-7 and the two 255s trail them.
-  @visibleForTesting
-  static ({
-    List<Map<String, dynamic>> general,
-    Map<String, dynamic>? sunrise,
-    Map<String, dynamic>? sunset,
-  }) partitionTimerIns(List<Map<String, dynamic>>? ins) {
-    final general = <Map<String, dynamic>>[];
-    final solar = <Map<String, dynamic>>[];
-    for (final t in ins ?? const <Map<String, dynamic>>[]) {
-      final hour = (t['hour'] as num?)?.toInt();
-      if (hour == ScheduleSyncService.kWledSolarHourMarker) {
-        solar.add(t);
-      } else if (general.length < ScheduleSyncService.kMaxWledTimers) {
-        general.add(t);
-      }
+  /// The table to write, from state: hydrated schedules, the loaded lease
+  /// ledger, and the setting being written. Null when any of them is not known
+  /// yet — writing then could erase rows this toggle does not own.
+  Future<TimerTable?> _composeTable(Ref ref, WledRepository repo,
+      {required bool enabled}) async {
+    LeaseLedgerState leases;
+    try {
+      leases = ref.read(calendarLeaseActiveTimersProvider);
+    } catch (_) {
+      leases = const LeaseLedgerLoading();
     }
-    return (
-      general: general,
-      sunrise: solar.isNotEmpty ? solar[0] : null,
-      sunset: solar.length > 1 ? solar[1] : null,
+    if (leases is LeaseLedgerLoading) {
+      debugPrint('SunriseOff: lease ledger not loaded — not writing');
+      return null;
+    }
+    final List<ScheduleItem> schedules;
+    try {
+      if (!ref.read(calendarLeaseSchedulesHydratedProvider)) {
+        debugPrint('SunriseOff: schedules not loaded — not writing');
+        return null;
+      }
+      schedules = ref.read(calendarLeaseSchedulesProvider);
+    } catch (e) {
+      debugPrint('SunriseOff: schedules unreadable — $e; not writing');
+      return null;
+    }
+    final read = await resolveTimerTableContext(
+      ref,
+      repo,
+      sunriseOffGiven: true,
+      sunriseOff: enabled ? buildSunriseOffTimerEntry() : null,
     );
-  }
-
-  /// Build the full 10-slot array to push: the controller's existing timers
-  /// with ONLY the reserved sunrise slot replaced.
-  ///
-  /// Always emits exactly [ScheduleSyncService.kWledTotalTimerSlots] entries in
-  /// firmware-slot order, so the write is positionally unambiguous no matter
-  /// what shape the read came back in. When the table can't be read (relay,
-  /// fetch error) the general slots become stubs rather than invented timers —
-  /// the next schedule sync re-asserts 0-7 from Firestore, which owns them.
-  Future<List<Map<String, dynamic>>> _readModifyWrite(
-      WledRepository repo, Map<String, dynamic> slot8Entry) async {
-    List<Map<String, dynamic>>? existing;
-    if (repo is WledService) {
-      try {
-        existing = await repo.fetchTimerInstances();
-      } catch (e) {
-        debugPrint('SunriseOff: could not read existing timers — $e');
-      }
+    final ctx = read.context;
+    if (ctx == null) {
+      debugPrint('SunriseOff: ${read.unknown} — not writing');
+      return null;
     }
-    if (existing == null) {
-      debugPrint('SunriseOff: existing timer table unreadable — writing '
-          'stubs for slots 0-7 (next schedule sync re-asserts them)');
-    }
-
-    final parts = partitionTimerIns(existing);
-    final out = <Map<String, dynamic>>[];
-    // Slots 0-7: preserved general timers, padded with stubs.
-    for (var i = 0; i < ScheduleSyncService.kMaxWledTimers; i++) {
-      out.add(i < parts.general.length
-          ? Map<String, dynamic>.from(parts.general[i])
-          : ScheduleSyncService.disabledTimerStub());
-    }
-    // Slot 8: ours. Slot 9: the controller's existing sunset, preserved.
-    out.add(Map<String, dynamic>.from(slot8Entry));
-    out.add(parts.sunset != null
-        ? Map<String, dynamic>.from(parts.sunset!)
-        : ScheduleSyncService.disabledTimerStub());
-    return out;
+    return composeTimerTable(
+      schedules: schedules,
+      leaseRows: leases.timers,
+      ctx: ctx,
+      debug: debugPrint,
+    );
   }
 }
 

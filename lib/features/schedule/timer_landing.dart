@@ -4,16 +4,16 @@
 // importers are unaffected.
 
 /// True when a timer entry is a "real, enabled, armable" timer — NOT a disabled
-/// padding stub and NOT a solar sentinel: `en` is truthy (bool `true` or int
-/// `1`), `macro != 0`, `hour != 255`. Shared by the readback comparator
-/// ([timersInsLanded]), syncAll's empty-armed guard, and the bench/ CLI — a
-/// genuine shared internal API (not test-only), so no @visibleForTesting.
+/// padding stub and NOT a sun row: `en` is truthy (bool `true` or int `1`),
+/// `macro != 0`, and `hour` is neither sun marker (255 sunrise, 254 sunset).
+/// Shared by the readback comparator ([timersInsLanded]) and the bench/ CLI —
+/// a genuine shared internal API (not test-only), so no @visibleForTesting.
 bool isRealEnabledTimer(Map<String, dynamic> t) {
   final en = t['en'];
   final enOn = en == true || en == 1;
   final macro = (t['macro'] is num) ? (t['macro'] as num).toInt() : 0;
   final hour = (t['hour'] is num) ? (t['hour'] as num).toInt() : -1;
-  return enOn && macro != 0 && hour != 255;
+  return enOn && macro != 0 && !_isSunMarker(hour);
 }
 
 /// True when [t] is an enabled entry that DOES something — a clock timer, a
@@ -51,14 +51,26 @@ List<Map<String, dynamic>>? timerInstancesFromCfg(Map<String, dynamic>? cfg) {
   return ins.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
 }
 
-/// The `hour` value WLED serializes for a solar (sunrise/sunset) timer slot.
-/// Not a clock hour — a marker. See [solarTimersLanded].
+/// The `hour` value of a SUNRISE row (and of every sun row in tables written
+/// before the sunset marker existed). Not a clock hour — a marker. See
+/// [solarTimersLanded].
 const int kSolarHourMarker = 255;
+
+/// The `hour` value of a SUNSET row: WLED 16.x's TH_SUNSET. 0.15.x stores it in
+/// slot 9 and serializes it back unchanged. See timer_table.dart.
+const int kSunsetHourMarker = 254;
+
+bool _isSunMarker(int hour) =>
+    hour == kSolarHourMarker || hour == kSunsetHourMarker;
 
 /// A solar row as it appears on the wire, paired to the slot that owns it.
 class SolarTimerRow {
   /// `true` = sunrise (sent slot 8), `false` = sunset (sent slot 9).
   final bool isSunrise;
+
+  /// The marker this row was SENT with: 255, or 254 for a sunset written with
+  /// the 16.x-safe encoding.
+  final int hour;
 
   /// `en` normalized to int (WLED reads it type-strictly; a JSON bool stores 0).
   final int en;
@@ -71,6 +83,7 @@ class SolarTimerRow {
 
   const SolarTimerRow({
     required this.isSunrise,
+    this.hour = kSolarHourMarker,
     required this.en,
     required this.offsetMinutes,
     required this.macro,
@@ -106,6 +119,7 @@ int _fld(Map<String, dynamic> m, String k) =>
 SolarTimerRow _row(Map<String, dynamic> t, {required bool isSunrise}) =>
     SolarTimerRow(
       isSunrise: isSunrise,
+      hour: _fld(t, 'hour'),
       en: (t['en'] == true || t['en'] == 1) ? 1 : 0,
       offsetMinutes: normalizeSolarOffset(_fld(t, 'min')),
       macro: _fld(t, 'macro'),
@@ -129,7 +143,14 @@ List<SolarTimerRow> extractSentSolarRows(List<Map<String, dynamic>> ins) {
   for (final slot in const [kSentSunriseSlot, kSentSunsetSlot]) {
     if (slot >= ins.length) continue;
     final t = ins[slot];
-    if (_fld(t, 'hour') != kSolarHourMarker) continue;
+    final hour = _fld(t, 'hour');
+    // Slot 8 is always 255. Slot 9 is 254 (current encoding) or 255 (tables
+    // written before it).
+    if (slot == kSentSunriseSlot
+        ? hour != kSolarHourMarker
+        : !_isSunMarker(hour)) {
+      continue;
+    }
     final r = _row(t, isSunrise: slot == kSentSunriseSlot);
     if (r.en == 1) out.add(r);
   }
@@ -156,6 +177,11 @@ List<Map<String, dynamic>> extractReadbackSolarEntries(
   }
   return out;
 }
+
+/// READBACK-side rows carrying either sun marker (255 or 254), in order.
+List<Map<String, dynamic>> extractReadbackSunRows(
+        List<Map<String, dynamic>> ins) =>
+    [for (final t in ins) if (_isSunMarker(_fld(t, 'hour'))) t];
 
 /// Readback comparator for SOLAR rows — the blind spot [timersInsLanded] leaves.
 ///
@@ -197,6 +223,26 @@ bool solarTimersLanded(
   final sentSolar = extractSentSolarRows(sent);
   if (sentSolar.isEmpty) return true; // nothing solar claimed; nothing to check
 
+  bool sameContent(SolarTimerRow s, Map<String, dynamic> b) =>
+      ((b['en'] == true || b['en'] == 1) ? 1 : 0) == s.en &&
+      _fld(b, 'macro') == s.macro &&
+      _fld(b, 'dow') == s.dow &&
+      normalizeSolarOffset(_fld(b, 'min')) == s.offsetMinutes;
+
+  // Every row is matched by ITS marker and content: the readback carries the
+  // markers unchanged on both firmwares (254 = sunset in the current encoding),
+  // so a sunrise/sunset swap fails and the disabled slot-8 placeholder can
+  // never stand in for an armed sunrise. Only a LEGACY pair — both rows armed
+  // and both sent as 255 — is told apart by order instead.
+  final legacyPair = sentSolar.length == 2 &&
+      sentSolar.every((r) => r.hour == kSolarHourMarker);
+  if (!legacyPair) {
+    final back = extractReadbackSunRows(readback);
+    return sentSolar.every((s) =>
+        back.any((b) => _fld(b, 'hour') == s.hour && sameContent(s, b)));
+  }
+
+  // LEGACY PAIR (both rows 255): only order distinguishes them.
   final backEntries = extractReadbackSolarEntries(readback);
   if (backEntries.length < sentSolar.length) return false; // a slot is missing
 
@@ -253,7 +299,7 @@ bool timersInsLanded(
 
   if (sentReal.isEmpty) {
     // Cleared schedule: the controller must show no enabled non-solar timers.
-    return !readback.any((r) => en(r['en']) == 1 && fld(r, 'hour') != 255);
+    return !readback.any((r) => en(r['en']) == 1 && !_isSunMarker(fld(r, 'hour')));
   }
 
   // Every real timer we sent must appear somewhere in the readback (en==1,
