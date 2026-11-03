@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
 import 'package:nexgen_command/features/schedule/preset_repair_convergence.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/base_ladder_repair_feature_flag.dart';
@@ -1495,10 +1496,25 @@ class ScheduleSyncService {
           capturedLiveState,
           channels: effectiveSchedule.channels,
         );
+        // 2026-11-02 — FAN OUT over the BUS SET (pattern_preset_fanout.dart).
+        // The Explore tuner hands a schedule ONE id-less segment; the firmware
+        // applies that to segment 0 only and `psave` snapshots the rest, so on
+        // a multi-bus controller the schedule fired on channel 1 alone. The
+        // bus ids come from `gateExpectedShape` — `deviceChannelsFromConfig`
+        // of the controller's own `/json/cfg`, the same device truth the
+        // healer and the gate use, and the layout the gate has just
+        // re-provisioned if a restart had collapsed it. Empty (relay, cfg
+        // unreadable) or single-bus ⇒ the payload passes through unchanged.
+        // A scoped schedule already names the full census, so it is left to
+        // the scope rule.
+        final fannedPayload = effectiveSchedule.channels == null
+            ? fanOutPatternPayloadToBuses(
+                scopedPayload, gateExpectedShape.map((s) => s.id))
+            : scopedPayload;
         final presetPayload = <String, dynamic>{
-          ...scopedPayload,
+          ...fannedPayload,
           'on': true,
-          'bri': (scopedPayload['bri'] as num?)?.toInt() ?? 255,
+          'bri': (fannedPayload['bri'] as num?)?.toInt() ?? 255,
           // ib:true → WLED persists the root master on/bri (not just segments),
           // so firing this ON-preset from a master-off state powers the strip on.
           // Bench-proven (see the system-preset block above). normalizeWledPayload
@@ -2242,7 +2258,10 @@ class ScheduleSyncService {
   ///
   /// Returns [payload] unchanged when [channels] is null — the all-channel path
   /// is untouched, which is what keeps every existing fixture byte-identical.
-  @visibleForTesting
+  ///
+  /// Public (no longer test-only): the lease manager is the FOURTH caller as
+  /// of 2026-11-02 — a one-night entry's channel scope fires through the same
+  /// rule, so the two paths cannot disagree about what a scope means.
   static Map<String, dynamic> scopePatternPayload(
     Map<String, dynamic> payload,
     Map<String, dynamic>? liveState, {
