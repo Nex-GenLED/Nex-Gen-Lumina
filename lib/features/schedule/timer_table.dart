@@ -130,11 +130,19 @@ int generalRowsFor(ScheduleItem s, {required bool solarEnabled}) {
   return (armed: armed, overflowed: overflowed);
 }
 
-/// The two sun rows across all [armed] schedules. One sunrise row and one
-/// sunset row exist on 0.15.x; extra boundaries come back in `rejected`.
-/// [sunriseTaken]: the global sunrise-off owns slot 8, so a schedule's sunrise
-/// OFF is superseded (same macro 2 effect) and is neither assigned nor
-/// rejected.
+/// The two sun rows across all [armed] schedules.
+///
+/// 0.15.x has ONE sunrise row and ONE sunset row. For each event:
+/// * if any schedule turns the lights ON at it, the first such schedule owns
+///   the row; every other boundary at that event comes back in `rejected`;
+/// * otherwise every OFF at it is merged into ONE row: macro 2 (master off)
+///   with the union of the schedules' OFF days. Every sun OFF is the same
+///   macro, so merging loses nothing — and the editor gives every new
+///   schedule an OFF at Sunrise, so two ordinary schedules ("6 PM → Sunrise"
+///   on weeknights, "5 PM → Sunrise" at weekends) used to leave one of them
+///   with no OFF at all.
+/// [sunriseTaken]: the global sunrise-off owns slot 8 (every day, macro 2), so
+/// a schedule's sunrise OFF is superseded — neither assigned nor rejected.
 ({
   Map<String, dynamic>? sunrise,
   Map<String, dynamic>? sunset,
@@ -144,30 +152,11 @@ int generalRowsFor(ScheduleItem s, {required bool solarEnabled}) {
   bool sunriseTaken = false,
   void Function(String)? debug,
 }) {
-  Map<String, dynamic>? sunrise;
-  Map<String, dynamic>? sunset;
   final rejected = <String>[];
-
-  void assign(bool isSunrise, Map<String, dynamic> row, String who) {
-    if (isSunrise) {
-      if (sunriseTaken) {
-        debug?.call('TimerTable: sunrise slot owned by the global '
-            'sunrise-off — superseded $who (same master-OFF effect)');
-        return;
-      }
-      if (sunrise == null) {
-        sunrise = row;
-      } else {
-        rejected.add(who);
-      }
-    } else {
-      if (sunset == null) {
-        sunset = row;
-      } else {
-        rejected.add(who);
-      }
-    }
-  }
+  // Per event: the ON owner (first wins), and the merged OFF days.
+  final onRow = <bool, Map<String, dynamic>>{};
+  final offDays = <bool, int>{};
+  final offWho = <bool, List<String>>{true: [], false: []};
 
   for (final s in armed) {
     final dow = cfg.computeDowMask(s.repeatDays);
@@ -180,29 +169,51 @@ int generalRowsFor(ScheduleItem s, {required bool solarEnabled}) {
     }
     if (cfg.isSolarLabel(s.timeLabel)) {
       final up = _isSunrise(s.timeLabel);
-      assign(
-        up,
-        sunRow(sunrise: up, offsetMinutes: 0, macro: presetId, dow: dow),
-        '${s.actionLabel} (${s.timeLabel} ON)',
-      );
+      final who = '${s.actionLabel} (${s.timeLabel} ON)';
+      if (onRow.containsKey(up)) {
+        rejected.add(who);
+      } else {
+        onRow[up] =
+            sunRow(sunrise: up, offsetMinutes: 0, macro: presetId, dow: dow);
+      }
     }
     if (s.hasOffTime &&
         s.offTimeLabel != null &&
         cfg.isSolarLabel(s.offTimeLabel!)) {
       final up = _isSunrise(s.offTimeLabel);
-      assign(
-        up,
-        sunRow(
-            sunrise: up,
-            offsetMinutes: 0,
-            macro: cfg.kNglOffPresetIdCfg,
-            // A Sunrise OFF that ends an evening ON fires the next morning.
-            dow: cfg.offDowFor(s, dow)),
-        '${s.actionLabel} (${s.offTimeLabel} OFF)',
-      );
+      if (up && sunriseTaken) {
+        debug?.call('TimerTable: sunrise slot owned by the global '
+            'sunrise-off — superseded ${s.actionLabel} (same master-OFF '
+            'effect)');
+        continue;
+      }
+      // A Sunrise OFF that ends an evening ON fires the next morning.
+      offDays[up] = (offDays[up] ?? 0) | cfg.offDowFor(s, dow);
+      offWho[up]!.add('${s.actionLabel} (${s.offTimeLabel} OFF)');
     }
   }
-  return (sunrise: sunrise, sunset: sunset, rejected: rejected);
+
+  Map<String, dynamic>? rowFor(bool up) {
+    final on = onRow[up];
+    if (on != null) {
+      // An ON owns the row; an OFF at the same instant cannot also arm.
+      rejected.addAll(offWho[up]!);
+      return on;
+    }
+    final days = offDays[up];
+    if (days == null) return null;
+    return sunRow(
+        sunrise: up,
+        offsetMinutes: 0,
+        macro: cfg.kNglOffPresetIdCfg,
+        dow: days);
+  }
+
+  return (
+    sunrise: sunriseTaken ? null : rowFor(true),
+    sunset: rowFor(false),
+    rejected: rejected,
+  );
 }
 
 /// Exactly [kTableSlots] rows: [general] padded/truncated into 0-7, then the
@@ -395,4 +406,53 @@ TimerTable composeTimerTable({
     solarEnabled: ctx.solarEnabled,
     debug: debug,
   );
+}
+
+// ─── Save-time refusals ─────────────────────────────────────────────────────
+
+String _plainName(ScheduleItem s) {
+  final a = s.actionLabel.trim();
+  final colon = a.indexOf(':');
+  return a.toLowerCase().startsWith('pattern') && colon != -1
+      ? a.substring(colon + 1).trim()
+      : a;
+}
+
+/// Why the schedule editor must not save [candidate] as it is — in the words
+/// the customer sees — or null when it may.
+///
+/// The controller holds one sunrise row and one sunset row, so two schedules
+/// cannot both START at sunset (or at sunrise): the second used to save, then
+/// silently not arm at the next sync. A Sunrise ON also cannot share the
+/// sunrise row with "Turn lights off at sunrise daily". OFF boundaries are not
+/// refused — they share one row (see [sunSlotsFor]). [schedules] is the
+/// account's list; [editingId] is the schedule being edited, which is never a
+/// conflict with itself. Disabled schedules conflict with nothing.
+String? sunScheduleSaveRefusal({
+  required ScheduleItem candidate,
+  required List<ScheduleItem> schedules,
+  String? editingId,
+  required bool sunriseOffOn,
+}) {
+  if (!candidate.enabled || !cfg.isSolarLabel(candidate.timeLabel)) {
+    return null;
+  }
+  final sunrise = _isSunrise(candidate.timeLabel);
+  if (sunrise && sunriseOffOn) {
+    return 'This schedule turns the lights on at sunrise, but "Turn lights '
+        'off at sunrise daily" is on, and your controller cannot do both at '
+        'sunrise. Give this schedule a clock time, or turn that setting off '
+        'in System first.';
+  }
+  for (final other in schedules) {
+    if (other.id == editingId || other.id == candidate.id) continue;
+    if (!other.enabled || !cfg.isSolarLabel(other.timeLabel)) continue;
+    if (_isSunrise(other.timeLabel) != sunrise) continue;
+    final event = sunrise ? 'sunrise' : 'sunset';
+    final name = _plainName(other);
+    return '"$name" already turns the lights on at $event, and your '
+        'controller can start only one look at $event. Give this schedule a '
+        'clock time, or change "$name".';
+  }
+  return null;
 }

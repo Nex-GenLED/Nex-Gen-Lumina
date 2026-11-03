@@ -23,6 +23,10 @@ import 'package:nexgen_command/features/game_day/served_game_day.dart'
 import 'package:nexgen_command/features/schedule/widgets/ladder_repair_banner.dart';
 import 'package:nexgen_command/features/schedule/widgets/channel_scope_picker.dart';
 import 'package:nexgen_command/features/schedule/widgets/timer_slot_meter.dart';
+import 'package:nexgen_command/features/schedule/timer_table.dart'
+    show sunScheduleSaveRefusal;
+import 'package:nexgen_command/features/schedule/sunrise_off_service.dart'
+    show sunriseOffEnabledProvider;
 import 'package:nexgen_command/features/schedule/widgets/timeline_row.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/dated_overwrite_dialog.dart';
@@ -5243,6 +5247,33 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                     // naming what is holding the slots. The old behaviour saved
                     // to Firestore and only then reported "8/8, delete an old
                     // schedule", after the fact and naming nothing.
+                    // One sunrise row and one sunset row on the controller:
+                    // refuse a second sunset (or sunrise) look, and a Sunrise
+                    // ON while the daily sunrise-off owns that row — here, in
+                    // words, instead of a silent "not armed" at the next sync.
+                    final sunRefusal = sunScheduleSaveRefusal(
+                      candidate: item,
+                      schedules: ref.read(schedulesProvider),
+                      editingId: widget.editing?.id,
+                      sunriseOffOn: ref.read(sunriseOffEnabledProvider),
+                    );
+                    if (sunRefusal != null) {
+                      await showDialog<void>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text("Can't save this schedule"),
+                          content: Text(sunRefusal),
+                          actions: [
+                            TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(),
+                                child: const Text('OK')),
+                          ],
+                        ),
+                      );
+                      return;
+                    }
+                    if (!context.mounted) return;
+
                     if (!await confirmSlotCapacity(context, ref,
                         candidate: item, editingId: widget.editing?.id)) {
                       return;
