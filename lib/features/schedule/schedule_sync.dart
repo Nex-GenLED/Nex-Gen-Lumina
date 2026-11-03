@@ -1258,6 +1258,29 @@ class ScheduleSyncService {
         return;
       }
 
+      // ── CONVERGENCE IS JUDGED BY THE REAL PREDICATE, ALWAYS ───────────────
+      // For an [alwaysWrite] slot `isSatisfied` is the constant `false` — that
+      // is Option A's "no idempotent skip", and it stays. But the
+      // non-convergence counter must not inherit that constant: it exists to
+      // stop re-saving a preset a save CANNOT satisfy, and "cannot satisfy" is
+      // a question for `presetSatisfies`, not for the skip policy. With the
+      // counter keyed off `isSatisfied`, every pattern slot (10-25) accrued one
+      // "failed" attempt per sync and the fourth sync of a session refused it
+      // with "Predicate and builder are out of step" — literally true (the
+      // predicate in force was `() => false`) and a false alarm on every
+      // house (2026-11-02 arm-check read; the stored preset satisfied the real
+      // predicate exactly). So: a stored definition that already satisfies the
+      // builder's output CLEARS the counter, and is still re-written below; a
+      // definition that never satisfies it still trips the guard after
+      // [kMaxRepairAttempts] writes, which is the behaviour the guard was built
+      // for. For a non-alwaysWrite slot this is the same test the early return
+      // above just failed, so `converged` is false and nothing changes.
+      final bool converged = existing != null &&
+          presetSatisfies(existing, state,
+              expectedName: name,
+              compareSegments: compareSegments,
+              requireAllExpectedSegments: scoped);
+
       // GEOMETRY GATE FIRST (#76 layer 4), and the ORDER IS THE POINT. A gate
       // refusal must not count as a repair attempt: no save happens, so
       // counting it would burn the non-convergence budget on a condition a save
@@ -1283,14 +1306,22 @@ class ScheduleSyncService {
       // visible flicker on every connect, on every controller, with each
       // individual save reporting success. Three attempts without the
       // predicate flipping is a bug report, not a retry.
-      final decision = await decideRepair(presetId: id, presetName: name);
-      if (!decision.allowed) {
-        presetErrors.add(decision.refusal!);
-        debugPrint('ScheduleSync: ${decision.refusal}');
-        savedPresetIds.add(id); // left alone deliberately, not lost
-        return;
+      //
+      // A CONVERGED slot (see `converged` above) is not consulted and its
+      // counter is cleared: the write that follows is Option A's policy, not
+      // a repair attempt, and it cannot be "the save that is not fixing it".
+      if (converged) {
+        await repairAttempts.recordSatisfied(id);
+      } else {
+        final decision = await decideRepair(presetId: id, presetName: name);
+        if (!decision.allowed) {
+          presetErrors.add(decision.refusal!);
+          debugPrint('ScheduleSync: ${decision.refusal}');
+          savedPresetIds.add(id); // left alone deliberately, not lost
+          return;
+        }
+        await repairAttempts.recordAttempt(id);
       }
-      await repairAttempts.recordAttempt(id);
 
       // PACE. Only reached once every skip/refuse branch above has returned,
       // so this delay is charged strictly to writes that actually go out.
@@ -1603,15 +1634,29 @@ class ScheduleSyncService {
     // controller forever — the exact dow:0 accumulation padTimersToMax exists
     // to fix.
     //
-    // Only count refusals that would OTHERWISE HAVE ARMED. This loop, unlike
-    // buildCfgPayload, does not filter on `enabled`/eviction — so without this
+    // Only count refusals that would OTHERWISE HAVE ARMED. This loop does not
+    // filter on `enabled` (updatedSchedules already did) — so without this
     // filter a single DISABLED solar schedule would block the clearing write
-    // for a user who has switched everything off.
+    // for a user who has switched everything off. Soft-evicted items are
+    // skipped below before any check, so the eviction test here is a belt.
     var refusedCount = 0;
     void countRefusal(ScheduleItem s) {
       if (s.enabled && !s.isCurrentlyEvicted) refusedCount++;
     }
     for (final s in updatedSchedules) {
+      // ── Soft-evicted = "as if enabled:false" ──────────────────────────
+      // `ScheduleItem.disabledUntil` in the future means the lease manager's
+      // eviction picker paused this schedule to free a slot. buildCfgPayload
+      // already drops its rows; this loop and solarTimerSlots did NOT, so an
+      // evicted schedule still counted as ARMED, still consumed capacity in
+      // splitByTimerCapacity, and (if solar) still took a slot-8/9 row. One
+      // evicted clock schedule and nothing else ⇒ armedSchedules non-empty
+      // with zero rows ⇒ the empty-armed guard below reported "could not be
+      // armed" for an account where nothing was wrong (2026-11-02 arm-check
+      // read). Neither armed nor refused — exactly like a disabled schedule.
+      // Its preset was still written above, so it is ready when the eviction
+      // expires and the next sync re-arms it.
+      if (s.isCurrentlyEvicted) continue;
       final isPatternAction = s.actionLabel.toLowerCase().startsWith('pattern');
       final presetSaved =
           s.presetId != null && savedPresetIds.contains(s.presetId);
@@ -1831,25 +1876,38 @@ class ScheduleSyncService {
     // content-match comparator would then trivially pass and report a false
     // green. Checked on scheduleIns (NOT the merged ins) so preserved lease
     // timers can't mask the bug. Fail loudly; never POST a no-op that arms nothing.
-    if (armedSchedules.isNotEmpty && !scheduleIns.any(isRealEnabledTimer)) {
+    //
+    // ── "Nothing armed" means NO ENABLED ENTRY, solar rows included ─────────
+    // This used to test `isRealEnabledTimer`, which EXCLUDES `hour:255`. That
+    // was fine while solar was refused upstream (the first conjunct was false
+    // for every solar-only account), but once the solar flag went live a
+    // dusk-to-dawn schedule reached here with its boundaries in slots 8/9 and
+    // nothing in 0-7: the guard called that "zero real timers", returned
+    // before the POST, and the customer saw "could not be armed… Try syncing
+    // again" on every sync, for a schedule that was correct (2026-11-02
+    // arm-check read; the slot-9 row was never written). A solar row in
+    // `scheduleIns` is always a schedule's own boundary — the global
+    // sunrise-off is deliberately excluded from it (see above) — so it is
+    // precisely the "something real" this guard exists to detect. The clobber
+    // guard below already uses `carriesAnyEnabledEntry` for the same reason
+    // (see shouldSkipClobberingWrite); the two now agree.
+    if (armedSchedules.isNotEmpty &&
+        !scheduleIns.any(carriesAnyEnabledEntry)) {
       debugPrint('ScheduleSync: ABORT — ${armedSchedules.length} armable '
-          'schedule(s) but the built payload has zero real timers (all stubs). '
-          'Refusing to POST a no-op that would false-green.');
+          'schedule(s) but the built payload has zero enabled entries (all '
+          'stubs). Refusing to POST a no-op that would false-green.');
       return finish(ScheduleSyncResult(
         success: false,
         // Customer-facing. The old text ("internal: enabled schedules produced
         // no armable timers") leaked a developer assertion into a red banner
         // and named neither cause nor remedy.
         //
-        // NOTE ON SCOPE: this guard does NOT fire for solar-only accounts —
-        // solar schedules are refused upstream in the `armable` loop, so
-        // `armedSchedules` is empty and the first conjunct is false. Those
-        // users get the specific "uses sunrise/sunset timing…" presetErrors
-        // message instead (now rendered, not counted). So this message must
-        // NOT mention sunrise/sunset: reaching here means a schedule passed
-        // every arm check and still produced no timer, which is an internal
-        // inconsistency, not a user misconfiguration. Keep it honest about
-        // that rather than guessing at a cause.
+        // NOTE ON SCOPE: solar-only accounts no longer reach here (their slot
+        // 8/9 rows count), and soft-evicted schedules are skipped before the
+        // arm checks. Reaching here means a schedule passed every arm check
+        // and still produced no row, which is an internal inconsistency, not
+        // a user misconfiguration. Keep the message honest about that rather
+        // than guessing at a cause.
         error: 'Your schedules are saved but could not be armed on the '
             'controller. Try syncing again — if this keeps happening, '
             'contact support.',
