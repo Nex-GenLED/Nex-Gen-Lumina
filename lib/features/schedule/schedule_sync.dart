@@ -1258,6 +1258,29 @@ class ScheduleSyncService {
         return;
       }
 
+      // ── CONVERGENCE IS JUDGED BY THE REAL PREDICATE, ALWAYS ───────────────
+      // For an [alwaysWrite] slot `isSatisfied` is the constant `false` — that
+      // is Option A's "no idempotent skip", and it stays. But the
+      // non-convergence counter must not inherit that constant: it exists to
+      // stop re-saving a preset a save CANNOT satisfy, and "cannot satisfy" is
+      // a question for `presetSatisfies`, not for the skip policy. With the
+      // counter keyed off `isSatisfied`, every pattern slot (10-25) accrued one
+      // "failed" attempt per sync and the fourth sync of a session refused it
+      // with "Predicate and builder are out of step" — literally true (the
+      // predicate in force was `() => false`) and a false alarm on every
+      // house (2026-11-02 arm-check read; the stored preset satisfied the real
+      // predicate exactly). So: a stored definition that already satisfies the
+      // builder's output CLEARS the counter, and is still re-written below; a
+      // definition that never satisfies it still trips the guard after
+      // [kMaxRepairAttempts] writes, which is the behaviour the guard was built
+      // for. For a non-alwaysWrite slot this is the same test the early return
+      // above just failed, so `converged` is false and nothing changes.
+      final bool converged = existing != null &&
+          presetSatisfies(existing, state,
+              expectedName: name,
+              compareSegments: compareSegments,
+              requireAllExpectedSegments: scoped);
+
       // GEOMETRY GATE FIRST (#76 layer 4), and the ORDER IS THE POINT. A gate
       // refusal must not count as a repair attempt: no save happens, so
       // counting it would burn the non-convergence budget on a condition a save
@@ -1283,14 +1306,22 @@ class ScheduleSyncService {
       // visible flicker on every connect, on every controller, with each
       // individual save reporting success. Three attempts without the
       // predicate flipping is a bug report, not a retry.
-      final decision = await decideRepair(presetId: id, presetName: name);
-      if (!decision.allowed) {
-        presetErrors.add(decision.refusal!);
-        debugPrint('ScheduleSync: ${decision.refusal}');
-        savedPresetIds.add(id); // left alone deliberately, not lost
-        return;
+      //
+      // A CONVERGED slot (see `converged` above) is not consulted and its
+      // counter is cleared: the write that follows is Option A's policy, not
+      // a repair attempt, and it cannot be "the save that is not fixing it".
+      if (converged) {
+        await repairAttempts.recordSatisfied(id);
+      } else {
+        final decision = await decideRepair(presetId: id, presetName: name);
+        if (!decision.allowed) {
+          presetErrors.add(decision.refusal!);
+          debugPrint('ScheduleSync: ${decision.refusal}');
+          savedPresetIds.add(id); // left alone deliberately, not lost
+          return;
+        }
+        await repairAttempts.recordAttempt(id);
       }
-      await repairAttempts.recordAttempt(id);
 
       // PACE. Only reached once every skip/refuse branch above has returned,
       // so this delay is charged strictly to writes that actually go out.
