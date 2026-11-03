@@ -83,6 +83,12 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// [_syncRequestedBeforeHydration].
   bool _initialized = false;
 
+  /// True once the first Firestore emission has landed — i.e. [state] is the
+  /// account's real schedule list, not the empty pre-load placeholder. Writers
+  /// that rebuild the controller's whole timer table (the lease manager, the
+  /// sunrise-off toggle) must not build from the placeholder.
+  bool get isHydrated => _initialized;
+
   /// Set when a WLED sync is requested before the schedule stream has hydrated
   /// (see [_runWledSync]). The sync is DEFERRED — never run against the empty
   /// pre-load state, which would push disabled-stub timers over the device's

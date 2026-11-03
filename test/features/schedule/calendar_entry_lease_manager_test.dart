@@ -71,6 +71,7 @@ void main() {
   }) {
     final repo = _FakeWledRepository();
     final container = ProviderContainer(overrides: [
+      calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
       calendarLeaseScheduleSlotDemandProvider
           .overrideWith((_) => scheduleSlotDemand),
       calendarLeaseEntriesProvider.overrideWith((_) => entries),
@@ -1134,6 +1135,7 @@ void main() {
         calendarLeaseScheduleSlotDemandProvider
             .overrideWith((ref) => ref.watch(demandHolder)),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue(const []),
         calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
           return (item) async {
@@ -1184,6 +1186,7 @@ void main() {
         calendarLeaseScheduleSlotDemandProvider
             .overrideWith((ref) => ref.watch(demandHolder)),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue(const []),
         calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
           return (item) async {
@@ -1240,6 +1243,7 @@ void main() {
         calendarLeaseScheduleSlotDemandProvider
             .overrideWith((ref) => ref.watch(demandHolder)),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue(const []),
         calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
           return (item) async {
@@ -1291,6 +1295,7 @@ void main() {
         calendarLeaseScheduleSlotDemandProvider
             .overrideWith((ref) => ref.watch(demandHolder)),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue(const []),
         calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
           return (item) async {
@@ -1338,6 +1343,7 @@ void main() {
         calendarLeaseScheduleSlotDemandProvider
             .overrideWith((ref) => ref.watch(demandHolder)),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue(const []),
         calendarLeaseScheduleUpdaterProvider.overrideWith((ref) {
           return (item) async {
@@ -1395,6 +1401,7 @@ void main() {
       final container = ProviderContainer(overrides: [
         calendarLeaseScheduleSlotDemandProvider.overrideWithValue(0),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue([evicted]),
         calendarLeaseScheduleUpdaterProvider.overrideWith((_) {
           return (item) async {
@@ -1443,6 +1450,7 @@ void main() {
       final container = ProviderContainer(overrides: [
         calendarLeaseScheduleSlotDemandProvider.overrideWithValue(0),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue([evicted]),
         calendarLeaseScheduleUpdaterProvider.overrideWith((_) {
           return (item) async {
@@ -1491,6 +1499,7 @@ void main() {
       final updaterCalls = <ScheduleItem>[];
       final repo = _FakeWledRepository();
       final container = ProviderContainer(overrides: [
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseScheduleSlotDemandProvider.overrideWithValue(0),
         calendarLeaseEntriesProvider.overrideWithValue(const []),
         calendarLeaseSchedulesProvider

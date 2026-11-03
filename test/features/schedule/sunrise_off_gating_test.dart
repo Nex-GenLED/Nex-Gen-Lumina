@@ -10,34 +10,51 @@
 //   schedule sync had never run, arming wrote a timer pointing at a preset that
 //   does not exist: WLED fires macro 2, loads nothing, lights stay on.
 //
-// BUG 2 — _readModifyWrite indexed the /json/cfg `ins` response positionally.
-//   WLED COMPACTS that array (omits fully-empty timers), verified on
-//   192.168.1.150 (0.15.1 / vid 2507300): 8 empty general slots + 2 solar slots
-//   came back as TWO entries. Positional indexing copied the solar entries into
-//   general slots 0/1 and dropped the sunrise slot.
+// BUG 2 — the toggle used to read the controller's table back and swap index 8.
+//   WLED COMPACTS that readback (omits fully-empty timers), so the fix
+//   classified rows by the 255 marker: first = sunrise. A LONE sunset row
+//   ("Sunset → 11 PM") then read as the sunrise and was overwritten, and slot
+//   9 was stubbed. The toggle now builds the table from state through the shared
+//   builder (timer_table.dart) and never reads the table back at all.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
+    show
+        calendarLeaseActiveTimersProvider,
+        calendarLeaseSchedulesHydratedProvider,
+        calendarLeaseSchedulesProvider,
+        LeaseLedgerEmpty;
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/sunrise_off_service.dart';
+import 'package:nexgen_command/features/wled/clock_health.dart'
+    show ControllerClockInfo;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 
 class _FakeService extends WledService {
   _FakeService({
-    this.existing,
     this.presets = const {},
     this.savePresetSucceeds = true,
   }) : super('http://mock');
 
-  List<Map<String, dynamic>>? existing;
   Map<int, Map<String, dynamic>> presets;
   bool savePresetSucceeds;
+  int timerReads = 0;
 
   final List<({int id, Map<String, dynamic> state, String? name})> saved = [];
 
   @override
-  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async => existing;
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
+    timerReads++;
+    return null;
+  }
+
+  @override
+  Future<ControllerClockInfo?> fetchClockInfo() async =>
+      const ControllerClockInfo(latitude: 40.0, longitude: -95.0);
 
   @override
   Future<Map<int, Map<String, dynamic>>> fetchPresets() async => presets;
@@ -80,9 +97,19 @@ void _seam(CfgPushOutcome outcome) {
   };
 }
 
-({ProviderContainer container, _FakeService repo}) _harness(_FakeService repo) {
+({ProviderContainer container, _FakeService repo}) _harness(
+  _FakeService repo, {
+  List<ScheduleItem> schedules = const [],
+  bool solarFlag = false,
+}) {
   final container = ProviderContainer(overrides: [
     wledRepositoryProvider.overrideWithValue(repo),
+    calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
+    calendarLeaseSchedulesProvider.overrideWithValue(schedules),
+    calendarLeaseActiveTimersProvider
+        .overrideWithValue(const LeaseLedgerEmpty()),
+    solarSchedulingEnabledProvider
+        .overrideWith((_) => Stream.value(solarFlag)),
   ]);
   addTearDown(container.dispose);
   return (container: container, repo: repo);
@@ -97,17 +124,6 @@ Map<String, dynamic> _goodOffPresetDef() => {
         {'id': 0, 'on': false}
       ],
     };
-
-Map<String, dynamic> _solarEntry({int macro = 0}) => {
-      'en': 1,
-      'hour': ScheduleSyncService.kWledSolarHourMarker,
-      'min': 0,
-      'macro': macro,
-      'dow': 127,
-    };
-
-Map<String, dynamic> _clockEntry(int macro, int hour) =>
-    {'en': 1, 'hour': hour, 'min': 0, 'macro': macro, 'dow': 127};
 
 void main() {
   setUp(() {
@@ -124,7 +140,7 @@ void main() {
   group('BUG 1 — arm() must guarantee the NGL Off preset exists', () {
     test('controller WITHOUT preset 2 → preset is saved, THEN the timer arms',
         () async {
-      final h = _harness(_FakeService(existing: [], presets: const {}));
+      final h = _harness(_FakeService(presets: const {}));
 
       final result =
           await const SunriseOffService().arm(h.container.read(_refProvider));
@@ -139,7 +155,6 @@ void main() {
     test('savePreset FAILS → timer is NOT written, failure returned (never a '
         'false green)', () async {
       final h = _harness(_FakeService(
-        existing: [],
         presets: const {},
         savePresetSucceeds: false,
       ));
@@ -158,7 +173,6 @@ void main() {
         'psave (savePreset applies state, so it would blink the strip)',
         () async {
       final h = _harness(_FakeService(
-        existing: [],
         presets: {2: _goodOffPresetDef()},
       ));
 
@@ -173,7 +187,7 @@ void main() {
 
     test('a legacy segments-only preset 2 (no root on:false) is NOT accepted '
         '— it gets re-saved', () async {
-      final h = _harness(_FakeService(existing: [], presets: {
+      final h = _harness(_FakeService(presets: {
         2: {
           'n': ScheduleSyncService.kNglOffPresetName,
           'seg': [
@@ -190,7 +204,7 @@ void main() {
 
     test('DISARM never touches presets — clearing a slot needs no preset',
         () async {
-      final h = _harness(_FakeService(existing: [], presets: const {}));
+      final h = _harness(_FakeService(presets: const {}));
 
       final result = await const SunriseOffService()
           .disarm(h.container.read(_refProvider));
@@ -201,7 +215,7 @@ void main() {
 
     test('SINGLE SOURCE OF TRUTH — arm() saves the exact payload schedule sync '
         'seeds', () async {
-      final h = _harness(_FakeService(existing: [], presets: const {}));
+      final h = _harness(_FakeService(presets: const {}));
       await const SunriseOffService().arm(h.container.read(_refProvider));
 
       // The same live state the fake getState() returns.
@@ -224,103 +238,68 @@ void main() {
     });
   });
 
-  group('BUG 2 — compacted ins response must still target slot 8', () {
-    test('COMPACTED response (2 solar entries only, as .150 returns) → solar '
-        'entries are NOT copied into general slots, sunrise-off lands at 8',
-        () async {
-      // Exactly what 192.168.1.150 returns: 8 empty general slots omitted.
-      final h = _harness(_FakeService(
-        existing: [_solarEntry(), _solarEntry()],
-        presets: {2: _goodOffPresetDef()},
-      ));
+  group('BUG 2 — the toggle builds from state, never from a readback', () {
+    ScheduleItem sunsetToEleven() => ScheduleItem(
+          id: 'sunset-11',
+          timeLabel: 'Sunset',
+          offTimeLabel: '11:00 PM',
+          repeatDays: const ['Daily'],
+          actionLabel: 'Pattern: evening',
+          enabled: true,
+          presetId: 10,
+        );
+
+    test('a lone sunset schedule keeps its sunset row when the sunrise-off is '
+        'switched ON (the readback used to take it for the sunrise)', () async {
+      final h = _harness(
+        _FakeService(presets: {2: _goodOffPresetDef()}),
+        schedules: [sunsetToEleven()],
+        solarFlag: true,
+      );
+
+      await const SunriseOffService().arm(h.container.read(_refProvider));
+
+      final ins = _pushedIns!;
+      expect(h.repo.timerReads, 0, reason: 'no readback to misread');
+      expect(ins[ScheduleSyncService.kWledSunriseSlot]['macro'],
+          kSunriseOffMacro);
+      expect(ins[ScheduleSyncService.kWledSunsetSlot],
+          {'en': 1, 'hour': 254, 'min': 0, 'macro': 10, 'dow': 127},
+          reason: 'the sunset ON survives, as a TH_SUNSET row');
+      expect(ins.take(8).where((t) => t['macro'] == 2 && t['hour'] == 23),
+          hasLength(1), reason: 'its 11 PM OFF survives');
+    });
+
+    test('... and when it is switched OFF', () async {
+      final h = _harness(
+        _FakeService(presets: {2: _goodOffPresetDef()}),
+        schedules: [sunsetToEleven()],
+        solarFlag: true,
+      );
+
+      await const SunriseOffService().disarm(h.container.read(_refProvider));
+
+      final ins = _pushedIns!;
+      expect(ins[ScheduleSyncService.kWledSunriseSlot]['en'], 0);
+      expect(ins[ScheduleSyncService.kWledSunsetSlot]['macro'], 10);
+      expect(ins[ScheduleSyncService.kWledSunsetSlot]['hour'], 254);
+    });
+
+    test('general slots never hold a sun row', () async {
+      final h = _harness(
+        _FakeService(presets: {2: _goodOffPresetDef()}),
+        schedules: [sunsetToEleven()],
+        solarFlag: true,
+      );
 
       await const SunriseOffService().arm(h.container.read(_refProvider));
 
       final ins = _pushedIns!;
       expect(ins.length, ScheduleSyncService.kWledTotalTimerSlots);
-      // The positional bug put hour:255 entries in slots 0 and 1.
       for (var i = 0; i < ScheduleSyncService.kMaxWledTimers; i++) {
-        expect(ins[i]['hour'], isNot(ScheduleSyncService.kWledSolarHourMarker),
-            reason: 'general slot $i must never hold a solar entry — that is '
-                'the compaction bug');
+        expect(ins[i]['hour'], lessThan(24),
+            reason: 'general slot $i must never hold a sun row');
       }
-      final slot8 = ins[ScheduleSyncService.kWledSunriseSlot];
-      expect(slot8['macro'], kSunriseOffMacro);
-      expect(slot8['en'], 1);
-      expect(slot8['hour'], ScheduleSyncService.kWledSolarHourMarker);
-    });
-
-    test('COMPACTED response with real clock timers keeps them in slots 0-n '
-        'and still lands slot 8', () async {
-      final h = _harness(_FakeService(
-        existing: [
-          _clockEntry(10, 19), // a schedule
-          _clockEntry(30, 18), // a lease
-          _solarEntry(), // slot 8
-          _solarEntry(macro: 7), // slot 9 (sunset)
-        ],
-        presets: {2: _goodOffPresetDef()},
-      ));
-
-      await const SunriseOffService().arm(h.container.read(_refProvider));
-
-      final ins = _pushedIns!;
-      expect(ins[0]['macro'], 10, reason: 'schedule preserved');
-      expect(ins[1]['macro'], 30, reason: 'lease preserved (P0-3)');
-      expect(ins[ScheduleSyncService.kWledSunriseSlot]['macro'],
-          kSunriseOffMacro);
-      expect(ins[ScheduleSyncService.kWledSunsetSlot]['macro'], 7,
-          reason: 'the existing sunset must survive');
-    });
-
-    test('FULL positional 10-entry response is handled identically', () async {
-      final stub = ScheduleSyncService.disabledTimerStub();
-      final h = _harness(_FakeService(
-        existing: [
-          _clockEntry(10, 19),
-          for (var i = 0; i < 7; i++) Map<String, dynamic>.from(stub),
-          _solarEntry(),
-          _solarEntry(macro: 7),
-        ],
-        presets: {2: _goodOffPresetDef()},
-      ));
-
-      await const SunriseOffService().arm(h.container.read(_refProvider));
-
-      final ins = _pushedIns!;
-      expect(ins.length, 10);
-      expect(ins[0]['macro'], 10);
-      expect(ins[ScheduleSyncService.kWledSunriseSlot]['macro'],
-          kSunriseOffMacro);
-      expect(ins[ScheduleSyncService.kWledSunsetSlot]['macro'], 7);
-    });
-
-    group('partitionTimerIns', () {
-      test('classifies by the solar marker, not by array position', () {
-        final p = SunriseOffService.partitionTimerIns([
-          _solarEntry(macro: 4),
-          _solarEntry(macro: 5),
-        ]);
-        expect(p.general, isEmpty,
-            reason: 'both entries are solar — neither is a general timer');
-        expect(p.sunrise!['macro'], 4, reason: 'first 255-entry is sunrise');
-        expect(p.sunset!['macro'], 5, reason: 'second 255-entry is sunset');
-      });
-
-      test('null / empty response yields nothing', () {
-        for (final input in [null, <Map<String, dynamic>>[]]) {
-          final p = SunriseOffService.partitionTimerIns(input);
-          expect(p.general, isEmpty);
-          expect(p.sunrise, isNull);
-          expect(p.sunset, isNull);
-        }
-      });
-
-      test('general timers are capped at the 8-slot table', () {
-        final p = SunriseOffService.partitionTimerIns(
-            [for (var i = 0; i < 12; i++) _clockEntry(i, 6)]);
-        expect(p.general.length, ScheduleSyncService.kMaxWledTimers);
-      });
     });
   });
 }

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
 import 'package:nexgen_command/features/schedule/preset_repair_convergence.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/base_ladder_repair_feature_flag.dart';
@@ -14,7 +15,6 @@ import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.d
 import 'package:nexgen_command/features/wled/clock_health.dart'
     show ClockInfoSource;
 import 'package:nexgen_command/features/wled/base_look.dart';
-import 'package:nexgen_command/features/wled/wled_dow.dart';
 import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
@@ -37,6 +37,7 @@ import 'package:nexgen_command/features/schedule/sunrise_off_service.dart'
 // Pure-Dart extractions (bench/ CLI imports these without dart:ui). Imported for
 // internal use AND re-exported so existing importers of schedule_sync.dart still
 // resolve timersInsLanded / isRealEnabledTimer.
+import 'package:nexgen_command/features/schedule/timer_table.dart';
 import 'package:nexgen_command/features/schedule/timer_landing.dart';
 export 'package:nexgen_command/features/schedule/timer_landing.dart'
     show
@@ -351,6 +352,12 @@ class ScheduleSyncService {
   /// match the firmware's own serialization. NOT 24/25 — the app's OLD broken
   /// encoding, where 24 = "fire hourly" and 25 = never matches the RTC.
   static const int kWledSolarHourMarker = 255;
+
+  /// Hour sent for the SUNSET row (slot 9): WLED 16.x's TH_SUNSET. 16.x types a
+  /// sun row by its hour, so a sunset sent as 255 became a second sunrise;
+  /// 0.15.x reads slot 9 by position and never looks at its hour. See
+  /// timer_table.dart.
+  static const int kWledSunsetHourMarker = kSunsetHour;
 
   /// Max minute-offset magnitude WLED accepts for a sunrise/sunset timer.
   static const int kWledSolarOffsetLimit = 120;
@@ -762,42 +769,12 @@ class ScheduleSyncService {
   /// actually armed — never overcounting a schedule that silently fell off the
   /// controller.
   static ({List<ScheduleItem> armed, bool overflowed}) splitByTimerCapacity(
-      List<ScheduleItem> armable,
-      {bool solarEnabled = false, int maxSlots = kMaxWledTimers}) {
-    // [maxSlots] is the GENERAL clock-slot budget available to schedules. It
-    // defaults to the full table but syncAll passes `kMaxWledTimers - leaseCount`
-    // so active lease timers (macro 26-41) keep their reserved slots — lease
-    // priority (P0-3.2). Clamped to a sane range.
-    final budget = maxSlots.clamp(0, kMaxWledTimers);
-    final armed = <ScheduleItem>[];
-    var slotsUsed = 0;
-    var overflowed = false;
-    for (final s in armable) {
-      // Solar boundaries live in the dedicated slots 8/9, so they don't consume
-      // a general slot when solar is enabled — count only the CLOCK boundaries.
-      final onSolar = solarEnabled && _isSolarLabel(s.timeLabel);
-      final offSolar = solarEnabled &&
-          s.hasOffTime &&
-          s.offTimeLabel != null &&
-          _isSolarLabel(s.offTimeLabel!);
-      // A clock ON needs a general slot; a solar ON does not. Only overflow on
-      // a schedule that actually needs a general slot and has none left — a
-      // solar-only schedule always fits (it uses slot 8/9).
-      if (!onSolar && slotsUsed >= budget) {
-        overflowed = true;
-        break;
-      }
-      if (!onSolar) slotsUsed += 1; // clock ON timer
-      if (s.hasOffTime &&
-          s.offTimeLabel != null &&
-          !offSolar &&
-          slotsUsed < budget) {
-        slotsUsed += 1; // clock OFF timer
-      }
-      armed.add(s);
-    }
-    return (armed: armed, overflowed: overflowed);
-  }
+          List<ScheduleItem> armable,
+          {bool solarEnabled = false, int maxSlots = kMaxWledTimers}) =>
+      // [maxSlots] is the GENERAL clock-slot budget available to schedules;
+      // the table builder passes `kMaxWledTimers - leaseCount` so active lease
+      // timers keep their slots (P0-3.2). One implementation: timer_table.dart.
+      splitByCapacity(armable, solarEnabled: solarEnabled, maxSlots: maxSlots);
 
   /// Encodes a single WLED 0.15.1 solar timer entry (for slot 8 or 9). The
   /// slot POSITION — not this map — is what makes it sunrise vs sunset; the map
@@ -819,112 +796,28 @@ class ScheduleSyncService {
     };
   }
 
-  /// Resolves the two solar slots (sunrise / sunset) across ALL schedules — the
+  /// Resolves the two sun rows (sunrise / sunset) across ALL schedules — the
   /// constraint is cross-schedule, so it cannot live in a per-schedule guard.
-  /// WLED 0.15.1 has exactly ONE sunrise slot (8) and ONE sunset slot (9), so
-  /// each holds at most one boundary (an ON or an OFF), first-wins. Additional
-  /// sunrise/sunset boundaries are returned in [rejected] for a warning.
-  ///
-  /// Flexible pairing: a dusk-to-dawn schedule (ON at sunset, OFF at sunrise)
-  /// fills BOTH slots by itself; the two are independently assignable.
-  /// [sunriseTaken] is set when the global sunrise-off owns slot 8. Schedule
-  /// sunrise boundaries are then NOT assigned: an OFF boundary is redundant
-  /// (identical macro 2 — superseded silently, same effect), and an ON boundary
-  /// was already refused-and-warned in syncAll's arm guard, so it can't reach
-  /// here. Sunset is unaffected, so a dusk-to-dawn schedule keeps its ON.
+  /// The sunset row carries hour 254 ([kWledSunsetHourMarker]). See
+  /// [sunSlotsFor] (timer_table.dart), the single implementation.
   ({
     Map<String, dynamic>? sunrise,
     Map<String, dynamic>? sunset,
     List<String> rejected,
   }) solarTimerSlots(List<ScheduleItem> schedules,
-      {bool sunriseTaken = false}) {
-    Map<String, dynamic>? sunrise;
-    Map<String, dynamic>? sunset;
-    final rejected = <String>[];
+          {bool sunriseTaken = false}) =>
+      sunSlotsFor(schedules, sunriseTaken: sunriseTaken, debug: debugPrint);
 
-    void assign(bool isSunrise, Map<String, dynamic> entry, String who) {
-      if (isSunrise) {
-        // The global sunrise-off holds slot 8. Superseding a schedule's sunrise
-        // OFF is a no-op in effect (both load macro 2 = master off), so this is
-        // logged, not surfaced as a user-facing rejection.
-        if (sunriseTaken) {
-          debugPrint('ScheduleSync: sunrise slot owned by the global '
-              'sunrise-off — superseded $who (same master-OFF effect)');
-          return;
-        }
-        if (sunrise == null) {
-          sunrise = entry;
-        } else {
-          rejected.add(who);
-        }
-      } else {
-        if (sunset == null) {
-          sunset = entry;
-        } else {
-          rejected.add(who);
-        }
-      }
-    }
-
-    for (final s in schedules) {
-      final dow = _computeDowMask(s.repeatDays);
-      if (dow == 0) continue;
-      final presetId = s.presetId ?? _presetForAction(s.actionLabel);
-      // Unrecognised action → refuse the SOLAR boundary too, for the same
-      // reason as the clock path: never arm a macro we had to guess.
-      if (presetId == null) {
-        debugPrint('ScheduleSync: REFUSED solar "${s.actionLabel}" — action '
-            'not recognised and no design payload');
-        continue;
-      }
-
-      // ON boundary (offset 0 — no offset UI yet; see PR bench-gate note).
-      if (_isSolarLabel(s.timeLabel)) {
-        final isSunrise = s.timeLabel.trim().toLowerCase() == 'sunrise';
-        assign(
-          isSunrise,
-          buildSolarTimerEntry(offsetMinutes: 0, macro: presetId, dow: dow),
-          '${s.actionLabel} (${s.timeLabel} ON)',
-        );
-      }
-      // OFF boundary — macro 2 is the OFF preset (same convention as clock).
-      if (s.hasOffTime &&
-          s.offTimeLabel != null &&
-          _isSolarLabel(s.offTimeLabel!)) {
-        final isSunrise = s.offTimeLabel!.trim().toLowerCase() == 'sunrise';
-        assign(
-          isSunrise,
-          buildSolarTimerEntry(offsetMinutes: 0, macro: 2, dow: dow),
-          '${s.actionLabel} (${s.offTimeLabel} OFF)',
-        );
-      }
-    }
-    return (sunrise: sunrise, sunset: sunset, rejected: rejected);
-  }
-
-  /// Assembles the full 10-entry `timers.ins` for the solar-enabled path:
-  /// [generalTimers] pad/truncate into slots 0-7, then slot 8 = [sunrise] and
-  /// slot 9 = [sunset] (disabled stubs when absent, so a removed solar timer is
-  /// reclaimed on the next push — same mechanism as the general slot reclaim).
+  /// Assembles the full 10-entry `timers.ins`: [generalTimers] pad/truncate
+  /// into slots 0-7, then slot 8 = [sunrise] (or the disabled hour-255
+  /// placeholder) and slot 9 = [sunset] (or a stub). See [assembleTable]
+  /// (timer_table.dart) for why slot 8 is never an all-zero stub.
   static List<Map<String, dynamic>> assembleSolarAwareIns(
     List<Map<String, dynamic>> generalTimers, {
     Map<String, dynamic>? sunrise,
     Map<String, dynamic>? sunset,
-  }) {
-    final out = generalTimers.length > kMaxWledTimers
-        ? generalTimers.sublist(0, kMaxWledTimers)
-        : List<Map<String, dynamic>>.from(generalTimers);
-    while (out.length < kMaxWledTimers) {
-      out.add(Map<String, dynamic>.from(_disabledTimerStub));
-    }
-    out.add(sunrise != null
-        ? Map<String, dynamic>.from(sunrise)
-        : Map<String, dynamic>.from(_disabledTimerStub)); // slot 8
-    out.add(sunset != null
-        ? Map<String, dynamic>.from(sunset)
-        : Map<String, dynamic>.from(_disabledTimerStub)); // slot 9
-    return out; // exactly kWledTotalTimerSlots (10)
-  }
+  }) =>
+      assembleTable(generalTimers, sunrise: sunrise, sunset: sunset);
 
   /// Builds a WLED /json/cfg payload that sets the timer configuration.
   ///
@@ -1258,6 +1151,29 @@ class ScheduleSyncService {
         return;
       }
 
+      // ── CONVERGENCE IS JUDGED BY THE REAL PREDICATE, ALWAYS ───────────────
+      // For an [alwaysWrite] slot `isSatisfied` is the constant `false` — that
+      // is Option A's "no idempotent skip", and it stays. But the
+      // non-convergence counter must not inherit that constant: it exists to
+      // stop re-saving a preset a save CANNOT satisfy, and "cannot satisfy" is
+      // a question for `presetSatisfies`, not for the skip policy. With the
+      // counter keyed off `isSatisfied`, every pattern slot (10-25) accrued one
+      // "failed" attempt per sync and the fourth sync of a session refused it
+      // with "Predicate and builder are out of step" — literally true (the
+      // predicate in force was `() => false`) and a false alarm on every
+      // house (2026-11-02 arm-check read; the stored preset satisfied the real
+      // predicate exactly). So: a stored definition that already satisfies the
+      // builder's output CLEARS the counter, and is still re-written below; a
+      // definition that never satisfies it still trips the guard after
+      // [kMaxRepairAttempts] writes, which is the behaviour the guard was built
+      // for. For a non-alwaysWrite slot this is the same test the early return
+      // above just failed, so `converged` is false and nothing changes.
+      final bool converged = existing != null &&
+          presetSatisfies(existing, state,
+              expectedName: name,
+              compareSegments: compareSegments,
+              requireAllExpectedSegments: scoped);
+
       // GEOMETRY GATE FIRST (#76 layer 4), and the ORDER IS THE POINT. A gate
       // refusal must not count as a repair attempt: no save happens, so
       // counting it would burn the non-convergence budget on a condition a save
@@ -1283,14 +1199,22 @@ class ScheduleSyncService {
       // visible flicker on every connect, on every controller, with each
       // individual save reporting success. Three attempts without the
       // predicate flipping is a bug report, not a retry.
-      final decision = await decideRepair(presetId: id, presetName: name);
-      if (!decision.allowed) {
-        presetErrors.add(decision.refusal!);
-        debugPrint('ScheduleSync: ${decision.refusal}');
-        savedPresetIds.add(id); // left alone deliberately, not lost
-        return;
+      //
+      // A CONVERGED slot (see `converged` above) is not consulted and its
+      // counter is cleared: the write that follows is Option A's policy, not
+      // a repair attempt, and it cannot be "the save that is not fixing it".
+      if (converged) {
+        await repairAttempts.recordSatisfied(id);
+      } else {
+        final decision = await decideRepair(presetId: id, presetName: name);
+        if (!decision.allowed) {
+          presetErrors.add(decision.refusal!);
+          debugPrint('ScheduleSync: ${decision.refusal}');
+          savedPresetIds.add(id); // left alone deliberately, not lost
+          return;
+        }
+        await repairAttempts.recordAttempt(id);
       }
-      await repairAttempts.recordAttempt(id);
 
       // PACE. Only reached once every skip/refuse branch above has returned,
       // so this delay is charged strictly to writes that actually go out.
@@ -1495,10 +1419,25 @@ class ScheduleSyncService {
           capturedLiveState,
           channels: effectiveSchedule.channels,
         );
+        // 2026-11-02 — FAN OUT over the BUS SET (pattern_preset_fanout.dart).
+        // The Explore tuner hands a schedule ONE id-less segment; the firmware
+        // applies that to segment 0 only and `psave` snapshots the rest, so on
+        // a multi-bus controller the schedule fired on channel 1 alone. The
+        // bus ids come from `gateExpectedShape` — `deviceChannelsFromConfig`
+        // of the controller's own `/json/cfg`, the same device truth the
+        // healer and the gate use, and the layout the gate has just
+        // re-provisioned if a restart had collapsed it. Empty (relay, cfg
+        // unreadable) or single-bus ⇒ the payload passes through unchanged.
+        // A scoped schedule already names the full census, so it is left to
+        // the scope rule.
+        final fannedPayload = effectiveSchedule.channels == null
+            ? fanOutPatternPayloadToBuses(
+                scopedPayload, gateExpectedShape.map((s) => s.id))
+            : scopedPayload;
         final presetPayload = <String, dynamic>{
-          ...scopedPayload,
+          ...fannedPayload,
           'on': true,
-          'bri': (scopedPayload['bri'] as num?)?.toInt() ?? 255,
+          'bri': (fannedPayload['bri'] as num?)?.toInt() ?? 255,
           // ib:true → WLED persists the root master on/bri (not just segments),
           // so firing this ON-preset from a master-off state powers the strip on.
           // Bench-proven (see the system-preset block above). normalizeWledPayload
@@ -1603,15 +1542,34 @@ class ScheduleSyncService {
     // controller forever — the exact dow:0 accumulation padTimersToMax exists
     // to fix.
     //
-    // Only count refusals that would OTHERWISE HAVE ARMED. This loop, unlike
-    // buildCfgPayload, does not filter on `enabled`/eviction — so without this
+    // Only count refusals that would OTHERWISE HAVE ARMED. This loop does not
+    // filter on `enabled` (updatedSchedules already did) — so without this
     // filter a single DISABLED solar schedule would block the clearing write
-    // for a user who has switched everything off.
+    // for a user who has switched everything off. Soft-evicted items are
+    // skipped below before any check, so the eviction test here is a belt.
     var refusedCount = 0;
     void countRefusal(ScheduleItem s) {
       if (s.enabled && !s.isCurrentlyEvicted) refusedCount++;
     }
+    final tableContext = TimerTableContext(
+      solarFlagOn: solarFlagOn,
+      solarEnabled: solarEnabled,
+      globalSunriseOff: globalSunriseOff,
+    );
     for (final s in updatedSchedules) {
+      // ── Soft-evicted = "as if enabled:false" ──────────────────────────
+      // `ScheduleItem.disabledUntil` in the future means the lease manager's
+      // eviction picker paused this schedule to free a slot. buildCfgPayload
+      // already drops its rows; this loop and solarTimerSlots did NOT, so an
+      // evicted schedule still counted as ARMED, still consumed capacity in
+      // splitByTimerCapacity, and (if solar) still took a slot-8/9 row. One
+      // evicted clock schedule and nothing else ⇒ armedSchedules non-empty
+      // with zero rows ⇒ the empty-armed guard below reported "could not be
+      // armed" for an account where nothing was wrong (2026-11-02 arm-check
+      // read). Neither armed nor refused — exactly like a disabled schedule.
+      // Its preset was still written above, so it is ready when the eviction
+      // expires and the next sync re-arms it.
+      if (s.isCurrentlyEvicted) continue;
       final isPatternAction = s.actionLabel.toLowerCase().startsWith('pattern');
       final presetSaved =
           s.presetId != null && savedPresetIds.contains(s.presetId);
@@ -1625,98 +1583,15 @@ class ScheduleSyncService {
         continue;
       }
 
-      // ── Never silently arm a timer pointing at the wrong time ──────────
-      // A time label that doesn't resolve to a real clock time (or a solar
-      // keyword) used to fall back to 00:00 and fire the macro at MIDNIGHT.
-      // Refuse to arm such a schedule — surface a warning instead. Both
-      // boundaries are checked together: a half-parseable schedule (good ON,
-      // bad OFF) would otherwise turn lights ON and never OFF, so the whole
-      // entry is left unarmed. Mirrors the dead-macro invariant above.
-      final badLabels = <String>[
-        if (!_isArmableTimeLabel(s.timeLabel)) s.timeLabel,
-        if (s.hasOffTime &&
-            s.offTimeLabel != null &&
-            !_isArmableTimeLabel(s.offTimeLabel!))
-          s.offTimeLabel!,
-      ];
-      if (badLabels.isNotEmpty) {
-        presetErrors.add(
-            '"${s.actionLabel}" has an unrecognized time '
-            '(${badLabels.join(", ")}) — not armed. Re-open the schedule and '
-            'set a valid time.');
-        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — '
-            'unparseable time label(s): ${badLabels.join(", ")}');
-        countRefusal(s);
-        continue;
-      }
-
-      // ── Global sunrise-off owns the single sunrise slot ────────────────
-      // WLED has exactly ONE sunrise slot. A schedule that turns lights ON at
-      // sunrise genuinely cannot arm while the global sunrise-off holds it —
-      // and the two are semantically opposed (on and off at the same instant),
-      // so silently dropping either would be a lie. Refuse-and-warn, matching
-      // every other arm invariant. Checked BEFORE the generic solar gate so the
-      // user gets the specific, actionable reason ("turn that setting off")
-      // rather than the generic "sunrise/sunset isn't supported".
-      //
-      // A schedule whose sunrise boundary is an OFF is NOT refused here: it
-      // still arms its other boundaries (a dusk-to-dawn schedule keeps its
-      // sunset ON) and its redundant sunrise OFF is superseded by the identical
-      // global one — see solarTimerSlots's `sunriseTaken`.
-      if (globalSunriseOff != null &&
-          s.timeLabel.trim().toLowerCase() == 'sunrise') {
-        presetErrors.add(
-            '"${s.actionLabel}" turns lights ON at sunrise, which conflicts '
-            'with "Turn lights off at sunrise daily" — not armed. Turn that '
-            'setting off, or give this schedule a different time.');
-        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — sunrise '
-            'ON conflicts with the global sunrise-off (slot '
-            '$kWledSunriseSlot)');
-        countRefusal(s);
-        continue;
-      }
-
-      // ── Sunrise/sunset gate (refuse-and-warn unless solar is enabled) ──
-      // When the solar_scheduling flag is ON *and* the controller has usable
-      // coordinates, correctly-encoded solar (hour:255 at slot 8/9) is armed
-      // downstream — so DON'T refuse here. Otherwise refuse-and-warn (the
-      // a75f504 production behavior), distinguishing the two off states so the
-      // user gets an actionable message. _isArmableTimeLabel treats solar as
-      // valid, so the bad-time guard above does NOT catch this.
-      final solarLabels = <String>[
-        if (_isSolarLabel(s.timeLabel)) s.timeLabel,
-        if (s.hasOffTime &&
-            s.offTimeLabel != null &&
-            _isSolarLabel(s.offTimeLabel!))
-          s.offTimeLabel!,
-      ];
-      if (solarLabels.isNotEmpty && !solarEnabled) {
-        final why = solarFlagOn
-            ? 'needs your location set on the controller — sunrise/sunset '
-                'can\'t be computed without it'
-            : 'isn\'t supported yet — please set a specific time';
-        presetErrors.add(
-            '"${s.actionLabel}" uses sunrise/sunset timing, which $why.');
-        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — solar '
-            'not enabled (flagOn=$solarFlagOn coordsUsable=$solarCoordsUsable; '
-            '${solarLabels.join(", ")})');
-        countRefusal(s);
-        continue;
-      }
-
-      // ── Never arm a dead dow:0 timer ───────────────────────────────────
-      // An empty or all-unrecognized repeatDays yields a zero WLED dow mask
-      // ("no days"), so the timer would take a slot but never fire — the
-      // silent dead-timer that accumulates until the 8-slot table is full.
-      // Refuse-and-warn (policy: never silently normalize to daily); the
-      // schedule stays saved in Firestore, it just isn't armed. Mirrors the
-      // dead-macro / bad-time invariants above.
-      if (_computeDowMask(s.repeatDays) == 0) {
-        presetErrors.add(
-            '"${s.actionLabel}" has no repeat days — not armed. Re-open the '
-            'schedule and pick at least one day.');
-        debugPrint('ScheduleSync: refused to arm "${s.actionLabel}" — '
-            'repeatDays produced dow:0 (${s.repeatDays})');
+      // ── The arm checks that need no controller ─────────────────────────
+      // Unparseable time, Sunrise ON against the global sunrise-off, solar
+      // while solar is not enabled, no repeat days. Shared verbatim with the
+      // lease writer and the sunrise-off toggle (timer_table.dart), so all
+      // three arm the same schedules from the same state.
+      final refusal = timerArmRefusal(s, tableContext);
+      if (refusal != null) {
+        presetErrors.add(refusal);
+        debugPrint('ScheduleSync: refused to arm — $refusal');
         countRefusal(s);
         continue;
       }
@@ -1748,78 +1623,26 @@ class ScheduleSyncService {
       leaseState = const LeaseLedgerLoading();
     }
     final leaseTimers = leaseState.timers;
-    final leaseCount = leaseTimers.length;
 
-    // ── Slot capacity: which armable schedules actually fit the table ───────
-    // buildCfgPayload truncates at kMaxWledTimers; mirror its slot accounting
-    // here so we (a) surface a loud warning when schedules overflow and (b)
-    // count only the schedules that armed — never claim success for one that
-    // silently fell off the controller. LEASE-PRIORITY (P0-3.2): the general
-    // budget is reduced by the active lease count so a schedule can never claim
-    // a lease-reserved slot; overflow schedules surface the existing 8/8 warning.
-    final capacity = splitByTimerCapacity(armable,
-        solarEnabled: solarEnabled, maxSlots: kMaxWledTimers - leaseCount);
-    final armedSchedules = capacity.armed;
-    if (capacity.overflowed) {
-      presetErrors.add(
-          "Schedule saved but couldn't arm — controller timer slots are full "
-          "(8/8). Delete an old schedule.");
-      debugPrint('ScheduleSync: ${armable.length - armedSchedules.length} '
-          'schedule(s) could not arm — WLED timer table full (8/8)');
-    }
-
-    // Step 2: Build and push timer configuration. Clock timers fill the general
-    // slots; lease timers (macro 26-41) are MERGED in so the write preserves
-    // them; the array is padded so a vacated slot is overwritten with a disabled
-    // stub (slot reclaim — clears dow:0 / stale timers). When solar is enabled
-    // the push is a 10-entry array with the sunrise timer at slot 8 and sunset
-    // at slot 9 (WLED 0.15.1 positional encoding); otherwise it's the 8-slot form.
-    final built =
-        buildCfgPayload(armedSchedules, solarEnabled: solarEnabled);
-    final builtIns = ((built['timers'] as Map)['ins'] as List)
-        .cast<Map<String, dynamic>>();
-    // scheduleIns = SCHEDULE-derived timers only (for the empty-armed guard —
-    // preserved lease timers must NOT mask a schedules-produced-nothing bug).
-    // ins = the MERGED array actually written (schedules + leases).
-    final List<Map<String, dynamic>> scheduleIns;
-    final List<Map<String, dynamic>> ins;
-    // The 10-slot solar assembly is required whenever ANY dedicated slot has an
-    // owner — solar schedules OR the global sunrise-off. Using it purely
-    // because the sunrise-off is on is what makes slot 8 authoritative on every
-    // sync, so the timer is re-asserted rather than left to luck.
-    if (solarEnabled || globalSunriseOff != null) {
-      final solar = solarEnabled
-          ? solarTimerSlots(armedSchedules,
-              sunriseTaken: globalSunriseOff != null)
-          : (
-              sunrise: null,
-              sunset: null,
-              rejected: const <String>[],
-            );
-      // Only one sunrise slot (8) and one sunset slot (9) exist — reject-and-
-      // warn any additional solar boundary (cross-schedule constraint).
-      for (final who in solar.rejected) {
-        presetErrors.add(
-            'Only one sunrise and one sunset schedule are supported per '
-            'controller — "$who" was not armed.');
-        debugPrint('ScheduleSync: solar slot already taken — dropped $who');
-      }
-      // Slot 8: the global sunrise-off outranks a schedule's solar sunrise.
-      final sunriseSlot = globalSunriseOff ?? solar.sunrise;
-      // scheduleIns deliberately EXCLUDES the sunrise-off (it passes
-      // solar.sunrise, not sunriseSlot) so a preserved global timer can never
-      // mask a "schedules produced nothing" bug in the empty-armed guard below
-      // — the same reason lease timers are excluded from it.
-      scheduleIns = assembleSolarAwareIns(builtIns,
-          sunrise: solar.sunrise, sunset: solar.sunset);
-      // Lease timers are CLOCK timers → merge into the general pool BEFORE solar
-      // assembly (solar entries own the dedicated slots 8/9).
-      ins = assembleSolarAwareIns([...builtIns, ...leaseTimers],
-          sunrise: sunriseSlot, sunset: solar.sunset);
-    } else {
-      scheduleIns = builtIns;
-      ins = padTimersToMax([...builtIns, ...leaseTimers]);
-    }
+    // ── The timer table: one builder for every controller write ────────────
+    // Clock rows for the schedules that fit (the budget is reduced by the
+    // active lease rows, lease priority P0-3.2), the lease rows merged after
+    // them, then slot 8 (the global sunrise-off, a schedule's sunrise, or the
+    // disabled placeholder) and slot 9 (a schedule's sunset at hour 254, or a
+    // stub). Always all 10 rows — see timer_table.dart for why each firmware
+    // needs exactly that. `scheduleIns` is the same table without leases or
+    // the global sunrise-off, for the empty-armed guard below.
+    final table = buildTimerTable(
+      armable: armable,
+      leaseRows: leaseTimers,
+      globalSunriseOff: globalSunriseOff,
+      solarEnabled: solarEnabled,
+      debug: debugPrint,
+    );
+    presetErrors.addAll(table.warnings);
+    final armedSchedules = table.armed;
+    final scheduleIns = table.scheduleIns;
+    final ins = table.ins;
     final payload = <String, dynamic>{
       'timers': {'ins': ins},
     };
@@ -1831,25 +1654,38 @@ class ScheduleSyncService {
     // content-match comparator would then trivially pass and report a false
     // green. Checked on scheduleIns (NOT the merged ins) so preserved lease
     // timers can't mask the bug. Fail loudly; never POST a no-op that arms nothing.
-    if (armedSchedules.isNotEmpty && !scheduleIns.any(isRealEnabledTimer)) {
+    //
+    // ── "Nothing armed" means NO ENABLED ENTRY, solar rows included ─────────
+    // This used to test `isRealEnabledTimer`, which EXCLUDES `hour:255`. That
+    // was fine while solar was refused upstream (the first conjunct was false
+    // for every solar-only account), but once the solar flag went live a
+    // dusk-to-dawn schedule reached here with its boundaries in slots 8/9 and
+    // nothing in 0-7: the guard called that "zero real timers", returned
+    // before the POST, and the customer saw "could not be armed… Try syncing
+    // again" on every sync, for a schedule that was correct (2026-11-02
+    // arm-check read; the slot-9 row was never written). A solar row in
+    // `scheduleIns` is always a schedule's own boundary — the global
+    // sunrise-off is deliberately excluded from it (see above) — so it is
+    // precisely the "something real" this guard exists to detect. The clobber
+    // guard below already uses `carriesAnyEnabledEntry` for the same reason
+    // (see shouldSkipClobberingWrite); the two now agree.
+    if (armedSchedules.isNotEmpty &&
+        !scheduleIns.any(carriesAnyEnabledEntry)) {
       debugPrint('ScheduleSync: ABORT — ${armedSchedules.length} armable '
-          'schedule(s) but the built payload has zero real timers (all stubs). '
-          'Refusing to POST a no-op that would false-green.');
+          'schedule(s) but the built payload has zero enabled entries (all '
+          'stubs). Refusing to POST a no-op that would false-green.');
       return finish(ScheduleSyncResult(
         success: false,
         // Customer-facing. The old text ("internal: enabled schedules produced
         // no armable timers") leaked a developer assertion into a red banner
         // and named neither cause nor remedy.
         //
-        // NOTE ON SCOPE: this guard does NOT fire for solar-only accounts —
-        // solar schedules are refused upstream in the `armable` loop, so
-        // `armedSchedules` is empty and the first conjunct is false. Those
-        // users get the specific "uses sunrise/sunset timing…" presetErrors
-        // message instead (now rendered, not counted). So this message must
-        // NOT mention sunrise/sunset: reaching here means a schedule passed
-        // every arm check and still produced no timer, which is an internal
-        // inconsistency, not a user misconfiguration. Keep it honest about
-        // that rather than guessing at a cause.
+        // NOTE ON SCOPE: solar-only accounts no longer reach here (their slot
+        // 8/9 rows count), and soft-evicted schedules are skipped before the
+        // arm checks. Reaching here means a schedule passed every arm check
+        // and still produced no row, which is an internal inconsistency, not
+        // a user misconfiguration. Keep the message honest about that rather
+        // than guessing at a cause.
         error: 'Your schedules are saved but could not be armed on the '
             'controller. Try syncing again — if this keeps happening, '
             'contact support.',
@@ -2061,37 +1897,6 @@ class ScheduleSyncService {
   // parseTimeLabel); its only callers were _buildTimerEntry (also moved) and
   // _isArmableTimeLabel (now delegates below).
 
-  /// True when [label] is a time WLED can actually arm: a solar keyword or a
-  /// clock time [parseTimeLabel] recognizes. Used by [syncAll] to refuse
-  /// arming a timer that would otherwise silently fire at midnight.
-  bool _isArmableTimeLabel(String label) => cfg.isArmableTimeLabel(label);
-
-  /// True for the two solar keywords the app (wrongly) maps to WLED hour 24/25.
-  /// Used by the Option-A refuse guards until solar is re-encoded correctly —
-  /// see memory/project_solar_schedules_never_fire.
-  static bool _isSolarLabel(String label) => cfg.isSolarLabel(label);
-
-  /// Compute the WLED dow bitmask for a list of weekday names.
-  /// Delegates to the centralized [wledDowMaskForDayList] helper.
-  /// See [wled_dow.dart] for the canonical Mon=bit 0..Sun=bit 6
-  /// convention (Item #72 — corrected 2026-05-19).
-  int _computeDowMask(List<String> days) => wledDowMaskForDayList(days);
-
-  /// Maps an action label to a WLED preset ID.
-  ///
-  /// WLED timers trigger presets (saved states). The user must have these
-  /// presets configured on their device:
-  /// - Preset 1: "On" state (default brightness/color)
-  /// - Preset 2: "Off" state
-  /// - Preset 3: "Dim" state (20% brightness) - for night mode / brightness rules
-  /// - Preset 4: "Low" state (40% brightness)
-  /// - Preset 5: "Medium" state (60% brightness)
-  /// - Preset 10+: Custom patterns/effects
-  ///
-  /// For now we use simple conventions. Future improvement: let users
-  /// select which preset to trigger per schedule item.
-  int? _presetForAction(String actionLabel) => cfg.presetForAction(actionLabel);
-
   /// Extracts brightness percentage from an action label.
   /// Returns null if the label doesn't contain a brightness percentage.
   int? extractBrightnessPercent(String actionLabel) {
@@ -2242,7 +2047,10 @@ class ScheduleSyncService {
   ///
   /// Returns [payload] unchanged when [channels] is null — the all-channel path
   /// is untouched, which is what keeps every existing fixture byte-identical.
-  @visibleForTesting
+  ///
+  /// Public (no longer test-only): the lease manager is the FOURTH caller as
+  /// of 2026-11-02 — a one-night entry's channel scope fires through the same
+  /// rule, so the two paths cannot disagree about what a scope means.
   static Map<String, dynamic> scopePatternPayload(
     Map<String, dynamic> payload,
     Map<String, dynamic>? liveState, {

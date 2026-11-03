@@ -94,6 +94,7 @@ void main() {
       calendarLeaseScheduleSlotDemandProvider
           .overrideWith((_) => scheduleSlotDemand),
       calendarLeaseEntriesProvider.overrideWithValue(entries),
+      calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
       calendarLeaseSchedulesProvider.overrideWithValue(const []),
       calendarLeaseScheduleUpdaterProvider
           .overrideWith((_) => (_) async {}),
@@ -132,13 +133,14 @@ void main() {
       expect(h.service.lastSimulatedPresetSave!.state.containsKey('on'),
           isTrue);
 
-      // applyConfig captured the merged timers.ins. The payload is padded to
-      // all 8 slots (slot reclaim); with zero ScheduleItems the lease is the
-      // only REAL timer, at slot 0, followed by disabled stubs.
+      // applyConfig captured the whole timer table: all 10 rows, every time
+      // (timer_table.dart). With zero ScheduleItems the lease is the only REAL
+      // timer, at slot 0, followed by disabled stubs and the disabled slot-8
+      // placeholder.
       expect(h.service.lastSimulatedConfigPayload, isNotNull);
       final ins = (h.service.lastSimulatedConfigPayload!['timers'] as Map)
           ['ins'] as List;
-      expect(ins.length, ScheduleSyncService.kMaxWledTimers);
+      expect(ins.length, ScheduleSyncService.kWledTotalTimerSlots);
       // P0-3.1: lease timer `en` is int 1 (was bool true — WLED stores a bool
       // en as 0=disabled, so the pre-arm never fired). Padding stubs are en:0.
       expect(ins.where((t) => (t as Map)['en'] == 1).length, 1);
@@ -209,13 +211,13 @@ void main() {
       expect(h.manager.activeLeases, isEmpty);
 
       // The zero-write happened. With the expired lease gone and no
-      // ScheduleItems, all 8 slots are disabled stubs — the vacated slot is
+      // ScheduleItems, all 10 rows are disabled — the vacated slot is
       // genuinely zeroed on the controller (this is the reclaim that clears
       // the accumulated dead dow:0 timers).
       expect(h.service.lastSimulatedConfigPayload, isNotNull);
       final ins = (h.service.lastSimulatedConfigPayload!['timers'] as Map)
           ['ins'] as List;
-      expect(ins.length, ScheduleSyncService.kMaxWledTimers);
+      expect(ins.length, ScheduleSyncService.kWledTotalTimerSlots);
       expect(ins.every((t) => (t as Map)['en'] == 0), isTrue);
     });
   });
@@ -256,12 +258,12 @@ void main() {
       expect(h.manager.activeLeases.single.dateKey, entry.dateKey);
 
       // applyConfig was called multiple times (sweep + create); the
-      // final captured payload must reflect the post-create state — padded to
-      // all 8 slots with the single active lease as the only real timer.
+      // final captured payload must reflect the post-create state — all 10
+      // rows, with the single active lease as the only real timer.
       expect(h.service.lastSimulatedConfigPayload, isNotNull);
       final ins = (h.service.lastSimulatedConfigPayload!['timers'] as Map)
           ['ins'] as List;
-      expect(ins.length, ScheduleSyncService.kMaxWledTimers);
+      expect(ins.length, ScheduleSyncService.kWledTotalTimerSlots);
       final real = ins.where((t) => (t as Map)['en'] == 1).toList(); // P0-3.1 int
       expect(real.length, 1);
       expect((real.first as Map)['macro'],

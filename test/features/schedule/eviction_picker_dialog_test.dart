@@ -69,6 +69,7 @@ Future<Completer<ScheduleItem?>> _openPicker(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
         calendarLeaseSchedulesProvider.overrideWithValue(schedules),
         timeFormatPreferenceProvider.overrideWithValue(timeFormat),
       ],

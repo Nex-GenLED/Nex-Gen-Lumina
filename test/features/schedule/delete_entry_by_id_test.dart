@@ -159,6 +159,7 @@ Future<_Harness> _harness() async {
   final repo = _FakeWledRepository();
   final users = _FakeUserService();
   final c = ProviderContainer(overrides: [
+    calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
     userServiceProvider.overrideWithValue(users),
     authStateProvider.overrideWith((_) => Stream<User?>.value(_FakeUser())),
     calendarLeaseScheduleSlotDemandProvider.overrideWith((_) => 0),

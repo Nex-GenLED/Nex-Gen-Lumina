@@ -235,7 +235,8 @@ int _fld(Map<String, dynamic> t, String k) =>
 /// plausible-wrong-number failure the split `hour`/`offset_minutes` keys exist
 /// to prevent.
 ///
-/// So: `hour == 255` identifies a solar row, wherever it sits.
+/// So: `hour == 255` (or 254, the sunset marker of the current encoding)
+/// identifies a solar row, wherever it sits.
 ///
 /// ── AND WHY DIRECTION IS SOMETIMES REFUSED ──────────────────────────────────
 ///
@@ -259,19 +260,32 @@ List<BaseBoundaryRow>? extractBaseBoundaries(List<Map<String, dynamic>>? ins) {
     if (carriesAnyEnabledEntry(ins[i])) armed.add((i, ins[i]));
   }
 
-  // Ordinal solar identification — see the doc comment above.
+  // A table written with the current encoding (timer_table.dart) names each
+  // sun row by its hour — 254 is sunset — and keeps a disabled hour-255
+  // placeholder in slot 8 when nothing owns sunrise. Either mark means every
+  // 255-row is a sunrise and the direction is known from content alone.
+  bool sunMarker(int h) => h == kSolarHourMarker || h == kSunsetHourMarker;
+  final markedEncoding = ins.any((t) =>
+      _fld(t, 'hour') == kSunsetHourMarker ||
+      (_fld(t, 'hour') == kSolarHourMarker && !carriesAnyEnabledEntry(t)));
+
+  // Ordinal solar identification for older tables — see the doc comment above.
   final solarIndices = <int>[
     for (final (i, t) in armed)
-      if (_fld(t, 'hour') == kSolarHourMarker) i
+      if (sunMarker(_fld(t, 'hour'))) i
   ];
   final directionKnown = solarIndices.length == 2;
 
   final rows = <BaseBoundaryRow>[];
   for (final (i, t) in armed) {
-    final isSolar = _fld(t, 'hour') == kSolarHourMarker;
+    final isSolar = sunMarker(_fld(t, 'hour'));
     final String kind;
     if (!isSolar) {
       kind = kBoundaryKindClock;
+    } else if (markedEncoding) {
+      kind = _fld(t, 'hour') == kSunsetHourMarker
+          ? kBoundaryKindSunset
+          : kBoundaryKindSunrise;
     } else if (directionKnown) {
       kind = i == solarIndices.first
           ? kBoundaryKindSunrise
