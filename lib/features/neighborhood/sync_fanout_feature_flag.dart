@@ -14,6 +14,18 @@
 // config/sync_fanout.enabled and DEFAULTS FALSE. It is flipped via the
 // Firestore console only AFTER Slice 1 Commit 2 (rate limit) ships and a
 // real-crew test passes — never in Commit 1.
+//
+// HOW START READS IT (Sync Start window, 2026-11-02). The flag used to be
+// read synchronously (`maybeWhen(orElse: false)`) by the only code that
+// cared, broadcastSync, and nothing watched the stream before that read. The
+// first Start of every app session therefore CREATED the stream, saw it
+// loading, and read `false`: the fan-out never fired from a first tap, on
+// any build since the client shipped. Start now awaits the stream's real
+// value (`syncFanoutEnabledProvider.future`) under a short timeout. A stream
+// ERROR is no longer folded into `false`: "off by policy" (doc absent, field
+// absent or not a bool) still reads false, but "cannot be read" (permission,
+// no app, timeout) surfaces to Start as a visible failure instead of a silent
+// app-open-only sync.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -23,26 +35,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 const String kSyncFanoutFlagCollection = 'config';
 const String kSyncFanoutFlagDocId = 'sync_fanout';
 
-/// Stream the fanout feature flag. Defaults to `false` for any degraded
-/// state — missing doc, missing/non-boolean field, Firestore error.
+/// Stream the fanout feature flag. `false` for "off by policy" — missing doc,
+/// missing/non-boolean field. A Firestore error is NOT folded into `false`:
+/// it propagates as the provider's error state so a caller can tell "off"
+/// from "unreadable" (see the file header).
 final syncFanoutEnabledProvider = StreamProvider<bool>((ref) async* {
   bool? lastEmitted;
-  try {
-    final docStream = FirebaseFirestore.instance
-        .collection(kSyncFanoutFlagCollection)
-        .doc(kSyncFanoutFlagDocId)
-        .snapshots();
-    await for (final snap in docStream) {
-      final value = _extractEnabled(snap);
-      if (value != lastEmitted) {
-        debugPrint('SyncFanout: enabled = $value');
-        lastEmitted = value;
-      }
-      yield value;
+  final docStream = FirebaseFirestore.instance
+      .collection(kSyncFanoutFlagCollection)
+      .doc(kSyncFanoutFlagDocId)
+      .snapshots();
+  await for (final snap in docStream) {
+    final value = _extractEnabled(snap);
+    if (value != lastEmitted) {
+      debugPrint('SyncFanout: enabled = $value');
+      lastEmitted = value;
     }
-  } catch (e) {
-    debugPrint('SyncFanout: feature-flag stream error — $e (defaulting to false)');
-    yield false;
+    yield value;
   }
 });
 
@@ -54,16 +63,6 @@ bool _extractEnabled(DocumentSnapshot<Map<String, dynamic>> snap) {
   if (raw is bool) return raw;
   return false;
 }
-
-/// Synchronous read for call sites that can't await the stream (e.g. the
-/// broadcast trigger). Defaults to `false` during the StreamProvider's loading
-/// window or any error — the safe default (no fanout).
-final syncFanoutEnabledSyncProvider = Provider<bool>((ref) {
-  return ref.watch(syncFanoutEnabledProvider).maybeWhen(
-        data: (v) => v,
-        orElse: () => false,
-      );
-});
 
 /// One-time bootstrap so the Firestore console has a doc to edit. Creates the
 /// flag with `enabled:false` if absent. Best-effort; failures are logged, never

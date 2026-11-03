@@ -1,7 +1,7 @@
 // SYNC-3 TASK B — coverage for the flag-gated crew-fanout trigger.
 //
 // The fanout chain is wired end-to-end via NeighborhoodNotifier.broadcastSync
-// and gated by the `config/sync_fanout` feature flag (syncFanoutEnabledSyncProvider).
+// and gated by the `config/sync_fanout` feature flag (syncFanoutEnabledProvider).
 // Nothing in test/ locked that gate down. These tests pin the exact contract so a
 // future refactor can't silently change activation behavior:
 //
@@ -12,10 +12,10 @@
 //                 entirely and the rate-limit result is returned gracefully
 //                 (no throw, notifier settles to data — anti-strobe policy).
 //
-// Plus the SYNC-3 TASK A bypass fix: triggerScoreCelebration (game_day_setup_screen)
-// now routes through broadcastSync (the gate) instead of calling
-// broadcastSyncCommand directly, so a score celebration fans out to closed-app
-// crew when the flag is ON and stays inert (broadcast-only) when it's OFF.
+// Sync Start window (2026-11-02): broadcastSync now AWAITS the flag stream's
+// real value, so the tests override the STREAM provider (the synchronous
+// `maybeWhen(orElse: false)` provider that made the first Start of a session
+// read `false` is gone), and the result is a SyncStartResult.
 //
 // The Cloud Function boundary is mocked by overriding fanoutAdHocSync on a
 // NeighborhoodService subclass (fake_cloud_firestore + hand-rolled auth stub,
@@ -59,7 +59,10 @@ class _RecordingService extends NeighborhoodService {
   }
 
   @override
-  Future<void> broadcastSyncCommand(SyncCommand command) async {
+  Future<void> broadcastSyncCommand(
+    SyncCommand command, {
+    Duration writeTimeout = kSyncCommandWriteTimeout,
+  }) async {
     broadcastCalls++;
     callOrder.add('broadcast');
   }
@@ -84,16 +87,21 @@ _RecordingService _makeService({FanoutResult? fanoutResult}) => _RecordingServic
       fanoutResult: fanoutResult ?? const FanoutResult(ok: true),
     );
 
+ProviderContainer _container(_RecordingService service, {required bool flag}) {
+  final c = ProviderContainer(overrides: [
+    neighborhoodServiceProvider.overrideWithValue(service),
+    syncFanoutEnabledProvider.overrideWith((ref) => Stream.value(flag)),
+  ]);
+  addTearDown(c.dispose);
+  return c;
+}
+
 void main() {
   group('broadcastSync — flag gate', () {
     test('flag OFF → fanoutAdHocSync NOT called, only broadcastSyncCommand '
         '(byte-identical to today)', () async {
       final service = _makeService();
-      final container = ProviderContainer(overrides: [
-        neighborhoodServiceProvider.overrideWithValue(service),
-        syncFanoutEnabledSyncProvider.overrideWithValue(false),
-      ]);
-      addTearDown(container.dispose);
+      final container = _container(service, flag: false);
 
       final result = await container
           .read(neighborhoodNotifierProvider.notifier)
@@ -102,17 +110,15 @@ void main() {
       expect(service.fanoutCalls, 0, reason: 'flag off ⇒ no server fanout');
       expect(service.broadcastCalls, 1);
       expect(service.callOrder, ['broadcast']);
-      // Flag off returns null (no FanoutResult to surface) — unchanged contract.
-      expect(result, isNull);
+      // Flag off: no fan-out outcome to surface, the command was written.
+      expect(result.fanout, isNull);
+      expect(result.commandWritten, isTrue);
+      expect(result.failure, isNull);
     });
 
     test('flag ON → fanout fires FIRST, then broadcast', () async {
       final service = _makeService(fanoutResult: const FanoutResult(ok: true));
-      final container = ProviderContainer(overrides: [
-        neighborhoodServiceProvider.overrideWithValue(service),
-        syncFanoutEnabledSyncProvider.overrideWithValue(true),
-      ]);
-      addTearDown(container.dispose);
+      final container = _container(service, flag: true);
 
       final result = await container
           .read(neighborhoodNotifierProvider.notifier)
@@ -123,8 +129,9 @@ void main() {
       // Ordering matters: fanout enforces the server rate limit before the
       // app-open broadcast goes out.
       expect(service.callOrder, ['fanout', 'broadcast']);
-      expect(result?.ok, isTrue);
-      expect(result?.rateLimited, isFalse);
+      expect(result.fanout?.ok, isTrue);
+      expect(result.rateLimited, isFalse);
+      expect(result.commandWritten, isTrue);
     });
 
     test('flag ON + rate-limited (server reject) → broadcast SKIPPED, '
@@ -132,11 +139,7 @@ void main() {
       final service = _makeService(
         fanoutResult: const FanoutResult(rateLimited: true, retryAfterMs: 17000),
       );
-      final container = ProviderContainer(overrides: [
-        neighborhoodServiceProvider.overrideWithValue(service),
-        syncFanoutEnabledSyncProvider.overrideWithValue(true),
-      ]);
-      addTearDown(container.dispose);
+      final container = _container(service, flag: true);
 
       final result = await container
           .read(neighborhoodNotifierProvider.notifier)
@@ -146,8 +149,10 @@ void main() {
       // Reject = nothing fires: not even the app-open broadcast.
       expect(service.broadcastCalls, 0);
       expect(service.callOrder, ['fanout']);
-      expect(result?.rateLimited, isTrue);
-      expect(result?.retryAfterMs, 17000);
+      expect(result.rateLimited, isTrue);
+      expect(result.fanout?.retryAfterMs, 17000);
+      expect(result.commandWritten, isFalse);
+      expect(result.failure, isNull, reason: 'a reject is not a failure');
       // Notifier settled cleanly, not into an error state.
       final state = container.read(neighborhoodNotifierProvider);
       expect(state.hasError, isFalse);

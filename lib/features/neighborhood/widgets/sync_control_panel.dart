@@ -12,6 +12,7 @@ import '../../wled/wled_effects_catalog.dart';
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
+import '../sync_start_feedback.dart';
 import '../services/group_autopilot_service.dart';
 import '../services/path1_complement_theme.dart';
 import '../services/path1_game_day_snapshot.dart';
@@ -172,6 +173,12 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
   // ── Per-house customization ────────────────────────────────────────────
   bool _perHouseExpanded = false;
   final Map<String, SyncPatternAssignment> _perHouseAssignments = {};
+
+  // ── Start in flight ────────────────────────────────────────────────────
+  // True from the tap until broadcastSync resolves. The button shows progress
+  // and is disabled meanwhile; the group turns active only when the command
+  // write is acknowledged (the group doc flips), never from the tap itself.
+  bool _starting = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1194,15 +1201,33 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
-        onPressed: isActive
-            ? _stopSync
-            : (canStart ? _startSync : null),
-        icon: Icon(isActive ? Icons.stop : Icons.play_arrow),
-        label: Text(isActive ? activeLabel : 'Start Neighborhood Sync'),
+        onPressed: _starting
+            ? null
+            : (isActive ? _stopSync : (canStart ? _startSync : null)),
+        icon: _starting
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : Icon(isActive ? Icons.stop : Icons.play_arrow),
+        label: Text(
+          _starting
+              ? 'Starting…'
+              : (isActive ? activeLabel : 'Start Neighborhood Sync'),
+        ),
         style: ElevatedButton.styleFrom(
           backgroundColor: isActive
               ? Colors.red.shade700
               : (canStart ? Colors.cyan : Colors.grey.shade700),
+          // Keep the Start colour while in flight; a disabled button would
+          // otherwise read as "nothing selected".
+          disabledBackgroundColor:
+              _starting ? Colors.cyan.withValues(alpha: 0.6) : null,
+          disabledForegroundColor: _starting ? Colors.white : null,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
@@ -1213,9 +1238,12 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
     );
   }
 
-  void _startSync() {
+  Future<void> _startSync() async {
     final timingConfig = ref.read(syncTimingConfigProvider);
     final engine = ref.read(neighborhoodSyncEngineProvider);
+    // Whoever taps Start is present, whatever their presence flag says —
+    // the engine keeps this member in the delay map (Sync Start window).
+    final initiatorUid = FirebaseAuth.instance.currentUser?.uid;
 
     SyncCommand command;
 
@@ -1237,6 +1265,7 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
         speed: speed,
         intensity: intensity,
         brightness: brightness,
+        initiatorUid: initiatorUid,
       );
     } else {
       // Unified mode: use global pattern + optional per-house overrides
@@ -1278,6 +1307,7 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
         pal: global.pal,
         grp: global.grp,
         spc: global.spc,
+        initiatorUid: initiatorUid,
       );
 
       // Attach per-house overrides if any
@@ -1306,26 +1336,30 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
       }
     }
 
-    _dispatchBroadcast(command);
-    ref.read(syncEngineActiveProvider.notifier).state = true;
-  }
-
-  /// Await the broadcast so a server-side rate-limit reject (Slice 1 Commit 2)
-  /// can surface a "try again" SnackBar. When the fanout flag is off this
-  /// returns null and nothing extra is shown — behavior is unchanged.
-  Future<void> _dispatchBroadcast(SyncCommand command) async {
+    // Sync Start window (2026-11-02): the broadcast is AWAITED. The button
+    // shows progress meanwhile; the local listener is mounted only once the
+    // command write is acknowledged; every outcome that is not a clean
+    // success is shown in plain text (sync_start_feedback.dart).
+    setState(() => _starting = true);
     final result = await ref
         .read(neighborhoodNotifierProvider.notifier)
         .broadcastSync(command);
     if (!mounted) return;
-    if (result != null && result.rateLimited) {
-      final secs = (result.retryAfterMs / 1000).ceil();
+    setState(() => _starting = false);
+
+    final feedback = syncStartFeedbackFor(result);
+    if (feedback != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Hang on — try again in ${secs < 1 ? 1 : secs}s.'),
-          backgroundColor: Colors.orange.shade800,
+          content: Text(feedback.text),
+          backgroundColor:
+              feedback.isError ? Colors.red.shade700 : Colors.orange.shade800,
+          duration: const Duration(seconds: 6),
         ),
       );
+    }
+    if (shouldMarkEngineActive(result)) {
+      ref.read(syncEngineActiveProvider.notifier).state = true;
     }
   }
 

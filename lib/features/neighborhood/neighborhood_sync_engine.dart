@@ -137,9 +137,19 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
   }
 
   /// Checks if the current member should participate in the given sync command.
-  bool _shouldParticipateInSync(NeighborhoodMember member, SyncCommand command) {
-    // Not participating if offline
-    if (!member.isOnline) return false;
+  ///
+  /// `isOnline` is a presence flag the app writes for itself and it goes
+  /// stale (backgrounded app, missed presence write). A command that names
+  /// this member in its delay map was built with them in — the sender keeps
+  /// the initiator regardless of presence (see [createSyncCommand]) and
+  /// drops everyone else who was offline — so an explicit slot outranks the
+  /// stale flag. Without this the initiator's own engine returned before
+  /// applying when their presence flag happened to be false (Sync Start
+  /// window, 2026-11-02).
+  @visibleForTesting
+  bool shouldParticipateInSync(NeighborhoodMember member, SyncCommand command) {
+    // Not participating if offline — unless the command explicitly includes us.
+    if (!member.isOnline && !command.includesMember(member.oderId)) return false;
 
     // Not participating if paused
     if (member.participationStatus == MemberParticipationStatus.paused) return false;
@@ -158,16 +168,18 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
   /// Filters members to only include those who are actively participating.
   ///
   /// Excludes:
-  /// - Offline members
+  /// - Offline members — except [alwaysInclude] (the initiator: whoever is
+  ///   tapping Start is present, whatever their stale presence flag says)
   /// - Members who have paused their participation
   /// - Members who have opted out (either globally or for a specific schedule)
   List<NeighborhoodMember> _filterActiveMembers(
     List<NeighborhoodMember> members,
-    String? scheduleId,
-  ) {
+    String? scheduleId, {
+    String? alwaysInclude,
+  }) {
     return members.where((m) {
-      // Must be online
-      if (!m.isOnline) {
+      // Must be online — the initiator is, by definition.
+      if (!m.isOnline && m.oderId != alwaysInclude) {
         debugPrint('Excluding ${m.displayName}: offline');
         return false;
       }
@@ -250,6 +262,13 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
   /// Only active, online members who haven't paused or opted out are included
   /// in the timing calculations. This ensures the animation flows correctly
   /// even when some members are not participating.
+  ///
+  /// [initiatorUid] — the member tapping Start — is kept even when their
+  /// presence flag reads offline. Without it a stale `isOnline:false` on the
+  /// initiator's own member doc left them out of the delay map, and their own
+  /// engine then returned before applying ("No delay found for current
+  /// user") with nothing shown. Paused / opted-out are explicit choices and
+  /// still exclude.
   SyncCommand createSyncCommand({
     required String groupId,
     required List<NeighborhoodMember> members,
@@ -267,9 +286,14 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     int spc = 0,
     Map<String, List<int>>? memberColorOverrides,
     String? complementTheme,
+    String? initiatorUid,
   }) {
-    // Filter to only active participating members
-    final activeMembers = _filterActiveMembers(members, scheduleId);
+    // Filter to only active participating members (+ the initiator)
+    final activeMembers = _filterActiveMembers(
+      members,
+      scheduleId,
+      alwaysInclude: initiatorUid,
+    );
 
     debugPrint('Sync command: ${members.length} total members, ${activeMembers.length} active participants');
 
@@ -332,6 +356,7 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     int intensity = 128,
     int brightness = 200,
     String? scheduleId,
+    String? initiatorUid,
   }) {
     // Build member color overrides from theme
     final colorOverrides = theme.buildMemberColorOverrides(members);
@@ -356,6 +381,7 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
       scheduleId: scheduleId,
       memberColorOverrides: colorOverrides,
       complementTheme: theme.id,
+      initiatorUid: initiatorUid,
     );
   }
 
@@ -599,7 +625,7 @@ class NeighborhoodSyncEngine with WidgetsBindingObserver {
     }
 
     // Check if current user is participating in this sync
-    if (!_shouldParticipateInSync(currentMember, command)) {
+    if (!shouldParticipateInSync(currentMember, command)) {
       debugPrint('Current user is not participating in this sync (paused/opted out/offline)');
       return;
     }
