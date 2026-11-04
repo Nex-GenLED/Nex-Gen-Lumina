@@ -20,6 +20,13 @@
 //   • no channel model at all (simulation, cfg never read) → captured
 //     unchecked, exactly as before: refusing on ignorance would block Light Up
 //     Now where there is nothing to judge.
+//
+// Roofline slice 1, item 3 — FREEZE-AWARE. Before any of the above, a live,
+// switched-on segment reporting `frz: true` (a per-pixel frame: a painted
+// design, a Static favourite, a smart preset) REFUSES the capture with its
+// own message. The state read holds no pixel data, only the black base under
+// the paint, so storing it would bring the house back dark. Nothing is
+// stored and nothing is written — not even a repair.
 
 import 'package:nexgen_command/features/schedule/gated_preset_save.dart'
     show expectedShapeFromChannels;
@@ -31,6 +38,30 @@ import 'package:nexgen_command/features/wled/wled_service.dart';
 
 const String kRevertCaptureRefusedMessage =
     'Lights are mid-repair. Try again in a minute.';
+
+/// Roofline slice 1, item 3 — what the user is told when the lights are
+/// showing a per-pixel frame (a painted design, a Static favourite, a smart
+/// preset) and the look cannot be captured.
+const String kRevertCaptureFrozenMessage =
+    'Your lights are showing a painted design, which can\'t be saved as the '
+    'look to come back to. Apply a pattern or a colour first, then try '
+    'Light Up Now again.';
+
+/// Why a capture was refused — picks the sentence.
+enum RevertCaptureRefusal {
+  /// The segment layout is off and could not be repaired here, or the
+  /// controller did not answer.
+  layout,
+
+  /// A live, switched-on segment reports `frz: true`: a per-pixel frame is
+  /// on the strip. WLED never serialises the pixel buffer, so the state read
+  /// holds only the black base the paint spine wrote under the pixels (fx 0,
+  /// `col` black) plus the freeze flag. Stored as the revert look, that puts
+  /// the house back DARK at final + 30 min (the chokepoint's `frz:false` on
+  /// the way out only makes the black base render). Refused instead
+  /// (ROOFLINE_CUSTOM_DESIGN_AUDIT_2026-11-03 §B.4, gate G3).
+  frozen,
+}
 
 /// Segment fields that describe GEOMETRY, never a look. A revert restores a
 /// look; the bounds belong to provisioning (#89 / #95).
@@ -64,6 +95,7 @@ class RevertCapture {
     required this.outcome,
     required this.payload,
     this.note = '',
+    this.refusal = RevertCaptureRefusal.layout,
   });
 
   final RevertCaptureOutcome outcome;
@@ -72,8 +104,14 @@ class RevertCapture {
   final Map<String, dynamic> payload;
   final String note;
 
+  /// Why, when [outcome] is refused. Meaningless otherwise.
+  final RevertCaptureRefusal refusal;
+
   /// What the user is told on a refusal.
-  String get message => kRevertCaptureRefusedMessage;
+  String get message => switch (refusal) {
+        RevertCaptureRefusal.layout => kRevertCaptureRefusedMessage,
+        RevertCaptureRefusal.frozen => kRevertCaptureFrozenMessage,
+      };
 }
 
 typedef GeometryReheal = Future<GeometryRehealResult> Function(
@@ -107,6 +145,34 @@ Map<String, dynamic> revertLookFromState(Map<String, dynamic> state) {
 RevertCapture _refused(String note) =>
     RevertCapture(outcome: RevertCaptureOutcome.refused, payload: const {}, note: note);
 
+RevertCapture _refusedFrozen(List<int> ids) => RevertCapture(
+      outcome: RevertCaptureOutcome.refused,
+      payload: const {},
+      note: 'per-pixel frame on the strip: segment(s) $ids report frz:true',
+      refusal: RevertCaptureRefusal.frozen,
+    );
+
+/// The ids of the live, switched-on segments in a `/json/state` body that
+/// report `frz: true` — a per-pixel frame is showing on each of them.
+///
+/// A deleted slot (stop ≤ start) and a segment that is OFF are not showing
+/// anything and do not count. Nothing in `lib/` ever writes `frz: true` (the
+/// chokepoint writes `frz: false` on every non-`i` write), so a true here is
+/// the firmware's own mark of a per-pixel write.
+List<int> frozenSegmentIds(Map<String, dynamic> state) {
+  final seg = state['seg'];
+  if (seg is! List) return const [];
+  final out = <int>[];
+  for (final s in seg) {
+    if (s is! Map || _inactive(s)) continue;
+    if (s['on'] == false) continue;
+    if (s['frz'] != true) continue;
+    final id = s['id'];
+    out.add(id is int ? id : -1);
+  }
+  return out;
+}
+
 Future<RevertCapture> captureRevertLook({
   required WledRepository repo,
   required List<DeviceChannel> channels,
@@ -119,6 +185,14 @@ Future<RevertCapture> captureRevertLook({
     return _refused('controller state unreadable ($e)');
   }
   if (state == null) return _refused('controller state unreadable');
+
+  // Roofline slice 1, item 3 — FREEZE first, before the layout verdict and
+  // before any repair: a per-pixel frame cannot be captured whatever the
+  // layout is, and a repair write would be a write for nothing. This also
+  // covers the "no channel model" branch below: the freeze is a content
+  // problem, not a layout one.
+  final frozen = frozenSegmentIds(state);
+  if (frozen.isNotEmpty) return _refusedFrozen(frozen);
 
   final expected = expectedShapeFromChannels(channels);
   final live = segmentShapeFromState(state);
@@ -158,6 +232,10 @@ Future<RevertCapture> captureRevertLook({
       GeometryHealVerdict.healthy) {
     return _refused('layout still off after the repair');
   }
+  // Defensive: the repair body never writes `i`, so the re-read cannot be
+  // frozen unless something else painted meanwhile. Never store it if so.
+  final frozenAfter = frozenSegmentIds(after);
+  if (frozenAfter.isNotEmpty) return _refusedFrozen(frozenAfter);
   return RevertCapture(
     outcome: RevertCaptureOutcome.capturedAfterRepair,
     payload: revertLookFromState(after),

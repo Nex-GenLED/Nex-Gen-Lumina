@@ -82,3 +82,42 @@ Prerequisite: "Bench stamp 3x100" from item 1 (stamped `[100, 100, 100]`).
 9. Restore the spare to 100/100/100 and re-save the design once so the stamp matches.
 
 Pass: 1, 3, 5, 8 apply; 2, 4, 6, 7 refuse with the stated sentence and zero writes.
+
+## Item 3 — freeze-aware Game Day revert capture
+
+Change: `captureRevertLook` refuses when any live, switched-on segment reports
+`frz: true` (a per-pixel frame is showing), with the painted-design sentence, before
+the layout verdict and before any repair. Nothing stored, nothing written.
+
+Prerequisite: a Game Day team configured on the bench account with any colour-and-
+effect base design; the spare at three buses of 100/100/100; Lumina Blue (or any
+effect look) showing on all three buses.
+
+1. Baseline (unchanged behaviour): tap Light Up Now. Expect the team look to fire
+   and, in the console, the ephemeral session document's `revert_wled_payload` to
+   hold three segments with the effect look and no `frz: true`. End the session
+   (or wait for the game-end revert) and confirm the effect look returns.
+2. Apply "Bench stamp 3x100" from My Designs (all three buses painted). Read
+   `/json/state`: expect `seg[0..2].frz == true`, `fx 0`, `col[0]` black (the base
+   under the paint). This is the frozen frame.
+3. Tap Light Up Now. Expect the orange snackbar "Your lights are showing a painted
+   design, which can't be saved as the look to come back to. Apply a pattern or a
+   colour first, then try Light Up Now again." Expect: NO session document created,
+   NO POST in the controller log during the tap (the capture must not write, and must
+   not run the geometry repair), the painted design still on the strip.
+4. Apply any pattern from Explore (any effect; the chokepoint writes `frz:false`).
+   Read `/json/state`: `frz == false` on all three. Tap Light Up Now: expect the team
+   look to fire and the revert payload to hold the effect look (as step 1).
+5. Partial: apply the painted design, then from the Home channel bar switch channel 2
+   OFF (the frozen segment is now `on:false`). Tap Light Up Now: expect the refusal
+   (channels 1 and 3 are still frozen and on). Switch all three off, then apply a
+   pattern to all three and confirm step 4 again.
+6. Collapsed AND frozen: power-cycle the spare (one segment after boot), then apply
+   the painted design from the LAN (the app re-heals first on connect; if it does not,
+   note it: the healer is a +122 item, not this slice). If the strip is frozen with a
+   single segment, Light Up Now must refuse with the painted-design sentence and
+   ZERO POSTs — the freeze check runs before the repair.
+7. One-bus unit (`.204` provisioned as one bus of 100): repeat 2–4; expect the same.
+
+Pass: 1 and 4 capture; 3, 5 (first half) and 6 refuse with the painted-design
+sentence and zero writes; no session document exists after a refusal.
