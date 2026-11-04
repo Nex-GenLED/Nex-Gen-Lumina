@@ -121,3 +121,48 @@ effect look) showing on all three buses.
 
 Pass: 1 and 4 capture; 3, 5 (first half) and 6 refuse with the painted-design
 sentence and zero writes; no session document exists after a refusal.
+
+## Item 4 — per-pixel designs blocked from Sync fan-out and Game Day base designs
+
+Change: the Game Day plan write (`gameDayDesignUpdate`) throws a plain refusal for a
+payload carrying `seg[].i`; the two Game Day save doors show that sentence; the
+library picker's refusal names Game Day as the destination. On Sync, a per-pixel
+assignment is not well-formed (panel sentence) and `broadcastSync` refuses the command
+before the flag read with reason `per_pixel_design` (Start sentence). No server
+change: the fan-out whitelist already drops `i`; this stops the app from sending it.
+
+Game Day (bench account, any team configured, "Bench stamp 3x100" saved):
+
+1. Game Day screen → the team's design picker → My Designs → tap "Bench stamp 3x100".
+   Expect the snackbar naming the design, "painted design", "can't be the Game Day base
+   design", "colour-and-effect"; the picker stays open; the team document's
+   `saved_design_payload` / `saved_design_name` are unchanged (console read, own
+   account).
+2. Explore → any colourway → tuner → Save → Game Day → the team. Expect "Saved … to
+   Game Day" and the document updated (effect designs are unaffected).
+3. Direct write attempt (defence in depth): from a Dart test shell or the bench CLI, call
+   `gameDayDesignUpdate(designName: …, wledPayload: <the painted design's
+   toWledPayload()>)`; expect `PerPixelDesignRefused` with the same sentence, and no
+   Firestore write (the exception is thrown before `update`).
+4. Confirm Light Up Now and a scheduled fire still use the effect design saved in step
+   2 (the `saved_design_payload` path is untouched for effect payloads).
+
+Neighborhood Sync (bench group with two synthetic members; fan-out flag ON for the
+group, or OFF — both are covered by the guard running before the flag read):
+
+5. Sync control panel → Browse all: confirm My Designs is not offered (unchanged, the
+   picker excludes saved designs by node id). Choose any catalog pattern, Start:
+   expect the normal start (unchanged).
+6. The refusal has no UI door today (step 5), so prove it at the notifier: in a Dart
+   test shell against the bench group, build a `SyncCommand` with a member override
+   from `SyncPatternAssignment.fromWledPayload(payload: <painted toWledPayload()>)`
+   and call `broadcastSync`. Expect `commandWritten == false`,
+   `failure.reason == 'per_pixel_design'`, NO document under the group's commands,
+   NO fan-out request in the function logs, and `syncStartFeedbackFor` giving the
+   "painted design … Nothing was sent" sentence. This mirrors
+   test/features/neighborhood/sync_per_pixel_block_test.dart on the live backend.
+7. Repeat 6 with the effect override (`SyncPatternAssignment(name, effectId: 28,
+   colors: […])`): expect the normal write and fan-out.
+
+Pass: 1 and 3 refuse with the Game Day sentence and no write; 2 and 4 unchanged; 5
+and 7 unchanged; 6 refuses with nothing written or fanned out.

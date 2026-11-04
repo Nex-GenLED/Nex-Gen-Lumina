@@ -10,6 +10,7 @@ import '../wled/wled_payload_utils.dart' show normalizeWledPayload;
 import 'neighborhood_models.dart';
 import 'neighborhood_service.dart';
 import 'sync_fanout_feature_flag.dart';
+import 'sync_per_pixel_guard.dart';
 import 'services/sync_notification_service.dart';
 
 /// How long Start waits for the fan-out flag's real value before giving up
@@ -18,8 +19,9 @@ import 'services/sync_notification_service.dart';
 const Duration kSyncFanoutFlagTimeout = Duration(seconds: 5);
 
 /// Why a Start ended with NOTHING fired. [reason] is a short code
-/// (`flag_unavailable`, `write_timeout`, `client_error`); the user-facing text
-/// for each lives in sync_start_feedback.dart so it is in one place and tested.
+/// (`flag_unavailable`, `write_timeout`, `client_error`, `per_pixel_design`);
+/// the user-facing text for each lives in sync_start_feedback.dart so it is in
+/// one place and tested.
 class SyncStartFailure {
   final String reason;
   final Object? error;
@@ -431,6 +433,19 @@ class NeighborhoodNotifier extends Notifier<AsyncValue<void>> {
     Duration flagTimeout = kSyncFanoutFlagTimeout,
     Duration writeTimeout = kSyncCommandWriteTimeout,
   }) async {
+    // Roofline slice 1, item 4 — a per-pixel (painted) design never fans
+    // out and never broadcasts: the server whitelist drops `i` and a member
+    // would show the design's black base under its name. Refused before the
+    // flag read, with a reason the Start button turns into a plain sentence
+    // (sync_start_feedback.dart). A deliberate refusal, not an error: nothing
+    // goes to the error sink.
+    if (syncCommandCarriesPerPixel(command)) {
+      debugPrint('🏘️ [NeighborhoodNotifier] broadcastSync REFUSED: '
+          'per-pixel design');
+      state = const AsyncValue.data(null);
+      return const SyncStartResult.failed(
+          SyncStartFailure(kSyncPerPixelFailureReason));
+    }
     state = const AsyncValue.loading();
     try {
       final bool fanoutOn;

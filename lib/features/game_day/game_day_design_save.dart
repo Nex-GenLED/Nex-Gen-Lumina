@@ -12,6 +12,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
+    show PerPixelDesignRefused;
 
 import '../autopilot/game_day_autopilot_config.dart';
 import '../autopilot/game_day_autopilot_providers.dart';
@@ -75,6 +77,13 @@ class GameDayDesignPickerScreen extends ConsumerWidget {
             duration: const Duration(seconds: 2),
           ));
           navigator.pop();
+        } on PerPixelDesignRefused catch (e) {
+          // Roofline slice 1, item 4: the write's own plain sentence, not a
+          // raw `$e`. The picker stays open so another design can be chosen.
+          messenger.showSnackBar(SnackBar(
+            content: Text(e.message),
+            duration: const Duration(seconds: 7),
+          ));
         } catch (e) {
           messenger.showSnackBar(SnackBar(
             content: Text("Couldn't save this design for Game Day: $e"),

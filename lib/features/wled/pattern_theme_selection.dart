@@ -27,6 +27,8 @@ import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
+    show perPixelPickerRefusalMessage;
 import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
 import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
@@ -308,15 +310,15 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
     // colours, positions dropped, fx:83 — audit F3), which scheduled a look
     // the user never made. Refuse plainly rather than schedule the wrong
     // thing; the design still applies faithfully from My Designs.
+    // Roofline slice 1, item 4: the sentence names the destination (Game
+    // Day has its own), and the plan write refuses the same payload itself
+    // (game_day_design_write.dart), so this is the early word, not the gate.
     if (match.isPositional) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
-          content: Text(
-              '"${match.name}" is a per-pixel design. Those can\'t be scheduled '
-              'yet — your controller\'s timers can only replay colours and '
-              'effects, not a painted picture. You can still apply it any time '
-              'from My Designs.'),
+          content: Text(perPixelPickerRefusalMessage(
+              match.name, widget.saveDestinationLabel)),
           duration: const Duration(seconds: 7),
         ));
       return; // stay in the picker so another design can be chosen

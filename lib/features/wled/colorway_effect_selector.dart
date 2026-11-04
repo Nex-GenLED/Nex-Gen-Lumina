@@ -35,6 +35,8 @@ import 'package:nexgen_command/nav.dart' show AppRoutes;
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
+    show PerPixelDesignRefused;
 import 'package:nexgen_command/features/favorites/favorites_full_dialog.dart';
 import 'package:nexgen_command/features/game_day/game_day_design_save.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
@@ -1369,6 +1371,11 @@ class _ColorwayEffectSelectorPageState
           await saveGameDayDesignSelection(ref, teamSlug, selection);
           messenger.showSnackBar(SnackBar(
               content: Text('Saved "${selection.name}" to Game Day')));
+        } on PerPixelDesignRefused catch (e) {
+          // Roofline slice 1, item 4: the write's own plain sentence.
+          messenger.showSnackBar(SnackBar(
+              content: Text(e.message),
+              duration: const Duration(seconds: 7)));
         } catch (e) {
           messenger
               .showSnackBar(SnackBar(content: Text('Could not save: $e')));

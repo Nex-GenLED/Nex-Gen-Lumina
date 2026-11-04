@@ -14,7 +14,9 @@
 //
 // Text is plain and names no third party.
 
+import '../design/per_pixel_payload_guard.dart' show kPerPixelSyncRefusedMessage;
 import 'neighborhood_providers.dart' show SyncStartResult;
+import 'sync_per_pixel_guard.dart' show kSyncPerPixelFailureReason;
 
 enum SyncStartFeedbackLevel { error, warning }
 
@@ -86,6 +88,10 @@ String _failureText(String reason) {
     case 'write_timeout':
       return "The sync command didn't go through in time. Nothing was started. "
           'Check your connection and try again.';
+    // Roofline slice 1, item 4: a painted design was refused before anything
+    // fired (sync_per_pixel_guard.dart).
+    case kSyncPerPixelFailureReason:
+      return kPerPixelSyncRefusedMessage;
     default:
       return "Couldn't start the sync. Nothing was sent. Please try again.";
   }
