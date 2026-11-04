@@ -41,3 +41,44 @@ record id. Legacy designs are unstamped and unchanged.
 
 Pass: steps 2, 3, 4, 5, 6 show the fields as stated; step 7 shows no field and no
 behaviour change.
+
+## Item 2 — fit gate at apply time
+
+Change: `applyPositionalDesignDetailed` (the one spine behind My Designs, scenes,
+favourites, the AI studio) refuses a STAMPED design when the live buses differ from
+its stamp (bus count, any bus length, or the controller record), and refuses it off
+the LAN (no bus data). Nothing is written on a refusal. Unstamped designs are not
+gated. The editor's own Apply/preview are not gated: the editor re-fits over the live
+lengths, which is the repair the message names.
+
+Prerequisite: "Bench stamp 3x100" from item 1 (stamped `[100, 100, 100]`).
+
+1. Fits: apply it from My Designs. Expect "Applied", `/ws` live view shows all three
+   buses painted (0/300 differ from the editor's picture). Also from the Home
+   favourites grid after saving it as a Static favourite, and from the detail screen.
+2. One bus length differs: in Hardware Config set bus 2's LED count to 120 and save
+   (bounds 0/100, 100/220, 220/320; read-back lands). Back in My Designs, apply the
+   design. Expect the refusal snackbar naming the design, "100 lights on channel 2 …
+   has 120 now", and the repair sentence; `/json/state` unchanged (same `seg[].col`,
+   no `i` write in the controller log; `/ws` frame unchanged).
+3. Repair path A: open the design (Edit), Save. Re-read the doc: `bus_lengths` =
+   `[100, 120, 100]`. Apply: expect "Applied", three buses painted, bus 2 painted to
+   120 (the editor re-fitted it; LEDs 100–119 on bus 2 carry the base colour).
+4. Bus count differs: set bus 3's LED count to 0 / remove the third output in
+   Hardware Config (two buses). Apply the design re-saved in step 3. Expect "saved for
+   3 channels, but your controller has 2 now" and no write.
+5. Repair path B: restore the three outputs (100/120/100). Apply: expect "Applied".
+6. Re-provisioned controller: select the OTHER bench unit (`.204`, 16.0.1) provisioned
+   as three buses of 100/120/100 — same lengths, different controller record. Apply
+   the design. Expect "saved for a different controller" and no write. (If only one
+   unit is available, edit the stored `controller_id` on the bench account's doc to
+   any other string and repeat.)
+7. Off the LAN: phone on mobile data, bridge paired. Apply the design. Expect "can
+   only be applied on your home network", and NO command document written under
+   `/users/{uid}/commands` for it (check the collection before/after).
+8. Legacy: a design saved before this build (unstamped) applies from every door on
+   every layout above exactly as on +122. Confirm with one such design in step 2's
+   layout.
+9. Restore the spare to 100/100/100 and re-save the design once so the stamp matches.
+
+Pass: 1, 3, 5, 8 apply; 2, 4, 6, 7 refuse with the stated sentence and zero writes.

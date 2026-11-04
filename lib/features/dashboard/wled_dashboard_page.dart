@@ -1394,6 +1394,16 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
         ));
         return;
       case FavoriteApplyStatus.failed:
+        // Roofline slice 1, item 2: a per-pixel favourite refused for its
+        // layout says what does not match (the outcome's reason); only a
+        // write that was actually refused by the lights blames the connection.
+        if (outcome.reason != null) {
+          await notifier.runAndReport(
+            Future.value(WriteResult.blocked(outcome.reason!)),
+            onFailure: outcome.reason!,
+          );
+          return;
+        }
         await notifier.runAndReport(
           Future.value(const WriteResult.failed(WriteFailureKind.unreachable)),
           onFailure:
