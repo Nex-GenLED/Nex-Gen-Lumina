@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/design/design_layout_stamp.dart';
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
@@ -131,6 +132,20 @@ class CustomDesign {
   /// [isPositional] for the fallback.
   final bool perPixel;
 
+  /// Roofline slice 1 (item 1) — the controller and bus layout this design
+  /// was saved against: the selected controller's record id and the LED
+  /// count of every bus, read from the live `deviceChannelsProvider` at save
+  /// time by the positional writers (the paint editor, the AI studio).
+  ///
+  /// Null on every design saved before the stamp existed, and on a design
+  /// saved while the buses were unknown: such a design keeps today's
+  /// behaviour (applied without a layout check) until it is re-saved. The
+  /// apply-time fit gate (item 2) reads this; nothing is backfilled.
+  ///
+  /// Stored as `controller_id` + `bus_lengths` (flat ints). Every writer
+  /// that copies a loaded design (`copyWith`) carries it forward.
+  final DesignLayoutStamp? layoutStamp;
+
   const CustomDesign({
     required this.id,
     required this.name,
@@ -149,6 +164,7 @@ class CustomDesign {
     this.segmentPatternConfig,
     this.composedPattern,
     this.perPixel = false,
+    this.layoutStamp,
   });
 
   CustomDesign copyWith({
@@ -169,6 +185,7 @@ class CustomDesign {
     Map<String, dynamic>? segmentPatternConfig,
     Map<String, dynamic>? composedPattern,
     bool? perPixel,
+    DesignLayoutStamp? layoutStamp,
   }) {
     return CustomDesign(
       id: id ?? this.id,
@@ -188,6 +205,7 @@ class CustomDesign {
       segmentPatternConfig: segmentPatternConfig ?? this.segmentPatternConfig,
       composedPattern: composedPattern ?? this.composedPattern,
       perPixel: perPixel ?? this.perPixel,
+      layoutStamp: layoutStamp ?? this.layoutStamp,
     );
   }
 
@@ -277,6 +295,9 @@ class CustomDesign {
       segmentPatternConfig: data['segment_pattern_config'] as Map<String, dynamic>?,
       composedPattern: parsedComposedPattern,
       perPixel: data['per_pixel'] as bool? ?? false,
+      // Absent or malformed → null: the design is unstamped and keeps
+      // today's behaviour until it is re-saved (slice 1, item 1).
+      layoutStamp: DesignLayoutStamp.fromFirestoreData(data),
     );
   }
 
@@ -311,6 +332,10 @@ class CustomDesign {
       // Only ever written as `true`: absence keeps meaning "not stated", so
       // older docs and the legacy fallback in [isPositional] stay valid.
       if (perPixel) 'per_pixel': true,
+      // Slice 1, item 1 — omitted while null, so a writer that does not own
+      // the layout (rename, the tuner) never strips a stamp through
+      // `.update()`, and an unstamped design stays unstamped.
+      if (layoutStamp != null) ...layoutStamp!.toFirestoreFields(),
     };
   }
 

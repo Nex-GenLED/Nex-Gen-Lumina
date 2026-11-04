@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/design_layout_stamp.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_service.dart';
@@ -702,12 +703,18 @@ List<ChannelDesign> channelsFromComposedPattern(
 /// there is. Null — the in-memory build behind "Apply to Lights", or a save
 /// with no controller connected — states none, and applying leaves the
 /// controller's brightness alone, as the studio always has.
+///
+/// [layoutStamp] — roofline slice 1 (item 1): the controller and bus lengths
+/// the composed picture was clipped over, from device truth at SAVE time.
+/// Null for the in-memory build behind "Apply to Lights" (nothing is stored,
+/// nothing to gate) and for a save with no bus data, which stays unstamped.
 CustomDesign customDesignFromComposedPattern({
   required ComposedPattern pattern,
   required List<WledSegment> segments,
   required String ownerId,
   String? name,
   int? liveBrightness,
+  DesignLayoutStamp? layoutStamp,
 }) {
   final now = DateTime.now();
   return CustomDesign(
@@ -721,6 +728,28 @@ CustomDesign customDesignFromComposedPattern({
     brightness: liveBrightness ?? pattern.brightness,
     brightnessStated: liveBrightness != null,
     composedPattern: pattern.toJson(),
+    layoutStamp: layoutStamp,
+  );
+}
+
+/// The layout stamp for the buses the app is looking at RIGHT NOW (roofline
+/// slice 1, item 1), for the positional writers to put on a design they save.
+///
+/// Device truth only: `deviceChannelsProvider` (one channel per `hw.led.ins[]`
+/// bus from the LAN cfg read) and the selected controller's record id. Null
+/// when there are no buses to stamp with — off the LAN the relay has no cfg
+/// door, and on the LAN the read may still be loading or have failed — and
+/// the design is then saved unstamped, exactly as before the stamp existed.
+/// The controller id is read only when there is something to stamp, so a
+/// writer with no bus data never touches the controller list.
+DesignLayoutStamp? liveDesignLayoutStamp(
+  T Function<T>(ProviderListenable<T> provider) read,
+) {
+  final channels = read(deviceChannelsProvider);
+  if (channels.isEmpty) return null;
+  return DesignLayoutStamp.fromChannels(
+    channels,
+    controllerId: read(selectedControllerIdProvider),
   );
 }
 
@@ -755,6 +784,11 @@ final saveComposedDesignProvider = Provider<Future<String?> Function({String? na
           : liveBrightnessToStore(
               connected: wledState.connected,
               brightness: wledState.brightness),
+      // Slice 1, item 1: stamp from the live buses (device truth), not from
+      // the WLED segment list the channels were clipped over. No bus data
+      // (off the LAN, cfg unread) → saved unstamped, as before; the
+      // controller id is read only when there is something to stamp.
+      layoutStamp: liveDesignLayoutStamp(ref.read),
     );
 
     final service = ref.read(designServiceProvider);
