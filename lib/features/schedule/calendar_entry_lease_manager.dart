@@ -46,9 +46,13 @@ import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dar
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
 import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
 import 'package:nexgen_command/features/schedule/geometry_gate.dart';
+import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
+import 'package:nexgen_command/features/schedule/timer_table.dart';
+import 'package:nexgen_command/features/schedule/timer_table_context.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
     show deviceChannelsFromConfig;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
@@ -95,27 +99,26 @@ const String _kLogPrefix = 'CalendarLease:';
 // [CalendarScheduleNotifier]. Production reads flow through the upstream
 // providers untouched.
 
-/// Slot demand from currently-enabled, non-evicted ScheduleItems.
+/// Slot demand from currently-enabled, non-evicted ScheduleItems, in ROWS.
 ///
-/// Treats each enabled ScheduleItem as occupying one timer slot. Real
-/// [ScheduleSyncService.buildCfgPayload] can consume 1–2 slots per
-/// schedule when an OFF timer is configured, but the upstream loop caps
-/// at 8 regardless. Treating each as 1 here is a conservative simplification
-/// that matches the unit-test contract and gives leases the back end of
-/// the slot range; over-allocation (counting fewer slots than reality)
-/// would have the lease manager overwrite ScheduleItem slots, which is
-/// strictly worse.
+/// Each schedule costs one general row per clock boundary (ON and OFF); a
+/// sunrise/sunset boundary costs none while solar is enabled (it lives in
+/// slot 8/9). This used to count one per SCHEDULE, so four clock schedules
+/// with on and off times (8 rows) left "4 free": a one-night was allocated a
+/// slot, then cut from the full table, and the screen still said "Saved for…".
+/// Counting rows makes that night refused honestly instead (noFreeSlots).
 ///
-/// Excludes [ScheduleItem.isCurrentlyEvicted] items so the lease
-/// manager's free-slot count agrees with what `buildCfgPayload`
-/// actually writes (Item #61 Workstream B eviction filter must match
-/// on both sides of the pipe — divergence would re-introduce silent
-/// slot overwrites).
+/// Excludes [ScheduleItem.isCurrentlyEvicted] items so the lease manager's
+/// free-slot count agrees with what the table builder writes. The solar flag
+/// is read the way schedule sync reads it; while it is loading, sun
+/// boundaries count as rows — an overcount, never an overwrite.
 final calendarLeaseScheduleSlotDemandProvider = Provider<int>((ref) {
-  final schedules = ref.watch(schedulesProvider);
-  final demand =
-      schedules.where((s) => s.enabled && !s.isCurrentlyEvicted).length;
-  return demand.clamp(0, kWledMaxTimerSlots);
+  final schedules = ref.watch(calendarLeaseSchedulesProvider);
+  final solar = ref.watch(solarSchedulingEnabledSyncProvider);
+  final rows = schedules
+      .where((s) => s.enabled && !s.isCurrentlyEvicted)
+      .fold<int>(0, (n, s) => n + generalRowsFor(s, solarEnabled: solar));
+  return rows.clamp(0, kWledMaxTimerSlots);
 });
 
 /// All CalendarEntries the sweep should consider for newly-imminent
@@ -139,6 +142,15 @@ final calendarLeaseEntriesProvider = Provider<List<CalendarEntry>>((ref) {
 /// for testability.
 final calendarLeaseSchedulesProvider = Provider<List<ScheduleItem>>((ref) {
   return ref.watch(schedulesProvider);
+});
+
+/// Whether [calendarLeaseSchedulesProvider] holds the HYDRATED list rather
+/// than the empty pre-load state. Every lease write rebuilds the controller's
+/// whole timer table from that list, so building from the placeholder would
+/// erase every schedule row. Indirected for testability.
+final calendarLeaseSchedulesHydratedProvider = Provider<bool>((ref) {
+  ref.watch(schedulesProvider); // re-evaluate when the list (and hydration) lands
+  return ref.read(schedulesProvider.notifier).isHydrated;
 });
 
 /// Callable that applies a ScheduleItem update through the canonical
@@ -387,6 +399,13 @@ class CalendarEntryLease {
   /// null holder is treated as "unknown", i.e. re-derived on any delete.
   final String? entryId;
 
+  /// 2026-11-02 — the entry's channel scope (`CalendarEntry.channels`), carried
+  /// so the device write can fire it through `scopePatternPayload`, the same
+  /// rule the recurring path uses. The editor has persisted this scope since
+  /// D4 and the lease ignored it. Null = every channel. Absent on records
+  /// persisted before the field existed, which reads as null.
+  final List<int>? channels;
+
   const CalendarEntryLease({
     required this.dateKey,
     required this.slotIndex,
@@ -399,6 +418,7 @@ class CalendarEntryLease {
     required this.wledMin,
     required this.dowMask,
     this.entryId,
+    this.channels,
   });
 
   CalendarEntryLease copyWith({
@@ -412,6 +432,11 @@ class CalendarEntryLease {
     int? wledMin,
     int? dowMask,
     String? entryId,
+    List<int>? channels,
+
+    /// Clears the scope — `channels: null` cannot express removal through the
+    /// `?? this.x` idiom (same convention as the entry and schedule models).
+    bool clearChannels = false,
   }) =>
       CalendarEntryLease(
         dateKey: dateKey,
@@ -425,6 +450,7 @@ class CalendarEntryLease {
         wledMin: wledMin ?? this.wledMin,
         dowMask: dowMask ?? this.dowMask,
         entryId: entryId ?? this.entryId,
+        channels: clearChannels ? null : (channels ?? this.channels),
       );
 
   Map<String, dynamic> toJson() => {
@@ -439,12 +465,21 @@ class CalendarEntryLease {
         'wledMin': wledMin,
         'dowMask': dowMask,
         if (entryId != null) 'entryId': entryId,
+        if (channels != null) 'channels': channels,
       };
+
+  /// Tolerant: absent, wrong type, or non-integral members collapse to null
+  /// ("all channels") rather than rejecting the whole record.
+  static List<int>? _channelsFromJson(dynamic raw) {
+    if (raw is! List) return null;
+    return raw.whereType<num>().map((n) => n.toInt()).toList(growable: false);
+  }
 
   static CalendarEntryLease? fromJson(Map<String, dynamic> json) {
     try {
       return CalendarEntryLease(
         entryId: json['entryId'] as String?,
+        channels: _channelsFromJson(json['channels']),
         dateKey: json['dateKey'] as String,
         slotIndex: (json['slotIndex'] as num).toInt(),
         presetId: (json['presetId'] as num).toInt(),
@@ -721,6 +756,8 @@ class CalendarEntryLeaseManager {
         wledMin: onHm.min,
         dowMask: dowMask,
         entryId: entry.entryId,
+        channels: entry.channels,
+        clearChannels: entry.channels == null,
       );
       _activeLeases[entry.dateKey] = updated;
       await _saveToPrefs();
@@ -821,6 +858,7 @@ class CalendarEntryLeaseManager {
       wledMin: onHm.min,
       dowMask: dowMask,
       entryId: entry.entryId,
+      channels: entry.channels,
     );
     _activeLeases[entry.dateKey] = lease;
     await _saveToPrefs();
@@ -1447,6 +1485,13 @@ class CalendarEntryLeaseManager {
         );
         return (attempt: _WriteAttempt.cfgUnsupported, gateSummary: null);
       }
+      // The write sends the WHOLE table (schedules, leases, sunrise-off), so
+      // resolve what it depends on before anything is saved. Unknown → no
+      // preset, no timer; the record is dropped and the next sweep re-arms.
+      final table = await _composeTable(repo);
+      if (table == null) {
+        return (attempt: _WriteAttempt.cfgWriteFailed, gateSummary: null);
+      }
       try {
         // #3 — THE LAST UNGATED SAVE PATH JOINS THE GATE.
         //
@@ -1457,6 +1502,11 @@ class CalendarEntryLeaseManager {
         // caller 3 of 4; it was the one that had not been wired.
         final gate = await _geometryGateInputsFor(repo);
         final presetName = 'Lease ${lease.dateKey}';
+        // 2026-11-02 — the body is shaped at WRITE time, when the bus set is
+        // known: fanned out over every bus, or scoped to the entry's channels.
+        // The registry keeps the entry's raw payload so an old record and a
+        // new one render identically from the same device facts.
+        final body = await _leasePresetBody(repo, lease, gate.expected);
         final gated = await gatedSaveFn(
           presetId: lease.presetId,
           presetName: presetName,
@@ -1466,7 +1516,7 @@ class CalendarEntryLeaseManager {
           label: 'lease preset',
           save: () => repo.savePreset(
             presetId: lease.presetId,
-            state: lease.wledPayload,
+            state: body,
             presetName: presetName,
           ),
         );
@@ -1496,10 +1546,13 @@ class CalendarEntryLeaseManager {
         // fire-and-forget applyConfig whose dropped return value made a failed
         // or 2xx-but-stalled write indistinguishable from success — the silent
         // failure behind days of lease presets with ZERO matching timers.
-        final mergedPayload = _buildMergedCfgPayload();
-        final mergedIns = ((mergedPayload['timers'] as Map)['ins'] as List)
-            .cast<Map<String, dynamic>>();
-        final outcome = await cfgPushFn(repo, mergedPayload, mergedIns);
+        final outcome = await cfgPushFn(
+          repo,
+          <String, dynamic>{
+            'timers': {'ins': table.ins},
+          },
+          table.ins,
+        );
         // Diagnostic: dump the lease's own timer slot exactly as the controller
         // stored it (or ABSENT) on BOTH outcomes, so the next bench run tells us
         // definitively whether the timer landed.
@@ -1532,6 +1585,53 @@ class CalendarEntryLeaseManager {
         return (attempt: _WriteAttempt.savePresetFailed, gateSummary: null);
       }
     });
+  }
+
+  /// The preset body a lease is psaved with — 2026-11-02.
+  ///
+  /// A one-night entry carries the Explore tuner's hand-back verbatim: ONE
+  /// segment with no `id`. The firmware applies that to segment 0 only and
+  /// `psave` snapshots every other segment as it was (U7), so on a multi-bus
+  /// controller the night fired on channel 1 alone. Two shapes, same rules as
+  /// the recurring path in `ScheduleSyncService`:
+  ///
+  ///   • SCOPED (the entry named channels): `scopePatternPayload` — the
+  ///     addressed buses carry the design, every other live segment is named
+  ///     `on:false` (D2/D4 semantics: a scoped night DARKENS the rest, as the
+  ///     editor says). Needs the live layout for the census; an unreadable
+  ///     state still names the addressed ids.
+  ///   • UNSCOPED: `fanOutPatternPayloadToBuses` over [buses] — the ids of
+  ///     `deviceChannelsFromConfig(cfg)`, the controller's own bus list and the
+  ///     same device truth the gate re-provisions against. Empty (relay,
+  ///     unreadable cfg) or single-bus ⇒ the payload passes through unchanged,
+  ///     exactly as before.
+  ///
+  /// A payload with no `seg` (the OFF lease) is never reshaped: its root
+  /// `on:false` is what turns the house off, and a partition would change
+  /// what an OFF night means.
+  Future<Map<String, dynamic>> _leasePresetBody(
+    WledRepository repo,
+    CalendarEntryLease lease,
+    List<SegmentShape> buses,
+  ) async {
+    final payload = lease.wledPayload;
+    final seg = payload['seg'];
+    if (seg is! List || seg.isEmpty) return payload;
+    final channels = lease.channels;
+    if (channels != null) {
+      Map<String, dynamic>? live;
+      try {
+        live = await repo.getState();
+      } catch (_) {
+        live = null;
+      }
+      return ScheduleSyncService.scopePatternPayload(
+        payload,
+        live,
+        channels: channels,
+      );
+    }
+    return fanOutPatternPayloadToBuses(payload, buses.map((s) => s.id));
   }
 
   /// Geometry-gate inputs for the lease preset write.
@@ -1587,8 +1687,8 @@ class CalendarEntryLeaseManager {
   }
 
   /// Defensive zero-write on lease expiry / deletion. Re-sends the
-  /// merged timers payload WITHOUT the removed lease so any stale
-  /// entry the firmware retained gets cleared.
+  /// whole timer table ([_composeTable]) WITHOUT the removed lease so any
+  /// stale entry the firmware retained gets cleared.
   ///
   /// Gated by the [calendarLeaseLiveWritesEnabledProvider] feature
   /// flag — when off, returns true without touching the controller.
@@ -1618,8 +1718,12 @@ class CalendarEntryLeaseManager {
         );
         return false;
       }
+      final table = await _composeTable(repo);
+      if (table == null) return false;
       try {
-        final ok = await repo.applyConfig(_buildMergedCfgPayload());
+        final ok = await repo.applyConfig(<String, dynamic>{
+          'timers': {'ins': table.ins},
+        });
         if (!ok) {
           debugPrint('$_kLogPrefix _writeZeroedSlot: applyConfig failed '
               'for slot $slotIndex');
@@ -1638,10 +1742,8 @@ class CalendarEntryLeaseManager {
   /// registry transform — no upstream provider read, no missing-entry
   /// race.
   ///
-  /// IMPORTANT: this returns ONLY the lease-derived timers. Use
-  /// [_buildMergedCfgPayload] for the full payload that includes
-  /// ScheduleItem-derived timers — that's what's pushed to the
-  /// controller in production.
+  /// IMPORTANT: this returns ONLY the lease-derived timers. What is pushed
+  /// to the controller is the whole table from [_composeTable].
   Map<String, dynamic> _buildLeaseTimersPayload() {
     final List<Map<String, dynamic>> ins = [];
     for (final lease in _activeLeases.values) {
@@ -1675,7 +1777,7 @@ class CalendarEntryLeaseManager {
   /// Public view of the active lease timers (macro 26-41), for the schedule sync
   /// to MERGE so a schedule cfg write preserves leases instead of stub-clobbering
   /// them (P0-3.2). Reuses the SAME [_buildLeaseTimersPayload] the lease
-  /// manager's own merged write uses — single source of truth, no second merge
+  /// manager's own table write uses — single source of truth, no second merge
   /// implementation.
   ///
   /// P0-9 (part a): returns a TRI-STATE, not a bare list. The bare list conflated
@@ -1697,54 +1799,49 @@ class CalendarEntryLeaseManager {
     return ins.isEmpty ? const LeaseLedgerEmpty() : LeaseLedgerReady(ins);
   }
 
-  /// Build the full cfg.timers.ins payload merging:
-  ///   1. ScheduleItem-driven timers (enabled, non-evicted) from
-  ///      [ScheduleSyncService.buildCfgPayload]
-  ///   2. Lease-driven timers from [_buildLeaseTimersPayload]
+  /// The table this manager writes: every enabled schedule (sunrise/sunset
+  /// ones included), every active lease, and the daily sunrise-off — built by
+  /// the SAME [composeTimerTable] the sunrise-off toggle uses, over the same
+  /// builder schedule sync uses (timer_table.dart).
   ///
-  /// Slot non-collision is guaranteed by [_allocateFreeSlotIndex]
-  /// which counts ScheduleItem demand before allocating. This method
-  /// just renders the merged view.
+  /// This used to call `buildCfgPayload(schedules)` with solar left OFF, which
+  /// skips every schedule that has a sunrise or sunset boundary — so arming or
+  /// releasing any night erased those schedules' clock rows ("Sunset → 11 PM"
+  /// never turned off again). It also sent 8 rows, which 16.x treats as the
+  /// whole list and so deleted the sun rows outright.
   ///
-  /// WLED honors only the first 8 entries in `ins`. If schedule
-  /// demand + lease count > 8 in production state drift (e.g., user
-  /// added schedules after a lease was allocated), entries beyond
-  /// the 8th silently fall off the controller — not handled here;
-  /// the slot-allocation logic upstream prevents it under normal
-  /// flows.
-  Map<String, dynamic> _buildMergedCfgPayload() {
+  /// Null when an input is still unknown (see timer_table_context.dart); the
+  /// caller then writes nothing.
+  Future<TimerTable?> _composeTable(WledRepository repo) async {
     List<ScheduleItem> schedules;
     try {
+      if (!_ref.read(calendarLeaseSchedulesHydratedProvider)) {
+        debugPrint('$_kLogPrefix timer table: schedules not loaded yet — not '
+            'writing; the next sweep retries');
+        return null;
+      }
       schedules = _ref.read(calendarLeaseSchedulesProvider);
     } catch (e) {
-      debugPrint('$_kLogPrefix _buildMergedCfgPayload: schedules read '
-          'failed — $e (falling back to lease-only payload)');
-      final leaseOnly =
-          (_buildLeaseTimersPayload()['timers'] as Map)['ins'] as List;
-      return {
-        'timers': {
-          'ins': ScheduleSyncService.padTimersToMax(
-              leaseOnly.cast<Map<String, dynamic>>()),
-        },
-      };
+      debugPrint('$_kLogPrefix timer table: schedules unreadable — $e; '
+          'not writing');
+      return null;
     }
-    const scheduleSync = ScheduleSyncService();
-    final schedulePayload = scheduleSync.buildCfgPayload(schedules);
-    final schedTimers =
-        (schedulePayload['timers'] as Map?)?['ins'] as List? ?? const [];
-    final leasePayload = _buildLeaseTimersPayload();
-    final leaseTimers =
-        (leasePayload['timers'] as Map?)?['ins'] as List? ?? const [];
-    // Pad the FINAL merged array to all 8 slots so a shrinking schedule/lease
-    // set zeros the slots it vacated on the controller (slot reclaim — clears
-    // accumulated dow:0 orphans). This is the only pad point for the lease
-    // path; buildCfgPayload stays unpadded so the merge above is correct.
-    return {
-      'timers': {
-        'ins': ScheduleSyncService.padTimersToMax(
-            [...schedTimers, ...leaseTimers].cast<Map<String, dynamic>>()),
-      },
-    };
+    final read = await resolveTimerTableContext(_ref, repo);
+    final ctx = read.context;
+    if (ctx == null) {
+      debugPrint('$_kLogPrefix timer table: ${read.unknown} — not writing; '
+          'the next sweep retries');
+      return null;
+    }
+    final leaseRows =
+        ((_buildLeaseTimersPayload()['timers'] as Map)['ins'] as List)
+            .cast<Map<String, dynamic>>();
+    return composeTimerTable(
+      schedules: schedules,
+      leaseRows: leaseRows,
+      ctx: ctx,
+      debug: debugPrint,
+    );
   }
 
   WledRepository? _readRepo() {

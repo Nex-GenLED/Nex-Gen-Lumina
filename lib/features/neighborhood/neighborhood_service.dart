@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show Random, cos, sin, sqrt, atan2, pi;
 
@@ -18,47 +19,126 @@ import 'package:nexgen_command/services/user_service.dart';
 /// (reject = nothing fires). A plain failure ([ok] false, not rate-limited —
 /// network/500/no-auth) lets the broadcast proceed so app-open members aren't
 /// left dark.
+///
+/// Every outcome now carries WHY ([reason], a short code, plus the server's
+/// own text in [detail] when it sent one) and, on success, what the server
+/// did ([memberCount] / [commandCount] / [skipped]). A successful response
+/// WITHOUT [memberCount] is the host-only path: the server took the request
+/// but did not fan out (the group is not in scope). The UI says so.
 class FanoutResult {
   final bool ok;
   final bool rateLimited;
   final int retryAfterMs;
 
+  /// Short code: the server's `reason` when it sent one (`rate_limited`),
+  /// `http_<status>` for a non-200, `malformed` for an unparseable 200,
+  /// `not_ok` for a 200 `{ok:false}` with no reason, or the client-side
+  /// codes `no_auth` / `timeout` / `network`. Null on success.
+  final String? reason;
+
+  /// Plain text behind [reason] — the server's `error` field or the client
+  /// exception — for the user-facing message. Null when there is none.
+  final String? detail;
+
+  /// Crew members the fan-out considered (null = the server did not fan out).
+  final int? memberCount;
+
+  /// Queue commands the server wrote.
+  final int? commandCount;
+
+  /// Members the fan-out skipped (paused / unverified target).
+  final int? skipped;
+
   const FanoutResult({
     this.ok = false,
     this.rateLimited = false,
     this.retryAfterMs = 0,
+    this.reason,
+    this.detail,
+    this.memberCount,
+    this.commandCount,
+    this.skipped,
   });
 
-  const FanoutResult.failed()
+  /// A plain, non-rate-limited failure (the broadcast still proceeds).
+  const FanoutResult.failed({String reason = 'failed', String? detail})
       : ok = false,
         rateLimited = false,
-        retryAfterMs = 0;
+        retryAfterMs = 0,
+        reason = reason,
+        detail = detail,
+        memberCount = null,
+        commandCount = null,
+        skipped = null;
+
+  /// True when the server answered ok but took the host-only path (no crew
+  /// fan-out): `memberCount` is absent from that body.
+  bool get hostOnly => ok && memberCount == null;
 
   /// PURE parser over the HTTP status + body from applySyncPattern. Exposed
-  /// for testing. 200 + {ok:true} → ok; 200 + {reason:'rate_limited',
-  /// retryAfterMs} → rateLimited; anything else → a plain (non-rate-limited)
-  /// failure so the caller still broadcasts.
+  /// for testing. 200 + {ok:true} → ok (with counts); 200 +
+  /// {reason:'rate_limited', retryAfterMs} → rateLimited; anything else → a
+  /// plain (non-rate-limited) failure, carrying the status / server text, so
+  /// the caller still broadcasts and the user can be told why.
   factory FanoutResult.parse(int statusCode, String body) {
-    if (statusCode != 200) return const FanoutResult(ok: false);
+    Map? decoded;
     try {
-      final decoded = jsonDecode(body);
-      if (decoded is Map) {
-        if (decoded['ok'] == true) return const FanoutResult(ok: true);
-        if (decoded['reason'] == 'rate_limited') {
-          final ra = decoded['retryAfterMs'];
-          return FanoutResult(
-            ok: false,
-            rateLimited: true,
-            retryAfterMs: ra is num ? ra.toInt() : 0,
-          );
-        }
-      }
+      final d = jsonDecode(body);
+      if (d is Map) decoded = d;
     } catch (_) {
-      // Malformed body → treat as a plain failure (broadcast proceeds).
+      // Not JSON — handled below by status.
     }
-    return const FanoutResult(ok: false);
+    String? serverText() {
+      final e = decoded?['error'];
+      return e is String && e.isNotEmpty ? e : null;
+    }
+
+    if (statusCode != 200) {
+      return FanoutResult(
+        ok: false,
+        reason: 'http_$statusCode',
+        detail: serverText(),
+      );
+    }
+    if (decoded == null) {
+      return const FanoutResult(ok: false, reason: 'malformed');
+    }
+    int? count(String key) {
+      final v = decoded?[key];
+      return v is num ? v.toInt() : null;
+    }
+
+    if (decoded['ok'] == true) {
+      return FanoutResult(
+        ok: true,
+        memberCount: count('memberCount'),
+        commandCount: count('commandCount'),
+        skipped: count('skipped'),
+      );
+    }
+    final reason = decoded['reason'];
+    if (reason == 'rate_limited') {
+      final ra = decoded['retryAfterMs'];
+      return FanoutResult(
+        ok: false,
+        rateLimited: true,
+        retryAfterMs: ra is num ? ra.toInt() : 0,
+        reason: 'rate_limited',
+      );
+    }
+    return FanoutResult(
+      ok: false,
+      reason: reason is String && reason.isNotEmpty ? reason : 'not_ok',
+      detail: serverText(),
+    );
   }
 }
+
+/// How long the group command write (`neighborhoods/{g}/commands/{id}`) may
+/// take before Start gives up visibly. The write otherwise never completes
+/// while Firestore's write stream is down, and the notifier hung in
+/// `loading` with nothing shown (Sync Start window, 2026-11-02).
+const Duration kSyncCommandWriteTimeout = Duration(seconds: 15);
 
 /// Service for managing neighborhood sync groups in Firestore.
 class NeighborhoodService {
@@ -523,14 +603,14 @@ class NeighborhoodService {
     required Map<String, dynamic> payload,
   }) async {
     final uid = _currentUid;
-    if (uid == null) return const FanoutResult.failed();
+    if (uid == null) return const FanoutResult.failed(reason: 'no_auth');
     String? token;
     try {
       token = await _auth.currentUser?.getIdToken();
     } catch (e) {
       debugPrint('NeighborhoodService.fanoutAdHocSync: idToken failed: $e');
     }
-    if (token == null) return const FanoutResult.failed();
+    if (token == null) return const FanoutResult.failed(reason: 'no_auth');
     try {
       final resp = await http
           .post(
@@ -558,9 +638,12 @@ class NeighborhoodService {
             'HTTP ${resp.statusCode} ${resp.body}');
       }
       return result;
+    } on TimeoutException {
+      debugPrint('NeighborhoodService.fanoutAdHocSync: timed out');
+      return const FanoutResult.failed(reason: 'timeout');
     } catch (e) {
       debugPrint('NeighborhoodService.fanoutAdHocSync error: $e');
-      return const FanoutResult.failed();
+      return FanoutResult.failed(reason: 'network', detail: '$e');
     }
   }
 
@@ -641,18 +724,42 @@ class NeighborhoodService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /// Broadcasts a sync command to all members.
-  Future<void> broadcastSyncCommand(SyncCommand command) async {
+  ///
+  /// The command write is bounded by [writeTimeout]. A write the backend has
+  /// not acknowledged by then throws [TimeoutException] so the caller can
+  /// show a failure instead of hanging. The group doc is flipped to active
+  /// ONLY after the command write is acknowledged, so a timed-out Start never
+  /// turns the group on.
+  ///
+  /// A timed-out write is NOT cancelled by the SDK: it stays in the local
+  /// queue and is flushed when the write stream recovers, even after an app
+  /// restart. To keep that from becoming a surprise late Start, a delete of
+  /// the same document is queued behind it; both flush in order, so the
+  /// backend ends with no document and the group is never flipped.
+  Future<void> broadcastSyncCommand(
+    SyncCommand command, {
+    Duration writeTimeout = kSyncCommandWriteTimeout,
+  }) async {
     final docRef = _neighborhoodsRef
         .doc(command.groupId)
         .collection('commands')
         .doc();
 
-    await docRef.set({
-      ...command.toFirestore(),
-      'id': docRef.id,
-    });
+    try {
+      await setCommandDoc(docRef, {
+        ...command.toFirestore(),
+        'id': docRef.id,
+      }).timeout(writeTimeout);
+    } on TimeoutException {
+      debugPrint('Broadcast sync command: write of ${docRef.id} not acknowledged '
+          'within ${writeTimeout.inSeconds} s — queuing its delete');
+      unawaited(deleteCommandDoc(docRef).catchError((Object e) {
+        debugPrint('Broadcast sync command: delete of ${docRef.id} failed: $e');
+      }));
+      rethrow;
+    }
 
-    // Update group's active state
+    // Update group's active state — only after the command write landed.
     await _neighborhoodsRef.doc(command.groupId).update({
       'isActive': true,
       'activePatternName': command.patternName,
@@ -660,6 +767,20 @@ class NeighborhoodService {
 
     debugPrint('Broadcast sync command: ${command.patternName ?? "Pattern"}');
   }
+
+  /// The command write. A seam so a test can hold it open (never completes)
+  /// without a custom Firestore fake.
+  @visibleForTesting
+  Future<void> setCommandDoc(
+    DocumentReference<Map<String, dynamic>> ref,
+    Map<String, dynamic> data,
+  ) =>
+      ref.set(data);
+
+  /// The undo queued behind a timed-out command write. Same seam.
+  @visibleForTesting
+  Future<void> deleteCommandDoc(DocumentReference<Map<String, dynamic>> ref) =>
+      ref.delete();
 
   /// Stops the current sync (clears active pattern).
   ///

@@ -101,7 +101,9 @@ void main() {
           [item(id: 'dtd', time: 'Sunset', off: 'Sunrise', presetId: 15)]);
       expect(r.sunset, isNotNull);
       expect(r.sunrise, isNotNull);
-      expect(r.sunset!['hour'], 255);
+      expect(r.sunset!['hour'], 254,
+          reason: 'sunset is TH_SUNSET (254) — 16.0.1 types sun rows by hour');
+      expect(r.sunrise!['hour'], 255);
       expect(r.sunset!['macro'], 15, reason: 'sunset ON uses the design preset');
       expect(r.sunrise!['macro'], 2, reason: 'sunrise OFF uses the off preset');
       expect(r.rejected, isEmpty);
@@ -176,7 +178,7 @@ void main() {
   });
 
   group('round-trip: dusk-to-dawn through the full flag-on push shape', () {
-    test('slot 8 = sunrise OFF, slot 9 = sunset ON, both hour:255', () {
+    test('slot 8 = sunrise OFF at hour 255, slot 9 = sunset ON at hour 254', () {
       final schedules = [
         item(id: 'dtd', time: 'Sunset', off: 'Sunrise', presetId: 15),
       ];
@@ -190,7 +192,9 @@ void main() {
           reason: 'no general timers for a solar-only schedule');
       expect(ins[8]['hour'], 255);
       expect(ins[8]['macro'], 2, reason: 'sunrise slot holds the OFF boundary');
-      expect(ins[9]['hour'], 255);
+      expect(ins[9]['hour'], 254,
+          reason: 'sunset row carries TH_SUNSET so 16.0.1 does not read it as '
+              'a second sunrise; 0.15.x ignores the hour of slot 9');
       expect(ins[9]['macro'], 15, reason: 'sunset slot holds the ON boundary');
     });
   });

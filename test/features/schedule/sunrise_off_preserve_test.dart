@@ -167,7 +167,7 @@ void main() {
     expect(h.repo.realMacros, contains(10), reason: 'schedule armed');
   });
 
-  test('toggle OFF → sync writes an 8-slot payload and never re-arms slot 8',
+  test('toggle OFF → sync writes the whole table and never re-arms slot 8',
       () async {
     final h = _harness(sunriseOff: false);
     final ref = h.container.read(_refProvider);
@@ -175,9 +175,11 @@ void main() {
     final result = await svc.syncAll(ref, [_sched('s1', 10, '7:00 PM')]);
 
     expect(result.success, isTrue);
-    expect(h.repo.lastIns.length, 8,
-        reason: 'no dedicated-slot owner → the existing 8-slot path is '
-            'unchanged (no behavior change for users who never opt in)');
+    expect(h.repo.lastIns.length, 10,
+        reason: 'every write is all 10 rows (16.x replaces the list on write)');
+    expect(h.repo.lastIns[8]['en'], 0,
+        reason: 'no sunrise owner → slot 8 is the disabled placeholder');
+    expect(h.repo.lastIns[8]['macro'], 0);
     expect(h.repo.realMacros, contains(10));
   });
 

@@ -11,6 +11,7 @@ import 'package:nexgen_command/features/demo/demo_models.dart';
 import 'package:nexgen_command/features/demo/demo_providers.dart';
 import 'package:nexgen_command/features/demo/demo_stock_home.dart';
 import 'package:nexgen_command/features/demo/widgets/demo_scaffold.dart';
+import 'package:nexgen_command/services/error_sink.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
 
@@ -61,10 +62,28 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
 
     setState(() => _isSubmitting = true);
 
+    final leadService = ref.read(demoLeadServiceProvider);
     try {
       final lead = ref.read(demoLeadProvider);
       if (lead == null) {
-        throw Exception('No lead data found');
+        // No lead was captured in this session: the App Review demo code
+        // skips the profile step by design (guideline 5.1.1), and a session
+        // reset clears it. A consultation needs a way to reach the person,
+        // so this is not an exception to throw at them — it is a missing
+        // step to send them to. Recorded so the rate is visible.
+        _recordFailure(
+          leadService,
+          reason: 'no_lead',
+          error: StateError('consultation requested with no lead in session'),
+          stack: StackTrace.current,
+        );
+        _showFailure(
+          "We don't have your contact details yet, so we can't send this "
+          'request. Add them and try again.',
+          actionLabel: 'Add details',
+          onAction: () => context.go(AppRoutes.demoProfile),
+        );
+        return;
       }
 
       final request = ContactRequest(
@@ -76,7 +95,6 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
         requestedAt: DateTime.now(),
       );
 
-      final leadService = ref.read(demoLeadServiceProvider);
       await leadService.logContactRequest(lead.id, request);
       await leadService.logConsultationRequested(lead.id);
 
@@ -84,17 +102,61 @@ class _DemoCompletionScreenState extends ConsumerState<DemoCompletionScreen> {
 
       // Show success dialog
       await _showSuccessDialog();
-    } catch (e) {
+    } catch (e, st) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error submitting request: $e'),
-          backgroundColor: Colors.red,
-        ),
+      // The exception goes to the record, never to the screen.
+      _recordFailure(leadService, reason: 'submit', error: e, stack: st);
+      _showFailure(
+        "Couldn't send your request. Check your connection and try again.",
+        actionLabel: 'Retry',
+        onAction: _submitConsultationRequest,
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  /// One plain line with one action — never the exception's own text.
+  void _showFailure(
+    String message, {
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: actionLabel,
+            textColor: Colors.white,
+            onPressed: onAction,
+          ),
+        ),
+      );
+  }
+
+  /// Records a failed consultation request twice: in the app's error sink
+  /// (lands only when someone is signed in — the demo usually is not) and
+  /// as a demo analytics event, the demo's own unauthenticated telemetry.
+  void _recordFailure(
+    DemoLeadService leadService, {
+    required String reason,
+    required Object error,
+    required StackTrace stack,
+  }) {
+    unawaited(ref.read(errorReporterProvider)(
+      error: error,
+      stack: stack,
+      context: 'demoConsultation/$reason',
+    ));
+    unawaited(leadService.logAnalyticsEvent(
+      event: 'consultation_request_failed',
+      leadId: ref.read(demoLeadProvider)?.id,
+      data: {'reason': reason, 'error_type': error.runtimeType.toString()},
+    ));
   }
 
   Future<void> _showSuccessDialog() async {

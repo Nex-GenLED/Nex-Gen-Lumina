@@ -1,10 +1,14 @@
 // Per-controller markers for the defaults healer's one-shot and backed-off
 // heals (2026-10-20):
 //
-// - the target-frame-rate heal runs ONCE per controller (a controller found
-//   in the unlimited mode gets one `{"hw":{"led":{"fps":42}}}` write when no
-//   other heal is writing in that run; afterwards every cfg write carries the
-//   rate anyway, so a second dedicated flash write would buy nothing);
+// - the target-frame-rate heal runs ONCE per EPISODE of the unlimited mode (a
+//   controller found in that mode gets one `{"hw":{"led":{"fps":42}}}` write
+//   when no other heal is writing in that run). The marker means "written, not
+//   yet seen usable": a usable rate — on a later connect or on the same run's
+//   read-back — spends it (+122 item 3), so a LATER cfg write that carried no
+//   rate and put the device back into the unlimited mode is healed again. A
+//   device that never takes the write keeps its marker and is never written
+//   twice;
 // - the AudioReactive disable is a flash write that, on some units, never
 //   takes (the readback still says enabled). After one such failure the heal
 //   backs off for [kAudioReactiveHealBackoff] instead of re-writing flash on
@@ -23,6 +27,9 @@ const Duration kAudioReactiveHealBackoff = Duration(days: 7);
 abstract class HealMarkerStore {
   Future<bool> targetFpsHealDone(String controllerId);
   Future<void> markTargetFpsHealDone(String controllerId);
+
+  /// +122 item 3: the rate has been seen usable — the marker is spent.
+  Future<void> clearTargetFpsHealDone(String controllerId);
   Future<DateTime?> audioReactiveLastAttempt(String controllerId);
   Future<void> markAudioReactiveAttempt(String controllerId, DateTime at);
 }
@@ -50,6 +57,17 @@ class SharedPrefsHealMarkerStore implements HealMarkerStore {
       await prefs.setBool(fpsKey(controllerId), true);
     } catch (_) {
       // A lost marker costs at most one repeated single write later.
+    }
+  }
+
+  @override
+  Future<void> clearTargetFpsHealDone(String controllerId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(fpsKey(controllerId));
+    } catch (_) {
+      // A marker that will not clear costs at most one missed re-heal until
+      // the next usable read clears it.
     }
   }
 
@@ -88,6 +106,11 @@ class InMemoryHealMarkerStore implements HealMarkerStore {
   @override
   Future<void> markTargetFpsHealDone(String controllerId) async {
     fpsDone.add(controllerId);
+  }
+
+  @override
+  Future<void> clearTargetFpsHealDone(String controllerId) async {
+    fpsDone.remove(controllerId);
   }
 
   @override

@@ -362,6 +362,8 @@ void main() {
   // ── 2026-09-22: restore fix — slot-aware restore, exact compare, pre-flight ──
   // Fixtures are the COMPACTED readback shape (what /json/cfg actually returns).
   const solar = {'en': 1, 'hour': 255, 'min': 0, 'macro': 2, 'dow': 127};
+  // +122: the shared timer table sends sunset as hour 254 in row 9.
+  const sunset254 = {'en': 1, 'hour': 254, 'min': 0, 'macro': 10, 'dow': 127};
   const rowA = {
     'en': 1, 'hour': 19, 'min': 0, 'macro': 10, 'dow': 127,
     'start': {'mon': 1, 'day': 1}, 'end': {'mon': 12, 'day': 31},
@@ -374,7 +376,44 @@ void main() {
   const fixtureOff = {'en': 1, 'hour': 4, 'min': 20, 'macro': 2, 'dow': 17};
   const scratchFire = {'en': 1, 'hour': 13, 'min': 55, 'macro': 1, 'dow': 2};
 
+  group('isSolarTimerRow (+122: 254 is the sunset marker)', () {
+    test('255 is a sun row (sunrise, or the old encoding of either event)', () {
+      expect(isSolarTimerRow(solar), isTrue);
+      expect(isSunsetTimerRow(solar), isFalse);
+    });
+
+    test('254 is a sun row — the sunset the +122 timer table sends', () {
+      expect(isSolarTimerRow(sunset254), isTrue);
+      expect(isSunsetTimerRow(sunset254), isTrue);
+    });
+
+    test('clock rows, a missing hour and a string hour are not sun rows', () {
+      expect(isSolarTimerRow(rowA), isFalse);
+      expect(isSolarTimerRow(const {'en': 1, 'min': 5, 'macro': 1}), isFalse);
+      expect(isSolarTimerRow(const {'hour': '254'}), isFalse);
+      expect(isSolarTimerRow(const {'hour': 253}), isFalse);
+    });
+
+    test('the markers are the firmware values', () {
+      expect(kWledSunriseHour, 255);
+      expect(kWledSunsetHour, 254);
+    });
+  });
+
   group('buildTimerRestoreIns (slot-aware restore body)', () {
+    test('a 254 sunset row is NOT re-posted into a general slot (+122)', () {
+      final body = buildTimerRestoreIns([solar, sunset254, rowA]);
+      expect(body, hasLength(kWledGeneralTimerSlots));
+      expect(body[0], rowA, reason: 'the clock row is re-packed to slot 0');
+      expect(body.any((r) => r['hour'] == 254), isFalse,
+          reason: 'before +122 the harness took a 254 row for a clock row '
+              'and re-posted it into slot 1');
+      expect(body.any((r) => r['hour'] == 255), isFalse);
+      for (var i = 1; i < 8; i++) {
+        expect(body[i], kEmptyTimerRow, reason: 'slot $i must be cleared');
+      }
+    });
+
     test('solar-only capture → 8 empty general rows, solar NOT re-posted', () {
       final body = buildTimerRestoreIns([solar]);
       expect(body, hasLength(kWledGeneralTimerSlots));

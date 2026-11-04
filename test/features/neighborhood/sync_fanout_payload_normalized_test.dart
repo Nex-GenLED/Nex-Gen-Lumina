@@ -6,6 +6,10 @@
 // path changes: flag off means no fan-out call, the broadcast still follows,
 // and the payload keeps its one id-less segment (the function's partition
 // path depends on that shape). Synthetic ids only.
+//
+// Sync Start window (2026-11-02): the flag is overridden at the STREAM
+// provider (broadcastSync awaits its real value) and the result is a
+// SyncStartResult.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,7 +44,7 @@ void main() {
       {required bool fanoutOn}) {
     final c = ProviderContainer(overrides: [
       neighborhoodServiceProvider.overrideWithValue(service),
-      syncFanoutEnabledSyncProvider.overrideWithValue(fanoutOn),
+      syncFanoutEnabledProvider.overrideWith((ref) => Stream.value(fanoutOn)),
     ]);
     addTearDown(c.dispose);
     return c;
@@ -57,7 +61,8 @@ void main() {
       final result = await c
           .read(neighborhoodNotifierProvider.notifier)
           .broadcastSync(command(effectId: 23, speed: 255, intensity: 128));
-      expect(result?.ok, isTrue);
+      expect(result.fanout?.ok, isTrue);
+      expect(result.commandWritten, isTrue);
       expect(svc.fanoutPayloads, hasLength(1));
       final s = seg0(svc.fanoutPayloads.single);
       expect(s['fx'], 23);
@@ -108,7 +113,8 @@ void main() {
       final result = await c
           .read(neighborhoodNotifierProvider.notifier)
           .broadcastSync(command(effectId: 23, speed: 255, intensity: 128));
-      expect(result, isNull);
+      expect(result.fanout, isNull);
+      expect(result.commandWritten, isTrue);
       expect(svc.fanoutPayloads, isEmpty);
       expect(svc.broadcasts, hasLength(1));
     });
@@ -132,7 +138,10 @@ class _CapturingService implements NeighborhoodService {
   }
 
   @override
-  Future<void> broadcastSyncCommand(SyncCommand command) async {
+  Future<void> broadcastSyncCommand(
+    SyncCommand command, {
+    Duration writeTimeout = kSyncCommandWriteTimeout,
+  }) async {
     broadcasts.add(command);
   }
 

@@ -1,7 +1,6 @@
 import 'dart:async';
-import 'package:nexgen_command/services/debug_error_record.dart';
+import 'package:nexgen_command/services/error_sink.dart';
 import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -53,50 +52,17 @@ void _startupBreadcrumb(String message) {
   print('LUMINA_STARTUP: $message');
 }
 
-/// Re-entry guard: if the sink itself throws (e.g. Firestore unreachable),
-/// we must not recurse into ourselves and feedback-loop.
-bool _errorSinkActive = false;
-
-/// Global uncaught-error sink. #84 hardening.
-///
-/// Without this the app has no error reporting surface — Tyler can't read
-/// Crashlytics (no Mac) and TestFlight crash logs aren't accessible from
-/// the device. Writes a capped record to /users/{uid}/debug_errors/{autoId}
-/// so the next uncaught error in a TestFlight build is readable from the
-/// Firestore console.
+/// Global uncaught-error sink. #84 hardening. The sink itself lives in
+/// services/error_sink.dart so handled failures can record to it too
+/// (first caller: NeighborhoodNotifier.broadcastSync, 2026-11-02).
 ///
 /// Must never throw. Sink failures are swallowed.
 Future<void> _reportUncaughtError({
   required Object error,
   required StackTrace? stack,
   required String context,
-}) async {
-  if (_errorSinkActive) return;
-  _errorSinkActive = true;
-  try {
-    debugPrint('🛑 UNCAUGHT [$context]: $error\n$stack');
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('debug_errors')
-        .add(debugErrorRecord(
-          error: error,
-          stack: stack,
-          context: context,
-          platform: Platform.isIOS
-              ? 'ios'
-              : Platform.isAndroid
-                  ? 'android'
-                  : 'other',
-        ));
-  } catch (_) {
-    // Sink must never crash the app. Swallow.
-  } finally {
-    _errorSinkActive = false;
-  }
-}
+}) =>
+    reportErrorToSink(error: error, stack: stack, context: context);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

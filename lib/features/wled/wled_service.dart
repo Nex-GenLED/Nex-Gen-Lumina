@@ -15,6 +15,8 @@ import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/device_identity.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/device_channel.dart';
+import 'package:nexgen_command/features/wled/segment_layout_guard.dart';
 import 'package:nexgen_command/models/controller_type.dart';
 import 'package:nexgen_command/services/routing_diagnostics.dart';
 
@@ -712,7 +714,9 @@ class WledService
       final res = await closeOrAbort(req, const Duration(seconds: 15));
       final body = await res.transform(utf8.decoder).join();
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        return jsonDecode(body) as Map<String, dynamic>;
+        final map = jsonDecode(body) as Map<String, dynamic>;
+        _noteLiveLayout(map);
+        return map;
       }
       debugPrint('WLED getState status ${res.statusCode}: $body');
     } catch (e) {
@@ -1028,7 +1032,93 @@ class WledService
     final participating = await getCachedParticipatingChannels();
     final normalized = normalizeWledPayload(payload);
     final expanded = expandForParticipation(normalized, participating);
+    await _repairLayoutBeforeMultiSegmentApply(expanded);
     return _postJson(expanded);
+  }
+
+  /// TD-10 narrow fix (build 122). Before a MULTI-segment apply, read the live
+  /// layout; if it lacks a segment the apply addresses and the controller's own
+  /// buses say that segment should exist, re-provision the bus-derived bounds
+  /// first (the same bounds-only write the connect-time geometry heal makes),
+  /// then let the apply carry the look to every segment it addresses. A
+  /// single-segment apply, an unreadable layout, an unreadable config, a bus
+  /// set without the missing segment, and simulation are left exactly as
+  /// before: this repairs a KNOWN mismatch, never a guess. The relay path has
+  /// its own applyJson and is unchanged. One extra `/json/state` read per
+  /// multi-segment LAN apply; the config is read only on a mismatch.
+  /// Decisions live in segment_layout_guard.dart (pure, tested).
+  /// The last live layout any `/json/state` read on this service saw (the
+  /// dashboard poller reads every 1.5 s), with its age — the "poller's last
+  /// state" the TD-10 guard compares against before a multi-segment apply.
+  Map<String, dynamic>? _lastLiveState;
+  DateTime? _lastLiveAt;
+
+  void _noteLiveLayout(Map<String, dynamic> state) {
+    if (liveSegmentIds(state) == null) return;
+    // The raw body, segment entries copied: the repair copies segment 0's look
+    // from it (+122 item 2), so it must not change under the poller's feet.
+    final seg = state['seg'];
+    _lastLiveState = {
+      ...state,
+      if (seg is List)
+        'seg': [
+          for (final s in seg)
+            if (s is Map) Map<String, dynamic>.from(s) else s,
+        ],
+    };
+    _lastLiveAt = DateTime.now();
+  }
+
+  Map<String, dynamic>? get _freshLiveState {
+    final at = _lastLiveAt;
+    if (at == null || DateTime.now().difference(at) > kLiveLayoutHintMaxAge) {
+      return null;
+    }
+    return _lastLiveState;
+  }
+
+  /// Bench seam only: the TD-10 guard can be switched off to record the
+  /// firmware's dropped-id behaviour on the spare. Never false in the app.
+  @visibleForTesting
+  static bool layoutGuardEnabled = true;
+
+  Future<void> _repairLayoutBeforeMultiSegmentApply(
+      Map<String, dynamic> payload) async {
+    if (_simulate || !layoutGuardEnabled) return;
+    final addressed = addressedSegmentIds(payload);
+    if (addressed.length < 2) return;
+    Map<String, dynamic>? state = _freshLiveState;
+    Set<int>? live = state == null ? null : liveSegmentIds(state);
+    if (live == null) {
+      try {
+        state = await getState();
+        live = liveSegmentIds(state);
+      } catch (e) {
+        debugPrint('TD-10 guard: layout unreadable ($e) — stood aside');
+        return;
+      }
+    }
+    if (live == null || addressed.every(live.contains)) return;
+    List<SegmentBounds> expected;
+    try {
+      expected = expectedBoundsFromChannels(
+          deviceChannelsFromConfig(await getConfig()));
+    } catch (e) {
+      debugPrint('TD-10 guard: config unreadable ($e) — stood aside');
+      return;
+    }
+    if (!needsLayoutRepairBeforeApply(
+        addressed: addressed, live: live, expected: expected)) {
+      return;
+    }
+    debugPrint('TD-10 guard: live segments $live lack one the apply addresses '
+        '$addressed; re-provisioning $expected before the apply');
+    // Bounds for every bus segment; a segment the live layout lacks also takes
+    // segment 0's look in the same POST (+122 item 2), so a channel the apply
+    // does not address never lights in the firmware's default amber.
+    final ok = await applyGeometryJson(
+        geometryRepairPayload(want: expected, liveState: state));
+    debugPrint('TD-10 guard: re-provision ${ok ? 'posted' : 'FAILED — apply proceeds unrepaired'}');
   }
 
   /// PROVISIONING ENTRY POINT — the only door through which segment bounds may
@@ -1041,7 +1131,9 @@ class WledService
   ///
   /// Legitimate callers. All but the last derive `want` from the controller's
   /// OWN hardware buses (never from the app's model of the installation):
-  ///   • `ControllerDefaultsHealer._reprovisionSegments`
+  ///   • `rehealSegmentGeometry` (segment_geometry_reheal.dart): the connect-
+  ///     time healer, the restart watch and Light Up Now's revert capture
+  ///   • the TD-10 apply guard above (`_repairLayoutBeforeMultiSegmentApply`)
   ///   • `ScheduleSyncService`'s geometry-gate re-provision
   ///   • `SunriseOffService` / `CalendarEntryLeaseManager` gate re-provision
   ///   • ⚠️ the user-facing DIRECTION control (`channel_direction.dart`) — the

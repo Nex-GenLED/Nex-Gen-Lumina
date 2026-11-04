@@ -80,6 +80,7 @@ void main() {
           .overrideWith((_) => Stream.value(true)),
       calendarLeaseScheduleSlotDemandProvider.overrideWith((_) => 0),
       calendarLeaseEntriesProvider.overrideWithValue([entry]),
+      calendarLeaseSchedulesHydratedProvider.overrideWithValue(true),
       calendarLeaseSchedulesProvider.overrideWithValue(const []),
       calendarLeaseScheduleUpdaterProvider.overrideWith((_) => (_) async {}),
       calendarLeaseScheduleSyncTriggerProvider
