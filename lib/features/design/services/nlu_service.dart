@@ -108,6 +108,31 @@ class NLUService {
     return out;
   }
 
+  /// True when [prompt] names a colour this parser knows — a specific name
+  /// from the colour table or a vague one it would ask a shade question
+  /// about. Spacing phrases are canonicalised first, so the "off" in "1 on
+  /// 3 off" is not the colour black (the same rule [parseUserIntent] applies).
+  ///
+  /// Roofline slice 3: the orchestrator seeds a variation's colours from the
+  /// saved design ONLY when the prompt names none, so "white every other
+  /// light" stays white. Public + static so it can be tested directly.
+  static bool mentionsColor(String prompt) {
+    final normalized = canonicalizeSpacingPhrases(prompt
+        .toLowerCase()
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll('colour', 'color'));
+    for (final entry in _colorMap.values) {
+      for (final name in entry.names) {
+        if (normalized.contains(name)) return true;
+      }
+    }
+    for (final vague in _vagueColors.keys) {
+      if (normalized.contains(vague)) return true;
+    }
+    return false;
+  }
+
   /// Split a prompt into separate clauses for layer parsing.
   List<String> _splitIntoClauses(String prompt) {
     // Split on common clause separators

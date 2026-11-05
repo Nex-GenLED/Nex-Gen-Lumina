@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/design_color_summary.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/models/clarification_models.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
@@ -170,6 +171,15 @@ final lastCompositionResultProvider = StateProvider<CompositionResult?>((ref) {
   return null;
 });
 
+/// Roofline slice 3 — the saved design this studio session is making
+/// "Variations of …", or null for an ordinary session. Set by the studio's
+/// entry (only a STAMPED design can be chosen — `variationBaseFor`), read by
+/// the composition path (colours to start from, the stamped bus lengths to
+/// compose over), by the save and apply builders (the variation keeps the
+/// saved design's stamp) and by the AI context (bus lengths and a colour
+/// summary, nothing else). Cleared by [resetDesignStudio].
+final variationBaseProvider = StateProvider<VariationBase?>((ref) => null);
+
 /// The last result the orchestrator returned that the studio could not act
 /// on: an error, with its message and suggestions. +110 E2 audit row 2 —
 /// this used to be dropped on the floor (the text box just re-enabled), so a
@@ -215,21 +225,38 @@ void recordDesignStudioResultWith(
 // Processing Actions
 // =============================================================================
 
-/// The roofline map as the AI pipeline needs it: with LIVE device bus lengths
-/// attached when the controller is reachable. The composer emits
-/// whole-controller LED groups, so it has to know where each channel really
-/// starts on the wire — including channels that carry no map at all (see
-/// RooflineConfiguration.globalStartOf). Falls back to the lengths recorded at
-/// map time, which the config already carries.
-RooflineConfiguration? _configForAiPipeline(Ref ref) {
-  final config = ref.read(currentRooflineConfigProvider).valueOrNull;
+/// The roofline map as the AI pipeline needs it: with the bus lengths the
+/// composer lays each channel over. The composer works per channel, so it
+/// has to know how long each bus really is — including a bus that carries no
+/// map at all (see PatternComposer). Three sources, in order:
+///
+///  * a "Variations of …" session: the saved design's STAMPED bus lengths
+///    (roofline slice 3). The variation is composed over the layout the
+///    design was saved for and stamped the same, so the apply-time fit gate
+///    tells the truth about it, on or off the LAN;
+///  * the LIVE device bus lengths when the controller is reachable;
+///  * else the lengths recorded at map time, which the config already carries.
+///
+/// Takes `ref.read` so the studio screen and the providers below compose over
+/// the same config (the screen used to read the bare map).
+RooflineConfiguration? configForAiPipeline(
+  T Function<T>(ProviderListenable<T> provider) read,
+) {
+  final config = read(currentRooflineConfigProvider).valueOrNull;
   if (config == null) return null;
-  final deviceChannels = ref.read(deviceChannelsProvider);
+  final base = read(variationBaseProvider);
+  if (base != null) {
+    return config.withChannelPixelCounts(base.busLengthsByChannel);
+  }
+  final deviceChannels = read(deviceChannelsProvider);
   if (deviceChannels.isEmpty) return config;
   return config.withChannelPixelCounts({
     for (final c in deviceChannels) c.id: c.stop - c.start,
   });
 }
+
+RooflineConfiguration? _configForAiPipeline(Ref ref) =>
+    configForAiPipeline(ref.read);
 
 /// Provider for processing user input through the orchestrator.
 final processInputProvider = FutureProvider.family<DesignStudioResult, String>((ref, prompt) async {
@@ -243,6 +270,7 @@ final processInputProvider = FutureProvider.family<DesignStudioResult, String>((
   final result = await orchestrator.processUserInput(
     prompt: prompt,
     config: config,
+    baseColors: ref.read(variationBaseProvider)?.colors,
   );
 
   if (result.needsClarification) {
@@ -280,6 +308,7 @@ final applyClarificationsProvider = FutureProvider<DesignStudioResult>((ref) asy
     questions: questions,
     choices: choices,
     config: config,
+    baseColors: ref.read(variationBaseProvider)?.colors,
   );
 
   // Existing choices that are still relevant are kept on a follow-up
@@ -323,6 +352,7 @@ void resetDesignStudioWith(
   read(composedPatternProvider.notifier).state = null;
   read(lastCompositionResultProvider.notifier).state = null;
   read(designStudioLastErrorProvider.notifier).state = null;
+  read(variationBaseProvider.notifier).state = null;
 }
 
 /// Select an answer for the current clarification question.

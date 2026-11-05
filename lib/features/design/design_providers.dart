@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/design_color_summary.dart';
 import 'package:nexgen_command/features/design/design_layout_stamp.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
@@ -862,6 +863,139 @@ final composedDesignForApplyProvider = Provider<CustomDesign?>((ref) {
     ownerId: user?.uid ?? '',
   );
 });
+
+// =============================================================================
+// Roofline slice 3 — "Variations of …": the colour summary of a saved design
+// =============================================================================
+
+/// What a saved design is made of, colour-wise — the input "Variations of …"
+/// starts from, and the only thing about the design the AI context gets
+/// (owner decision 2: bus lengths and a colour summary; never a controller
+/// id, a name, an address or an account identifier).
+///
+/// Shares come from the channels — the picture itself, which every design
+/// carries: a positional design's lights counted per colour over its full
+/// coverage (gaps unlit), an effect design's palette entries weighted
+/// equally. Roles come from the stored `composed_pattern` layer when the
+/// design was composed by the AI studio: the first layer's primary and the
+/// first stated secondary and accent in its `source_intent`.
+///
+/// This is the FIRST READER of `composed_pattern` beyond the motion fields
+/// (`motionEffectOf`): until now the layered `source_intent` was stored and
+/// preserved but decoded by nothing (design_models.dart, "WRITE-ONLY
+/// TODAY"). Reads defensively — the field is a jsonDecoded map of unknown
+/// vintage — and never throws: a malformed layer simply states no roles.
+DesignColorSummary designColorSummaryOf(CustomDesign design) {
+  final counts = <String, ({List<int> rgbw, int lights})>{};
+  var lit = 0;
+  var unlit = 0;
+
+  void add(List<int> rgbw, int lights) {
+    final key = rgbw.join(',');
+    final had = counts[key];
+    counts[key] = (rgbw: rgbw, lights: (had?.lights ?? 0) + lights);
+  }
+
+  if (design.isPositional) {
+    for (final ch in design.channels) {
+      if (!ch.included) continue;
+      for (final span in ch.fullCoverageSpans()) {
+        final lights = span.end - span.start + 1;
+        if (lights <= 0) continue;
+        if (isUnlitRgbw(span.color)) {
+          unlit += lights;
+        } else {
+          lit += lights;
+          add(span.color, lights);
+        }
+      }
+    }
+  } else {
+    for (final ch in design.channels) {
+      if (!ch.included) continue;
+      for (final g in ch.colorGroups) {
+        final rgbw = _rgbw4(g.color);
+        if (isUnlitRgbw(rgbw)) continue;
+        lit += 1;
+        add(rgbw, 1);
+      }
+    }
+  }
+
+  final total = lit + unlit;
+  final ordered = counts.values.toList()
+    ..sort((a, b) => b.lights.compareTo(a.lights));
+  final swatches = [
+    for (final c in ordered)
+      DesignColorSwatch(
+          rgbw: List<int>.unmodifiable(c.rgbw),
+          share: total > 0 ? c.lights / total : 0),
+  ];
+
+  final roles = _statedRolesOf(design.composedPattern);
+
+  return DesignColorSummary(
+    swatches: swatches,
+    unlitShare: total > 0 ? unlit / total : 0,
+    statedPrimary: roles.primary,
+    statedSecondary: roles.secondary,
+    statedAccent: roles.accent,
+  );
+}
+
+/// The saved design as a "Variations of …" base, or null when it carries no
+/// layout stamp — such a design gets no entry and the owner is told to
+/// re-save it on their roofline first (owner decision 3).
+VariationBase? variationBaseFor(CustomDesign design) {
+  final stamp = design.layoutStamp;
+  if (stamp == null) return null;
+  return VariationBase(
+    design: design,
+    colors: designColorSummaryOf(design),
+    stamp: stamp,
+  );
+}
+
+List<int> _rgbw4(List<int> c) {
+  if (c.length >= 4) return [c[0], c[1], c[2], c[3]];
+  if (c.length == 3) return [c[0], c[1], c[2], 0];
+  return const [0, 0, 0, 0];
+}
+
+/// The colour roles the AI studio's stored intent states: the first layer's
+/// primary, the first secondary and the first accent any layer states.
+/// `ColorAssignment.toJson` writes each as `[r, g, b, a]`.
+({Color? primary, Color? secondary, Color? accent}) _statedRolesOf(
+    Map<String, dynamic>? composedPattern) {
+  const none = (primary: null, secondary: null, accent: null);
+  if (composedPattern == null) return none;
+  final intent = composedPattern['source_intent'];
+  if (intent is! Map) return none;
+  final layers = intent['layers'];
+  if (layers is! List) return none;
+  Color? primary;
+  Color? secondary;
+  Color? accent;
+  for (final layer in layers) {
+    if (layer is! Map) continue;
+    final colors = layer['colors'];
+    if (colors is! Map) continue;
+    primary ??= _colorFromIntentList(colors['primary_color']);
+    secondary ??= _colorFromIntentList(colors['secondary_color']);
+    accent ??= _colorFromIntentList(colors['accent_color']);
+  }
+  return (primary: primary, secondary: secondary, accent: accent);
+}
+
+Color? _colorFromIntentList(dynamic v) {
+  if (v is! List || v.length < 3) return null;
+  final ints = <int>[];
+  for (final e in v.take(3)) {
+    if (e is! num) return null;
+    ints.add(e.toInt().clamp(0, 255));
+  }
+  return Color.fromARGB(255, ints[0], ints[1], ints[2]);
+}
 
 /// Duplicate an existing design
 final duplicateDesignProvider = Provider<Future<String?> Function(CustomDesign design, String newName)>((ref) {

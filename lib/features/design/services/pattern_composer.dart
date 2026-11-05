@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:nexgen_command/features/design/design_color_summary.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
@@ -33,9 +34,17 @@ class PatternComposer {
   /// 2. Apply spacing rules to generate LED assignments
   /// 3. Merge layers respecting priority (higher = on top), per channel
   /// 4. Generate the WLED JSON payload
+  ///
+  /// [baseColors] — roofline slice 3, "start from this design": the colours
+  /// of a saved design the customer is making variations of. A layer whose
+  /// colours the prompt did not state (the parser's default: white, nothing
+  /// else) takes the saved design's primary / secondary / accent instead, so
+  /// "every other light" on a red-and-blue design composes in red and blue.
+  /// A layer that names its own colours is left alone. Null: no seeding.
   CompositionResult compose({
     required DesignIntent intent,
     required RooflineConfiguration config,
+    DesignColorSummary? baseColors,
   }) {
     // Validate intent is ready
     if (!intent.isReady && intent.ambiguities.isNotEmpty) {
@@ -54,11 +63,23 @@ class PatternComposer {
     }
 
     try {
+      // Seed unstated colours from the saved design, when there is one. The
+      // seeded intent is what gets composed, named, described and stored, so
+      // a saved variation's own `source_intent` says the colours it used.
+      final seededIntent = baseColors == null
+          ? intent
+          : intent.copyWith(
+              layers: [
+                for (final layer in intent.layers)
+                  layer.copyWith(colors: seedColors(layer.colors, baseColors)),
+              ],
+            );
+
       // Process each layer: priority → channel → that channel's groups.
       final layerGroups = <int, Map<int, List<LedColorGroup>>>{};
       final warnings = <String>[];
 
-      for (final layer in intent.layers.where((l) => l.enabled)) {
+      for (final layer in seededIntent.layers.where((l) => l.enabled)) {
         final byChannel = _composeLayer(layer, config);
         if (byChannel.isEmpty) {
           warnings.add('Layer "${layer.name}" produced no LED assignments');
@@ -107,8 +128,8 @@ class PatternComposer {
       final usedColors = _extractUsedColors(finalGroups);
 
       // Determine if we have motion
-      final hasMotion = intent.layers.any((l) => l.motion != null);
-      final primaryMotion = intent.layers
+      final hasMotion = seededIntent.layers.any((l) => l.motion != null);
+      final primaryMotion = seededIntent.layers
           .where((l) => l.motion != null)
           .map((l) => l.motion!)
           .firstOrNull;
@@ -117,21 +138,21 @@ class PatternComposer {
       final wledPayload = _generateWledPayload(
         channelGroups: channelGroups,
         motion: primaryMotion,
-        globalSettings: intent.globalSettings,
+        globalSettings: seededIntent.globalSettings,
       );
 
       // Build the composed pattern
       final pattern = ComposedPattern(
-        name: _generatePatternName(intent),
-        description: _generateDescription(intent),
-        sourceIntent: intent,
+        name: _generatePatternName(seededIntent),
+        description: _generateDescription(seededIntent),
+        sourceIntent: seededIntent,
         colorGroups: finalGroups,
         channelGroups: channelGroups,
         channelLengths: channelLengths,
         effectId: primaryMotion?.effectId ?? 0,
         speed: primaryMotion?.speed ?? 128,
         intensity: primaryMotion?.intensity ?? 128,
-        brightness: intent.globalSettings.brightness,
+        brightness: seededIntent.globalSettings.brightness,
         hasMotion: hasMotion,
         motionDirection: primaryMotion?.direction,
         reverse: primaryMotion?.reverse ?? false,
@@ -153,6 +174,33 @@ class PatternComposer {
       );
     }
   }
+
+  /// The colours a layer composes with when a saved design is the starting
+  /// point: [colors] untouched when it states any colour, else the saved
+  /// design's own primary / secondary / accent with the layer's spacing rule
+  /// kept. Pure; public for the tests.
+  static ColorAssignment seedColors(
+      ColorAssignment colors, DesignColorSummary base) {
+    if (!isUnstatedColors(colors)) return colors;
+    final primary = base.primary;
+    if (primary == null) return colors;
+    return ColorAssignment(
+      primaryColor: primary,
+      secondaryColor: base.secondary,
+      accentColor: base.accent,
+      spacingRule: colors.spacingRule,
+    );
+  }
+
+  /// True when [colors] is exactly what the parser produces for a clause that
+  /// names no colour: white, and nothing else. A clause that says "white"
+  /// looks the same here — the orchestrator passes no base colours for a
+  /// prompt that names any colour, so that case never reaches [seedColors].
+  static bool isUnstatedColors(ColorAssignment colors) =>
+      colors.primaryColor.toARGB32() == 0xFFFFFFFF &&
+      colors.secondaryColor == null &&
+      colors.accentColor == null &&
+      colors.fillColor == null;
 
   // ── Channels ──────────────────────────────────────────────────────────────
 
