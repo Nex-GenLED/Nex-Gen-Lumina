@@ -471,7 +471,8 @@ class DesignScheduleEligibility {
 /// expectation, so the lengths alone decide (slice 1's rule).
 /// [firmwareVersion] — `/json/info`'s `ver`; null or empty = unreadable.
 /// [existingDesignScheduleCount] — painted designs already on the schedule,
-/// not counting the one being edited.
+/// not counting the one being edited. The SAVE path passes it (it knows the
+/// editing id); the picker leaves it at 0 and never refuses on the count.
 /// [presetId] / [presetName] — what the eventual save sends, for the byte
 /// measurement; the defaults are the widest slot and the design's name.
 DesignScheduleEligibility designScheduleEligibility({
@@ -480,7 +481,7 @@ DesignScheduleEligibility designScheduleEligibility({
   required List<DeviceChannel> liveChannels,
   String? liveControllerId,
   required String? firmwareVersion,
-  required int existingDesignScheduleCount,
+  int existingDesignScheduleCount = 0,
   int presetId = kLastSchedulePresetId,
   String? presetName,
 }) {

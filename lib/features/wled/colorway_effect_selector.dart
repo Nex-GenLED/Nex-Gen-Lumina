@@ -115,6 +115,16 @@ class LibraryDesignSelection {
   /// Null from every other mode.
   final CelebrationLength? celebrationLength;
 
+  /// Roofline slice 2 — set when the choice is a PAINTED design handed to the
+  /// schedule editor: [wledPayload] is then the WLED API-command preset body
+  /// (`o:true`, one entry per bus with bounds and paint) the controller will
+  /// replay, [designId] the design's id and [presetKind]
+  /// `kSchedulePresetKindApi`. The schedule stores both (design_id /
+  /// preset_kind) so the sync takes the design branch. Null for every catalog
+  /// pattern and every other destination.
+  final String? designId;
+  final String? presetKind;
+
   const LibraryDesignSelection({
     required this.id,
     required this.name,
@@ -122,6 +132,8 @@ class LibraryDesignSelection {
     this.imageUrl = '',
     this.paletteName,
     this.celebrationLength,
+    this.designId,
+    this.presetKind,
   });
 
   /// [paletteName] when known, else [name].

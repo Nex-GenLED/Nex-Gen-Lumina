@@ -30,6 +30,10 @@ import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
     show perPixelPickerRefusalMessage;
 import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
+import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart'
+    show kSchedulePresetKindApi;
+import 'package:nexgen_command/features/wled/design_schedule_pick.dart';
 import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/shared/write_result.dart';
@@ -277,7 +281,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   /// Selection-mode handler: resolve the saved
   /// design and hand it back via [LibraryBrowserScreen.onDesignSelected] (its
   /// RAW payload) WITHOUT applying it. The callback owns dismissing the picker.
-  void _returnSavedDesignSelection(String? designId) {
+  Future<void> _returnSavedDesignSelection(String? designId) async {
     if (!mounted) return;
     final cb = widget.onDesignSelected;
     if (cb == null) return;
@@ -313,6 +317,46 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
     // Roofline slice 1, item 4: the sentence names the destination (Game
     // Day has its own), and the plan write refuses the same payload itself
     // (game_day_design_write.dart), so this is the early word, not the gate.
+    //
+    // Roofline slice 2: for the SCHEDULE destination a painted design CAN be
+    // scheduled nightly — as a WLED API-command preset the controller replays
+    // with the picture — when the owner's gates pass: stamped (slice 1), on
+    // the controller's LAN, the live layout fits the stamp, a proven
+    // firmware version, the body under the byte cap. The verdict and every
+    // sentence come from design_api_preset.dart; the sync re-checks the same
+    // gates at write time, so this is the early word. A body over the cap
+    // offers the editor (simplify, never auto-simplify).
+    if (match.isPositional &&
+        (widget.saveDestinationLabel?.toLowerCase() == 'schedule')) {
+      final design = match;
+      final verdict = await designSchedulePickVerdict(ref.read, design);
+      if (!mounted) return;
+      if (!verdict.allowed) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(verdict.message ??
+                perPixelPickerRefusalMessage(
+                    design.name, widget.saveDestinationLabel)),
+            duration: const Duration(seconds: 8),
+            action: verdict.offersEditor
+                ? SnackBarAction(
+                    label: 'Open editor',
+                    onPressed: () => _openDesignEditor(design),
+                  )
+                : null,
+          ));
+        return; // stay in the picker so another design can be chosen
+      }
+      cb(LibraryDesignSelection(
+        id: design.id,
+        name: design.name,
+        wledPayload: verdict.body!,
+        designId: design.id,
+        presetKind: kSchedulePresetKindApi,
+      ));
+      return;
+    }
     if (match.isPositional) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -327,6 +371,20 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
       id: match.id,
       name: match.name,
       wledPayload: match.toWledPayload(),
+    ));
+  }
+
+  /// Roofline slice 2 — the repair a too-detailed design is offered: the
+  /// paint editor over the live buses (the same door the detail screen's Edit
+  /// opens). Pushed on the root navigator, above the picker.
+  Future<void> _openDesignEditor(CustomDesign design) async {
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        backgroundColor: NexGenPalette.matteBlack,
+        appBar: GlassAppBar(title: Text('Edit ${design.name}')),
+        body: ManualDesignEditor(initialDesign: design),
+      ),
     ));
   }
 
