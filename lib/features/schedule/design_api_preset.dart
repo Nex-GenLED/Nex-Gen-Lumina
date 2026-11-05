@@ -31,6 +31,7 @@
 // it device facts they already hold (the live channel list, the controller id,
 // the firmware version) and act on the verdict.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:nexgen_command/features/design/design_layout_fit.dart';
@@ -293,6 +294,26 @@ String plainDesignName(String actionLabel) =>
     actionLabel.startsWith('Pattern: ')
         ? actionLabel.substring('Pattern: '.length)
         : actionLabel;
+
+// ── One writer at a time (owner decision 6) ─────────────────────────────────
+
+/// A FIFO lock: each call runs after every call queued before it has settled.
+/// Two syncs that overlap (a manual Sync during the stream-triggered one, a
+/// lease write during a sync) must not interleave a design preset's write and
+/// its read-back, or the read-back would judge the other writer's bytes.
+class SerialWriteLock {
+  Future<void> _tail = Future<void>.value();
+
+  Future<T> synchronized<T>(Future<T> Function() action) {
+    final previous = _tail;
+    final completer = Completer<void>();
+    _tail = completer.future;
+    return previous.then((_) => action()).whenComplete(completer.complete);
+  }
+}
+
+/// The process-wide lock every design preset write takes.
+final SerialWriteLock designPresetWriteLock = SerialWriteLock();
 
 // ── Customer-readable sentences ─────────────────────────────────────────────
 
