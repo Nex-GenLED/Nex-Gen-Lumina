@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/schedule/data/schedule_repository.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_detector.dart';
 import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/schedule/schedules_subcollection_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/solar_schedule_cleanup.dart';
@@ -697,6 +698,17 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
           'has no valid repeat days (${item.repeatDays})');
       _showValidationError(
           "Pick at least one repeat day — the schedule won't run without one.");
+      return;
+    }
+
+    // Roofline slice 2 — persistence-layer backstop for the per-account cap
+    // on painted designs (the editor refuses first, with the editing id).
+    final designCap =
+        designScheduleCountRefusal(candidate: item, schedules: state);
+    if (designCap != null) {
+      debugPrint('SchedulesNotifier: refusing add — "${item.actionLabel}" '
+          'would be painted design ${kMaxDesignSchedulesPerAccount + 1}');
+      _showValidationError(designCap);
       return;
     }
 

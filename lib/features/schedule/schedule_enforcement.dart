@@ -21,6 +21,34 @@ enum ScheduleEnforcementMode {
   strict,
 }
 
+/// Roofline slice 2 — what the enforcement timer does for a drifted schedule.
+enum EnforcementAction {
+  /// Re-apply the schedule's stored payload live (every catalog pattern).
+  applyPayload,
+
+  /// Load the schedule's preset on the controller: a painted design's body is
+  /// an API-command preset the controller replays itself, and applying it
+  /// live would strip its bounds at the wire pin and trip the apply size cap.
+  loadPreset,
+
+  /// Nothing to apply.
+  none,
+}
+
+/// PURE. The action for [schedule]: a design-kind schedule with a preset slot
+/// loads it; one without a slot has nothing to fire; everything else keeps the
+/// rule that stood before (payload first, then a preset).
+EnforcementAction enforcementActionFor(ScheduleItem schedule) {
+  if (schedule.isDesignApiPreset) {
+    return schedule.presetId != null
+        ? EnforcementAction.loadPreset
+        : EnforcementAction.none;
+  }
+  if (schedule.hasWledPayload) return EnforcementAction.applyPayload;
+  if (schedule.presetId != null) return EnforcementAction.loadPreset;
+  return EnforcementAction.none;
+}
+
 /// Service that monitors the active schedule and enforces it by re-applying
 /// the scheduled state if the user manually changes the lights.
 ///
@@ -193,23 +221,25 @@ class ScheduleEnforcementService {
     try {
       bool success;
 
-      if (schedule.hasWledPayload) {
-        // Route through the applyPayloadWithLabel chokepoint so wledState +
-        // explorePreview + activePresetLabel all reflect the fired schedule.
-        // Bare repo.applyJson here would leave Now Playing stale (the
-        // SCHEDULE-FIRE bug confirmed on device).
-        success = await _ref
-            .read(wledStateProvider.notifier)
-            .applyPayloadWithLabel(
-              schedule.wledPayload!,
-              labelHint: schedule.actionLabel,
-            );
-      } else if (schedule.presetId != null) {
-        // Load the preset
-        success = await repo.loadPreset(schedule.presetId!);
-      } else {
-        debugPrint('ScheduleEnforcement: No payload or preset to apply');
-        return;
+      switch (enforcementActionFor(schedule)) {
+        case EnforcementAction.applyPayload:
+          // Route through the applyPayloadWithLabel chokepoint so wledState +
+          // explorePreview + activePresetLabel all reflect the fired schedule.
+          // Bare repo.applyJson here would leave Now Playing stale (the
+          // SCHEDULE-FIRE bug confirmed on device).
+          success = await _ref
+              .read(wledStateProvider.notifier)
+              .applyPayloadWithLabel(
+                schedule.wledPayload!,
+                labelHint: schedule.actionLabel,
+              );
+        case EnforcementAction.loadPreset:
+          // Load the preset (a painted design always takes this branch —
+          // see enforcementActionFor).
+          success = await repo.loadPreset(schedule.presetId!);
+        case EnforcementAction.none:
+          debugPrint('ScheduleEnforcement: No payload or preset to apply');
+          return;
       }
 
       if (success) {
