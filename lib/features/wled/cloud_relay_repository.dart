@@ -690,6 +690,20 @@ class CloudRelayRepository implements WledRepository, PerPixelWriter, ClockInfoS
     String? presetName,
   }) async {
     if (presetId < 1 || presetId > 250) return false;
+    // ROOFLINE SLICE 2 — a painted design's API-command preset (`o:true`) is
+    // REFUSED over the relay, before any command is queued. Every gate the
+    // slice requires runs on device facts only a direct-LAN service has: the
+    // bus list (cfg read) for the layout fit, the firmware version, and the
+    // presets.json read-back after the write. The bridge carries none of
+    // them, and a psave it did relay would land ungated. The sync never sends
+    // one here (it refuses off the LAN first); this is the backstop for any
+    // other caller. Owner decision: refusing is fine, and this is where.
+    if (state['o'] == true) {
+      debugPrint('CloudRelayRepository.savePreset: REFUSED preset $presetId — '
+          'an API-command (painted design) preset can only be saved on the '
+          'home network, where its layout, firmware and read-back checks run');
+      return false;
+    }
     // Pre-normalize caller state so the preset persists with all 3 col
     // slots populated; mirrors the WledService.savePreset fix so local +
     // relay paths produce identical preset shapes on the controller.

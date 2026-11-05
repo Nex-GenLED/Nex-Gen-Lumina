@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
@@ -565,6 +566,22 @@ Map<String, dynamic> ensurePsaveClearsFreeze(
 /// the REPLAY boundary — where a stored blob is rehydrated, which no
 /// provisioning path crosses — or a migration. Not here.
 Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
+  // ── ROOFLINE SLICE 2: AN API-COMMAND PRESET BODY IS NEVER TOUCHED ──────
+  // A painted design scheduled nightly is saved as a WLED API-command preset
+  // (`o:true`, design_api_preset.dart): the controller stores the REQUEST and
+  // replays it at fire time. Its segments are built final — bounds per bus,
+  // the range-compressed `i`, three black col slots — and the sync decides
+  // whether to re-save by comparing a hash of that body with the controller's
+  // stored copy. Rewriting it here (col padding, grp/spc, `i` re-validation,
+  // `frz`) would make the saved body differ from the built one, so no hash
+  // could ever match: every sync would re-save (flash wear) and every
+  // read-back would report a mismatch. Owner rule: never touch `o` or `i`.
+  // Returned as a deep copy so a caller that mutates the result cannot reach
+  // the stored schedule payload. Nothing else in lib/ writes `o`.
+  if (payload['o'] == true) {
+    return jsonDecode(jsonEncode(payload)) as Map<String, dynamic>;
+  }
+
   final seg = payload['seg'];
   if (seg is! List || seg.isEmpty) {
     return Map<String, dynamic>.from(payload);
