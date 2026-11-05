@@ -1527,7 +1527,7 @@ class ScheduleSyncService {
             'n': name,
           };
           final expectedHash = presetPayloadHash(body);
-          final svcForReadBack = activeRepo;
+          final svcForReadBack = activeRepo as WledService;
           await designPresetWriteLock.synchronized(() => psaveIfChanged(
                 id: presetId,
                 state: body,
