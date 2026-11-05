@@ -1494,7 +1494,7 @@ class ScheduleSyncService {
                 'match the live buses ${gateExpectedShape.join(' ')}');
             refusal = designApiPresetLayoutChangedMessage(plain);
           } else {
-            final ver = await _firmwareVersionOrNull(activeRepo as WledService);
+            final ver = await _firmwareVersionOrNull(activeRepo);
             if (ver == null || ver.trim().isEmpty) {
               refusal = designScheduleFirmwareUnreadableMessage(plain);
             } else if (!isDesignApiPresetFirmwareProven(ver)) {
@@ -1527,7 +1527,7 @@ class ScheduleSyncService {
             'n': name,
           };
           final expectedHash = presetPayloadHash(body);
-          final svcForReadBack = activeRepo as WledService;
+          final svcForReadBack = activeRepo;
           await designPresetWriteLock.synchronized(() => psaveIfChanged(
                 id: presetId,
                 state: body,
