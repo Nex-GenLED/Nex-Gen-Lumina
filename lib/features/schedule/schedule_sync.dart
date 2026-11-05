@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart';
 import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
 import 'package:nexgen_command/features/schedule/preset_repair_convergence.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -2057,6 +2058,17 @@ class ScheduleSyncService {
     List<int>? channels,
   }) {
     if (channels == null) return payload;
+
+    // ROOFLINE SLICE 2 — a PICTURE is never templated. A painted design's
+    // body (an API-command preset, `o:true`, or any body carrying `seg[].i`)
+    // names every bus itself, each with its own paint; copying the first
+    // segment onto the census would hand every bus one bus's picture and
+    // strip the bounds the preset needs after a power cycle (audit §B.2).
+    // The sync's design branch bypasses this rule and the fan-out; this is
+    // the backstop for any caller that reaches the scope rule with one.
+    if (payloadCarriesPerPixel(payload) || payload['o'] == true) {
+      return payload;
+    }
 
     final live = liveState?['seg'];
     final liveIds = <int>[];

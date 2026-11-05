@@ -54,6 +54,14 @@ Map<String, dynamic> fanOutPatternPayloadToBuses(
   final ids = busIds.toSet().toList()..sort();
   if (ids.length < 2) return payload;
 
+  // ROOFLINE SLICE 2 — an API-command preset body (`o:true`, a painted
+  // design scheduled nightly) is built FINAL by design_api_preset.dart: one
+  // entry per bus with its own bounds and paint. It is never fanned, whatever
+  // its segment count or keys. Explicit, rather than relying on the per-pixel
+  // and several-entries rules below, so a one-bus body with no `i` (a design
+  // that leaves its only bus dark) cannot slip through either.
+  if (payload['o'] == true) return payload;
+
   final seg = payload['seg'];
   if (seg is! List || seg.length != 1) return payload;
   final first = seg.first;
