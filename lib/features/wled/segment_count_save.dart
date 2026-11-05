@@ -73,6 +73,9 @@ String segmentCountSaveMessage(SegmentCountSaveOutcome outcome) {
     case SegmentCountSaveOutcome.landedOnRetry:
       return 'LED counts updated on the second attempt.';
     case SegmentCountSaveOutcome.postFailed:
+      // No read-back happened: the geometry POST itself was refused.
+      return 'LED counts saved, but the segment layout could not be written. '
+          'Check your controller.';
     case SegmentCountSaveOutcome.didNotLand:
       return 'LED counts saved, but the segment layout did not read back as '
           'expected. Check your controller.';

@@ -198,3 +198,35 @@ visible (the healer prints its report; the ladder coordinator prints `[LadderRep
 
 Pass: 2, 3 and 5 re-run the heal exactly once each; 4 does not; no preset is written in any
 step; `/json/state` segment bounds match the typed counts after 2 and 3.
+
+## G5 — the LED-count save re-reads the live layout
+
+Change: after the cfg write succeeds and the bounds are written, `_saveSegmentCounts`
+invalidates `deviceHardwareConfigProvider` and waits (at most 3 s) for the fresh read, so the
+layout stamp, the fit gate, the pixel-map staleness check and the G4 watcher see the new
+lengths at once instead of after the next reconnect. No Firestore write (the gate reads device
+truth only; off the LAN a stamped design is refused). The `postFailed` outcome has its own
+sentence ("could not be written") since no read-back happened.
+
+Prerequisite: "Bench stamp 3x100" saved (item 1) and fitting; the spare at 100/100/100; the
+app on the LAN, the spare selected. Do NOT reconnect or restart the app between steps 1 and 4:
+the point is what the app sees without a reconnect.
+
+1. Hardware Config → bus 2 → 120 → Save Changes. Expect "LED counts updated." and, back on
+   Home, the channel bar's range for channel 2 reads 101–220 straight away (on `fd8252c` it
+   read 101–200 until the next reconnect).
+2. My Designs → apply "Bench stamp 3x100". Expect the refusal naming "100 lights on channel
+   2 … has 120 now" and no write (on `fd8252c` the gate compared against the stale 100 and
+   APPLIED it, 20 LEDs short on bus 2).
+3. Open the design (Edit), Save. Read the document: `bus_lengths` = `[100, 120, 100]` (on
+   `fd8252c` the re-save re-stamped the stale `[100, 100, 100]`).
+4. If a pixel map exists for the spare: the staleness mark for channel 2 appears right after
+   step 1, not after a reconnect.
+5. Restore bus 2 → 100 → Save Changes. Apply the design re-saved in step 3: expect the
+   refusal ("120 lights on channel 2 … has 100 now"). Re-save it; apply: expect "Applied".
+6. Failure wording: with the spare unplugged after the cfg write cannot be arranged safely,
+   prove `postFailed` from the unit test only (segment_count_save_test); on the bench confirm
+   the normal path's sentence is unchanged ("LED counts updated.").
+
+Pass: 1–5 as stated with no reconnect; after every save the Home channel ranges match the
+`/json/state` segment bounds.

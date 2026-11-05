@@ -193,5 +193,10 @@ void main() {
         contains('second attempt'));
     expect(segmentCountSaveMessage(SegmentCountSaveOutcome.didNotLand),
         contains('did not read back'));
+    // G5: a refused POST had no read-back to report.
+    expect(segmentCountSaveMessage(SegmentCountSaveOutcome.postFailed),
+        contains('could not be written'));
+    expect(segmentCountSaveMessage(SegmentCountSaveOutcome.postFailed),
+        isNot(contains('read back')));
   });
 }

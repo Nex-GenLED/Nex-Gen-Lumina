@@ -8,6 +8,7 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_repository.dart';
+import 'package:nexgen_command/features/wled/live_layout_refresh.dart';
 import 'package:nexgen_command/features/wled/segment_count_save.dart';
 
 /// Builds the `hw.led.ins` array from the per-port UI state, preserving each
@@ -326,7 +327,20 @@ class _HardwareConfigScreenState extends ConsumerState<HardwareConfigScreen> {
         repo, segmentBoundsForCounts(counts));
     debugPrint('Segment bounds after count update: $result');
 
-    // Step 3: Update local baseline so subsequent saves use the correct reference.
+    if (!mounted) return;
+
+    // Step 3 (roofline slice 1, G5): the controller's hw.led has changed and
+    // nothing reboots, so the cfg read cached at connect is stale. Re-read
+    // it now — after the bounds write, so the bus-change watcher's re-heal
+    // (G4) sees the final layout — so the design layout stamp, the fit gate
+    // and the pixel-map staleness check compare against the lengths the
+    // controller now has. Bounded; the provider keeps resolving on its own.
+    final live =
+        await refreshLiveLayout(invalidate: ref.invalidate, read: ref.read);
+    debugPrint('Live layout after count update: '
+        '${[for (final c in live) c.stop - c.start]}');
+
+    // Step 4: Update local baseline so subsequent saves use the correct reference.
     _originalBusCount = _enabled.where((e) => e).length;
 
     if (mounted) {
