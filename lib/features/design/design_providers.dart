@@ -626,22 +626,54 @@ final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String nam
 // #86 — Design Studio (AI ComposedPattern) → CustomDesign save (option-b)
 // =============================================================================
 
-/// Splits an AI [ComposedPattern]'s whole-roofline [LedColorGroup]s into
-/// per-channel [ChannelDesign]s using the device's [WledSegment] boundaries.
+/// Builds an AI [ComposedPattern] into per-channel [ChannelDesign]s.
 ///
-/// `ComposedPattern.colorGroups` are *absolute* LED ranges across the entire
-/// roofline (0..totalPixels). `ChannelDesign.colorGroups` are *segment-local*
-/// (0-based within the channel), matching the convention used by
-/// `CurrentDesignNotifier.createNew` / `saveCurrentAsDesignProvider`. We clip
-/// each absolute group to each segment's `[start, stop)` window and re-base it.
+/// Roofline slice 3 (the D-2 defect): a pattern the composer built carries
+/// its picture CHANNEL-LOCALLY — [ComposedPattern.channelGroups] keyed by
+/// channel index, over [ComposedPattern.channelLengths]. Those map straight
+/// onto `ChannelDesign.colorGroups` / `ledCount` with no re-projection, and
+/// the device's segment list is consulted only for channel NAMES. A channel
+/// the composer laid out but left dark is kept with an empty group list, as
+/// before. It used to be the flat `colorGroups` split over the device's
+/// [WledSegment] bounds — two different index spaces that agreed only when
+/// the map, the cfg read and the state read all described the same strip —
+/// and with no segment list at all every bus collapsed into channel 0.
+///
+/// A pattern with NO channel-local picture (built by hand, or by
+/// [ComposedPattern.solid]) keeps the previous behaviour: `colorGroups` are
+/// *absolute* LED ranges across the entire roofline (0..totalPixels), clipped
+/// to each segment's `[start, stop)` window and re-based; with no segments a
+/// single channel 0 spans all pixels so the design still previews and applies.
 ///
 /// Effect/speed/intensity/reverse are pattern-global, applied to every channel.
-/// When the device exposes no segments (offline), we emit a single channel 0
-/// spanning all pixels so the design still previews and applies.
 List<ChannelDesign> channelsFromComposedPattern(
   ComposedPattern pattern,
   List<WledSegment> segments,
 ) {
+  if (pattern.channelGroups.isNotEmpty || pattern.channelLengths.isNotEmpty) {
+    final ids = <int>{
+      ...pattern.channelLengths.keys,
+      ...pattern.channelGroups.keys,
+    }.toList()
+      ..sort();
+    return [
+      for (final id in ids)
+        ChannelDesign(
+          channelId: id,
+          channelName: _segmentNameFor(segments, id) ?? 'Channel ${id + 1}',
+          included: true,
+          colorGroups: List<LedColorGroup>.from(
+              pattern.channelGroups[id] ?? const <LedColorGroup>[]),
+          effectId: pattern.effectId,
+          speed: pattern.speed,
+          intensity: pattern.intensity,
+          reverse: pattern.reverse,
+          ledCount: pattern.channelLengths[id] ??
+              _lengthFromGroups(pattern.channelGroups[id]),
+        ),
+    ];
+  }
+
   if (segments.isEmpty) {
     final endLed = pattern.totalPixels > 0 ? pattern.totalPixels - 1 : 0;
     return [
@@ -689,6 +721,23 @@ List<ChannelDesign> channelsFromComposedPattern(
       ledCount: seg.ledCount,
     );
   }).toList();
+}
+
+/// The device's name for segment [id], when the segment list has it.
+String? _segmentNameFor(List<WledSegment> segments, int id) {
+  for (final s in segments) {
+    if (s.id == id && s.name.trim().isNotEmpty) return s.name;
+  }
+  return null;
+}
+
+/// One past the highest LED a group list reaches; 0 for none.
+int _lengthFromGroups(List<LedColorGroup>? groups) {
+  var length = 0;
+  for (final g in groups ?? const <LedColorGroup>[]) {
+    if (g.endLed + 1 > length) length = g.endLed + 1;
+  }
+  return length;
 }
 
 /// Assembles a [CustomDesign] from an AI [ComposedPattern] (#86 option-b):

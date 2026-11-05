@@ -12,13 +12,26 @@ import 'package:nexgen_command/models/roofline_segment.dart' hide ArchitecturalR
 ///
 /// Takes a validated [DesignIntent] and generates a [ComposedPattern]
 /// containing LED color groups and the WLED JSON payload.
+///
+/// Roofline slice 3 (the D-2 global-index defect): the composer works
+/// CHANNEL-LOCALLY. Every zone resolves to ranges on a named hardware channel
+/// (bus), every pattern and spacing rule is laid down inside that channel, and
+/// the result is kept per channel ([ComposedPattern.channelGroups]). The
+/// whole-controller [ComposedPattern.colorGroups] are a projection of that,
+/// for the consumers that still draw in one flat index space. It used to be
+/// the other way round: one flat space across every bus, consolidated over the
+/// MAPPED pixel total, with no channel awareness anywhere in the file — so a
+/// bus mapped shorter than its strip ate the tail of the next bus, and with no
+/// WLED segment list to split the result over every bus collapsed into
+/// channel 0 (ROOFLINE_CUSTOM_DESIGN_AUDIT_2026-11-03 §A.4; Parent Segment
+/// spec §3.2).
 class PatternComposer {
   /// Compose a validated design intent into a WLED-ready pattern.
   ///
   /// The composition process:
-  /// 1. Resolve zones to pixel ranges for each layer
+  /// 1. Resolve zones to channel-local pixel ranges for each layer
   /// 2. Apply spacing rules to generate LED assignments
-  /// 3. Merge layers respecting priority (higher = on top)
+  /// 3. Merge layers respecting priority (higher = on top), per channel
   /// 4. Generate the WLED JSON payload
   CompositionResult compose({
     required DesignIntent intent,
@@ -41,16 +54,16 @@ class PatternComposer {
     }
 
     try {
-      // Process each layer
-      final layerGroups = <int, List<LedColorGroup>>{};
+      // Process each layer: priority → channel → that channel's groups.
+      final layerGroups = <int, Map<int, List<LedColorGroup>>>{};
       final warnings = <String>[];
 
       for (final layer in intent.layers.where((l) => l.enabled)) {
-        final groups = _composeLayer(layer, config);
-        if (groups.isEmpty) {
+        final byChannel = _composeLayer(layer, config);
+        if (byChannel.isEmpty) {
           warnings.add('Layer "${layer.name}" produced no LED assignments');
         } else {
-          layerGroups[layer.priority] = groups;
+          layerGroups[layer.priority] = byChannel;
         }
       }
 
@@ -61,17 +74,34 @@ class PatternComposer {
         );
       }
 
-      // Merge layers by priority (lowest priority first, highest overwrites)
+      // Merge layers by priority (lowest priority first, highest overwrites),
+      // keeping every channel's groups on that channel.
       final sortedPriorities = layerGroups.keys.toList()..sort();
-      final mergedGroups = <LedColorGroup>[];
-
+      final merged = <int, List<LedColorGroup>>{};
       for (final priority in sortedPriorities) {
-        final groups = layerGroups[priority]!;
-        mergedGroups.addAll(groups);
+        for (final entry in layerGroups[priority]!.entries) {
+          (merged[entry.key] ??= <LedColorGroup>[]).addAll(entry.value);
+        }
       }
 
-      // Consolidate overlapping groups (later ones win)
-      final finalGroups = _consolidateGroups(mergedGroups, config.totalPixelCount);
+      // Consolidate overlapping groups per channel (later ones win), each
+      // channel over ITS OWN length.
+      final channelGroups = <int, List<LedColorGroup>>{};
+      final channelLengths = <int, int>{};
+      for (final channel in _channels(config)) {
+        final length = _channelLength(config, channel);
+        if (length <= 0) continue;
+        channelLengths[channel] = length;
+        final groups = merged[channel];
+        if (groups == null || groups.isEmpty) continue;
+        final consolidated = _consolidateGroups(groups, length);
+        if (consolidated.isNotEmpty) channelGroups[channel] = consolidated;
+      }
+
+      // The whole-controller projection, for the flat-space consumers.
+      final finalGroups = _projectToGlobal(channelGroups, channelLengths);
+      final totalPixels =
+          channelLengths.values.fold<int>(0, (sum, len) => sum + len);
 
       // Extract used colors for display
       final usedColors = _extractUsedColors(finalGroups);
@@ -85,10 +115,9 @@ class PatternComposer {
 
       // Generate WLED payload
       final wledPayload = _generateWledPayload(
-        groups: finalGroups,
+        channelGroups: channelGroups,
         motion: primaryMotion,
         globalSettings: intent.globalSettings,
-        totalPixels: config.totalPixelCount,
       );
 
       // Build the composed pattern
@@ -97,6 +126,8 @@ class PatternComposer {
         description: _generateDescription(intent),
         sourceIntent: intent,
         colorGroups: finalGroups,
+        channelGroups: channelGroups,
+        channelLengths: channelLengths,
         effectId: primaryMotion?.effectId ?? 0,
         speed: primaryMotion?.speed ?? 128,
         intensity: primaryMotion?.intensity ?? 128,
@@ -106,7 +137,7 @@ class PatternComposer {
         reverse: primaryMotion?.reverse ?? false,
         wledPayload: wledPayload,
         usedColors: usedColors,
-        totalPixels: config.totalPixelCount,
+        totalPixels: totalPixels,
         composedAt: DateTime.now(),
         warnings: warnings,
       );
@@ -123,16 +154,60 @@ class PatternComposer {
     }
   }
 
-  /// Compose a single layer into LED color groups.
-  List<LedColorGroup> _composeLayer(
+  // ── Channels ──────────────────────────────────────────────────────────────
+
+  /// Every hardware channel the composer lays LEDs over: the mapped channels
+  /// plus any channel the config carries a device length for, sorted. A bus
+  /// the map says nothing about still has LEDs; "everywhere" means it too.
+  List<int> _channels(RooflineConfiguration config) {
+    final ids = <int>{
+      ...config.allChannelIndices,
+      ...config.channelPixelCounts.keys,
+    };
+    return ids.toList()..sort();
+  }
+
+  /// LED count of [channel]: device truth when the config carries it, else
+  /// that channel's mapped total — the same rule
+  /// [RooflineConfiguration.channelGlobalOffset] applies.
+  int _channelLength(RooflineConfiguration config, int channel) {
+    final known = config.channelPixelCounts[channel];
+    if (known != null && known > 0) return known;
+    return config
+        .segmentsForChannel(channel)
+        .fold<int>(0, (total, s) => total + s.pixelCount);
+  }
+
+  /// Channel-local groups → whole-controller groups, channels in id order,
+  /// each offset by the summed lengths of the channels before it.
+  List<LedColorGroup> _projectToGlobal(
+    Map<int, List<LedColorGroup>> channelGroups,
+    Map<int, int> channelLengths,
+  ) {
+    final out = <LedColorGroup>[];
+    var offset = 0;
+    final channels = channelLengths.keys.toList()..sort();
+    for (final channel in channels) {
+      for (final g in channelGroups[channel] ?? const <LedColorGroup>[]) {
+        out.add(LedColorGroup(
+          startLed: g.startLed + offset,
+          endLed: g.endLed + offset,
+          color: g.color,
+        ));
+      }
+      offset += channelLengths[channel]!;
+    }
+    return out;
+  }
+
+  /// Compose a single layer into LED color groups, per channel.
+  Map<int, List<LedColorGroup>> _composeLayer(
     DesignLayer layer,
     RooflineConfiguration config,
   ) {
-    // Get pixel ranges for the target zone
+    // Get channel-local pixel ranges for the target zone
     final pixelRanges = _resolveZoneToPixels(layer.targetZone, config);
-    if (pixelRanges.isEmpty) return [];
-
-    final groups = <LedColorGroup>[];
+    final byChannel = <int, List<LedColorGroup>>{};
 
     for (final range in pixelRanges) {
       final rangeGroups = _applyPatternToRange(
@@ -141,70 +216,96 @@ class PatternComposer {
         pattern: layer.pattern,
         config: config,
       );
-      groups.addAll(rangeGroups);
+      if (rangeGroups.isEmpty) continue;
+      (byChannel[range.channel] ??= <LedColorGroup>[]).addAll(rangeGroups);
     }
 
-    return groups;
+    return byChannel;
   }
 
-  /// Resolve a zone selector to pixel ranges.
+  /// Resolve a zone selector to channel-local pixel ranges.
   List<_PixelRange> _resolveZoneToPixels(
     ZoneSelector zone,
     RooflineConfiguration config,
   ) {
     switch (zone.type) {
       case ZoneSelectorType.all:
-        return [_PixelRange(0, config.globalPixelCount - 1)];
+        return _wholeChannels(config);
 
       case ZoneSelectorType.segments:
-        if (zone.segmentIds == null) {
-          return [_PixelRange(0, config.globalPixelCount - 1)];
-        }
-        return config.segments
-            .where((s) => zone.segmentIds!.contains(s.id))
-            .map((s) => _PixelRange(
-                config.globalStartOf(s), config.globalEndOf(s)))
-            // A segment lying wholly past the end of its strip has no LEDs.
-            .where((r) => r.end >= r.start)
-            .toList();
+        if (zone.segmentIds == null) return _wholeChannels(config);
+        return _segmentRanges(
+            config, config.segments.where((s) => zone.segmentIds!.contains(s.id)));
 
       case ZoneSelectorType.architectural:
         if (zone.roles == null) return [];
-        return config.segments
-            .where((s) => _segmentMatchesRoles(s, zone.roles!))
-            .map((s) => _PixelRange(
-                config.globalStartOf(s), config.globalEndOf(s)))
-            // A segment lying wholly past the end of its strip has no LEDs.
-            .where((r) => r.end >= r.start)
-            .toList();
+        return _segmentRanges(
+            config, config.segments.where((s) => _segmentMatchesRoles(s, zone.roles!)));
 
       case ZoneSelectorType.location:
         // Filter segments by location tag (front, back, left, right)
         final location = zone.location?.toLowerCase() ?? '';
-        return config.segments
-            .where((s) => _segmentMatchesLocation(s, location))
-            .map((s) => _PixelRange(
-                config.globalStartOf(s), config.globalEndOf(s)))
-            // A segment lying wholly past the end of its strip has no LEDs.
-            .where((r) => r.end >= r.start)
-            .toList();
+        return _segmentRanges(
+            config, config.segments.where((s) => _segmentMatchesLocation(s, location)));
 
       case ZoneSelectorType.level:
         if (zone.level == null) return [];
-        return config.segments
-            .where((s) => s.level == zone.level)
-            .map((s) => _PixelRange(
-                config.globalStartOf(s), config.globalEndOf(s)))
-            // A segment lying wholly past the end of its strip has no LEDs.
-            .where((r) => r.end >= r.start)
-            .toList();
+        return _segmentRanges(
+            config, config.segments.where((s) => s.level == zone.level));
 
       case ZoneSelectorType.custom:
         if (zone.pixelRanges == null) return [];
-        return zone.pixelRanges!
-            .map((r) => _PixelRange(r.start, r.end))
-            .toList();
+        return _customRanges(config, zone.pixelRanges!);
     }
+  }
+
+  /// Every LED of every channel.
+  List<_PixelRange> _wholeChannels(RooflineConfiguration config) => [
+        for (final channel in _channels(config))
+          if (_channelLength(config, channel) > 0)
+            _PixelRange(channel, 0, _channelLength(config, channel) - 1),
+      ];
+
+  /// Each segment's own LEDs on its own channel. A segment lying wholly past
+  /// the end of its strip has no LEDs; one running past the end is clamped to
+  /// the strip (the same clamp-at-consumption `globalEndOf` applies).
+  List<_PixelRange> _segmentRanges(
+    RooflineConfiguration config,
+    Iterable<RooflineSegment> segments,
+  ) {
+    final out = <_PixelRange>[];
+    for (final s in segments) {
+      final length = _channelLength(config, s.channelIndex);
+      final end = length > 0 ? math.min(s.endPixel, length - 1) : s.endPixel;
+      if (end < s.startPixel) continue;
+      out.add(_PixelRange(s.channelIndex, s.startPixel, end));
+    }
+    return out;
+  }
+
+  /// A custom [PixelRange] is the one input still numbered across the whole
+  /// controller (nothing in the app produces one today); it is cut at the
+  /// channel boundaries into channel-local pieces.
+  List<_PixelRange> _customRanges(
+    RooflineConfiguration config,
+    List<PixelRange> ranges,
+  ) {
+    final out = <_PixelRange>[];
+    for (final r in ranges) {
+      var offset = 0;
+      for (final channel in _channels(config)) {
+        final length = _channelLength(config, channel);
+        if (length > 0) {
+          final start = math.max(r.start, offset);
+          final end = math.min(r.end, offset + length - 1);
+          if (end >= start) {
+            out.add(_PixelRange(channel, start - offset, end - offset));
+          }
+        }
+        offset += length;
+      }
+    }
+    return out;
   }
 
   /// Check if a segment matches architectural roles.
@@ -262,7 +363,7 @@ class PatternComposer {
     return false;
   }
 
-  /// Apply pattern and colors to a pixel range.
+  /// Apply pattern and colors to a (channel-local) pixel range.
   List<LedColorGroup> _applyPatternToRange({
     required _PixelRange range,
     required ColorAssignment colors,
@@ -337,7 +438,9 @@ class PatternComposer {
     return groups;
   }
 
-  /// Apply a spacing rule to a pixel range.
+  /// Apply a spacing rule to a (channel-local) pixel range. The rule's phase
+  /// starts at the range's first LED, so on a whole-house zone every bus
+  /// starts its own "1 on, 3 off" at its own LED 0.
   List<LedColorGroup> _applySpacingRule({
     required _PixelRange range,
     required ColorAssignment colors,
@@ -433,25 +536,23 @@ class PatternComposer {
         break;
 
       case SpacingType.anchorsOnly:
-        // Only light anchor points in the affected segments
-        for (final segment in config.segments) {
-          // Whole-controller indices (startPixel itself is channel-local).
-          final segStart = config.globalStartOf(segment);
-          if (segStart > range.end ||
-              config.globalEndOf(segment) < range.start) {
+        // Only light anchor points in the affected segments of THIS channel.
+        // Both the segment's startPixel and its anchors are channel-local.
+        for (final segment in config.segmentsForChannel(range.channel)) {
+          if (segment.startPixel > range.end || segment.endPixel < range.start) {
             continue; // Segment doesn't overlap
           }
 
           for (final anchorLocal in segment.anchorPixels) {
-            final anchorGlobal = segStart + anchorLocal;
-            if (anchorGlobal >= range.start && anchorGlobal <= range.end) {
+            final anchor = segment.startPixel + anchorLocal;
+            if (anchor >= range.start && anchor <= range.end) {
               // Add anchor with its LED count
               final anchorEnd = math.min(
-                anchorGlobal + segment.anchorLedCount - 1,
+                anchor + segment.anchorLedCount - 1,
                 range.end,
               );
               groups.add(LedColorGroup(
-                startLed: anchorGlobal,
+                startLed: anchor,
                 endLed: anchorEnd,
                 color: onColorList,
               ));
@@ -520,7 +621,8 @@ class PatternComposer {
     return _mergeAdjacentSameColor(groups);
   }
 
-  /// Consolidate overlapping groups (later entries win).
+  /// Consolidate overlapping groups (later entries win) over one channel of
+  /// [totalPixels] LEDs.
   List<LedColorGroup> _consolidateGroups(List<LedColorGroup> groups, int totalPixels) {
     if (groups.isEmpty) return groups;
 
@@ -528,7 +630,9 @@ class PatternComposer {
     final pixelColors = List<List<int>?>.filled(totalPixels, null);
 
     for (final group in groups) {
-      for (int i = group.startLed; i <= group.endLed && i < totalPixels; i++) {
+      for (int i = math.max(group.startLed, 0);
+          i <= group.endLed && i < totalPixels;
+          i++) {
         pixelColors[i] = group.color;
       }
     }
@@ -621,14 +725,15 @@ class PatternComposer {
     return colors.values.toList();
   }
 
-  /// Generate the WLED JSON payload.
+  /// Generate the WLED JSON payload: one `seg` entry per channel the pattern
+  /// paints, each addressed by its own segment id (= bus index) in its own
+  /// channel-local index space.
   Map<String, dynamic> _generateWledPayload({
-    required List<LedColorGroup> groups,
+    required Map<int, List<LedColorGroup>> channelGroups,
     required MotionSettings? motion,
     required GlobalSettings globalSettings,
-    required int totalPixels,
   }) {
-    if (groups.isEmpty) {
+    if (channelGroups.isEmpty) {
       return {'on': false};
     }
 
@@ -638,36 +743,37 @@ class PatternComposer {
     if (hasEffect) {
       // For effects, use segment-based color setup
       return _generateEffectPayload(
-        groups: groups,
+        channelGroups: channelGroups,
         motion: motion!,
         globalSettings: globalSettings,
-        totalPixels: totalPixels,
       );
     } else {
       // For static patterns, use individual LED addressing
       return _generateStaticPayload(
-        groups: groups,
+        channelGroups: channelGroups,
         globalSettings: globalSettings,
-        totalPixels: totalPixels,
       );
     }
   }
 
   /// Generate payload for effects/motion.
   Map<String, dynamic> _generateEffectPayload({
-    required List<LedColorGroup> groups,
+    required Map<int, List<LedColorGroup>> channelGroups,
     required MotionSettings motion,
     required GlobalSettings globalSettings,
-    required int totalPixels,
   }) {
-    // Extract up to 3 colors for the effect
+    // Extract up to 3 colors for the effect, channels in id order.
+    final channels = channelGroups.keys.toList()..sort();
     final colors = <List<int>>[];
-    for (final group in groups) {
-      final color = group.color.take(3).toList();
-      if (!colors.any((c) => _colorsEqual(c, color))) {
-        colors.add(color);
-        if (colors.length >= 3) break;
+    for (final channel in channels) {
+      for (final group in channelGroups[channel]!) {
+        final color = group.color.take(3).toList();
+        if (!colors.any((c) => _colorsEqual(c, color))) {
+          colors.add(color);
+          if (colors.length >= 3) break;
+        }
       }
+      if (colors.length >= 3) break;
     }
 
     if (colors.isEmpty) {
@@ -681,23 +787,24 @@ class PatternComposer {
           ? globalSettings.transitionDuration ~/ 100
           : 0,
       'seg': [
-        {
-          // #88 — grp/spc asserted at their DESIGN defaults. A composed
-          // pattern states its whole look; leaving spacing unstated let the
-          // previous look's `spc` survive underneath it.
-          ...kDesignSpacingDefaults,
-          'id': 0,
-          // #76 — start/stop removed: bounds are geometry (see below).
+        for (final channel in channels)
+          {
+            // #88 — grp/spc asserted at their DESIGN defaults. A composed
+            // pattern states its whole look; leaving spacing unstated let the
+            // previous look's `spc` survive underneath it.
+            ...kDesignSpacingDefaults,
+            'id': channel,
+            // #76 — start/stop removed: bounds are geometry (see below).
 
-          'col': colors,
-          'fx': motion.effectId ?? 0,
-          'sx': motion.speed,
-          'ix': motion.intensity,
-          // #76 — `rev` removed. WLED spells direction as `rev`, which is a
-          // geometry field owned by provisioning; a motion's "reverse" cannot
-          // be expressed without clobbering the channel's installed
-          // orientation. LOSES: motion.reverse no longer reaches the device.
-        }
+            'col': colors,
+            'fx': motion.effectId ?? 0,
+            'sx': motion.speed,
+            'ix': motion.intensity,
+            // #76 — `rev` removed. WLED spells direction as `rev`, which is a
+            // geometry field owned by provisioning; a motion's "reverse" cannot
+            // be expressed without clobbering the channel's installed
+            // orientation. LOSES: motion.reverse no longer reaches the device.
+          },
       ],
     };
   }
@@ -705,34 +812,55 @@ class PatternComposer {
   /// Generate payload for static patterns.
   ///
   /// Emits the CANONICAL nested `i` form ([start, stop, [r,g,b,w]] range
-  /// entries — stop exclusive), one entry per color group, with every color
-  /// routed through [rgbToRgbw] so the RGBW W-channel is set (not dropped) and
-  /// values are clamped. `fx: 0` (Solid) is required so the static paint
-  /// persists — a running effect would repaint over the `i` colors
-  /// (memory/project_blocks_boundary_blend_fix). The old flat
+  /// entries — stop exclusive), one entry per color group, per channel, with
+  /// every color routed through [rgbToRgbw] so the RGBW W-channel is set (not
+  /// dropped) and values are clamped. `fx: 0` (Solid) is required so the
+  /// static paint persists — a running effect would repaint over the `i`
+  /// colors (memory/project_blocks_boundary_blend_fix). The old flat
   /// `[idx, r, g, b, …]` form was RGB-only AND misread by WLED (it treated the
   /// r,g,b bytes as further indices) — Design Studio Slice 0.
+  ///
+  /// Roofline slice 3: one `seg` per channel, each `i` array channel-local.
+  /// This used to be ONE seg 0 carrying a whole-controller array, which on a
+  /// multi-bus install landed within seg 0's range and truncated everything
+  /// past it (the D-2 defect on the wire).
   Map<String, dynamic> _generateStaticPayload({
-    required List<LedColorGroup> groups,
+    required Map<int, List<LedColorGroup>> channelGroups,
     required GlobalSettings globalSettings,
-    required int totalPixels,
   }) {
-    final ledArray = <dynamic>[];
+    final channels = channelGroups.keys.toList()..sort();
+    final segments = <Map<String, dynamic>>[];
 
-    for (final group in groups) {
-      if (group.endLed < group.startLed) continue;
-      final c = group.color;
-      final rgbw = c.length >= 4
-          ? rgbToRgbw(c[0], c[1], c[2], explicitWhite: c[3])
-          : rgbToRgbw(c[0], c[1], c[2], forceZeroWhite: true);
-      if (group.startLed == group.endLed) {
-        ledArray.add(group.startLed);
-        ledArray.add(rgbw);
-      } else {
-        ledArray.add(group.startLed);
-        ledArray.add(group.endLed + 1); // WLED range stop is EXCLUSIVE
-        ledArray.add(rgbw);
+    for (final channel in channels) {
+      final ledArray = <dynamic>[];
+      for (final group in channelGroups[channel]!) {
+        if (group.endLed < group.startLed) continue;
+        final c = group.color;
+        final rgbw = c.length >= 4
+            ? rgbToRgbw(c[0], c[1], c[2], explicitWhite: c[3])
+            : rgbToRgbw(c[0], c[1], c[2], forceZeroWhite: true);
+        if (group.startLed == group.endLed) {
+          ledArray.add(group.startLed);
+          ledArray.add(rgbw);
+        } else {
+          ledArray.add(group.startLed);
+          ledArray.add(group.endLed + 1); // WLED range stop is EXCLUSIVE
+          ledArray.add(rgbw);
+        }
       }
+      segments.add({
+        // #88 — grp/spc asserted at their DESIGN defaults. Load-bearing on
+        // THIS payload in particular: a per-pixel `i` array painted over a
+        // segment still carrying `spc=2` renders every third pixel, so the
+        // design would land correct and read wrong.
+        ...kDesignSpacingDefaults,
+        'id': channel,
+        // #76 — bounds are never written: the array lands within the
+        // channel's provisioned range. Painting across channels is what the
+        // per-channel entries are for (docs/SYNC_GEOMETRY_LAYER.md).
+        'fx': 0,
+        'i': ledArray,
+      });
     }
 
     return {
@@ -741,27 +869,7 @@ class PatternComposer {
       'transition': globalSettings.smoothTransition
           ? globalSettings.transitionDuration ~/ 100
           : 0,
-      'seg': [
-        {
-          // #88 — grp/spc asserted at their DESIGN defaults. Load-bearing on
-          // THIS payload in particular: a per-pixel `i` array painted over a
-          // segment still carrying `spc=2` renders every third pixel, so the
-          // design would land correct and read wrong.
-          ...kDesignSpacingDefaults,
-          'id': 0,
-          // #76 — bounds removed here too, and this is the site where the
-          // old behaviour was most load-bearing: a per-pixel `i` array was
-          // written against a segment forced to span 0..totalPixels. On a
-          // multi-channel install that assertion FLATTENED the layout to one
-          // full-strip segment, which is #76's harm in its purest form.
-          // The array now lands within seg0's provisioned range. LOSES: a
-          // design longer than seg0 is truncated rather than silently
-          // redefining the strip. Painting across channels is the geometry
-          // layer's job (docs/SYNC_GEOMETRY_LAYER.md).
-          'fx': 0,
-          'i': ledArray,
-        }
-      ],
+      'seg': segments,
     };
   }
 
@@ -860,12 +968,13 @@ class PatternComposer {
   }
 }
 
-/// Internal helper for pixel ranges.
+/// Internal helper: a CHANNEL-LOCAL LED range on one hardware channel.
 class _PixelRange {
+  final int channel;
   final int start;
   final int end;
 
-  _PixelRange(this.start, this.end);
+  _PixelRange(this.channel, this.start, this.end);
 
   int get length => end - start + 1;
 }
