@@ -21,6 +21,7 @@
 //   3. Prefer asserting the FUNCTIONAL property (does loading this preset light
 //      the strip) over a structural proxy (does a key exist).
 
+import 'dart:convert';
 import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
 import 'package:nexgen_command/features/wled/wled_cfg_gamma.dart';
 
@@ -350,6 +351,87 @@ List<CheckResult> checkPresetInvariants(Map<int, Map<String, dynamic>> presets) 
 
   out.add(checkPresetSlotBands(presets));
 
+  out.addAll(checkDesignPresetInvariants(presets));
+
+  return out;
+}
+
+/// ROOFLINE SLICE 2 — the byte cap on a painted design's preset, as stored.
+/// MIRRORS `kDesignApiPresetMaxBytes` (lib/features/schedule/design_api_preset.dart);
+/// a test asserts the two agree, so this file can stay free of lib imports
+/// that pull in flutter. The bench calibration sets the final value THERE.
+const int kBenchDesignPresetMaxBytes = 5000;
+
+/// True when [def] is a painted design's preset: any `seg` entry carrying an
+/// `i` array. The one thing every design preset has and no ladder or catalog
+/// preset does.
+bool presetCarriesPicture(Map<String, dynamic> def) {
+  final seg = def['seg'];
+  if (seg is! List) return false;
+  return seg.any((s) => s is Map && s['i'] is List);
+}
+
+/// ROOFLINE SLICE 2 — invariants over every painted-design preset the
+/// controller holds in the schedule band (10–25), read from the SAME
+/// presets.json `preset-verify` already fetched: no new device traffic.
+///
+/// For each one: root `on:true` (fires lit from master-off), every `seg`
+/// entry bounded (`start` < `stop`, ids distinct — the per-bus bounds that
+/// re-create the buses after a power cycle), every lit entry carrying its
+/// picture, and the stored body under the byte cap. One line per preset so
+/// the bench record names which slot, how many buses and how many bytes.
+List<CheckResult> checkDesignPresetInvariants(
+    Map<int, Map<String, dynamic>> presets) {
+  final out = <CheckResult>[];
+  final ids = presets.keys
+      .where((id) =>
+          id >= kSchedulePresetMin &&
+          id <= kSchedulePresetMax &&
+          presetCarriesPicture(presets[id]!))
+      .toList()
+    ..sort();
+  if (ids.isEmpty) {
+    out.add(const CheckResult(
+      'design presets (10-25, seg[].i) well-formed',
+      true,
+      'none present — no painted design is scheduled on this controller',
+    ));
+    return out;
+  }
+  for (final id in ids) {
+    final def = presets[id]!;
+    final problems = <String>[];
+    if (def['on'] != true) problems.add('root on=${def['on'] ?? 'ABSENT'}');
+    final seg = def['seg'] as List;
+    final seen = <int>{};
+    for (var k = 0; k < seg.length; k++) {
+      final s = seg[k];
+      if (s is! Map) {
+        problems.add('seg[$k] not an object');
+        continue;
+      }
+      final sid = s['id'], start = s['start'], stop = s['stop'];
+      if (sid is! int || start is! int || stop is! int) {
+        problems.add('seg[$k] lacks id/start/stop');
+        continue;
+      }
+      if (!seen.add(sid)) problems.add('seg[$k] duplicates id $sid');
+      if (stop <= start) problems.add('seg[$k] id $sid stop $stop <= start $start');
+      if (s['on'] == true && s['i'] is! List) {
+        problems.add('seg[$k] id $sid is on with no i');
+      }
+    }
+    final bytes = utf8.encode(jsonEncode(def)).length;
+    if (bytes > kBenchDesignPresetMaxBytes) {
+      problems.add('$bytes B stored > cap $kBenchDesignPresetMaxBytes');
+    }
+    out.add(CheckResult(
+      'design preset $id well-formed (per-bus bounds, lit, under cap)',
+      problems.isEmpty,
+      'n=${def['n'] ?? 'ABSENT'} · buses=${seg.length} · $bytes B'
+          '${problems.isEmpty ? '' : ' — ${problems.join('; ')}'}',
+    ));
+  }
   return out;
 }
 
