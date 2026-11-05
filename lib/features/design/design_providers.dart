@@ -823,22 +823,30 @@ final saveComposedDesignProvider = Provider<Future<String?> Function({String? na
     final wledState = ref.read(wledRepositoryProvider) == null
         ? null
         : ref.read(wledStateProvider);
+    // Roofline slice 3: the saved design this session is making variations
+    // of, when it is.
+    final base = ref.read(variationBaseProvider);
 
     final design = customDesignFromComposedPattern(
       pattern: pattern,
       segments: segments,
       ownerId: user.uid,
-      name: name,
+      name: name ?? (base == null ? null : variationDesignName(base, pattern)),
       liveBrightness: wledState == null
           ? null
           : liveBrightnessToStore(
               connected: wledState.connected,
               brightness: wledState.brightness),
-      // Slice 1, item 1: stamp from the live buses (device truth), not from
-      // the WLED segment list the channels were clipped over. No bus data
-      // (off the LAN, cfg unread) → saved unstamped, as before; the
-      // controller id is read only when there is something to stamp.
-      layoutStamp: liveDesignLayoutStamp(ref.read),
+      // Slice 3: a VARIATION keeps the saved design's stamp (owner decision
+      // 3) — the layout it was composed over (configForAiPipeline) —
+      // whatever the live buses are, so slice 2 can schedule it for those
+      // lights later and the fit gate judges it against them.
+      // Slice 1, item 1, otherwise: stamp from the live buses (device
+      // truth), not from the WLED segment list the channels were clipped
+      // over. No bus data (off the LAN, cfg unread) → saved unstamped, as
+      // before; the controller id is read only when there is something to
+      // stamp.
+      layoutStamp: base?.stamp ?? liveDesignLayoutStamp(ref.read),
     );
 
     final service = ref.read(designServiceProvider);
@@ -861,8 +869,17 @@ final composedDesignForApplyProvider = Provider<CustomDesign?>((ref) {
     pattern: pattern,
     segments: segments,
     ownerId: user?.uid ?? '',
+    // Roofline slice 3: a variation carries its saved design's stamp into
+    // the apply, so the slice 1 fit gate refuses it on lights it was not
+    // composed for (and off the LAN), exactly as it would the saved design.
+    layoutStamp: ref.watch(variationBaseProvider)?.stamp,
   );
 });
+
+/// The name a saved variation gets when the customer gives none: the saved
+/// design it came from, then what the composer called the new look.
+String variationDesignName(VariationBase base, ComposedPattern pattern) =>
+    'Variation of ${base.design.name}: ${pattern.name}';
 
 // =============================================================================
 // Roofline slice 3 — "Variations of …": the colour summary of a saved design

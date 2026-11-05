@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/app_colors.dart';
 import 'package:nexgen_command/nav.dart' show AppRoutes;
+import 'package:nexgen_command/features/design/design_color_summary.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/design_studio_gate.dart';
@@ -14,7 +15,6 @@ import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_preview.dart';
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
-import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/roofline_feature_walkthrough.dart';
 import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
@@ -45,6 +45,12 @@ enum _StudioMode { ai, manual }
 ///    design is sent to the lights as a preview.
 ///  * row 117 — the manual editor opens ON the composed design.
 ///  * rows 40–42 — Apply goes through the shared spine with its report.
+///
+/// Roofline slice 3 — "Variations of …": a saved roofline design can be the
+/// starting point. Its entry is offered only for a design that carries a
+/// layout stamp (an unstamped one is named with the fix: re-save it on the
+/// roofline); once chosen, the session composes in that design's colours
+/// over its stamped bus lengths, and a saved variation keeps that stamp.
 class AIDesignStudioScreen extends ConsumerStatefulWidget {
   const AIDesignStudioScreen({super.key});
 
@@ -90,6 +96,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     final patternReady = ref.watch(patternReadyProvider);
     final intent = ref.watch(currentDesignIntentProvider);
     final lastError = ref.watch(designStudioLastErrorProvider);
+    final variationBase = ref.watch(variationBaseProvider);
 
     // Row 116: a newly composed design goes to the lights while the preview
     // toggle is on.
@@ -172,6 +179,14 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
                           : SingleChildScrollView(
                               child: Column(
                                 children: [
+                                  // Roofline slice 3: the saved design this
+                                  // session is making variations of.
+                                  if (variationBase != null)
+                                    _VariationBaseStrip(
+                                      base: variationBase,
+                                      onClear: _clearVariationBase,
+                                    ),
+
                                   // Unified preview (Slice 4 1b) — the SAME
                                   // house-photo overlay both modes render on.
                                   DesignPreview(frame: _aiFrame(), height: 200),
@@ -275,7 +290,8 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
     final hasWork = ref.watch(currentDesignIntentProvider) != null ||
         ref.watch(composedPatternProvider) != null ||
         ref.watch(designStudioLastErrorProvider) != null ||
-        ref.watch(isClarifyingProvider);
+        ref.watch(isClarifyingProvider) ||
+        ref.watch(variationBaseProvider) != null;
 
     return AppBar(
       backgroundColor: Colors.transparent,
@@ -338,6 +354,7 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   }
 
   Widget _buildInputSection(BuildContext context, bool isProcessing) {
+    final variation = ref.watch(variationBaseProvider) != null;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -360,7 +377,9 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Describe your lighting...',
+                  variation
+                      ? 'Describe the variation...'
+                      : 'Describe your lighting...',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.6),
                     fontSize: 14,
@@ -394,7 +413,9 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
                     maxLines: 4,
                     minLines: 1,
                     decoration: InputDecoration(
-                      hintText: 'e.g. "Dark green with red accents on corners, wave effect moving right to left"',
+                      hintText: variation
+                          ? 'e.g. "every other light" or "1 on 3 off"'
+                          : 'e.g. "Dark green with red accents on corners, wave effect moving right to left"',
                       hintMaxLines: 4,
                       hintStyle: TextStyle(
                         color: Colors.white.withValues(alpha: 0.3),
@@ -520,6 +541,8 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
   }
 
   Widget _buildQuickIdeas(BuildContext context) {
+    final base = ref.watch(variationBaseProvider);
+    if (base != null) return _buildVariationIdeas(context, base);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Column(
@@ -560,9 +583,124 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
               ),
             ],
           ),
+          _buildSavedDesignEntries(context),
         ],
       ),
     );
+  }
+
+  /// Roofline slice 3 — the "Variations of …" entries: one per saved
+  /// roofline design that carries a layout stamp. A painted or AI design
+  /// with no stamp (saved before the stamp existed, or with no bus data)
+  /// gets no entry and is named with the one thing that fixes it: re-save it
+  /// on the roofline (owner decision 3). Effect designs have no roofline
+  /// picture to vary and are not listed.
+  Widget _buildSavedDesignEntries(BuildContext context) {
+    final designs =
+        ref.watch(designsStreamProvider).valueOrNull ?? const <CustomDesign>[];
+    final stamped = <CustomDesign>[];
+    final unstamped = <CustomDesign>[];
+    for (final d in designs) {
+      if (!d.isPositional) continue;
+      (d.layoutStamp != null ? stamped : unstamped).add(d);
+    }
+    if (stamped.isEmpty && unstamped.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      key: const ValueKey('variation-entries'),
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Variations of a saved design',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (stamped.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final d in stamped)
+                  _QuickIdeaChip(
+                    key: ValueKey('variation-entry-${d.id}'),
+                    label: 'Variations of ${d.name}',
+                    onTap: () => _startVariations(d),
+                  ),
+              ],
+            ),
+          for (final d in unstamped)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Re-save "${d.name}" on your roofline first to make '
+                'variations of it.',
+                key: ValueKey('variation-unstamped-${d.id}'),
+                style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.6), fontSize: 13),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The arrangements the on-device composer understands, in the saved
+  /// design's colours. Colour-only (owner decision 1): no zone language.
+  Widget _buildVariationIdeas(BuildContext context, VariationBase base) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Variations to try',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _QuickIdeaChip(
+                key: const ValueKey('variation-idea-every-other'),
+                label: 'Every other light',
+                onTap: () => _useQuickIdea('every other light'),
+              ),
+              _QuickIdeaChip(
+                label: 'One on, three off',
+                onTap: () => _useQuickIdea('1 on 3 off'),
+              ),
+              _QuickIdeaChip(
+                label: 'Two on, two off',
+                onTap: () => _useQuickIdea('2 on 2 off'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Start making variations of [design]. Only a stamped design is offered,
+  /// so [variationBaseFor] is non-null here; nothing happens otherwise.
+  void _startVariations(CustomDesign design) {
+    final base = variationBaseFor(design);
+    if (base == null) return;
+    _textController.clear();
+    ref.read(variationBaseProvider.notifier).state = base;
+  }
+
+  void _clearVariationBase() {
+    ref.read(variationBaseProvider.notifier).state = null;
   }
 
   Future<void> _handleSubmit() async {
@@ -575,12 +713,15 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
 
     try {
       final orchestrator = ref.read(designStudioOrchestratorProvider);
-      final configAsync = ref.read(currentRooflineConfigProvider);
-      final config = configAsync.valueOrNull;
+      // Roofline slice 3: the same config the provider path composes over —
+      // the live bus lengths attached, or a variation's stamped lengths.
+      // This door used to hand the orchestrator the bare map.
+      final config = configForAiPipeline(ref.read);
 
       final result = await orchestrator.processUserInput(
         prompt: text,
         config: config,
+        baseColors: ref.read(variationBaseProvider)?.colors,
       );
 
       if (!mounted) return;
@@ -1110,12 +1251,94 @@ class _StudioErrorPanel extends StatelessWidget {
   }
 }
 
+/// Roofline slice 3 — the strip naming the saved design this session is
+/// making variations of: its name, its colours, and the way out.
+class _VariationBaseStrip extends StatelessWidget {
+  const _VariationBaseStrip({required this.base, required this.onClear});
+
+  final VariationBase base;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('variation-base'),
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+      decoration: BoxDecoration(
+        color: NexGenPalette.cyan.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.cyan.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(Icons.style_outlined, size: 20, color: NexGenPalette.cyan),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Variations of ${base.design.name}',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    for (final s in base.colors.swatches.take(6))
+                      Container(
+                        width: 14,
+                        height: 14,
+                        margin: const EdgeInsets.only(right: 6),
+                        decoration: BoxDecoration(
+                          color: s.color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.3)),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Describe the variation you want, or pick one below. It '
+                  "keeps this design's colours unless you name others, and "
+                  'it is made for the same lights.',
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 12,
+                      height: 1.35),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('variation-base-clear'),
+            tooltip: 'Stop making variations',
+            icon: const Icon(Icons.close, size: 18, color: Colors.white54),
+            onPressed: onClear,
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Quick idea chip widget.
 class _QuickIdeaChip extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
   const _QuickIdeaChip({
+    super.key,
     required this.label,
     required this.onTap,
   });
