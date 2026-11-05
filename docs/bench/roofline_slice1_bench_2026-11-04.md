@@ -166,3 +166,35 @@ group, or OFF — both are covered by the guard running before the flag read):
 
 Pass: 1 and 3 refuse with the Game Day sentence and no write; 2 and 4 unchanged; 5
 and 7 unchanged; 6 refuses with nothing written or fanned out.
+
+## G4 — a count-only bus change re-heals (the TD-9 remainder)
+
+Change: `busSetChanged` compares each bus's LED length as well as the ids, and
+`ladderBusChangeWatchProvider` feeds it (id, length) pairs. A count-only change on the
+same endpoint clears the one-time ladder repair marker and re-runs the controller-defaults
+heal (facts republished, ladder reconsidered), exactly as an added bus did already. Nothing
+is marked stale: the layout stamp, the fit gate and the pixel-map staleness check read the
+live channel list at use time.
+
+Prerequisite: the spare at three buses of 100/100/100, the app on the LAN with the spare
+selected, the bench account's controller document open in the console, the app's debug log
+visible (the healer prints its report; the ladder coordinator prints `[LadderRepair] <id> → …`).
+
+1. Baseline: note `participating_channels_at` on the controller document and the count of
+   healer report lines in the log since connect.
+2. Outside the app — the spare's OWN LED settings page — set bus 2 to 120 and save (the
+   controller re-initialises its buses; it may reboot). Wait for the app to reconnect.
+   Expect: within one poll window the healer runs again (a new report line; `[LadderRepair]`
+   line for the spare), `participating_channels_at` advances, and NO preset is rewritten
+   (presets 1–5 name all three buses, so the ladder reconsideration writes nothing: zero
+   `psave` in the controller log). On +122 this step produced no re-run: the ids were the same.
+3. Back in the app: Hardware Config → bus 2 → 100 → Save Changes (counts only, no reboot).
+   Expect the same re-run within a second of the save completing (G5's re-read feeds the
+   watcher), no reboot, zero `psave`.
+4. Hardware Config → Save Changes with nothing changed. Expect NO healer re-run and no
+   `[LadderRepair]` line (an unchanged layout read again is not a change).
+5. A real bus-set change still re-runs: remove bus 3, reconnect; expect the re-run as on
+   +122. Restore bus 3.
+
+Pass: 2, 3 and 5 re-run the heal exactly once each; 4 does not; no preset is written in any
+step; `/json/state` segment bounds match the typed counts after 2 and 3.

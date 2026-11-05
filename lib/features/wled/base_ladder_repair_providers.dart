@@ -42,7 +42,7 @@ import 'package:nexgen_command/features/wled/controller_defaults_healer.dart'
 import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
 import 'package:nexgen_command/features/wled/controller_facts_writer.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
-    show deviceChannelsFromConfig;
+    show DeviceChannel, deviceChannelsFromConfig;
 import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
@@ -451,15 +451,31 @@ final ladderRepairCoordinatorProvider = Provider<LadderRepairConsider>((ref) {
 
 // ── Bus change (#183) ────────────────────────────────────────────────────────
 
-/// PURE. Did the bus list change in a way the ladder cares about — the count
-/// or the ids? A first reading is not a change.
-bool busSetChanged(List<int>? before, List<int> after) {
+/// A bus as the watcher sees it: its id and its LED length.
+typedef BusShape = ({int id, int len});
+
+/// PURE. The buses of [channels] as the watcher compares them.
+List<BusShape> busShapesOf(List<DeviceChannel> channels) =>
+    [for (final c in channels) (id: c.id, len: c.stop - c.start)];
+
+/// PURE. Did the bus list change in a way the ladder — and a positional
+/// design — cares about: the count, the ids, or any bus's LED length? A
+/// first reading is not a change, nor is the same set in another order.
+///
+/// Lengths count (roofline slice 1 G4, the TD-9 remainder): until now only
+/// the ids were compared, so bus 2 going from 100 to 120 LEDs on the same
+/// three ids was no change — no marker clear, no re-heal, and the facts
+/// stayed as they were. Nothing is "marked" stale on a change: the design
+/// layout stamp, the apply-time fit gate and the pixel-map staleness check
+/// all compare against `deviceChannelsProvider` at use time; the re-heal
+/// republishes the facts.
+bool busSetChanged(List<BusShape>? before, List<BusShape> after) {
   if (before == null) return false;
-  final a = [...before]..sort();
-  final b = [...after]..sort();
-  if (a.length != b.length) return true;
+  if (before.length != after.length) return true;
+  final a = [...before]..sort((x, y) => x.id.compareTo(y.id));
+  final b = [...after]..sort((x, y) => x.id.compareTo(y.id));
   for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return true;
+    if (a[i].id != b[i].id || a[i].len != b[i].len) return true;
   }
   return false;
 }
@@ -467,8 +483,10 @@ bool busSetChanged(List<int>? before, List<int> after) {
 /// Re-runs the ladder evaluation when the LIVE bus list changes, not only at
 /// connect. The healer measures the ladder once per connect; a bus added
 /// outside the app (WLED's own settings page) mid-session, or found changed on
-/// the next connect of the same endpoint, left the facts stale and the
-/// one-time repair marker set. On a change for the SAME endpoint this clears
+/// the next connect of the same endpoint, or a bus whose LED count changed
+/// (G4: the LED-count save re-reads the config, which is what feeds this),
+/// left the facts stale and the one-time repair marker set. On a change for
+/// the SAME endpoint this clears
 /// that marker and runs the heal again (facts republished, repair
 /// reconsidered). A new endpoint is a connect, which the healer already
 /// handles. Pure apart from the injected actions, so it is unit-testable.
@@ -484,21 +502,25 @@ class LadderBusChangeWatcher {
   final String? Function() controllerId;
 
   String? _endpoint;
-  List<int>? _lastIds;
+  List<BusShape>? _lastBuses;
   bool _running = false;
 
-  /// The ids last seen for the current endpoint (tests).
-  List<int>? get lastIds => _lastIds;
+  /// The buses last seen for the current endpoint (tests).
+  List<BusShape>? get lastBuses => _lastBuses;
 
-  /// One hardware reading for [endpoint]. True when it re-ran the heal.
-  Future<bool> onBuses(String endpoint, List<int> ids) async {
+  /// The ids of [lastBuses] (tests).
+  List<int>? get lastIds => _lastBuses?.map((b) => b.id).toList();
+
+  /// One hardware reading for [endpoint]: the live buses, id and LED length
+  /// each. True when it re-ran the heal.
+  Future<bool> onBuses(String endpoint, List<BusShape> buses) async {
     if (_endpoint != endpoint) {
       _endpoint = endpoint;
-      _lastIds = ids;
+      _lastBuses = buses;
       return false;
     }
-    if (!busSetChanged(_lastIds, ids)) return false;
-    _lastIds = ids;
+    if (!busSetChanged(_lastBuses, buses)) return false;
+    _lastBuses = buses;
     if (_running) return false;
     _running = true;
     try {
@@ -518,7 +540,9 @@ class LadderBusChangeWatcher {
 /// Keeps a [LadderBusChangeWatcher] on the live hardware config. Watched by
 /// MainScaffold. A controller reboots when its buses change, so the
 /// connection drops and comes back; on that return the hardware config is
-/// re-read, which is what feeds the watcher.
+/// re-read, which is what feeds the watcher. A count-only change made through
+/// the app's own LED-count save does not reboot the controller; that save
+/// re-reads the config itself (G5), which feeds the watcher the same way.
 final ladderBusChangeWatchProvider = Provider<LadderBusChangeWatcher>((ref) {
   final watcher = LadderBusChangeWatcher(
     reheal: () => ref.read(controllerDefaultsHealerProvider)(),
@@ -545,7 +569,7 @@ final ladderBusChangeWatchProvider = Provider<LadderBusChangeWatcher>((ref) {
       if (repo is! WledService) return;
       unawaited(watcher.onBuses(
         repo.baseUrl,
-        deviceChannelsFromConfig(hw).map((c) => c.id).toList(),
+        busShapesOf(deviceChannelsFromConfig(hw)),
       ));
     });
   }, fireImmediately: true);

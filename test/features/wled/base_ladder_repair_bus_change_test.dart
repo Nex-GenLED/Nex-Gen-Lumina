@@ -28,6 +28,7 @@ import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
 import 'package:nexgen_command/features/wled/base_look.dart';
 import 'package:nexgen_command/features/wled/clock_health.dart';
 import 'package:nexgen_command/features/wled/controller_defaults_healer.dart';
+import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/wled_hardware_config.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 
@@ -36,6 +37,14 @@ final DateTime _now = DateTime(2026, 10, 6, 13, 0);
 const Duration _cdt = Duration(hours: -5);
 const List<int> _three = [0, 1, 2];
 const List<int> _four = [0, 1, 2, 3];
+
+/// The same buses as the watcher sees them — id AND LED length (G4), the
+/// lengths of [_threeBuses] / [_fourBuses] below.
+const List<BusShape> _threeShapes = [(id: 0, len: 162), (id: 1, len: 128), (id: 2, len: 100)];
+const List<BusShape> _fourShapes = [..._threeShapes, (id: 3, len: 90)];
+
+/// The same three ids, bus 2 re-counted 128 → 150: a count-only change.
+const List<BusShape> _threeShapesBus2At150 = [(id: 0, len: 162), (id: 1, len: 150), (id: 2, len: 100)];
 
 const WledHardwareConfig _threeBuses = WledHardwareConfig(
   totalLeds: 390,
@@ -688,13 +697,31 @@ void main() {
   });
 
   group('the bus-change watcher', () {
-    test('busSetChanged: a first reading is not a change; count or ids are',
-        () {
-      expect(busSetChanged(null, _three), isFalse);
-      expect(busSetChanged(_three, const [2, 1, 0]), isFalse);
-      expect(busSetChanged(_three, _four), isTrue);
-      expect(busSetChanged(_four, _three), isTrue);
-      expect(busSetChanged(_three, const [0, 1, 3]), isTrue);
+    test('busSetChanged: a first reading is not a change; count, ids or a '
+        'length are', () {
+      expect(busSetChanged(null, _threeShapes), isFalse);
+      expect(
+          busSetChanged(_threeShapes,
+              const [(id: 2, len: 100), (id: 1, len: 128), (id: 0, len: 162)]),
+          isFalse,
+          reason: 'the same set in another order');
+      expect(busSetChanged(_threeShapes, _fourShapes), isTrue);
+      expect(busSetChanged(_fourShapes, _threeShapes), isTrue);
+      expect(
+          busSetChanged(_threeShapes,
+              const [(id: 0, len: 162), (id: 1, len: 128), (id: 3, len: 100)]),
+          isTrue,
+          reason: 'an id changed');
+      // G4 (the TD-9 remainder): the same three ids, bus 2 a different length.
+      expect(busSetChanged(_threeShapes, _threeShapesBus2At150), isTrue,
+          reason: 'a count-only change is a change');
+      expect(busSetChanged(_threeShapesBus2At150, _threeShapes), isTrue);
+    });
+
+    test('busShapesOf: id and LED length per live channel', () {
+      expect(busShapesOf(deviceChannelsFromConfig(_threeBuses)), _threeShapes);
+      expect(busShapesOf(deviceChannelsFromConfig(_fourBuses)), _fourShapes);
+      expect(busShapesOf(deviceChannelsFromConfig(null)), isEmpty);
     });
 
     test('re-arms the marker and re-runs the heal ONLY on a real change of '
@@ -706,18 +733,41 @@ void main() {
         clearMarker: (id) async => cleared.add(id),
         controllerId: () => 'AA00000000A1',
       );
-      expect(await w.onBuses('http://a', _three), isFalse,
+      expect(await w.onBuses('http://a', _threeShapes), isFalse,
           reason: 'first reading');
-      expect(await w.onBuses('http://a', _three), isFalse,
+      expect(await w.onBuses('http://a', _threeShapes), isFalse,
           reason: 'provider churn re-reads the same config');
-      expect(await w.onBuses('http://a', _four), isTrue, reason: '3 → 4');
+      expect(await w.onBuses('http://a', _fourShapes), isTrue, reason: '3 → 4');
       expect(reheals, 1);
       expect(cleared, ['AA00000000A1']);
-      expect(await w.onBuses('http://a', _four), isFalse);
+      expect(await w.onBuses('http://a', _fourShapes), isFalse);
       // Another controller is a connect, which the healer already handles.
-      expect(await w.onBuses('http://b', _three), isFalse);
+      expect(await w.onBuses('http://b', _threeShapes), isFalse);
       expect(reheals, 1);
       expect(w.lastIds, _three);
+      expect(w.lastBuses, _threeShapes);
+    });
+
+    test('G4: a count-only change of the same endpoint re-arms the marker and '
+        're-runs the heal — the ids alone did not', () async {
+      var reheals = 0;
+      final cleared = <String>[];
+      final w = LadderBusChangeWatcher(
+        reheal: () async => reheals++,
+        clearMarker: (id) async => cleared.add(id),
+        controllerId: () => 'AA00000000A1',
+      );
+      expect(await w.onBuses('http://a', _threeShapes), isFalse,
+          reason: 'first reading');
+      expect(await w.onBuses('http://a', _threeShapesBus2At150), isTrue,
+          reason: 'bus 2: 128 → 150 on the same three ids');
+      expect(reheals, 1);
+      expect(cleared, ['AA00000000A1']);
+      expect(await w.onBuses('http://a', _threeShapesBus2At150), isFalse,
+          reason: 'the changed layout read again is not another change');
+      expect(reheals, 1);
+      expect(w.lastBuses, _threeShapesBus2At150);
+      expect(w.lastIds, _three, reason: 'the ids did not change');
     });
   });
 
