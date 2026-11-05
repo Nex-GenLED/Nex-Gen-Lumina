@@ -17,7 +17,61 @@
 //
 // THE RULE: a repair that does not converge is a bug report, not a retry.
 
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+
+/// Keys that never take part in [presetPayloadHash]: the ones WLED strips from
+/// an API-command request before writing it to presets.json (`o`, `v`,
+/// `time`, `error`, `psave`), so the body the app sends and the copy the
+/// controller stores hash alike. Everything else — the name the save adds
+/// (`n`), root `on`/`bri`, every segment's bounds and `i` — is in the hash.
+const Set<String> kPresetPayloadHashIgnoredKeys = <String>{
+  'o',
+  'v',
+  'time',
+  'error',
+  'psave',
+};
+
+/// ROOFLINE SLICE 2 — the one convergence test for a painted design's preset.
+///
+/// A design preset is a WLED API-command preset: the controller stores the
+/// REQUEST, `seg[].i` included, and replays it. Field-by-field satisfaction
+/// (`presetSatisfies`) cannot judge it — two `i` lists never compare equal by
+/// `!=`, so every sync would re-save and the non-convergence guard would then
+/// refuse it (the exact class this file exists to foreclose). Instead the
+/// WHOLE payload is canonicalised (keys sorted at every level, whole-number
+/// doubles folded to ints, the keys above set aside at the root) and hashed
+/// with SHA-256. The sync writes only when the stored copy's hash differs from
+/// the body's, and reads the slot back after a write to confirm the hashes
+/// now agree (owner decision 6: write only on a differing hash, read back
+/// after every write, a mismatch is a failure).
+///
+/// PURE. 64 lowercase hex characters.
+String presetPayloadHash(Map<String, dynamic> def) {
+  final canonical = _canonicalJson(def, root: true);
+  return sha256.convert(utf8.encode(jsonEncode(canonical))).toString();
+}
+
+Object? _canonicalJson(Object? value, {bool root = false}) {
+  if (value is Map) {
+    final keys = value.keys
+        .map((k) => k.toString())
+        .where((k) => !root || !kPresetPayloadHashIgnoredKeys.contains(k))
+        .toList()
+      ..sort();
+    return <String, Object?>{
+      for (final k in keys) k: _canonicalJson(value[k]),
+    };
+  }
+  if (value is List) return [for (final e in value) _canonicalJson(e)];
+  if (value is double && value.isFinite && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
+  return value;
+}
 
 /// Attempts against one preset before the repair is declared non-convergent.
 ///

@@ -521,6 +521,20 @@ class ScheduleSyncService {
     bool compareSegments = true,
     bool requireAllExpectedSegments = false,
   }) {
+    // ROOFLINE SLICE 2 — an API-command preset (a painted design, `o:true`)
+    // is judged by the hash of the WHOLE stored payload, never field by field:
+    // its segments carry `i` lists, which `!=` can never call equal, so the
+    // compare below would report every design preset unsatisfied on every
+    // sync (a flash write and a visible repaint per connect, then a
+    // non-convergence refusal). The hash sets aside the keys WLED strips on
+    // save and compares everything else — picture, bounds, name, root. See
+    // presetPayloadHash. `expectedName` is inside the hash (`n`), so it is
+    // not checked separately; `compareSegments` does not apply (there is no
+    // ladder to repair in a picture).
+    if (expected['o'] == true) {
+      return presetPayloadHash(stored) == presetPayloadHash(expected);
+    }
+
     if (expectedName != null && !_presetNamed(stored, expectedName)) {
       return false;
     }
