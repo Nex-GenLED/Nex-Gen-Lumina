@@ -67,6 +67,9 @@ import 'package:nexgen_command/features/wled/wled_service.dart'
     show rgbToRgbw, WledService;
 import 'package:nexgen_command/utils/async_lock.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart';
+import 'package:nexgen_command/features/schedule/design_api_preset.dart'
+    show isDesignApiPresetBody, designOneNightRefusedMessage;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -733,6 +736,19 @@ class CalendarEntryLeaseManager {
 
     if (!_isWithinLeaseWindow(entry)) {
       return LeaseResult.outsideWindow();
+    }
+
+    // Roofline slice 2 — a painted design never takes a lease: this path
+    // psaves the entry's body as live state with none of the design gates
+    // (layout fit, firmware, byte cap, hash, read-back). A per-pixel body
+    // would fire dark; an API-command body would land ungated. The editor
+    // and composeDatedEntry refuse first; this is the write-side backstop.
+    if (payloadCarriesPerPixel(entry.wledPayload) ||
+        isDesignApiPresetBody(entry.wledPayload)) {
+      debugPrint('$_kLogPrefix REFUSED lease for ${entry.dateKey}: a painted '
+          'design cannot be leased for one night');
+      return LeaseResult.invalidEntry(
+          designOneNightRefusedMessage(entry.patternName));
     }
 
     final payload = _synthesizeWledPayload(entry);

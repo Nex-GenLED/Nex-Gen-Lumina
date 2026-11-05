@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart';
+import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 
 /// A resolved clock time for a dated entry, and whether it came from the sun.
 class DatedClock {
@@ -157,6 +159,18 @@ CalendarEntry composeDatedEntry({
         controllerId: controllerId,
       );
     case DatedAction.runPattern:
+      // Roofline slice 2 — a painted design (per-pixel, or its API-command
+      // preset body) is a weekly schedule, never a one-night entry: the lease
+      // path psaves live state with none of the design gates, and a picture
+      // psaved that way fires dark. Refused here, in the editor, and again at
+      // the lease write.
+      if (payloadCarriesPerPixel(patternPayload) ||
+          isDesignApiPresetBody(patternPayload)) {
+        throw PerPixelDesignRefused(designOneNightRefusedMessage(
+            (patternName == null || patternName.trim().isEmpty)
+                ? 'Custom'
+                : patternName.trim()));
+      }
       final payloadBri = patternPayload?['bri'];
       final bri = payloadBri is num
           ? (payloadBri / 255 * 100).round().clamp(1, 100)
