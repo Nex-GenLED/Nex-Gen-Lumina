@@ -1484,6 +1484,11 @@ class ScheduleSyncService {
           final plain = plainDesignName(name);
           final rawPayload = effectiveSchedule.wledPayload!;
           String? refusal;
+          // C1 — TRANSIENT: a device read failed (the bus layout, the
+          // firmware/model read), so nothing is known to be wrong with the
+          // design. PERSISTENT: the design no longer fits, the firmware or
+          // model is not allowed, a cap is exceeded, the body is malformed.
+          var transient = false;
           final problem = designApiPresetBodyProblem(rawPayload);
           if (problem != null) {
             debugPrint('ScheduleSync: design preset body for "$name" — $problem');
@@ -1491,7 +1496,8 @@ class ScheduleSyncService {
           } else if (activeRepo is! WledService) {
             refusal = designScheduleOffLanMessage(plain);
           } else if (gateExpectedShape.isEmpty) {
-            refusal = designApiPresetLayoutUnreadMessage(plain);
+            transient = true;
+            refusal = designApiPresetCouldNotVerifyMessage(plain);
           } else if (!designApiPresetBoundsMatch(rawPayload, gateExpectedShape)) {
             debugPrint('ScheduleSync: design preset "$name" bounds do not '
                 'match the live buses ${gateExpectedShape.join(' ')}');
@@ -1500,7 +1506,8 @@ class ScheduleSyncService {
             final info = await _controllerInfoOrNull(activeRepo);
             final ver = info?.ver;
             if (ver == null || ver.trim().isEmpty) {
-              refusal = designScheduleFirmwareUnreadableMessage(plain);
+              transient = true;
+              refusal = designApiPresetCouldNotVerifyMessage(plain);
             } else if (!isDesignApiPresetFirmwareProven(ver)) {
               refusal = designScheduleFirmwareUnprovenMessage(plain, ver.trim());
             } else if (!isDesignApiPresetArchProven(info?.arch)) {
@@ -1521,9 +1528,28 @@ class ScheduleSyncService {
             }
           }
           if (refusal != null) {
-            presetErrors.add(refusal);
-            debugPrint('ScheduleSync: design preset "$name" REFUSED — $refusal');
-            refusedDesignScheduleIds.add(effectiveSchedule.id);
+            if (transient) {
+              // C1 — could not verify: the slot, its stored copy, its hash
+              // record and its timer row stay exactly as they were, no repair
+              // attempt is counted, and the next sync checks again. A copy
+              // the controller is known (or, with presets.json unreadable,
+              // presumed) to hold keeps its row armed; a design that never
+              // landed is not armed and has nothing to purge.
+              final landedCopy =
+                  presetsUnreadable || existingPresets.containsKey(presetId);
+              presetErrors.add(refusal);
+              debugPrint('ScheduleSync: design preset "$name" NOT VERIFIED — '
+                  'left as is (copy on device: $landedCopy)');
+              if (landedCopy) {
+                savedPresetIds.add(presetId); // kept: not purged, row kept
+              } else {
+                refusedDesignScheduleIds.add(effectiveSchedule.id);
+              }
+            } else {
+              presetErrors.add(refusal);
+              debugPrint('ScheduleSync: design preset "$name" REFUSED — $refusal');
+              refusedDesignScheduleIds.add(effectiveSchedule.id);
+            }
             updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
             continue;
           }

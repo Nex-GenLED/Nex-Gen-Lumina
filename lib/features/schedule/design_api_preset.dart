@@ -552,10 +552,13 @@ String designApiPresetMalformedMessage(String name) =>
     "\"$name\" can't be saved to your controller as it is stored. Open the "
     'schedule and pick the design again from My Designs.';
 
-String designApiPresetLayoutUnreadMessage(String name) =>
-    "Lumina couldn't read your controller's layout, so \"$name\" wasn't "
-    'saved to it this time. It will be saved on the next sync from your home '
-    'network.';
+/// C1 — the sync's sentence when a device read failed (the bus layout, the
+/// firmware/model read): nothing is known to be wrong, so the slot, its
+/// stored copy, its hash record and its timer row are left exactly as they
+/// were and the next sync checks again.
+String designApiPresetCouldNotVerifyMessage(String name) =>
+    "Lumina couldn't check \"$name\" against your controller just now, so it "
+    'was left exactly as it is. It will be checked again on the next sync.';
 
 String designApiPresetLayoutChangedMessage(String name) =>
     "Your roofline layout no longer matches \"$name\", so it wasn't saved to "

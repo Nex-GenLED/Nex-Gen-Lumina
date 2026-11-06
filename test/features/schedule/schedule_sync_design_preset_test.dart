@@ -451,11 +451,11 @@ void main() {
       );
     });
 
-    test('firmware unreadable', () async {
+    test('firmware unreadable — a transient "could not verify" (C1)', () async {
       await refuse(
         _FakeService(cfg: _buses(kThree), state: _live(kThree), firmware: null),
         _designSchedule(_body(kThree)),
-        saying: "couldn't read your controller's firmware version",
+        saying: "couldn't check",
       );
     });
 
@@ -478,12 +478,12 @@ void main() {
       );
     });
 
-    test('layout unread (no cfg): never write while the layout is unread',
-        () async {
+    test('layout unread (no cfg): never write while the layout is unread — '
+        'a transient "could not verify" (C1)', () async {
       await refuse(
         _FakeService(cfg: null, state: _live(kThree)),
         _designSchedule(_body(kThree)),
-        saying: "couldn't read your controller's layout",
+        saying: "couldn't check",
       );
     });
 
@@ -529,6 +529,97 @@ void main() {
 
       expect(repo.savedStates.keys.where((id) => id >= 10 && id <= 25).length, 4);
       expect(result.presetErrors.join('\n'), contains('4 painted designs'));
+    });
+  });
+
+  // C1 — a device read that fails is TRANSIENT: the slot, its stored copy,
+  // its hash record and its timer row stay exactly as they were, no repair
+  // attempt is counted, and the owner reads "checked again on the next
+  // sync". Only a schedule that is gone, or a PERSISTENT refusal, purges.
+  group('C1 — transient failures leave a landed design alone', () {
+    /// A good sync first: slot 10 written and armed; the controller's
+    /// presets.json then holds the stored copy.
+    Future<Map<int, Map<String, dynamic>>> landed() async {
+      final first = _FakeService(cfg: _buses(kThree), state: _live(kThree));
+      final r = await svc.syncAll(_ref(first), [_designSchedule(_body(kThree))]);
+      expect(r.presetErrors, isEmpty);
+      expect(first.device.containsKey(10), isTrue);
+      expect(first.armedMacros, contains(10));
+      return first.device;
+    }
+
+    test('an info timeout on the next sync: no pdel, the timer row stays, '
+        '"checked again", no repair attempt', () async {
+      final device = await landed();
+      final attemptsBefore = await repairAttempts.attempts(10);
+      final repo = _FakeService(
+          cfg: _buses(kThree), state: _live(kThree), firmware: null, presets: device);
+
+      final result = await svc.syncAll(
+          _ref(repo), [_designSchedule(_body(kThree)).copyWith(presetId: 10)]);
+
+      expect(repo.deletedPresetIds, isNot(contains(10)),
+          reason: 'on b4b09f2 the refused design left the saved set and the '
+              'orphan purge sent pdel for its slot');
+      expect(repo.device.containsKey(10), isTrue);
+      expect(repo.savedPresetIds, isNot(contains(10)), reason: 'no rewrite');
+      expect(repo.armedMacros, contains(10), reason: 'the timer row stays');
+      expect(result.presetErrors.join('\n'),
+          contains('checked again on the next sync'));
+      expect(await repairAttempts.attempts(10), attemptsBefore,
+          reason: 'a transient failure is not a repair attempt');
+    });
+
+    test('an unreadable cfg (layout unread) on the next sync: same', () async {
+      final device = await landed();
+      final repo = _FakeService(cfg: null, state: _live(kThree), presets: device);
+
+      final result = await svc.syncAll(
+          _ref(repo), [_designSchedule(_body(kThree)).copyWith(presetId: 10)]);
+
+      expect(repo.deletedPresetIds, isNot(contains(10)));
+      expect(repo.armedMacros, contains(10));
+      expect(result.presetErrors.join('\n'), contains("couldn't check"));
+    });
+
+    test('a transient failure before anything landed: not armed, nothing to '
+        'purge, no repair attempt', () async {
+      final repo =
+          _FakeService(cfg: _buses(kThree), state: _live(kThree), firmware: null);
+
+      final result = await svc.syncAll(_ref(repo), [_designSchedule(_body(kThree))]);
+
+      expect(repo.savedStates.keys.where((id) => id >= 10 && id <= 25), isEmpty);
+      expect(repo.deletedPresetIds, isEmpty);
+      expect(repo.armedMacros.where((m) => m >= 10 && m <= 25), isEmpty);
+      expect(result.presetErrors.join('\n'), contains("couldn't check"));
+      expect(await repairAttempts.attempts(10), 0);
+    });
+
+    test('a deleted schedule still purges its slot', () async {
+      final device = await landed();
+      final repo =
+          _FakeService(cfg: _buses(kThree), state: _live(kThree), presets: device);
+
+      await svc.syncAll(_ref(repo), const []);
+
+      expect(repo.deletedPresetIds, contains(10));
+    });
+
+    test('a persistent refusal (layout changed) still refuses and purges',
+        () async {
+      final device = await landed(); // the body is bounded 100/120/100
+      const other = [100, 100, 100];
+      final repo =
+          _FakeService(cfg: _buses(other), state: _live(other), presets: device);
+
+      final result = await svc.syncAll(
+          _ref(repo), [_designSchedule(_body(kThree)).copyWith(presetId: 10)]);
+
+      expect(result.presetErrors.join('\n'),
+          contains('roofline layout no longer matches'));
+      expect(repo.armedMacros.where((m) => m >= 10 && m <= 25), isEmpty);
+      expect(repo.deletedPresetIds, contains(10));
     });
   });
 }
