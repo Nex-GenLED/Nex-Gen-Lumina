@@ -439,6 +439,36 @@ String? designScheduleCountRefusal({
   return designScheduleTooManyMessage(plainDesignName(candidate.actionLabel));
 }
 
+/// D1 — PURE. Null when every live bus starts where the one before it ends
+/// (by id, cumulative from zero) — what the body's bounds assume and what
+/// the sync's write-time gate compares against exactly. Otherwise the first
+/// bus that does not, with its actual and expected start. Zero-length buses
+/// are skipped, as the body skips them.
+({int channel, int start, int expected})? busStartsProblem(
+    List<DeviceChannel> channels) {
+  final sorted = [...channels]..sort((a, b) => a.id.compareTo(b.id));
+  var expected = 0;
+  for (final c in sorted) {
+    final len = c.stop - c.start;
+    if (len <= 0) continue;
+    if (c.start != expected) {
+      return (channel: c.id, start: c.start, expected: expected);
+    }
+    expected += len;
+  }
+  return null;
+}
+
+/// D1 — the controller's buses are not laid end to end.
+String designScheduleBusStartsMessage(
+        String name, ({int channel, int start, int expected}) p) =>
+    "\"$name\" can't be scheduled on this controller: its channels aren't "
+    'laid out end to end (channel ${p.channel + 1} starts at light '
+    '${p.start + 1} instead of ${p.expected + 1}), and a scheduled design is '
+    'saved for channels that follow one another. Ask your installer to check '
+    "the controller's LED settings. You can still apply it any time from My "
+    'Designs.';
+
 /// "Pattern: Porch stripes" → "Porch stripes"; anything else unchanged.
 String plainDesignName(String actionLabel) =>
     actionLabel.startsWith('Pattern: ')
@@ -734,6 +764,16 @@ DesignScheduleEligibility designScheduleEligibility({
   if (!fit.applies) {
     return DesignScheduleEligibility._(DesignScheduleVerdict.layoutMismatch,
         message: fit.message);
+  }
+  // D1 — the body's bounds are cumulative offsets from zero, and the sync's
+  // write-time gate compares them with the controller's own hw.led.ins
+  // starts EXACTLY; the slice 1 fit gate compares counts and lengths only.
+  // A controller whose buses are not laid end to end is refused here, in
+  // words, instead of at every sync with a repair hint that cannot work.
+  final starts = busStartsProblem(liveChannels);
+  if (starts != null) {
+    return DesignScheduleEligibility._(DesignScheduleVerdict.layoutMismatch,
+        message: designScheduleBusStartsMessage(name, starts));
   }
   final ver = firmwareVersion?.trim() ?? '';
   if (ver.isEmpty) {
