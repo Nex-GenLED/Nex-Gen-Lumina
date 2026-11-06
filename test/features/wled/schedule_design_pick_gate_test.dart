@@ -21,7 +21,6 @@ import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart';
-import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_providers.dart';
 import 'package:nexgen_command/features/wled/pattern_theme_selection.dart';
@@ -34,8 +33,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../helpers/home_dashboard_harness.dart';
 
 /// A direct-LAN service that answers the one device read the pick makes.
-class _LanService extends WledService {
-  _LanService() : super('http://mock');
+class LanService extends WledService {
+  LanService() : super('http://mock');
   int infoReads = 0;
 
   @override
@@ -80,7 +79,7 @@ const kFitting =
 
 List<Override> overrides({
   required List<CustomDesign> designs,
-  required _LanService service,
+  required LanService service,
 }) =>
     [
       authStateProvider.overrideWith((_) => Stream<User?>.value(null)),
@@ -104,7 +103,7 @@ List<Override> overrides({
 Future<void> pumpPicker(
   WidgetTester tester, {
   required List<CustomDesign> designs,
-  required _LanService service,
+  required LanService service,
   required String? destination,
   required void Function(LibraryDesignSelection) onSelected,
 }) async {
@@ -133,7 +132,7 @@ void main() {
       'ONCE with the API body (fail-before: never called on b4b09f2)',
       (tester) async {
     final received = <LibraryDesignSelection>[];
-    final service = _LanService();
+    final service = LanService();
     await pumpPicker(tester,
         designs: [painted(stamp: kFitting)],
         service: service,
@@ -160,7 +159,7 @@ void main() {
     var handedBack = 0;
     await pumpPicker(tester,
         designs: [painted(stamp: null)],
-        service: _LanService(),
+        service: LanService(),
         destination: 'schedule',
         onSelected: (_) => handedBack++);
 
@@ -183,7 +182,7 @@ void main() {
                   controllerId: 'ctl-a', busLengths: [100, 100]),
               buses: 2)
         ],
-        service: _LanService(),
+        service: LanService(),
         destination: 'schedule',
         onSelected: (_) => handedBack++);
 
@@ -198,7 +197,7 @@ void main() {
   testWidgets('every other destination keeps row 92\'s card exactly',
       (tester) async {
     var handedBack = 0;
-    final service = _LanService();
+    final service = LanService();
     await pumpPicker(tester,
         designs: [painted(stamp: kFitting)],
         service: service,
