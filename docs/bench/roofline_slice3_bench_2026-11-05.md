@@ -181,8 +181,9 @@ segment name; on this map nothing matched, so the clause composed nothing.
    chase, left to right, and a preview on all three buses — NOT the red
    "No layers produced LED assignments" error of before.
 2. Type `wave effect moving right to left` (the placeholder example's motion
-   clause) and Create Design. Expect the whole roofline, moving right to
-   left, no direction question. (It composes as a CHASE — see item 8 step 6.)
+   clause) and Create Design. Expect the whole roofline, a WAVE, right to
+   left, no direction question. (Before the effect-word precedence fix the
+   chase list's "moving" made this a chase.)
 3. Type `red moving right`. Expect the whole roofline, moving left to right
    (before: the right side of the house, and the direction silently "inward").
 4. Type `red chase left`. Expect the whole roofline, right to left, and no
@@ -212,10 +213,13 @@ wave 67, twinkle 80, pulse 2.
    and a still `i` frame on every bus.
 2. Read the `/ws` live view twice, a second apart: the frame differs on every
    bus (a running chase), blue the only lit colour.
-3. Type `wave effect right to left`, Create Design, Apply: `fx 67` on
-   `seg[0..2]`. Then `red twinkle inward` → `fx 80`; `red breathe inward` →
-   `fx 2`. Cross-check the sheet once: type `red`, and when the studio asks
-   for an effect tap **Chase** — the same `fx 28` per bus as step 1.
+3. Type `wave effect moving right to left` (the placeholder's own wording),
+   Create Design, Apply: `fx 67` on `seg[0..2]` — a wave, not the chase the
+   generic word "moving" used to make it. Then `red twinkle inward` →
+   `fx 80`; `red pulse inward` → `fx 2` (before the precedence fix: `fx 67`,
+   a wave); `red breathe inward` → `fx 2`. Cross-check the sheet once: type
+   `red`, and when the studio asks for an effect tap **Chase** — the same
+   `fx 28` per bus as step 1.
 4. Type `red scan inward`, Create Design, Apply. Expect a STILL picture:
    `fx 0` and an `i` frame on every bus. Scan is in no existing effect table
    and was left static on purpose rather than guessed.
@@ -224,16 +228,45 @@ wave 67, twinkle 80, pulse 2.
    in My Designs: the detail screen shows it as a motion. Apply from My
    Designs: `fx 28` on `seg[0..2]`. Before: `effect_id: 0`, shown and applied
    as a still picture.
-6. Known and NOT fixed here — record only. (a) `wave effect moving right to
-   left` runs as a chase (`fx 28`): "moving" is a chase word in the motion
-   table and chase is scanned first. (b) `blue chase` with no direction asks
-   "Which direction should the chase effect go?"; choosing "Right to left" is
-   not applied and the design composes left to right — the parser never
-   binds a clarification to its layer; the effect id survives the question
-   either way (`fx 28`).
+6. The direction answer lands. Type `blue chase` (no direction). Expect
+   "Which direction should the chase effect go?"; tap **Right to left**.
+   Expect the understanding panel to say right to left and the composed
+   design to carry it (Save, then read the document: `composed_pattern`
+   has `motion_direction: "rightToLeft"`, `reverse: true`, `effect_id: 28`).
+   Before: the answer was dropped and the design composed left to right.
+   NOTE the lights themselves run the bus's installed orientation either
+   way — the design payload carries no `rev` (#76: `rev` is geometry owned
+   by provisioning) — so the direction is checked in the app and the
+   document, not on the `/ws` frame.
+7. Two clauses, one question each: type `red chase on the peaks and blue
+   wave on the corners`. Expect two direction questions; answer the chase
+   **Right to left** and the wave **Left to right**. Expect the understanding
+   panel to show each layer with its own answer. Apply: expect the FIRST
+   motion layer's effect, `fx 28`, on both buses — the composer carries one
+   motion per design (existing rule, unchanged), so the second layer's wave
+   (67) does not reach the device. Record what lands.
 
 Pass: 1–3 and 5 run the stated effect on all three buses; 4 is a still
-picture; 6 recorded as observed.
+picture; 6 and 7 carry the answered directions in the composed design.
+
+### Known, not fixed (prompt parser)
+
+Left as they are on the owner's instruction; one failing example each,
+verified by a unit probe on 2026-11-06.
+
+1. **Bare `in` / `up` / `out` / `down` direction matching by substring.**
+   `red chase spinning` → direction silently "inward" and NO direction
+   question (the "in" inside "spinning"). The same for `pulsing`,
+   `running`, `sweeping outdoors` ("in" / "out" inside the word).
+2. **`run` / `running` overlap with the architectural run.** `red running
+   lights everywhere` → zone "runs" (the architectural role, from the "run"
+   inside "running"), not the whole roofline; the motion is a chase as
+   intended.
+3. **The colour-shade question is unreachable** (found while testing, not
+   changed). `green chase inward` composes the colour map's green with no
+   "Which shade of green?" question: every vague-colour key (green, blue,
+   red, purple) is also a colour-map key, and the vague check is skipped
+   once the colour map has matched.
 
 ## Teardown
 
