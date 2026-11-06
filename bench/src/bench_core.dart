@@ -375,11 +375,15 @@ bool presetCarriesPicture(Map<String, dynamic> def) {
 /// controller holds in the schedule band (10–25), read from the SAME
 /// presets.json `preset-verify` already fetched: no new device traffic.
 ///
-/// For each one: root `on:true` (fires lit from master-off), every `seg`
-/// entry bounded (`start` < `stop`, ids distinct — the per-bus bounds that
-/// re-create the buses after a power cycle), every lit entry carrying its
-/// picture, and the stored body under the byte cap. One line per preset so
-/// the bench record names which slot, how many buses and how many bytes.
+/// For each one: root `on:true` (fires lit from master-off); the `seg` list
+/// BOUNDS-FIRST — it opens with a group of `{id,start,stop}` entries
+/// (`start` < `stop`, ids distinct: the per-bus bounds that re-create the
+/// buses after a power cycle BEFORE any paint is laid), followed by paint
+/// entries carrying their picture and NO bounds, and left-out entries
+/// (`on:false`) carrying the same bounds as their group entry; and the stored
+/// body under the byte cap. Bounds on a paint entry are the b4b09f2 shape that
+/// painted one bus after a cold boot (bench 2026-11-06). One line per preset
+/// so the bench record names which slot, how many buses and how many bytes.
 List<CheckResult> checkDesignPresetInvariants(
     Map<int, Map<String, dynamic>> presets) {
   final out = <CheckResult>[];
@@ -403,20 +407,53 @@ List<CheckResult> checkDesignPresetInvariants(
     final problems = <String>[];
     if (def['on'] != true) problems.add('root on=${def['on'] ?? 'ABSENT'}');
     final seg = def['seg'] as List;
-    final seen = <int>{};
-    for (var k = 0; k < seg.length; k++) {
+    // Group 1: bounds entries up to the first paint or off entry.
+    final bounded = <int, (int, int)>{};
+    var k = 0;
+    for (; k < seg.length; k++) {
       final s = seg[k];
       if (s is! Map) {
         problems.add('seg[$k] not an object');
         continue;
       }
+      // A bounds entry never carries `on` or `i`; the first that does ends
+      // the group.
+      if (s['i'] is List || s.containsKey('on')) break;
       final sid = s['id'], start = s['start'], stop = s['stop'];
       if (sid is! int || start is! int || stop is! int) {
         problems.add('seg[$k] lacks id/start/stop');
         continue;
       }
-      if (!seen.add(sid)) problems.add('seg[$k] duplicates id $sid');
+      if (bounded.containsKey(sid)) problems.add('seg[$k] duplicates id $sid');
       if (stop <= start) problems.add('seg[$k] id $sid stop $stop <= start $start');
+      if (s.length != 3) problems.add('seg[$k] id $sid bounds entry carries extra fields');
+      bounded[sid] = (start, stop);
+    }
+    if (bounded.isEmpty) problems.add('no bounds group before the paint');
+    // Group 2: paint (no bounds, with i) and off (same bounds) entries.
+    for (; k < seg.length; k++) {
+      final s = seg[k];
+      if (s is! Map) {
+        problems.add('seg[$k] not an object');
+        continue;
+      }
+      final sid = s['id'];
+      if (sid is! int) {
+        problems.add('seg[$k] lacks id');
+        continue;
+      }
+      final b = bounded[sid];
+      if (b == null) problems.add('seg[$k] id $sid has no bounds entry before it');
+      if (s['on'] == false) {
+        if (b != null && (s['start'] != b.$1 || s['stop'] != b.$2)) {
+          problems.add('seg[$k] id $sid (off) bounds differ from its bounds entry');
+        }
+        continue;
+      }
+      if (s.containsKey('start') || s.containsKey('stop')) {
+        problems.add('seg[$k] id $sid paint entry carries start/stop '
+            '(blanks earlier buses after a cold boot)');
+      }
       if (s['on'] == true && s['i'] is! List) {
         problems.add('seg[$k] id $sid is on with no i');
       }
@@ -426,9 +463,9 @@ List<CheckResult> checkDesignPresetInvariants(
       problems.add('$bytes B stored > cap $kBenchDesignPresetMaxBytes');
     }
     out.add(CheckResult(
-      'design preset $id well-formed (per-bus bounds, lit, under cap)',
+      'design preset $id well-formed (bounds-first per-bus bounds, lit, under cap)',
       problems.isEmpty,
-      'n=${def['n'] ?? 'ABSENT'} · buses=${seg.length} · $bytes B'
+      'n=${def['n'] ?? 'ABSENT'} · buses=${bounded.length} · $bytes B'
           '${problems.isEmpty ? '' : ' — ${problems.join('; ')}'}',
     ));
   }

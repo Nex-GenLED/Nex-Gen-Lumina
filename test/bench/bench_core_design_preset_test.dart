@@ -8,6 +8,10 @@ import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 
 import '../../bench/src/bench_core.dart';
 
+/// The stored copy of a bounds-first design preset (A1, bench 2026-11-06): a
+/// group of {id,start,stop} entries, then one paint entry per bus with no
+/// bounds. [bounded] false drops the group (the b4b09f2 shape that painted
+/// one bus after a cold boot); [lit] false strips bus 0's picture.
 Map<String, dynamic> designPreset({
   bool on = true,
   bool bounded = true,
@@ -19,11 +23,14 @@ Map<String, dynamic> designPreset({
       'on': on,
       'bri': 180,
       'seg': [
+        if (bounded)
+          for (var b = 0; b < buses; b++)
+            {'id': b, 'start': 100 * b, 'stop': 100 * (b + 1)},
         for (var b = 0; b < buses; b++)
           {
             'id': b,
-            if (bounded) 'start': 100 * b,
-            if (bounded) 'stop': 100 * (b + 1),
+            if (!bounded) 'start': 100 * b,
+            if (!bounded) 'stop': 100 * (b + 1),
             'on': true,
             'fx': 0,
             if (lit || b > 0) 'i': [0, 100, [255, 0, 0, 0]],
@@ -70,9 +77,19 @@ void main() {
     expect(r.evidence, contains('root on=false'));
   });
 
-  test('missing bounds fail (no per-bus re-creation after a power cycle)', () {
+  test('no bounds group (bounds on the paint entries — the b4b09f2 shape that '
+      'painted one bus after a cold boot) fails', () {
     final r = only(checkDesignPresetInvariants({12: designPreset(bounded: false)}),
         'design preset 12');
+    expect(r.pass, isFalse);
+    expect(r.evidence, contains('no bounds group before the paint'));
+    expect(r.evidence, contains('paint entry carries start/stop'));
+  });
+
+  test('a bounds entry missing a field fails', () {
+    final p = designPreset();
+    (p['seg'][1] as Map).remove('stop');
+    final r = only(checkDesignPresetInvariants({12: p}), 'design preset 12');
     expect(r.pass, isFalse);
     expect(r.evidence, contains('lacks id/start/stop'));
   });
@@ -86,7 +103,7 @@ void main() {
 
   test('a stored body over the cap fails and says the bytes', () {
     final big = designPreset();
-    big['seg'][0]['i'] = [
+    big['seg'][3]['i'] = [
       for (var led = 0; led < 400; led++) ...[led, [led % 255, 0, 0, 0]],
     ];
     final r = only(checkDesignPresetInvariants({12: big}), 'design preset 12');

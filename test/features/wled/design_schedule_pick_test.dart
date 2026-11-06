@@ -95,7 +95,9 @@ void main() {
     final v = await designSchedulePickVerdict(container(repo: lan).read, design());
     expect(v.verdict, DesignScheduleVerdict.allowed);
     expect(v.body!['o'], isTrue);
-    expect((v.body!['seg'] as List).map((s) => s['stop']), [100, 200, 300]);
+    // The bounds group opens the body (A1); the paint entries carry no stop.
+    expect((v.body!['seg'] as List).take(3).map((s) => s['stop']),
+        [100, 200, 300]);
     expect(lan.infoReads, 1, reason: 'one firmware read, on the LAN');
   });
 

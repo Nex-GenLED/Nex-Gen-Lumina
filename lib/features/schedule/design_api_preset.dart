@@ -11,12 +11,19 @@
 // `deserializeState` at fire time, `seg[].i` included.
 //
 // OWNER DECISIONS (2026-11-05) this file encodes:
-//   1. Mechanism — an API-command preset whose body carries ONE ENTRY PER BUS,
-//      each with explicit `start`/`stop` from the design's stamped
-//      `bus_lengths` (cumulative offsets, segment id = bus). A power cycle
-//      collapses the split to one segment; at the next fire the bounds in the
-//      body re-create every bus, so all of them are painted with no app on
-//      the LAN. Not runs-as-segments, no boot preset.
+//   1. Mechanism — an API-command preset whose body is BOUNDS-FIRST: one
+//      `{id,start,stop}` entry per bus (left-out buses included, bus order)
+//      from the design's stamped `bus_lengths` (cumulative offsets, segment
+//      id = bus), THEN one paint entry per painted bus with no bounds, THEN
+//      each left-out bus as `{id,start,stop,on:false}`. A power cycle
+//      collapses the split to one segment; at the next fire the bounds group
+//      re-creates every bus before any paint is laid. Bench 2026-11-06
+//      (0.15.4, classic ESP32): bounds and paint in the SAME entry painted
+//      only the last bus after a cold boot — every appended segment starts
+//      as a full-strip segment whose `setUp` blanks its old range, wiping the
+//      frozen paint of the buses before it. Bounds-first painted every bus
+//      and left the excluded bus dark and bounded (power cycle #2). Not
+//      runs-as-segments, no boot preset.
 //   2. Byte cap — REFUSE, never simplify. [kDesignApiPresetMaxBytes].
 //   3. Firmware — allowed only on versions the bench has proven.
 //      [kDesignApiPresetProvenFirmware]; unreadable or unproven refuses.
@@ -93,16 +100,26 @@ const List<List<int>> _kBlackColSlots = [
   [0, 0, 0, 0],
 ];
 
-/// The API body for [design]: one `seg` entry per stamped bus, in bus order,
-/// with explicit bounds from the stamp's cumulative `bus_lengths`.
+/// The API body for [design], BOUNDS-FIRST (owner decision 1 as the bench
+/// proved it on a cold boot, 2026-11-06):
 ///
-/// A bus the design paints gets `{id, start, stop, on:true, fx:0, grp:1,
-/// spc:0, pal:0, col: three black slots, i: the range-compressed paint over
-/// the whole bus}`. A bus the design leaves out (channel not included, or not in the
-/// design at all) gets `{id, start, stop, on:false}` — the bounds still
-/// re-create the bus after a power cycle, and the scope rule's meaning holds:
-/// a look that excludes a channel darkens it (U-7, schedule_models.dart).
-/// A zero-length bus in the stamp gets no entry.
+/// 1. One `{id, start, stop}` entry per stamped bus, in bus order, for EVERY
+///    bus — painted or left out — with bounds from the stamp's cumulative
+///    `bus_lengths`. Replayed after a power cycle these re-create every bus
+///    (WLED appends ids in order) before a single pixel is painted.
+/// 2. One paint entry per painted bus: `{id, on:true, fx:0, grp:1, spc:0,
+///    pal:0, col: three black slots, i: the range-compressed paint over the
+///    whole bus}` — with NO `start`/`stop`. Bounds on a paint entry are what
+///    wiped the earlier buses: an appended segment starts as a full-strip
+///    segment and `Segment::setUp` blanks its old range when the bounds are
+///    applied, so paint laid before the next bus's entry was lost.
+/// 3. Each bus the design leaves out (channel not included, or not in the
+///    design at all) as `{id, start, stop, on:false}` — the same bounds as
+///    its entry in group 1 (unchanged bounds never blank anything), dark, so
+///    the scope rule's meaning holds: a look that excludes a channel darkens
+///    it (U-7, schedule_models.dart).
+///
+/// A zero-length bus in the stamp gets no entry in any group.
 ///
 /// Root: `o:true`, `on:true`, `bri` (the design's stated brightness, or 255
 /// as the pattern path forces — a nightly fire is an ON action and must never
@@ -119,7 +136,9 @@ Map<String, dynamic>? buildDesignApiPresetBody(CustomDesign design) {
   final byId = <int, ChannelDesign>{
     for (final c in design.channels) c.channelId: c,
   };
-  final segs = <Map<String, dynamic>>[];
+  final bounds = <Map<String, dynamic>>[];
+  final paints = <Map<String, dynamic>>[];
+  final leftOut = <Map<String, dynamic>>[];
   var offset = 0;
   for (var bus = 0; bus < stamp.busCount; bus++) {
     final len = stamp.busLengths[bus];
@@ -128,9 +147,11 @@ Map<String, dynamic>? buildDesignApiPresetBody(CustomDesign design) {
     final stop = offset + len;
     offset = stop;
 
+    bounds.add(<String, dynamic>{'id': bus, 'start': start, 'stop': stop});
+
     final channel = byId[bus];
     if (channel == null || !channel.included) {
-      segs.add(<String, dynamic>{
+      leftOut.add(<String, dynamic>{
         'id': bus,
         'start': start,
         'stop': stop,
@@ -141,10 +162,8 @@ Map<String, dynamic>? buildDesignApiPresetBody(CustomDesign design) {
 
     final spans = _coverBus(channel.fullCoverageSpans(), len);
     final i = (buildPerPixelPayload(spans, bus)['seg'] as List).first['i'];
-    segs.add(<String, dynamic>{
+    paints.add(<String, dynamic>{
       'id': bus,
-      'start': start,
-      'stop': stop,
       'on': true,
       'fx': 0,
       'grp': 1,
@@ -159,7 +178,7 @@ Map<String, dynamic>? buildDesignApiPresetBody(CustomDesign design) {
     'o': true,
     'on': true,
     'bri': design.appliedBrightness ?? 255,
-    'seg': segs,
+    'seg': <Map<String, dynamic>>[...bounds, ...paints, ...leftOut],
   };
 }
 
@@ -206,18 +225,39 @@ int designApiPresetWireBytes(
     })).length;
 
 /// Why a stored design preset body cannot be written, or null when its shape
-/// is what [buildDesignApiPresetBody] produces: `o:true`, a non-empty `seg`
-/// list whose entries carry an int `id` and bounds with `stop > start`, and a
-/// list `i` on every entry that is `on`. Operator-readable; the customer
-/// sentence is [designApiPresetMalformedMessage].
+/// is what [buildDesignApiPresetBody] produces: `o:true`; a `seg` list that
+/// opens with a BOUNDS GROUP (entries carrying only an int `id`, `start` and
+/// `stop` with `stop > start`, ids distinct); then, in any order, paint
+/// entries (`on:true`, a list `i`, NO `start`/`stop`) and left-out entries
+/// (`on:false` with the same bounds as the id's bounds entry), every id
+/// bounded by the group above it. A paint entry carrying bounds is refused
+/// by name: that is the b4b09f2 shape that painted one bus after a cold
+/// boot. Operator-readable; the customer sentence is
+/// [designApiPresetMalformedMessage].
 String? designApiPresetBodyProblem(Map<String, dynamic>? body) {
   if (body == null) return 'no payload';
   if (body['o'] != true) return 'not an API-command body (no o:true)';
   final seg = body['seg'];
   if (seg is! List || seg.isEmpty) return 'no seg entries';
-  for (var k = 0; k < seg.length; k++) {
+
+  // Group 1 — bounds entries, up to the first entry that paints or is off.
+  final bounded = <int, (int, int)>{};
+  var k = 0;
+  for (; k < seg.length; k++) {
     final s = seg[k];
     if (s is! Map) return 'seg[$k] is not an object';
+    // A bounds entry never carries `on` or `i`; the first entry that does
+    // ends the group.
+    if (s['i'] is List || s.containsKey('on')) {
+      if (bounded.isEmpty &&
+          s['i'] is List &&
+          (s.containsKey('start') || s.containsKey('stop'))) {
+        // The b4b09f2 shape: bounds and paint in one entry, no bounds group.
+        return 'seg[$k] (id ${s['id']}) paint entry carries start/stop — '
+            'after a cold boot that blanks the buses painted before it';
+      }
+      break;
+    }
     final id = s['id'];
     final start = s['start'];
     final stop = s['stop'];
@@ -225,18 +265,48 @@ String? designApiPresetBodyProblem(Map<String, dynamic>? body) {
       return 'seg[$k] lacks int id/start/stop';
     }
     if (stop <= start) return 'seg[$k] has stop $stop <= start $start';
-    if (s['on'] == true && s['i'] is! List) {
+    if (s.length != 3) {
+      return 'seg[$k] (id $id) bounds entry carries more than id/start/stop';
+    }
+    if (bounded.containsKey(id)) return 'seg[$k] repeats bounds for id $id';
+    bounded[id] = (start, stop);
+  }
+  if (bounded.isEmpty) return 'no bounds entries before the paint';
+
+  // Group 2 — paint entries (no bounds) and left-out entries (same bounds).
+  for (; k < seg.length; k++) {
+    final s = seg[k];
+    if (s is! Map) return 'seg[$k] is not an object';
+    final id = s['id'];
+    if (id is! int) return 'seg[$k] lacks int id';
+    final b = bounded[id];
+    if (b == null) return 'seg[$k] (id $id) has no bounds entry before it';
+    if (s['on'] == false) {
+      if (s['start'] != b.$1 || s['stop'] != b.$2) {
+        return 'seg[$k] (id $id, off) bounds differ from its bounds entry';
+      }
+      continue;
+    }
+    if (s.containsKey('start') || s.containsKey('stop')) {
+      return 'seg[$k] (id $id) paint entry carries start/stop — after a cold '
+          'boot that blanks the buses painted before it';
+    }
+    if (s['on'] != true) return 'seg[$k] (id $id) is neither on nor off';
+    if (s['i'] is! List) {
       return 'seg[$k] (id $id) is on but carries no i array';
     }
   }
   return null;
 }
 
-/// True when the body's bus entries are EXACTLY the live expected shape: the
-/// same ids, each with the same `start`/`stop`, and no id on either side the
-/// other lacks. The sync asks this before any write, against the controller's
-/// own `hw.led.ins` buses (device truth) — owner decision 4, "the live layout
-/// fits the stamp", re-checked at write time, not only at pick time.
+/// True when the body's bounded entries are EXACTLY the live expected shape:
+/// the same ids, each with the same `start`/`stop`, and no id on either side
+/// the other lacks. Bounds are read from every entry that carries them (the
+/// bounds group and the left-out entries); a paint entry carries none and
+/// is judged by [designApiPresetBodyProblem] instead. The sync asks this
+/// before any write, against the controller's own `hw.led.ins` buses (device
+/// truth) — owner decision 4, "the live layout fits the stamp", re-checked at
+/// write time, not only at pick time.
 bool designApiPresetBoundsMatch(
   Map<String, dynamic> body,
   List<SegmentShape> liveBuses,
@@ -251,6 +321,7 @@ bool designApiPresetBoundsMatch(
     if (id is! int) return false;
     final live = want[id];
     if (live == null) return false;
+    if (!s.containsKey('start') && !s.containsKey('stop')) continue; // paint
     if (s['start'] != live.start || s['stop'] != live.stop) return false;
     seen.add(id);
   }

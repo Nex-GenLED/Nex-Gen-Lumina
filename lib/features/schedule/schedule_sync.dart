@@ -1466,7 +1466,10 @@ class ScheduleSyncService {
 
         // ── ROOFLINE SLICE 2: the DESIGN KIND — an API-command preset ──────
         // The stored wledPayload IS the body the controller replays (`o:true`,
-        // one entry per bus with bounds and paint, design_api_preset.dart).
+        // bounds-first: one {id,start,stop} entry per bus, then the paint
+        // entries without bounds, then the left-out buses as on:false —
+        // design_api_preset.dart; bounds on a paint entry painted one bus
+        // after a cold boot, bench 2026-11-06).
         // It bypasses the scope rule, the fan-out and the ib/on/bri splice:
         // the body is written as stored, plus the name. Before any write, the
         // owner's gates in order: a well-formed body, a direct-LAN service

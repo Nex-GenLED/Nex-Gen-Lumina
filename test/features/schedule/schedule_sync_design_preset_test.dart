@@ -377,7 +377,8 @@ void main() {
     test('a stored copy with a different picture IS re-written once', () async {
       final body = _body(kThree);
       final stale = _storedCopy(body, kName);
-      (stale['seg'][0]['i'] as List)[2] = [254, 0, 0, 0];
+      // seg[0..2] are the bounds group; seg[3] is bus 0's paint entry (A1).
+      (stale['seg'][3]['i'] as List)[2] = [254, 0, 0, 0];
       final repo = _FakeService(
         cfg: _buses(kThree),
         state: _live(kThree),
@@ -400,9 +401,12 @@ void main() {
         state: _live(kThree),
         // Only a painted body is corrupted; the ladder presets have no `i`.
         storeMutation: (stored) {
-          final i = stored['seg'] is List && stored['seg'].isNotEmpty
-              ? stored['seg'][0]['i']
+          // The first PAINT entry (the bounds group carries no `i`, A1).
+          final seg = stored['seg'];
+          final paint = seg is List
+              ? seg.cast<Map>().where((s) => s['i'] is List).firstOrNull
               : null;
+          final i = paint?['i'];
           if (i is List) i[2] = [0, 0, 0, 0];
         },
       );

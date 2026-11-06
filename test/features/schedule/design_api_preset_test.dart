@@ -125,9 +125,13 @@ DesignScheduleEligibility eligible(
     );
 
 void main() {
-  group('buildDesignApiPresetBody — one entry per bus with stamp bounds', () {
-    test('three buses 100/120/100 → ids 0/1/2, starts 0/100/220, stops 100/220/320',
-        () {
+  // A1 (bench 2026-11-06): the body is BOUNDS-FIRST — a group of
+  // {id,start,stop} entries for every bus, then the paint entries without
+  // bounds, then the left-out buses as on:false. design_api_preset_shape_test
+  // pins the ordering and the cold-boot golden; these pin the per-bus content.
+  group('buildDesignApiPresetBody — bounds group, then paint per bus', () {
+    test('three buses 100/120/100 → bounds ids 0/1/2, starts 0/100/220, '
+        'stops 100/220/320, then three paint entries', () {
       final body = buildDesignApiPresetBody(design())!;
       expect(body['o'], isTrue);
       expect(body['on'], isTrue);
@@ -136,10 +140,16 @@ void main() {
       expect(body.containsKey('sb'), isFalse);
 
       final seg = body['seg'] as List;
-      expect(seg.map((s) => s['id']), [0, 1, 2]);
-      expect(seg.map((s) => s['start']), [0, 100, 220]);
-      expect(seg.map((s) => s['stop']), [100, 220, 320]);
-      for (final s in seg) {
+      expect(seg.length, 6);
+      final bounds = seg.sublist(0, 3);
+      final paint = seg.sublist(3, 6);
+      expect(bounds.map((s) => s['id']), [0, 1, 2]);
+      expect(bounds.map((s) => s['start']), [0, 100, 220]);
+      expect(bounds.map((s) => s['stop']), [100, 220, 320]);
+      expect(paint.map((s) => s['id']), [0, 1, 2]);
+      for (final s in paint) {
+        expect(s.containsKey('start'), isFalse);
+        expect(s.containsKey('stop'), isFalse);
         expect(s['on'], isTrue);
         expect(s['fx'], 0);
         expect(s['grp'], 1);
@@ -152,31 +162,35 @@ void main() {
         ]);
       }
       // Channel-local, range-compressed, stop exclusive, covering the bus.
-      expect(seg[0]['i'], [0, 50, kRed, 50, 100, kBlue]);
-      expect(seg[1]['i'], [0, 60, kRed, 60, 120, kBlue]);
-      expect(seg[2]['i'], [0, 50, kRed, 50, 100, kBlue]);
+      expect(paint[0]['i'], [0, 50, kRed, 50, 100, kBlue]);
+      expect(paint[1]['i'], [0, 60, kRed, 60, 120, kBlue]);
+      expect(paint[2]['i'], [0, 50, kRed, 50, 100, kBlue]);
     });
 
-    test('a channel the design leaves out gets bounds and on:false, no paint',
-        () {
+    test('a channel the design leaves out is bounded in the group and comes '
+        'last as on:false, no paint', () {
       final body = buildDesignApiPresetBody(design(channels: [
         channel(0, 100),
         channel(1, 120, included: false),
         channel(2, 100),
       ]))!;
       final seg = body['seg'] as List;
-      expect(seg[1], {'id': 1, 'start': 100, 'stop': 220, 'on': false});
-      expect(seg[0]['i'], isA<List>());
-      expect(seg[2]['i'], isA<List>());
+      expect(seg.map((s) => s['id']), [0, 1, 2, 0, 2, 1]);
+      expect(seg[1], {'id': 1, 'start': 100, 'stop': 220});
+      expect(seg[5], {'id': 1, 'start': 100, 'stop': 220, 'on': false});
+      expect(seg[3]['i'], isA<List>());
+      expect(seg[4]['i'], isA<List>());
     });
 
     test('a bus the design has no channel for is still bounded (dark)', () {
       final body =
           buildDesignApiPresetBody(design(channels: [channel(0, 100)]))!;
       final seg = body['seg'] as List;
-      expect(seg.length, 3);
-      expect(seg[1], {'id': 1, 'start': 100, 'stop': 220, 'on': false});
-      expect(seg[2], {'id': 2, 'start': 220, 'stop': 320, 'on': false});
+      expect(seg.length, 6);
+      expect(seg.sublist(0, 3).map((s) => s['id']), [0, 1, 2]);
+      expect(seg[3]['id'], 0);
+      expect(seg[4], {'id': 1, 'start': 100, 'stop': 220, 'on': false});
+      expect(seg[5], {'id': 2, 'start': 220, 'stop': 320, 'on': false});
     });
 
     test('a zero-length bus in the stamp gets no entry; offsets still accumulate',
@@ -186,7 +200,7 @@ void main() {
         channels: [channel(0, 100), channel(2, 100)],
       ))!;
       final seg = body['seg'] as List;
-      expect(seg.map((s) => s['id']), [0, 2]);
+      expect(seg.map((s) => s['id']), [0, 2, 0, 2]);
       expect(seg[1]['start'], 100);
       expect(seg[1]['stop'], 200);
     });
@@ -200,7 +214,7 @@ void main() {
         channel(2, 100),
       ]))!;
       final seg = body['seg'] as List;
-      expect(seg[0]['i'], [0, 80, kRed, 80, 100, [0, 0, 0, 0]]);
+      expect(seg[3]['i'], [0, 80, kRed, 80, 100, [0, 0, 0, 0]]);
     });
 
     test('a channel longer than its bus is clipped to the bus', () {
@@ -212,7 +226,7 @@ void main() {
         channel(2, 100),
       ]))!;
       final seg = body['seg'] as List;
-      expect(seg[0]['i'], [0, 100, kRed]);
+      expect(seg[3]['i'], [0, 100, kRed]);
     });
 
     test('no stated brightness → 255 (an ON action is never saved dark)', () {
@@ -336,13 +350,14 @@ void main() {
           isNull);
     });
 
-    test('a stored body missing o, bounds, or paint is named as the problem',
-        () {
+    test('a stored body missing o, the bounds group, or paint is named as '
+        'the problem', () {
       expect(designApiPresetBodyProblem(null), 'no payload');
       expect(designApiPresetBodyProblem({'on': true, 'seg': []}),
           contains('no o:true'));
       expect(designApiPresetBodyProblem({'o': true, 'seg': []}),
           contains('no seg entries'));
+      // Paint with no bounds group before it.
       expect(
           designApiPresetBodyProblem({
             'o': true,
@@ -350,23 +365,66 @@ void main() {
               {'id': 0, 'on': true, 'i': []}
             ]
           }),
-          contains('lacks int id/start/stop'));
+          contains('no bounds entries before the paint'));
+      // A bounds entry that is empty.
       expect(
           designApiPresetBodyProblem({
             'o': true,
             'seg': [
-              {'id': 0, 'start': 100, 'stop': 100, 'on': true, 'i': []}
+              {'id': 0, 'start': 100, 'stop': 100},
+              {'id': 0, 'on': true, 'i': []}
             ]
           }),
           contains('stop 100 <= start 100'));
+      // A bounds entry lacking a field.
       expect(
           designApiPresetBodyProblem({
             'o': true,
             'seg': [
-              {'id': 0, 'start': 0, 'stop': 100, 'on': true}
+              {'id': 0, 'start': 0},
+            ]
+          }),
+          contains('lacks int id/start/stop'));
+      // A lit entry with no picture (the group entry is fine).
+      expect(
+          designApiPresetBodyProblem({
+            'o': true,
+            'seg': [
+              {'id': 0, 'start': 0, 'stop': 100},
+              {'id': 0, 'on': true}
             ]
           }),
           contains('no i array'));
+      // The b4b09f2 shape — bounds and paint in one entry — is refused by
+      // name (it painted one bus after a cold boot, bench 2026-11-06).
+      expect(
+          designApiPresetBodyProblem({
+            'o': true,
+            'seg': [
+              {'id': 0, 'start': 0, 'stop': 100, 'on': true, 'i': []}
+            ]
+          }),
+          contains('paint entry carries start/stop'));
+      // Paint for an id the group never bounded.
+      expect(
+          designApiPresetBodyProblem({
+            'o': true,
+            'seg': [
+              {'id': 0, 'start': 0, 'stop': 100},
+              {'id': 1, 'on': true, 'i': []}
+            ]
+          }),
+          contains('no bounds entry before it'));
+      // A left-out entry whose bounds drift from its group entry.
+      expect(
+          designApiPresetBodyProblem({
+            'o': true,
+            'seg': [
+              {'id': 0, 'start': 0, 'stop': 100},
+              {'id': 0, 'start': 0, 'stop': 90, 'on': false}
+            ]
+          }),
+          contains('bounds differ from its bounds entry'));
     });
 
     test('bounds match the live buses exactly, or not at all', () {
