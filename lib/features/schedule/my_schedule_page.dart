@@ -4685,7 +4685,10 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
             longitude: profile?.longitude,
           )
         : null;
-    final entry = composeDatedEntry(
+    // D4 — the composer refuses a painted design by throwing; the editor
+    // shows that sentence instead of crashing on it (reachable now that the
+    // picker hands painted designs to the schedule, A2).
+    final composedEntry = composeDatedEntryOrRefusal(
       date: _date,
       action: switch (_action) {
         _ActionType.powerOff => DatedAction.powerOff,
@@ -4700,6 +4703,11 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
       channels: _channels,
       controllerId: _controllerId,
     );
+    if (composedEntry.refusal != null) {
+      say(composedEntry.refusal!, seconds: 7);
+      return;
+    }
+    final entry = composedEntry.entry!;
 
     final notifier = ref.read(calendarScheduleProvider.notifier);
     final refusals =

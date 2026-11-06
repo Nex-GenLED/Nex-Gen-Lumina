@@ -114,6 +114,42 @@ Color? firstColorOfPayload(Map<String, dynamic>? payload) {
 /// What a single-night entry does when it fires.
 enum DatedAction { runPattern, powerOff, brightness }
 
+/// D4 — [composeDatedEntry] for a caller that shows refusals instead of
+/// throwing them: the entry, or the customer sentence when the payload is a
+/// painted design (per-pixel, or its API-command preset body). The editor's
+/// "Just this day" save goes through this; the throwing form stays for the
+/// lease manager, whose tests pin it.
+({CalendarEntry? entry, String? refusal}) composeDatedEntryOrRefusal({
+  required DateTime date,
+  required DatedAction action,
+  required String onHhmm,
+  required String? offHhmm,
+  String? patternName,
+  Map<String, dynamic>? patternPayload,
+  int brightnessPercent = 100,
+  List<int>? channels,
+  String? controllerId,
+}) {
+  try {
+    return (
+      entry: composeDatedEntry(
+        date: date,
+        action: action,
+        onHhmm: onHhmm,
+        offHhmm: offHhmm,
+        patternName: patternName,
+        patternPayload: patternPayload,
+        brightnessPercent: brightnessPercent,
+        channels: channels,
+        controllerId: controllerId,
+      ),
+      refusal: null,
+    );
+  } on PerPixelDesignRefused catch (e) {
+    return (entry: null, refusal: e.message);
+  }
+}
+
 /// Build the dated entry the "+" editor writes for "Just this day".
 ///
 /// The entry is the customer's own: `type user`, `autopilot false`,
