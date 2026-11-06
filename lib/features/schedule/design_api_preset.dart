@@ -68,14 +68,23 @@ import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 /// audit) is run. Change it HERE only; nothing else states a number.
 const int kDesignApiPresetMaxBytes = 4000;
 
-/// WLED firmware versions on which a nightly painted-design preset has been
-/// bench-proven end to end (save, read back, fire by timer from master-off,
-/// OFF boundary, power cycle before the fire). The string is `/json/info`'s
-/// `ver`, compared exactly after trimming.
+/// WLED firmware versions on which a nightly painted-design preset is
+/// proven. The string is `/json/info`'s `ver`, compared exactly after
+/// trimming; the model is judged separately by [kDesignApiPresetProvenArch].
 ///
-/// 0.15.4 only for now (the spare). 0.15.1 and 16.0.1 are added here after
-/// the bench proves them (step 5 of the slice 2 bench doc). An unproven or
-/// unreadable version refuses with a plain message.
+/// What is proven, and by what: 0.15.4 on a classic ESP32 (the spare, arch
+/// `esp32`), with the BOUNDS-FIRST body, on the bench of 2026-11-06
+/// (bench-s2-results/results.md): save, stored copy hashes as expected, fire
+/// by `ps` and by timer from master-off, the OFF boundary, and a fire after a
+/// COLD BOOT (power pulled) painting every bus with a left-out bus dark and
+/// bounded. The same bench showed the previous shape (bounds on each paint
+/// entry) painting only the last bus after a cold boot, which is why the
+/// shape changed.
+///
+/// NOT proven: 0.15.1 (the fleet version) and 16.0.1 — neither has been run
+/// (step 5 of the slice 2 bench doc). An unproven or unreadable version
+/// refuses with a plain message; a version is added here only with a bench
+/// record.
 const Set<String> kDesignApiPresetProvenFirmware = <String>{'0.15.4'};
 
 /// Painted designs on the schedule, per account. A fifth refuses with a plain
@@ -478,9 +487,16 @@ String plainDesignName(String actionLabel) =>
 // ── One writer at a time (owner decision 6) ─────────────────────────────────
 
 /// A FIFO lock: each call runs after every call queued before it has settled.
-/// Two syncs that overlap (a manual Sync during the stream-triggered one, a
-/// lease write during a sync) must not interleave a design preset's write and
-/// its read-back, or the read-back would judge the other writer's bytes.
+///
+/// What it actually serialises today: design preset writes (write plus
+/// read-back) issued through the sync's design branch, which is the only
+/// caller. Two overlapping SYNCS never reach it — the schedules notifier
+/// drops a sync requested while one is in flight
+/// (schedule_providers.dart, `_syncInFlight`). The lease manager's psaves
+/// do not take this lock; they refuse a painted design before any write
+/// (calendar_entry_lease_manager.dart), so no other writer shares a design
+/// slot. The lock is kept as the one place a future second writer would
+/// have to go through; its behaviour is unchanged.
 class SerialWriteLock {
   Future<void> _tail = Future<void>.value();
 
