@@ -586,13 +586,18 @@ String designScheduleTooManyMessage(String name) =>
     'before scheduling "$name".';
 
 /// The sync's sentence for a per-pixel payload that reached a schedule by any
-/// path other than the schedule editor's My Designs pick (Lumina chat, a
-/// calendar intent, an older build): it is not written, and not armed.
+/// path other than the schedule editor's My Designs pick: it is not written,
+/// and not armed. D5 (2026-11-06): no shipped build-122 feature creates such
+/// a schedule — the editor's picker refused painted designs, Lumina chat's
+/// scheduling intents carry the cloud's effect JSON, autopilot and commercial
+/// events carry library or cloud payloads, Game Day refuses a painted base,
+/// and dated nights go through the lease path — so this guards against an
+/// older or foreign writer only, and the sentence says what the owner can do.
 String designApiPresetStrayMessage(String name) =>
     '"$name" is a painted design that reached your schedule without being '
     "checked against your controller, so it wasn't saved to the controller "
-    "and won't run. Open the schedule and pick the design again from My "
-    'Designs.';
+    "and this schedule won't run. The schedule stays in your list: open it "
+    'and pick the design again from My Designs to arm it.';
 
 String designApiPresetMalformedMessage(String name) =>
     "\"$name\" can't be saved to your controller as it is stored. Open the "
