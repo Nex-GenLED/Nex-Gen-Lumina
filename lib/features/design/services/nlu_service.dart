@@ -509,21 +509,36 @@ class NLUService {
     return null;
   }
 
+  /// The vocabulary's words that only say "it moves" and name no look. They
+  /// decide the effect only when the clause names no explicit effect word.
+  static const _genericMotionWords = {
+    'moving', 'move', 'run', 'running', 'traveling', 'travel',
+  };
+
+  /// The first motion type, in table order, with a word of the asked kind
+  /// in [clause]: explicit effect words, or the generic motion words.
+  MotionType? _motionTypeOf(String clause, {required bool explicit}) {
+    for (final entry in _motionTypeSynonyms.entries) {
+      for (final synonym in entry.value) {
+        if (_genericMotionWords.contains(synonym) == explicit) continue;
+        if (clause.contains(synonym)) return entry.key;
+      }
+    }
+    return null;
+  }
+
   /// Parse motion settings from a clause.
   _MotionParseResult _parseMotion(String clause) {
     final ambiguities = <AmbiguityFlag>[];
 
-    // Check for motion type
-    MotionType? motionType;
-    for (final entry in _motionTypeSynonyms.entries) {
-      for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
-          motionType = entry.key;
-          break;
-        }
-      }
-      if (motionType != null) break;
-    }
+    // Check for motion type. An explicit effect word (chase, wave, twinkle,
+    // pulse, … as the vocabulary defines them) decides; a generic motion
+    // word ("moving", "running") decides only when the clause names no
+    // effect. Before, the scan took the first list in table order with any
+    // word present, and the chase list's "moving" made the placeholder's
+    // own "wave effect moving right to left" a chase.
+    final motionType = _motionTypeOf(clause, explicit: true) ??
+        _motionTypeOf(clause, explicit: false);
 
     if (motionType == null) {
       return _MotionParseResult(motion: null, ambiguities: []);
@@ -837,7 +852,8 @@ const _motionTypeSynonyms = <MotionType, List<String>>{
   ],
   MotionType.wave: [
     'wave', 'waving', 'ripple', 'rippling', 'undulating', 'rolling',
-    'pulse', 'pulsing', 'breathing'
+    // 'pulse', 'pulsing', 'breathing' moved to the pulse list they already
+    // sat in: scanned here first, they made a prompted pulse a wave (67).
   ],
   MotionType.twinkle: [
     'twinkle', 'twinkling', 'sparkle', 'sparkling', 'glitter', 'glittering',

@@ -212,25 +212,16 @@ void main() {
       expect(motionEffectOf(saved)!.effectId, 28);
     });
 
-    test('a wave, right to left: fx 67 on every bus', () async {
+    test('the placeholder example\'s motion clause: a wave, fx 67, right to left, '
+        'on every bus', () async {
       final res = await orch.processUserInput(
-          prompt: 'wave effect right to left', config: _roof());
+          prompt: 'wave effect moving right to left', config: _roof());
       expect(res.isReady, isTrue, reason: '${res.status}: ${res.errorMessage}');
+      expect(res.intent!.layers.single.motion!.motionType, MotionType.wave);
       expect(res.pattern!.effectId, 67);
       expect(res.pattern!.motionDirection, MotionDirection.rightToLeft);
       final seg = (res.pattern!.wledPayload['seg'] as List).cast<Map<String, dynamic>>();
       expect(seg.map((s) => s['fx']), [67, 67]);
-    });
-
-    test('the placeholder example\'s motion clause is a CHASE (pre-existing, '
-        'not changed here): "moving" is a chase word in the motion table and '
-        'chase is scanned first', () async {
-      final res = await orch.processUserInput(
-          prompt: 'wave effect moving right to left', config: _roof());
-      expect(res.isReady, isTrue, reason: '${res.status}: ${res.errorMessage}');
-      expect(res.intent!.layers.single.motion!.motionType, MotionType.chase);
-      expect(res.pattern!.effectId, 28, reason: 'runs as a chase, not a still picture');
-      expect(res.pattern!.motionDirection, MotionDirection.rightToLeft);
     });
   });
 }
