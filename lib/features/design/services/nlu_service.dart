@@ -296,7 +296,24 @@ class NLUService {
       priority: index,
     );
 
-    return _ClauseParseResult(layer: layer, ambiguities: ambiguities);
+    // Every ambiguity this clause raised belongs to this layer. The
+    // clarification sheet applies an answer only to the layer the question
+    // names (ClarificationQuestion.affectedLayerId, copied from here) and
+    // skips the layer change when it names none — so, before this, "Which
+    // direction?" answered "Right to left" left the design moving left to
+    // right. The constraint solver already stamps its own ambiguities.
+    final bound = [
+      for (final a in ambiguities)
+        AmbiguityFlag(
+          type: a.type,
+          description: a.description,
+          choices: a.choices,
+          affectedLayerId: layer.id,
+          sourceClause: a.sourceClause,
+        ),
+    ];
+
+    return _ClauseParseResult(layer: layer, ambiguities: bound);
   }
 
   /// Parse zone selector from a clause.
