@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -314,8 +315,26 @@ Future<CfgPushOutcome> pushCfgWithVerify({
 /// steady-state sync (few or zero real psaves) exactly as fast as before.
 const Duration kControllerWritePace = Duration(milliseconds: 300);
 
+/// C2 — settle before the one retry of a failed presets.json read-back after
+/// a design preset write, and the budget for the whole read-back (two reads
+/// and the settle). 1.5 s covers the flash commit the write itself does
+/// (bench 2026-11-06: every design read-back answered within 0.4 s once the
+/// write returned); 5 s is the owner's bound.
+const Duration kDesignReadBackSettle = Duration(milliseconds: 1500);
+const Duration kDesignReadBackBudget = Duration(seconds: 5);
+
 class ScheduleSyncService {
-  const ScheduleSyncService({this.paceDelay = kControllerWritePace});
+  const ScheduleSyncService({
+    this.paceDelay = kControllerWritePace,
+    this.readBackSettle = kDesignReadBackSettle,
+    this.readBackBudget = kDesignReadBackBudget,
+  });
+
+  /// C2 — after a design preset write, a presets.json read that fails is
+  /// retried ONCE after this settle (the controller is committing the file);
+  /// the whole read-back is bounded by [readBackBudget]. Tests pass zero.
+  final Duration readBackSettle;
+  final Duration readBackBudget;
 
   /// Floor delay BETWEEN consecutive controller WRITES inside one [syncAll]
   /// (audit/SYNC_PACING_FIX_STATUS.md §1(a) — previously absent entirely).
@@ -1011,6 +1030,11 @@ class ScheduleSyncService {
     // never saved (the silent-arm bug). A macro is only armed if its preset id
     // is in this set or maps to a legacy on/off/brightness preset.
     final Set<int> savedPresetIds = <int>{};
+    // C2 — slots written this sync whose read-back could not be done
+    // (presets.json unreadable twice within the budget): kept on the
+    // controller (never purged) but NOT armed until a later sync reads them
+    // back; disjoint from savedPresetIds, which is the armable set.
+    final Set<int> keepPresetIds = <int>{};
 
     // ── Idempotent-write + capture/restore scaffolding ──────────────────
     // ROOT CAUSE this guards against: every `savePreset` POSTs its inline
@@ -1145,12 +1169,18 @@ class ScheduleSyncService {
       /// expectation names but the controller lacks a FAILURE rather than
       /// silence — see presetSatisfies.
       bool scoped = false,
-      /// ROOFLINE SLICE 2 — run after a successful write; false means the
-      /// controller does not hold what was sent. The slot is then NOT counted
-      /// as armable and [readBackMismatchMessage] is reported (owner decision
-      /// 6: read back after every write, a mismatch is a failure).
-      Future<bool> Function()? readBackVerify,
+      /// ROOFLINE SLICE 2 — run after a successful write (owner decision 6:
+      /// read back after every write). [DesignReadBack.landed] arms the slot
+      /// and clears its repair counter; [DesignReadBack.mismatch] is the one
+      /// outcome that counts a repair attempt — the slot is NOT armable and
+      /// [readBackMismatchMessage] is reported; [DesignReadBack.unreadable]
+      /// (C2) is "written, not verified": not armed, not purged
+      /// (keepPresetIds), no attempt counted, [readBackUnverifiedMessage]
+      /// reported — the next sync re-reads and arms without rewriting when
+      /// the stored hash matches.
+      Future<DesignReadBack> Function()? readBackVerify,
       String? readBackMismatchMessage,
+      String? readBackUnverifiedMessage,
     }) async {
       bool isSatisfied(Map<String, dynamic> existingDef) => alwaysWrite
           ? false
@@ -1226,6 +1256,10 @@ class ScheduleSyncService {
       // A CONVERGED slot (see `converged` above) is not consulted and its
       // counter is cleared: the write that follows is Option A's policy, not
       // a repair attempt, and it cannot be "the save that is not fixing it".
+      // C2 — a slot with a read-back records its attempt AFTER the read-back,
+      // and only for a readable mismatch: an unreadable presets.json is not a
+      // save that failed to converge, it is a save nobody could look at yet.
+      final deferAttempt = readBackVerify != null;
       if (converged) {
         await repairAttempts.recordSatisfied(id);
       } else {
@@ -1236,7 +1270,7 @@ class ScheduleSyncService {
           savedPresetIds.add(id); // left alone deliberately, not lost
           return;
         }
-        await repairAttempts.recordAttempt(id);
+        if (!deferAttempt) await repairAttempts.recordAttempt(id);
       }
 
       // PACE. Only reached once every skip/refuse branch above has returned,
@@ -1254,18 +1288,30 @@ class ScheduleSyncService {
       if (ok) {
         didWriteAnyPreset = true;
         if (readBackVerify != null) {
-          bool landed;
+          DesignReadBack outcome;
           try {
-            landed = await readBackVerify();
+            outcome = await readBackVerify();
           } catch (e) {
             debugPrint('ScheduleSync: read-back of preset $id threw — $e');
-            landed = false;
+            outcome = DesignReadBack.unreadable;
           }
-          if (!landed) {
-            presetErrors.add(readBackMismatchMessage ??
-                'preset $id ($name) did not read back as written — not armed');
-            debugPrint('ScheduleSync: preset $id ($name) READ-BACK MISMATCH');
-            return; // not in savedPresetIds: not armed
+          switch (outcome) {
+            case DesignReadBack.landed:
+              await repairAttempts.recordSatisfied(id);
+              break;
+            case DesignReadBack.mismatch:
+              await repairAttempts.recordAttempt(id);
+              presetErrors.add(readBackMismatchMessage ??
+                  'preset $id ($name) did not read back as written — not armed');
+              debugPrint('ScheduleSync: preset $id ($name) READ-BACK MISMATCH');
+              return; // not in savedPresetIds: not armed
+            case DesignReadBack.unreadable:
+              keepPresetIds.add(id); // written: never purged
+              presetErrors.add(readBackUnverifiedMessage ??
+                  'preset $id ($name) was written but could not be read back '
+                      '— not armed until a later sync verifies it');
+              debugPrint('ScheduleSync: preset $id ($name) WRITTEN, NOT VERIFIED');
+              return; // not armed, not purged, no attempt counted
           }
         }
         savedPresetIds.add(id);
@@ -1570,13 +1616,20 @@ class ScheduleSyncService {
                 state: body,
                 name: name,
                 // NOT alwaysWrite: the hash decides (flash safety).
-                readBackVerify: () async {
-                  final read = await svcForReadBack.readPresets();
-                  if (!read.isKnown) return false;
-                  final got = read.presets[presetId];
-                  return got != null && presetPayloadHash(got) == expectedHash;
-                },
+                // C2 — read back; an unreadable presets.json gets ONE retry
+                // after a short settle, the whole read-back bounded by the
+                // budget. Unreadable twice is "written, not verified", never
+                // a mismatch.
+                readBackVerify: () => _readBackDesignPreset(
+                  svcForReadBack,
+                  presetId: presetId,
+                  expectedHash: expectedHash,
+                  settle: readBackSettle,
+                  budget: readBackBudget,
+                ),
                 readBackMismatchMessage: designApiPresetReadBackMessage(plain),
+                readBackUnverifiedMessage:
+                    designApiPresetUnverifiedMessage(plain),
               ));
           if (!savedPresetIds.contains(presetId)) {
             // Gate refusal, non-convergence, a failed save or a read-back
@@ -1669,9 +1722,13 @@ class ScheduleSyncService {
     // NOT apply live state, so it never trips didWriteAnyPreset / restore.
     // Never pdel on an unreadable read — we cannot tell an orphan from a slot
     // we simply failed to see, and pdel is what corrupts presets.json (P1-52).
+    // C2 — a slot written this sync but not yet read back (keepPresetIds) is
+    // not an orphan: it is kept for the next sync to verify.
     if (activeRepo is WledService && !presetsUnreadable) {
       for (var id = _firstSchedulePresetId; id <= _lastSchedulePresetId; id++) {
-        if (existingPresets.containsKey(id) && !savedPresetIds.contains(id)) {
+        if (existingPresets.containsKey(id) &&
+            !savedPresetIds.contains(id) &&
+            !keepPresetIds.contains(id)) {
           final deleted = await activeRepo.deletePreset(id);
           if (!deleted) {
             debugPrint('ScheduleSync: failed to delete orphaned preset $id');
@@ -2320,6 +2377,42 @@ class ScheduleSyncService {
           <String, dynamic>{'id': id, 'on': false},
     ];
     return out;
+  }
+
+  /// C2 — the read-back after a design preset write. presets.json is read;
+  /// if it cannot be read, ONE more read after [settle]; the whole thing is
+  /// bounded by [budget] (a timeout counts as unreadable). A readable store
+  /// decides landed/mismatch by the stored copy's hash against
+  /// [expectedHash]; unreadable twice is [DesignReadBack.unreadable] —
+  /// written, not verified — never a mismatch.
+  static Future<DesignReadBack> _readBackDesignPreset(
+    WledService svc, {
+    required int presetId,
+    required String expectedHash,
+    required Duration settle,
+    required Duration budget,
+  }) async {
+    Future<DesignReadBack> attempt() async {
+      var read = await svc.readPresets();
+      if (!read.isKnown) {
+        if (settle > Duration.zero) await Future<void>.delayed(settle);
+        read = await svc.readPresets();
+      }
+      if (!read.isKnown) return DesignReadBack.unreadable;
+      final got = read.presets[presetId];
+      return got != null && presetPayloadHash(got) == expectedHash
+          ? DesignReadBack.landed
+          : DesignReadBack.mismatch;
+    }
+
+    if (budget <= Duration.zero) return attempt();
+    try {
+      return await attempt().timeout(budget);
+    } on TimeoutException {
+      debugPrint('ScheduleSync: read-back of preset $presetId exceeded '
+          '${budget.inMilliseconds} ms — written, not verified');
+      return DesignReadBack.unreadable;
+    }
   }
 
   /// ROOFLINE SLICE 2 — the controller's firmware version and model

@@ -569,6 +569,29 @@ String designApiPresetReadBackMessage(String name) =>
     "\"$name\" didn't land on your controller as written, so its schedule "
     "isn't armed. Try syncing again from your home network.";
 
+/// C2 — the write went out but presets.json could not be read back (twice,
+/// within the budget): written, not verified. Not armed, not purged, no
+/// repair attempt counted; the next sync re-reads and arms without rewriting
+/// when the stored hash matches.
+String designApiPresetUnverifiedMessage(String name) =>
+    "\"$name\" was written to your controller but couldn't be read back yet, "
+    "so its schedule isn't armed this time. The next sync will check it and "
+    'arm it without writing again.';
+
+/// C2 — what the read-back after a design preset write found.
+enum DesignReadBack {
+  /// presets.json read and the stored copy hashes as expected: arm it.
+  landed,
+
+  /// presets.json read and the stored copy differs: not armed, a repair
+  /// attempt (the only outcome that advances the non-convergence counter).
+  mismatch,
+
+  /// presets.json could not be read (twice, within the budget): written, not
+  /// verified — not armed, not purged, no attempt counted.
+  unreadable,
+}
+
 /// "Just this day" with a painted design: the one-night lease path is not a
 /// nightly design mechanism (audit §B.2) and refuses, in the editor and at
 /// the lease write.

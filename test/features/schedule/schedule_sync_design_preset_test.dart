@@ -88,6 +88,21 @@ class _FakeService extends WledService {
   Future<Map<int, Map<String, dynamic>>> fetchPresets() async =>
       {for (final e in device.entries) e.key: Map.of(e.value)};
 
+  /// C2 — scripted outcomes for successive `readPresets` calls (the sync's
+  /// opening read, then each read-back attempt): true = readable, false =
+  /// unreadable. Exhausted → readable. Every call is counted.
+  final List<bool> readOutcomes = [];
+  int presetReads = 0;
+
+  @override
+  Future<PresetsRead> readPresets() async {
+    presetReads++;
+    final readable = readOutcomes.isEmpty ? true : readOutcomes.removeAt(0);
+    if (!readable) return const PresetsRead.unreadable('scripted');
+    if (device.isEmpty) return const PresetsRead.deviceEmpty();
+    return PresetsRead.available(await fetchPresets());
+  }
+
   @override
   Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
     final ins = (lastCfg?['timers'] as Map?)?['ins'];
@@ -282,7 +297,8 @@ Map<String, dynamic> _storedCopy(Map<String, dynamic> body, String name) =>
 
 void main() {
   setUp(resetRepairAttempts);
-  const svc = ScheduleSyncService(paceDelay: Duration.zero);
+  const svc = ScheduleSyncService(
+      paceDelay: Duration.zero, readBackSettle: Duration.zero);
 
   group('stray per-pixel payload (any other path) is refused at the builder',
       () {
@@ -620,6 +636,91 @@ void main() {
           contains('roofline layout no longer matches'));
       expect(repo.armedMacros.where((m) => m >= 10 && m <= 25), isEmpty);
       expect(repo.deletedPresetIds, contains(10));
+    });
+  });
+
+  // C2 — the read-back after a write: an unreadable presets.json gets one
+  // retry after a settle; unreadable twice is "written, not verified" (not
+  // armed, not purged, no attempt counted); only a READABLE mismatch advances
+  // the non-convergence counter. The scripted outcomes cover the sync's
+  // opening read first, then each read-back attempt.
+  group('C2 — the read-back after a design preset write', () {
+    test('unreadable, then readable on the retry: landed, armed, no attempt',
+        () async {
+      final repo = _FakeService(cfg: _buses(kThree), state: _live(kThree))
+        ..readOutcomes.addAll([true, false, true]);
+
+      final result = await svc.syncAll(_ref(repo), [_designSchedule(_body(kThree))]);
+
+      expect(repo.savedPresetIds, contains(10), reason: 'one write');
+      expect(repo.presetReads, 3, reason: 'opening read, failed read-back, retry');
+      expect(repo.armedMacros, contains(10));
+      expect(result.presetErrors, isEmpty);
+      expect(await repairAttempts.attempts(10), 0,
+          reason: 'landed clears the counter');
+    });
+
+    test('unreadable twice: written, not verified — not armed, not purged, '
+        'no attempt; the next sync arms it without rewriting', () async {
+      final body = _body(kThree);
+      final stale = _storedCopy(body, kName);
+      (stale['seg'][3]['i'] as List)[2] = [254, 0, 0, 0];
+      final repo = _FakeService(
+        cfg: _buses(kThree),
+        state: _live(kThree),
+        presets: {10: stale},
+      )..readOutcomes.addAll([true, false, false]);
+
+      final first = await svc.syncAll(
+          _ref(repo), [_designSchedule(body).copyWith(presetId: 10)]);
+
+      expect(repo.savedPresetIds.where((id) => id >= 10 && id <= 25), [10],
+          reason: 'written once (the ladder presets 1-5 are outside the band)');
+      expect(repo.presetReads, 3);
+      expect(repo.deletedPresetIds, isNot(contains(10)),
+          reason: 'a slot written this sync is never purged');
+      expect(repo.armedMacros.where((m) => m >= 10 && m <= 25), isEmpty,
+          reason: 'not armed until a later sync reads it back');
+      expect(first.presetErrors.join('\n'),
+          contains("couldn't be read back yet"));
+      expect(first.presetErrors.join('\n'),
+          isNot(contains("didn't land on your controller as written")));
+      expect(await repairAttempts.attempts(10), 0,
+          reason: 'unreadable is not a repair attempt');
+
+      // The device now holds the written copy; the next sync reads it.
+      final next = _FakeService(
+          cfg: _buses(kThree), state: _live(kThree), presets: repo.device);
+      final second = await svc.syncAll(
+          _ref(next), [_designSchedule(body).copyWith(presetId: 10)]);
+
+      expect(next.savedPresetIds, isNot(contains(10)), reason: 'no rewrite');
+      expect(next.armedMacros, contains(10));
+      expect(second.presetErrors, isEmpty);
+    });
+
+    test('a readable mismatch advances the counter and is not armed', () async {
+      final repo = _FakeService(
+        cfg: _buses(kThree),
+        state: _live(kThree),
+        storeMutation: (stored) {
+          final seg = stored['seg'];
+          final paint = seg is List
+              ? seg.cast<Map>().where((s) => s['i'] is List).firstOrNull
+              : null;
+          final i = paint?['i'];
+          if (i is List) i[2] = [0, 0, 0, 0];
+        },
+      );
+
+      final result = await svc.syncAll(_ref(repo), [_designSchedule(_body(kThree))]);
+
+      expect(repo.presetReads, 2, reason: 'opening read, one read-back');
+      expect(result.presetErrors.join('\n'),
+          contains("didn't land on your controller as written"));
+      expect(repo.armedMacros.where((m) => m >= 10 && m <= 25), isEmpty);
+      expect(await repairAttempts.attempts(10), 1,
+          reason: 'the one outcome that counts');
     });
   });
 }
