@@ -201,6 +201,29 @@ class NLUService {
     return out;
   }
 
+  // ── The effect a prompted motion runs as ───────────────────────────────
+  // The same ids the studio's clarification sheet applies when the owner
+  // taps an effect chip (ClarificationService._applyEffectChoice) and the
+  // model's named constructors use (chaseLeftToRight 28, wave 67). Before
+  // this, a prompted motion carried no id: the composer read "no id" as "no
+  // effect" and emitted the still picture, the stored design said
+  // has_motion with effect_id 0, and motionEffectOf() read it as static —
+  // so "blue chase" typed and the "Chase" chip tapped behaved differently.
+  // A motion with no entry here (scan: in no existing table) carries no id
+  // and stays a still picture rather than guess one.
+  static const _motionEffectIds = <MotionType, int>{
+    MotionType.chase: 28, // WLED Chase
+    MotionType.wave: 67, // WLED Colorwaves
+    MotionType.twinkle: 80, // WLED Twinkle
+    MotionType.pulse: 2, // WLED Breathe
+    MotionType.flow: 68, // WLED Flow
+  };
+
+  /// The WLED effect id a prompted [type] runs as, or null when no existing
+  /// table names one. Public + static so the drift guard can hold it against
+  /// the clarification sheet.
+  static int? effectIdFor(MotionType type) => _motionEffectIds[type];
+
   /// Split a prompt into separate clauses for layer parsing.
   List<String> _splitIntoClauses(String prompt) {
     // Split on common clause separators
@@ -562,6 +585,7 @@ class NLUService {
         direction: direction,
         speed: speed,
         reverse: direction == MotionDirection.rightToLeft,
+        effectId: effectIdFor(motionType),
       ),
       ambiguities: ambiguities,
     );
