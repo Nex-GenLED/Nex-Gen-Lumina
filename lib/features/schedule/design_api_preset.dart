@@ -49,18 +49,24 @@ import 'package:nexgen_command/features/wled/device_channel.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 
-/// Hard ceiling on a design preset's API body, in BYTES, for the WHOLE body
-/// across all buses as it goes over the wire (`o`, `on`, `bri`, every bus
-/// entry with its `i`, plus `psave` and `n`).
+/// Ceiling on a design preset's API body in BYTES, for the WHOLE body across
+/// all buses as it goes over the wire (`o`, `on`, `bri`, every entry with its
+/// `i`, plus `psave` and `n`) — a SANITY limit beside the element cap
+/// ([kDesignApiPresetMaxElements]), which is the limit the firmware enforces.
 ///
-/// PROVISIONAL. The bench-measured ceiling for a `/json/state` POST is about
-/// 6.0 KB before WLED answers HTTP 400 `{"error":9}` (per_pixel.dart), and the
-/// file-load path an API preset takes at fire time has not been measured at
-/// all. 5,000 keeps headroom under the known POST ceiling until the bench
-/// calibration (docs/bench/roofline_slice2_bench_2026-11-05.md, step 1: bodies
-/// of 2 / 4 / 6 / 8 / 12 KB saved, read back and fired on the spare) sets the
-/// final value. Change it HERE only; nothing else states a number.
-const int kDesignApiPresetMaxBytes = 5000;
+/// Derivation (bench 2026-11-06, spare .179, WLED 0.15.4, classic ESP32;
+/// bench-s2-results/results.md, step 1): the firmware refuses by element
+/// count, so the byte ceiling depends on how many digits each element
+/// carries. A typical body (two-digit indices, three-digit colours) passed at
+/// 6,152 B and was refused at 6,259 B; the worst realistic shape (one-digit
+/// indices, small colour values) passed at 4,505 B and was refused at
+/// 4,700 B with HTTP 400 `{"error":9}`. The audit's "about 6.0 KB" did not
+/// reproduce: 6,007 B passed. 15 % headroom under the dense failure is
+/// 3,995 B, so 4,000 — the former 5,000 admitted a 4,700 B dense body the
+/// controller refuses. The same number also bounds presets.json growth per
+/// scheduled design until the growth bench (toward the 32 KB figure in the
+/// audit) is run. Change it HERE only; nothing else states a number.
+const int kDesignApiPresetMaxBytes = 4000;
 
 /// WLED firmware versions on which a nightly painted-design preset has been
 /// bench-proven end to end (save, read back, fire by timer from master-off,

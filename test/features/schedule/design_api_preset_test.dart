@@ -270,8 +270,9 @@ void main() {
           reason: 'the name (slots 10 and 25 are both two digits)');
     });
 
-    test('the cap is one named constant, provisionally 5,000', () {
-      expect(kDesignApiPresetMaxBytes, 5000);
+    test('the cap is one named constant, 4,000 (bench 2026-11-06: the dense '
+        'shape was refused at 4,700 B and passed at 4,505 B)', () {
+      expect(kDesignApiPresetMaxBytes, 4000);
     });
 
     test('a simple three-bus design is well under the cap → allowed', () {
@@ -290,8 +291,8 @@ void main() {
       expect(v.body, isNull, reason: 'nothing to store on a refusal');
       expect(v.offersEditor, isTrue);
       expect(v.message, contains('"Porch stripes"'));
-      expect(v.message, contains('5,000 bytes'));
-      expect(v.message, contains('about 5.0 KB'));
+      expect(v.message, contains('4,000 bytes'));
+      expect(v.message, contains('about 4.0 KB'));
       expect(v.message, contains('simplify'));
     });
 
