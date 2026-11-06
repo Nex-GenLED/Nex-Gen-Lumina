@@ -1497,11 +1497,16 @@ class ScheduleSyncService {
                 'match the live buses ${gateExpectedShape.join(' ')}');
             refusal = designApiPresetLayoutChangedMessage(plain);
           } else {
-            final ver = await _firmwareVersionOrNull(activeRepo);
+            final info = await _controllerInfoOrNull(activeRepo);
+            final ver = info?.ver;
             if (ver == null || ver.trim().isEmpty) {
               refusal = designScheduleFirmwareUnreadableMessage(plain);
             } else if (!isDesignApiPresetFirmwareProven(ver)) {
               refusal = designScheduleFirmwareUnprovenMessage(plain, ver.trim());
+            } else if (!isDesignApiPresetArchProven(info?.arch)) {
+              // B4 — only the classic ESP32 is proven; the element ceiling is
+              // that model's parser pool.
+              refusal = designScheduleArchUnprovenMessage(plain, info?.arch);
             } else {
               // B3 — both caps at write time, the same question the picker
               // asked: the element count the firmware enforces and the byte
@@ -2291,13 +2296,17 @@ class ScheduleSyncService {
     return out;
   }
 
-  /// ROOFLINE SLICE 2 — the controller's firmware version (`/json/info`
-  /// `ver`), or null when the read fails. The same read the installer and the
-  /// restart watch make; nothing is cached, because the gate must judge the
-  /// controller the sync is talking to now.
-  static Future<String?> _firmwareVersionOrNull(WledService svc) async {
+  /// ROOFLINE SLICE 2 — the controller's firmware version and model
+  /// (`/json/info` `ver` and `arch`, ONE read), or null when the read fails.
+  /// The same read the installer and the restart watch make; nothing is
+  /// cached, because the gate must judge the controller the sync is talking
+  /// to now.
+  static Future<({String ver, String arch})?> _controllerInfoOrNull(
+      WledService svc) async {
     try {
-      return (await svc.getInfo())?.ver;
+      final info = await svc.getInfo();
+      if (info == null) return null;
+      return (ver: info.ver, arch: info.arch);
     } catch (e) {
       debugPrint('ScheduleSync: firmware version read failed — $e');
       return null;

@@ -44,6 +44,7 @@ class _FakeService extends WledService {
     required this.state,
     this.provisionsTo,
     this.firmware = '0.15.4',
+    this.arch = 'esp32',
     Map<int, Map<String, dynamic>>? presets,
     this.storeMutation,
   })  : device = {...?presets},
@@ -55,6 +56,9 @@ class _FakeService extends WledService {
 
   /// What `/json/info` reports as `ver`; null models an unreachable read.
   final String? firmware;
+
+  /// What `/json/info` reports as `arch` ('' models the key missing).
+  final String arch;
 
   /// presets.json as the controller holds it, updated by every psave.
   final Map<int, Map<String, dynamic>> device;
@@ -78,7 +82,7 @@ class _FakeService extends WledService {
   @override
   Future<WledInfoResponse?> getInfo() async => firmware == null
       ? null
-      : WledInfoResponse(maxseg: 10, arch: 'esp32', ver: firmware!);
+      : WledInfoResponse(maxseg: 10, arch: arch, ver: firmware!);
 
   @override
   Future<Map<int, Map<String, dynamic>>> fetchPresets() async =>
@@ -452,6 +456,25 @@ void main() {
         _FakeService(cfg: _buses(kThree), state: _live(kThree), firmware: null),
         _designSchedule(_body(kThree)),
         saying: "couldn't read your controller's firmware version",
+      );
+    });
+
+    // B4 — the controller model from the same /json/info read; only the
+    // classic ESP32 ("esp32", as the spare reported) is proven.
+    test('arch unknown (esp32s3): refused as an unproven model', () async {
+      final result = await refuse(
+        _FakeService(cfg: _buses(kThree), state: _live(kThree), arch: 'esp32s3'),
+        _designSchedule(_body(kThree)),
+        saying: 'This controller model is not proven for roofline schedules',
+      );
+      expect(result.presetErrors.join('\n'), contains('esp32s3'));
+    });
+
+    test('arch missing from /json/info: refused as an unproven model', () async {
+      await refuse(
+        _FakeService(cfg: _buses(kThree), state: _live(kThree), arch: ''),
+        _designSchedule(_body(kThree)),
+        saying: 'This controller model is not proven for roofline schedules',
       );
     });
 

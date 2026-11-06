@@ -18,8 +18,10 @@ import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
 class _Lan extends WledService {
-  _Lan({this.ver = '0.15.4', this.infoThrows = false}) : super('http://mock');
+  _Lan({this.ver = '0.15.4', this.arch = 'esp32', this.infoThrows = false})
+      : super('http://mock');
   final String? ver;
+  final String arch;
   final bool infoThrows;
   int infoReads = 0;
 
@@ -28,7 +30,7 @@ class _Lan extends WledService {
     infoReads++;
     if (infoThrows) throw StateError('unreachable');
     if (ver == null) return null;
-    return WledInfoResponse(maxseg: 10, arch: 'esp32', ver: ver!);
+    return WledInfoResponse(maxseg: 10, arch: arch, ver: ver!);
   }
 }
 
@@ -99,6 +101,22 @@ void main() {
     expect((v.body!['seg'] as List).take(3).map((s) => s['stop']),
         [100, 200, 300]);
     expect(lan.infoReads, 1, reason: 'one firmware read, on the LAN');
+  });
+
+  // B4 — the model comes from the SAME read as the version.
+  test('an unproven model (arch esp8266) is refused on one read', () async {
+    final lan = _Lan(arch: 'esp8266');
+    final v = await designSchedulePickVerdict(container(repo: lan).read, design());
+    expect(v.verdict, DesignScheduleVerdict.archUnproven);
+    expect(v.message, contains('not proven for roofline schedules'));
+    expect(v.message, contains('esp8266'));
+    expect(lan.infoReads, 1, reason: 'ver and arch come from one /json/info');
+  });
+
+  test('a missing arch is refused as an unproven model', () async {
+    final v = await designSchedulePickVerdict(
+        container(repo: _Lan(arch: '')).read, design());
+    expect(v.verdict, DesignScheduleVerdict.archUnproven);
   });
 
   test('a relay repository is off the LAN: refused, no firmware read', () async {

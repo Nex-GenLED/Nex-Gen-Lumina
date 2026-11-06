@@ -153,6 +153,7 @@ void main() {
         liveChannels: live,
         liveControllerId: 'ctl-a',
         firmwareVersion: '0.15.4',
+        architecture: 'esp32',
       );
       expect(v.verdict, DesignScheduleVerdict.tooLarge);
       expect(v.offersEditor, isTrue);

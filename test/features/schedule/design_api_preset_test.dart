@@ -113,6 +113,7 @@ DesignScheduleEligibility eligible(
   List<DeviceChannel> live = kLiveThree,
   String? controllerId = 'ctl-a',
   String? firmware = '0.15.4',
+  String? arch = 'esp32',
   int count = 0,
 }) =>
     designScheduleEligibility(
@@ -121,6 +122,7 @@ DesignScheduleEligibility eligible(
       liveChannels: live,
       liveControllerId: controllerId,
       firmwareVersion: firmware,
+      architecture: arch,
       existingDesignScheduleCount: count,
     );
 
@@ -309,6 +311,7 @@ void main() {
           liveChannels: kLiveThree,
           liveControllerId: 'ctl-a',
           firmwareVersion: '0.15.4',
+          architecture: 'esp32',
           existingDesignScheduleCount: 0,
           presetName: pad);
       expect(at.bytes, kDesignApiPresetMaxBytes);
@@ -319,6 +322,7 @@ void main() {
           liveChannels: kLiveThree,
           liveControllerId: 'ctl-a',
           firmwareVersion: '0.15.4',
+          architecture: 'esp32',
           existingDesignScheduleCount: 0,
           presetName: '${pad}y');
       expect(over.verdict, DesignScheduleVerdict.tooLarge);
@@ -335,6 +339,66 @@ void main() {
       expect(isDesignApiPresetFirmwareProven('0.15.4-b1'), isFalse);
       expect(isDesignApiPresetFirmwareProven(''), isFalse);
       expect(isDesignApiPresetFirmwareProven(null), isFalse);
+    });
+
+    // B4 — the controller model, from the same /json/info read. The spare
+    // reported exactly "esp32" (results.md); only that is proven.
+    test('arch: esp32 only, exact after trim', () {
+      expect(kDesignApiPresetProvenArch, {'esp32'});
+      expect(isDesignApiPresetArchProven('esp32'), isTrue);
+      expect(isDesignApiPresetArchProven(' esp32 '), isTrue);
+      expect(isDesignApiPresetArchProven('esp32s3'), isFalse);
+      expect(isDesignApiPresetArchProven('esp8266'), isFalse);
+      expect(isDesignApiPresetArchProven('ESP32'), isFalse);
+      expect(isDesignApiPresetArchProven(''), isFalse);
+      expect(isDesignApiPresetArchProven(null), isFalse);
+    });
+
+    test('an unknown arch refuses with the model sentence, after the firmware '
+        'checks and before the body is built', () {
+      final v = designScheduleEligibility(
+        design: design(),
+        onLan: true,
+        liveChannels: kLiveThree,
+        liveControllerId: 'ctl-a',
+        firmwareVersion: '0.15.4',
+        architecture: 'esp32s3',
+      );
+      expect(v.verdict, DesignScheduleVerdict.archUnproven);
+      expect(v.message,
+          contains('This controller model is not proven for roofline schedules'));
+      expect(v.message, contains('esp32s3'));
+      expect(v.message, contains('"Porch stripes"'));
+      expect(v.body, isNull);
+    });
+
+    test('a missing arch refuses with the model sentence', () {
+      for (final arch in [null, '', '  ']) {
+        final v = designScheduleEligibility(
+          design: design(),
+          onLan: true,
+          liveChannels: kLiveThree,
+          liveControllerId: 'ctl-a',
+          firmwareVersion: '0.15.4',
+          architecture: arch,
+        );
+        expect(v.verdict, DesignScheduleVerdict.archUnproven, reason: '$arch');
+        expect(v.message, contains('not proven for roofline schedules'));
+        expect(v.message, isNot(contains('reports')),
+            reason: 'nothing to quote when arch is missing');
+      }
+    });
+
+    test('an unproven firmware wins over an unproven arch (owner order)', () {
+      final v = designScheduleEligibility(
+        design: design(),
+        onLan: true,
+        liveChannels: kLiveThree,
+        liveControllerId: 'ctl-a',
+        firmwareVersion: '0.15.1',
+        architecture: 'esp8266',
+      );
+      expect(v.verdict, DesignScheduleVerdict.firmwareUnproven);
     });
   });
 

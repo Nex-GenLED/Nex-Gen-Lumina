@@ -18,19 +18,27 @@ import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 
-/// The controller's firmware version (`/json/info` `ver`) from a direct-LAN
-/// service, or null for any other repository or a failed read. The same read
-/// the installer's controller check and the restart watch make; nothing is
-/// cached, so the verdict judges the controller the app is talking to now.
-Future<String?> controllerFirmwareVersion(WledRepository? repo) async {
+/// The controller's firmware version and model (`/json/info` `ver` and
+/// `arch`, one read) from a direct-LAN service, or null for any other
+/// repository or a failed read. The same read the installer's controller
+/// check and the restart watch make; nothing is cached, so the verdict
+/// judges the controller the app is talking to now.
+Future<({String ver, String arch})?> controllerInfo(
+    WledRepository? repo) async {
   if (repo is! WledService) return null;
   try {
     final info = await repo.getInfo();
-    return info?.ver;
+    if (info == null) return null;
+    return (ver: info.ver, arch: info.arch);
   } catch (_) {
     return null;
   }
 }
+
+/// The controller's firmware version (`/json/info` `ver`) alone — kept for
+/// callers that need only the version.
+Future<String?> controllerFirmwareVersion(WledRepository? repo) async =>
+    (await controllerInfo(repo))?.ver;
 
 /// The eligibility verdict for [design] from the picker, over the live
 /// providers:
@@ -52,14 +60,15 @@ Future<DesignScheduleEligibility> designSchedulePickVerdict(
   final repo = read(wledRepositoryProvider);
   final onLan = repo is WledService && !read(isRemoteModeProvider);
   final live = read(deviceChannelsProvider);
-  final firmware = onLan && design.isPositional && design.layoutStamp != null
-      ? await controllerFirmwareVersion(repo)
+  final info = onLan && design.isPositional && design.layoutStamp != null
+      ? await controllerInfo(repo)
       : null;
   return designScheduleEligibility(
     design: design,
     onLan: onLan,
     liveChannels: live,
     liveControllerId: live.isEmpty ? null : read(selectedControllerIdProvider),
-    firmwareVersion: firmware,
+    firmwareVersion: info?.ver,
+    architecture: info?.arch,
   );
 }

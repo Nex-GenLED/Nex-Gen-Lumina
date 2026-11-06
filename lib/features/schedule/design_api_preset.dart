@@ -91,6 +91,22 @@ bool isDesignApiPresetFirmwareProven(String? ver) {
   return v.isNotEmpty && kDesignApiPresetProvenFirmware.contains(v);
 }
 
+/// B4 — the controller MODEL the bench proved, as `/json/info` reports `arch`:
+/// the spare answered exactly `esp32` (bench-s2-results/results.md,
+/// snapshot of 192.168.1.179). The element ceiling is the classic ESP32's
+/// 32,767-byte parser pool; an S2 or C3 build carries a 24,576-byte pool and
+/// an ESP8266 10,240, so a design preset sized for this model would be
+/// refused by those — or stored and never fire. Missing or any other value
+/// refuses. Compared exactly after trimming; added to only by a bench.
+const Set<String> kDesignApiPresetProvenArch = <String>{'esp32'};
+
+/// True when [arch] (as `/json/info` reports it) is a proven model.
+bool isDesignApiPresetArchProven(String? arch) {
+  if (arch == null) return false;
+  final a = arch.trim();
+  return a.isNotEmpty && kDesignApiPresetProvenArch.contains(a);
+}
+
 /// True when [payload] is a WLED API-command preset body (`o:true`). This is
 /// the one key every design preset body carries and no other builder writes;
 /// the scope rule, the fan-out, the normaliser and the relay all key off it.
@@ -471,6 +487,13 @@ String designScheduleFirmwareUnprovenMessage(String name, String ver) =>
     "\"$name\" can't be scheduled on this controller yet. You can still apply "
     'it any time from My Designs.';
 
+/// B4 — `arch` missing from `/json/info`, or not a proven model.
+String designScheduleArchUnprovenMessage(String name, String? arch) =>
+    'This controller model is not proven for roofline schedules'
+    '${arch == null || arch.trim().isEmpty ? '' : ' (it reports "${arch.trim()}")'}'
+    ", so \"$name\" can't be scheduled on it yet. You can still apply it any "
+    'time from My Designs.';
+
 /// B3 — the one sentence for a body over EITHER cap, at pick time and at
 /// write time: "too detailed for the controller", both measurements and both
 /// limits named, the editor offered. Never simplified (owner decision 2 / D7).
@@ -594,7 +617,11 @@ enum DesignScheduleVerdict {
   firmwareUnreadable,
   firmwareUnproven,
 
-  /// Over [kDesignApiPresetMaxBytes]; the message offers the editor.
+  /// B4 — `/json/info` `arch` missing or not in [kDesignApiPresetProvenArch].
+  archUnproven,
+
+  /// Over [kDesignApiPresetMaxElements] or [kDesignApiPresetMaxBytes]; the
+  /// message offers the editor.
   tooLarge,
 
   /// [kMaxDesignSchedulesPerAccount] already on the schedule.
@@ -635,6 +662,9 @@ class DesignScheduleEligibility {
 /// [liveControllerId] — `selectedControllerIdProvider`; null means no
 /// expectation, so the lengths alone decide (slice 1's rule).
 /// [firmwareVersion] — `/json/info`'s `ver`; null or empty = unreadable.
+/// [architecture] — `/json/info`'s `arch` from the SAME read; missing or not
+/// in [kDesignApiPresetProvenArch] refuses (B4): only the classic ESP32 is
+/// proven, and the element ceiling is that model's parser pool.
 /// [existingDesignScheduleCount] — painted designs already on the schedule,
 /// not counting the one being edited. The SAVE path passes it (it knows the
 /// editing id); the picker leaves it at 0 and never refuses on the count.
@@ -646,6 +676,7 @@ DesignScheduleEligibility designScheduleEligibility({
   required List<DeviceChannel> liveChannels,
   String? liveControllerId,
   required String? firmwareVersion,
+  String? architecture,
   int existingDesignScheduleCount = 0,
   int presetId = kLastSchedulePresetId,
   String? presetName,
@@ -687,6 +718,10 @@ DesignScheduleEligibility designScheduleEligibility({
   if (!isDesignApiPresetFirmwareProven(ver)) {
     return DesignScheduleEligibility._(DesignScheduleVerdict.firmwareUnproven,
         message: designScheduleFirmwareUnprovenMessage(name, ver));
+  }
+  if (!isDesignApiPresetArchProven(architecture)) {
+    return DesignScheduleEligibility._(DesignScheduleVerdict.archUnproven,
+        message: designScheduleArchUnprovenMessage(name, architecture));
   }
   final body = buildDesignApiPresetBody(design);
   if (body == null) {
