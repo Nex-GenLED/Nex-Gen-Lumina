@@ -133,6 +133,74 @@ class NLUService {
     return false;
   }
 
+  // ── Direction phrases that carry a side ────────────────────────────────
+  // "left" and "right" are also the names of the two SIDES of the house (the
+  // location zone, matched by substring). A direction of motion that names a
+  // side — "left to right", "chase left", "moving to the right" — is never a
+  // place: the motion parser reads these first and the zone parser blanks
+  // them before its scans, so "left side", "on the left" and "left of house"
+  // keep meaning the place. Before this, every such prompt (the studio's own
+  // "Chase Effect" quick idea among them) became a left-side or right-side
+  // layer that no segment matched, and composed nothing.
+
+  /// Every word the parser knows as a motion, for `<motion> left/right`.
+  static final String _motionWordAlternation = _motionTypeSynonyms.values
+      .expand((names) => names)
+      .map(RegExp.escape)
+      .join('|');
+
+  /// Always a direction, with or without a motion word.
+  static final _leftToRightPhrase =
+      RegExp(r'\b(?:left to right|l to r|rightwards?)\b');
+  static final _rightToLeftPhrase =
+      RegExp(r'\b(?:right to left|r to l|leftwards?)\b');
+
+  /// The direction table's other side-carrying entries. A direction when the
+  /// clause has a motion; "red to the left of the garage" stays a place.
+  static final _towardRightPhrase =
+      RegExp(r'\b(?:to the right|from left|toward right)\b');
+  static final _towardLeftPhrase =
+      RegExp(r'\b(?:to the left|from right|toward left)\b');
+
+  /// `<motion word> [to the | toward(s) (the)] left|right` — "moving right",
+  /// "chase left", "running toward the left". Group 1 is the side.
+  static final _motionTowardSide = RegExp(
+      '\\b(?:$_motionWordAlternation) (?:to the |towards? (?:the )?)?(left|right)\\b');
+
+  static bool _hasMotionWord(String clause) => _motionTypeSynonyms.values
+      .any((names) => names.any((name) => clause.contains(name)));
+
+  /// The direction a motion clause states with a side, or null when it
+  /// states none that way. The two-word forms win: "chase left to right" is
+  /// left-to-right, not "chase left". Public + static so it can be tested
+  /// directly.
+  static MotionDirection? sideDirectionOf(String clause) {
+    if (_leftToRightPhrase.hasMatch(clause)) return MotionDirection.leftToRight;
+    if (_rightToLeftPhrase.hasMatch(clause)) return MotionDirection.rightToLeft;
+    if (_towardRightPhrase.hasMatch(clause)) return MotionDirection.leftToRight;
+    if (_towardLeftPhrase.hasMatch(clause)) return MotionDirection.rightToLeft;
+    final m = _motionTowardSide.firstMatch(clause);
+    if (m == null) return null;
+    return m.group(1) == 'right'
+        ? MotionDirection.leftToRight
+        : MotionDirection.rightToLeft;
+  }
+
+  /// [clause] with every side-carrying direction phrase blanked, for the
+  /// zone scans. Public + static so it can be tested directly.
+  static String withoutSideDirectionPhrases(String clause) {
+    var out = clause
+        .replaceAll(_leftToRightPhrase, ' ')
+        .replaceAll(_rightToLeftPhrase, ' ')
+        .replaceAll(_motionTowardSide, ' ');
+    if (_hasMotionWord(clause)) {
+      out = out
+          .replaceAll(_towardRightPhrase, ' ')
+          .replaceAll(_towardLeftPhrase, ' ');
+    }
+    return out;
+  }
+
   /// Split a prompt into separate clauses for layer parsing.
   List<String> _splitIntoClauses(String prompt) {
     // Split on common clause separators
@@ -212,12 +280,15 @@ class NLUService {
   _ZoneParseResult _parseZoneSelector(String clause, RooflineConfiguration? config) {
     final ambiguities = <AmbiguityFlag>[];
 
+    // A direction of motion that names a side is not a place.
+    final zoneClause = withoutSideDirectionPhrases(clause);
+
     // Check for architectural role references
     final roles = <ArchitecturalRole>[];
 
     for (final entry in _architecturalSynonyms.entries) {
       for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
+        if (zoneClause.contains(synonym)) {
           roles.add(entry.key);
           break;
         }
@@ -269,7 +340,7 @@ class NLUService {
     // Check for location references
     for (final entry in _locationSynonyms.entries) {
       for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
+        if (zoneClause.contains(synonym)) {
           return _ZoneParseResult(
             selector: ZoneSelector.location(entry.key),
             ambiguities: ambiguities,
@@ -281,7 +352,7 @@ class NLUService {
     // Check for level references
     for (final entry in _levelSynonyms.entries) {
       for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
+        if (zoneClause.contains(synonym)) {
           return _ZoneParseResult(
             selector: ZoneSelector.level(entry.key),
             ambiguities: ambiguities,
@@ -435,16 +506,19 @@ class NLUService {
       return _MotionParseResult(motion: null, ambiguities: []);
     }
 
-    // Check for direction
-    MotionDirection? direction;
+    // Check for direction. A direction stated with a side ("left to right",
+    // "moving right", "chase left") is read first: it is the most specific
+    // phrase, and the table's bare entries ("in", "up") match inside other
+    // words ("mov-in-g").
+    MotionDirection? direction = sideDirectionOf(clause);
     for (final entry in _directionSynonyms.entries) {
+      if (direction != null) break;
       for (final synonym in entry.value) {
         if (clause.contains(synonym)) {
           direction = entry.key;
           break;
         }
       }
-      if (direction != null) break;
     }
 
     // If we have motion but no direction, add ambiguity
