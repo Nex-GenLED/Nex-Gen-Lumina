@@ -218,11 +218,68 @@ int designApiPresetWireBytes(
   required int presetId,
   required String presetName,
 }) =>
-    utf8.encode(jsonEncode(<String, dynamic>{
+    utf8.encode(jsonEncode(_wire(body, presetId, presetName))).length;
+
+/// Hard ceiling on a design preset's API body in JSON ELEMENTS — the limit
+/// the firmware actually enforces, measured on the bench of 2026-11-06 (the
+/// spare .179, WLED 0.15.4, classic ESP32; bench-s2-results/results.md):
+///
+/// WLED parses a `/json/state` POST into an ArduinoJson pool of
+/// JSON_BUFFER_SIZE = 32,767 bytes at 16 bytes per element, about 2,047
+/// elements, and answers HTTP 400 `{"error":9}` when the body needs more. A
+/// 6,152 B body of 2,019 elements parsed, was stored, and fired by `ps` and by
+/// timer; 6,259 B / 2,055 elements was refused, as were 7,010, 8,011 and
+/// 12,005 B. The file-load path at fire time handled the same 2,019. Bytes
+/// are only a proxy: a dense body of one-digit indices and small colours was
+/// refused at 4,700 B (2,061 elements) and accepted at 4,505 B (1,971).
+///
+/// 1,700 keeps 15 % headroom under the proven 2,019. Counted by
+/// [designApiPresetWireElements]. Change it HERE only.
+const int kDesignApiPresetMaxElements = 1700;
+
+/// The JSON element count of [value] the way WLED's parser stores it:
+/// ArduinoJson gives every array element and every object member one
+/// 16-byte slot; the root container itself takes none, and strings are
+/// zero-copy on a POST. The bench counted exactly this
+/// (`1 + Σ children` per list or map, 1 per scalar, minus one for the root)
+/// and it matched the firmware's refusal point.
+int wledJsonElementCount(Object? value) => _slots(value) - 1;
+
+int _slots(Object? v) {
+  if (v is List) {
+    var n = 1;
+    for (final e in v) {
+      n += _slots(e);
+    }
+    return n;
+  }
+  if (v is Map) {
+    var n = 1;
+    for (final e in v.values) {
+      n += _slots(e);
+    }
+    return n;
+  }
+  return 1;
+}
+
+/// The wire body's element count — the body plus the `psave` slot and the
+/// preset name, exactly what [designApiPresetWireBytes] measures in bytes.
+/// Order-independent, so the pick-time and write-time counts agree.
+int designApiPresetWireElements(
+  Map<String, dynamic> body, {
+  required int presetId,
+  required String presetName,
+}) =>
+    wledJsonElementCount(_wire(body, presetId, presetName));
+
+Map<String, dynamic> _wire(
+        Map<String, dynamic> body, int presetId, String presetName) =>
+    <String, dynamic>{
       ...body,
       'psave': presetId,
       'n': presetName,
-    })).length;
+    };
 
 /// Why a stored design preset body cannot be written, or null when its shape
 /// is what [buildDesignApiPresetBody] produces: `o:true`; a `seg` list that
