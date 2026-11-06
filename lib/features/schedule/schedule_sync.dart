@@ -1503,10 +1503,13 @@ class ScheduleSyncService {
             } else if (!isDesignApiPresetFirmwareProven(ver)) {
               refusal = designScheduleFirmwareUnprovenMessage(plain, ver.trim());
             } else {
-              final bytes = designApiPresetWireBytes(rawPayload,
-                  presetId: presetId, presetName: name);
-              if (bytes > kDesignApiPresetMaxBytes) {
-                refusal = designScheduleTooLargeMessage(plain, bytes);
+              // B3 — both caps at write time, the same question the picker
+              // asked: the element count the firmware enforces and the byte
+              // sanity limit.
+              final tooDetailed = designApiPresetCapRefusal(rawPayload,
+                  presetId: presetId, presetName: name, designName: plain);
+              if (tooDetailed != null) {
+                refusal = tooDetailed;
               } else if (designSchedulesSeen >= kMaxDesignSchedulesPerAccount) {
                 refusal = designScheduleTooManyMessage(plain);
               }

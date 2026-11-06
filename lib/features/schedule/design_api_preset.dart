@@ -471,14 +471,45 @@ String designScheduleFirmwareUnprovenMessage(String name, String ver) =>
     "\"$name\" can't be scheduled on this controller yet. You can still apply "
     'it any time from My Designs.';
 
-/// Names the limit ("about 5.0 KB, 5,000 bytes") and offers the repair: open
-/// the editor and simplify. No automatic simplification (owner decision 2).
-String designScheduleTooLargeMessage(String name, int bytes) =>
-    '"$name" is too detailed to schedule: it comes to ${_kb(bytes)} '
-    '(${_thousands(bytes)} bytes), and your controller can store about '
+/// B3 — the one sentence for a body over EITHER cap, at pick time and at
+/// write time: "too detailed for the controller", both measurements and both
+/// limits named, the editor offered. Never simplified (owner decision 2 / D7).
+String designScheduleTooDetailedMessage(
+  String name, {
+  required int elements,
+  required int bytes,
+}) =>
+    '"$name" is too detailed for your controller to store as a scheduled '
+    'design: it has ${_thousands(elements)} details and comes to '
+    '${_kb(bytes)} (${_thousands(bytes)} bytes); the limit is '
+    '${_thousands(kDesignApiPresetMaxElements)} details and '
     '${_kb(kDesignApiPresetMaxBytes)} (${_thousands(kDesignApiPresetMaxBytes)} '
-    'bytes) per scheduled design. Open the design and simplify it — fewer '
-    'colours, or longer runs of one colour — then try again.';
+    'bytes). Open the design and simplify it — fewer colours, or longer runs '
+    'of one colour — then try again.';
+
+/// B3 — PURE. The caps judged on the exact wire body ([body] plus `psave`
+/// and `n`): null when both [kDesignApiPresetMaxElements] and
+/// [kDesignApiPresetMaxBytes] hold, else the customer sentence. The picker
+/// (compose time) and the sync (write time) ask this same question, so a
+/// body the editor accepted is never refused at the write for its size, and
+/// one the editor would refuse is never written.
+String? designApiPresetCapRefusal(
+  Map<String, dynamic> body, {
+  required int presetId,
+  required String presetName,
+  required String designName,
+}) {
+  final elements = designApiPresetWireElements(body,
+      presetId: presetId, presetName: presetName);
+  final bytes = designApiPresetWireBytes(body,
+      presetId: presetId, presetName: presetName);
+  if (elements <= kDesignApiPresetMaxElements &&
+      bytes <= kDesignApiPresetMaxBytes) {
+    return null;
+  }
+  return designScheduleTooDetailedMessage(designName,
+      elements: elements, bytes: bytes);
+}
 
 String designScheduleTooManyMessage(String name) =>
     'You already have $kMaxDesignSchedulesPerAccount painted designs on your '
@@ -664,13 +695,16 @@ DesignScheduleEligibility designScheduleEligibility({
     return DesignScheduleEligibility._(DesignScheduleVerdict.unstamped,
         message: designScheduleUnstampedMessage(name));
   }
+  final wireName = presetName ?? 'Pattern: $name';
   final bytes = designApiPresetWireBytes(body,
-      presetId: presetId, presetName: presetName ?? 'Pattern: $name');
-  if (bytes > kDesignApiPresetMaxBytes) {
+      presetId: presetId, presetName: wireName);
+  // B3 — both caps at compose time: the element count the firmware enforces
+  // and the byte sanity limit, one sentence, never simplified.
+  final tooDetailed = designApiPresetCapRefusal(body,
+      presetId: presetId, presetName: wireName, designName: name);
+  if (tooDetailed != null) {
     return DesignScheduleEligibility._(DesignScheduleVerdict.tooLarge,
-        message: designScheduleTooLargeMessage(name, bytes),
-        bytes: bytes,
-        offersEditor: true);
+        message: tooDetailed, bytes: bytes, offersEditor: true);
   }
   if (existingDesignScheduleCount >= kMaxDesignSchedulesPerAccount) {
     return DesignScheduleEligibility._(DesignScheduleVerdict.tooMany,
