@@ -171,25 +171,29 @@ void main() {
   });
 
   group('CalendarEntryLeaseManager.handleEntryCreated', () {
-    String todayDateKey() {
-      final d = DateTime.now();
-      return '${d.year.toString().padLeft(4, '0')}-'
-          '${d.month.toString().padLeft(2, '0')}-'
-          '${d.day.toString().padLeft(2, '0')}';
-    }
+    // D2 — a FIXED clock, injected through the manager's nowProvider: the
+    // entries are 30 and 90 minutes after it on its own date, so the test
+    // no longer flakes between 23:30 and midnight local (the on time used to
+    // roll past midnight on today's date and the lease was already expired
+    // before the refusal ran).
+    final fixedNow = DateTime(2026, 11, 6, 10, 0);
+
+    String dateKeyOf(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
 
     String hhmm(DateTime d) =>
         '${d.hour.toString().padLeft(2, '0')}:'
         '${d.minute.toString().padLeft(2, '0')}';
 
     CalendarEntry entry(Map<String, dynamic> payload) {
-      final now = DateTime.now();
       return CalendarEntry(
-        dateKey: todayDateKey(),
+        dateKey: dateKeyOf(fixedNow),
         patternName: 'Porch stripes',
         color: const Color(0xFFFF0000),
-        onTime: hhmm(now.add(const Duration(minutes: 30))),
-        offTime: hhmm(now.add(const Duration(minutes: 90))),
+        onTime: hhmm(fixedNow.add(const Duration(minutes: 30))),
+        offTime: hhmm(fixedNow.add(const Duration(minutes: 90))),
         brightness: 100,
         type: CalendarEntryType.user,
         autopilot: false,
@@ -213,10 +217,9 @@ void main() {
             .overrideWith((_) => () async {}),
       ]);
       addTearDown(container.dispose);
-      return (
-        service: service,
-        manager: container.read(calendarEntryLeaseManagerProvider),
-      );
+      final manager = container.read(calendarEntryLeaseManagerProvider)
+        ..nowProvider = () => fixedNow;
+      return (service: service, manager: manager);
     }
 
     test('an API-command body: invalidEntry, nothing psaved', () async {
