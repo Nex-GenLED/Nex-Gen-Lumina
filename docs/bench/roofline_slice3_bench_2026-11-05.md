@@ -158,6 +158,83 @@ logs (production). On the bench, confirm only the behaviour:
 
 Pass: 1 proposes colours and an effect only; 2 has no saved-design content.
 
+## Items 7–8 — the prompt-parser follow-ups (written 2026-11-06, NOT run)
+
+Two defects of the Design Studio's prompt parser, found while building slice 3
+and fixed in the two commits after the five above (`nlu_service.dart` only;
+no effect id, label or table changed). Unit-proven by
+`nlu_direction_not_location_fail_before_test` + `nlu_direction_phrases_test`
+(defect 1) and `nlu_motion_effect_id_fail_before_test` +
+`nlu_motion_effect_id_test` (defect 2). On the bench confirm only the
+behaviour. Blank studio (no "Variations of" base chosen), the spare at
+162 / 128 / 100 with the map of the common setup — no segment named "left",
+"west", "right" or "east".
+
+### Item 7 — a direction of motion is never a location zone (defect 1)
+
+Before: the parser read the bare words "left" / "right" anywhere in a clause
+as the left or right SIDE of the house, a location the composer matches by
+segment name; on this map nothing matched, so the clause composed nothing.
+
+1. Tap the **"Chase Effect"** quick idea ("Blue chase effect moving left to
+   right"). Expect the understanding panel to show the whole roofline, a
+   chase, left to right, and a preview on all three buses — NOT the red
+   "No layers produced LED assignments" error of before.
+2. Type `wave effect moving right to left` (the placeholder example's motion
+   clause) and Create Design. Expect the whole roofline, moving right to
+   left, no direction question. (It composes as a CHASE — see item 8 step 6.)
+3. Type `red moving right`. Expect the whole roofline, moving left to right
+   (before: the right side of the house, and the direction silently "inward").
+4. Type `red chase left`. Expect the whole roofline, right to left, and no
+   direction question — the side was stated.
+5. A place is still a place. In the installer's map step rename bus 2's
+   segment to **"Left run"** (a name the composer matches for the left side)
+   and save. Back in the studio type `red on the left side`: expect bus 2
+   alone painted red. Type `chase on the left side`: expect the direction
+   question (none was stated) and, after answering, bus 2 alone. Type `red to
+   the left of the garage`: expect bus 2 alone (no motion word, so "to the
+   left" is a place). Rename the segment back.
+
+Pass: 1–4 compose on the whole roofline with the stated direction and no
+question; 5 paints bus 2 alone for all three prompts.
+
+### Item 8 — a prompted motion runs as an effect (defect 2)
+
+Before: the parser's motion carried no WLED effect id, the composer read
+"no id" as "no effect" and emitted the still picture, and the saved design
+said `has_motion: true, effect_id: 0`, read back as static. Now a prompted
+word carries the id the clarification sheet's chip already applies: chase 28,
+wave 67, twinkle 80, pulse 2.
+
+1. Item 7 step 1 composed ("Chase Effect"): tap **Apply to Lights**. Expect
+   "Applied to your lights". Read `/json/state`: `seg[0..2]` each `fx 28`,
+   `sx 128`, `ix 128`, `col[0]` = `[0,0,255,0]`, no `i` frame. Before: `fx 0`
+   and a still `i` frame on every bus.
+2. Read the `/ws` live view twice, a second apart: the frame differs on every
+   bus (a running chase), blue the only lit colour.
+3. Type `wave effect right to left`, Create Design, Apply: `fx 67` on
+   `seg[0..2]`. Then `red twinkle inward` → `fx 80`; `red breathe inward` →
+   `fx 2`. Cross-check the sheet once: type `red`, and when the studio asks
+   for an effect tap **Chase** — the same `fx 28` per bus as step 1.
+4. Type `red scan inward`, Create Design, Apply. Expect a STILL picture:
+   `fx 0` and an `i` frame on every bus. Scan is in no existing effect table
+   and was left static on purpose rather than guessed.
+5. Save the step 1 design. Read the document: `composed_pattern` (decode the
+   string) carries `has_motion: true`, `effect_id: 28`, `speed: 128`. Open it
+   in My Designs: the detail screen shows it as a motion. Apply from My
+   Designs: `fx 28` on `seg[0..2]`. Before: `effect_id: 0`, shown and applied
+   as a still picture.
+6. Known and NOT fixed here — record only. (a) `wave effect moving right to
+   left` runs as a chase (`fx 28`): "moving" is a chase word in the motion
+   table and chase is scanned first. (b) `blue chase` with no direction asks
+   "Which direction should the chase effect go?"; choosing "Right to left" is
+   not applied and the design composes left to right — the parser never
+   binds a clarification to its layer; the effect id survives the question
+   either way (`fx 28`).
+
+Pass: 1–3 and 5 run the stated effect on all three buses; 4 is a still
+picture; 6 recorded as observed.
+
 ## Teardown
 
 Restore the spare to 162 / 128 / 100 if any step changed it. Delete the bench
