@@ -51,22 +51,26 @@ import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 
 /// Ceiling on a design preset's API body in BYTES, for the WHOLE body across
 /// all buses as it goes over the wire (`o`, `on`, `bri`, every entry with its
-/// `i`, plus `psave` and `n`) — a SANITY limit beside the element cap
-/// ([kDesignApiPresetMaxElements]), which is the limit the firmware enforces.
+/// `i`, plus `psave` and `n`) — a BACKSTOP beside the element cap
+/// ([kDesignApiPresetMaxElements]), which is the limit the firmware enforces
+/// and the cap that decides first for a typical body.
 ///
 /// Derivation (bench 2026-11-06, spare .179, WLED 0.15.4, classic ESP32;
-/// bench-s2-results/results.md, step 1): the firmware refuses by element
-/// count, so the byte ceiling depends on how many digits each element
-/// carries. A typical body (two-digit indices, three-digit colours) passed at
-/// 6,152 B and was refused at 6,259 B; the worst realistic shape (one-digit
-/// indices, small colour values) passed at 4,505 B and was refused at
-/// 4,700 B with HTTP 400 `{"error":9}`. The audit's "about 6.0 KB" did not
-/// reproduce: 6,007 B passed. 15 % headroom under the dense failure is
-/// 3,995 B, so 4,000 — the former 5,000 admitted a 4,700 B dense body the
-/// controller refuses. The same number also bounds presets.json growth per
-/// scheduled design until the growth bench (toward the 32 KB figure in the
-/// audit) is run. Change it HERE only; nothing else states a number.
-const int kDesignApiPresetMaxBytes = 4000;
+/// bench-s2-results/results.md, steps 1, 8 and 10): the firmware refuses by
+/// ELEMENT count, not bytes. A typical body (two- or three-digit indices,
+/// three-digit colours) runs about 3.0–3.3 B per element, so the
+/// 1,700-element cap bites first, at about 5.2 KB; bytes only decide for a
+/// wider shape (long indices on long buses, a long name). What the spare
+/// stored and fired: a 1,647-element typical body of 5,075 B on the wire
+/// (step 8, by timer from master-off, 0/100 LEDs differing per bus) and
+/// 6,007 B and 6,152 B bodies during calibration (step 1; the first typical
+/// refusal was 6,259 B). 6,000 stays inside what was proven. The former
+/// 4,000 was chosen to bound presets.json growth; step 10 grew the file to
+/// 100,211 B on this unit with no anomaly (the audit's 32 KB figure did not
+/// reproduce; the real ceiling is above 100 KB and unmeasured), and 4,000
+/// would have refused the 5,075 B body the controller stored and fired.
+/// Change it HERE only; nothing else states a number.
+const int kDesignApiPresetMaxBytes = 6000;
 
 /// WLED firmware versions on which a nightly painted-design preset is
 /// proven. The string is `/json/info`'s `ver`, compared exactly after
@@ -264,8 +268,11 @@ int designApiPresetWireBytes(
 /// are only a proxy: a dense body of one-digit indices and small colours was
 /// refused at 4,700 B (2,061 elements) and accepted at 4,505 B (1,971).
 ///
-/// 1,700 keeps 15 % headroom under the proven 2,019. Counted by
-/// [designApiPresetWireElements]. Change it HERE only.
+/// 1,700 keeps 15 % headroom under the proven 2,019. This is the cap that
+/// decides first for a typical body: at about 3.0–3.3 B per element, 1,700
+/// elements is about 5.2 KB, under [kDesignApiPresetMaxBytes], which is a
+/// backstop for wider shapes (long indices on long buses, a long name).
+/// Counted by [designApiPresetWireElements]. Change it HERE only.
 const int kDesignApiPresetMaxElements = 1700;
 
 /// The JSON element count of [value] the way WLED's parser stores it:

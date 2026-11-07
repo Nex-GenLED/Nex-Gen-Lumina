@@ -517,7 +517,7 @@ void main() {
       await refuse(
         _FakeService(cfg: _buses(dense), state: _live(dense)),
         _designSchedule(_body(dense, dense: true)),
-        saying: '4,000 bytes',
+        saying: '6,000 bytes',
       );
     });
 

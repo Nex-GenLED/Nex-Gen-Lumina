@@ -359,9 +359,13 @@ List<CheckResult> checkPresetInvariants(Map<int, Map<String, dynamic>> presets) 
 /// ROOFLINE SLICE 2 — the byte cap on a painted design's preset, as stored.
 /// MIRRORS `kDesignApiPresetMaxBytes` (lib/features/schedule/design_api_preset.dart);
 /// a test asserts the two agree, so this file can stay free of lib imports
-/// that pull in flutter. Set by the bench of 2026-11-06: the dense shape was
-/// refused at 4,700 B (error 9) and passed at 4,505 B; 15 % under the failure.
-const int kBenchDesignPresetMaxBytes = 4000;
+/// that pull in flutter. 6,000 after the bench of 2026-11-06: the element
+/// cap (1,700) decides first for a typical body, at about 5.2 KB, and bytes
+/// are a backstop; the spare stored and fired 5,075 B (1,647 elements),
+/// 6,007 B and 6,152 B, and presets.json grew to 100,211 B with no anomaly,
+/// so the former 4,000 (chosen to bound file growth) would only have refused
+/// a body the controller handles.
+const int kBenchDesignPresetMaxBytes = 6000;
 
 /// True when [def] is a painted design's preset: any `seg` entry carrying an
 /// `i` array. The one thing every design preset has and no ladder or catalog

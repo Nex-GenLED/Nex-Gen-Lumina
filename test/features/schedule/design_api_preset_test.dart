@@ -272,9 +272,10 @@ void main() {
           reason: 'the name (slots 10 and 25 are both two digits)');
     });
 
-    test('the cap is one named constant, 4,000 (bench 2026-11-06: the dense '
-        'shape was refused at 4,700 B and passed at 4,505 B)', () {
-      expect(kDesignApiPresetMaxBytes, 4000);
+    test('the cap is one named constant, 6,000 (bench 2026-11-06: 5,075 B, '
+        '6,007 B and 6,152 B stored and fired; the element cap decides first '
+        'for a typical body, bytes are the backstop)', () {
+      expect(kDesignApiPresetMaxBytes, 6000);
     });
 
     test('a simple three-bus design is well under the cap → allowed', () {
@@ -293,8 +294,8 @@ void main() {
       expect(v.body, isNull, reason: 'nothing to store on a refusal');
       expect(v.offersEditor, isTrue);
       expect(v.message, contains('"Porch stripes"'));
-      expect(v.message, contains('4,000 bytes'));
-      expect(v.message, contains('about 4.0 KB'));
+      expect(v.message, contains('6,000 bytes'));
+      expect(v.message, contains('about 6.0 KB'));
       expect(v.message, contains('simplify'));
     });
 
