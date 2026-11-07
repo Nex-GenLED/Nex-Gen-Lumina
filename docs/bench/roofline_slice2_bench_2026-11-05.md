@@ -1,4 +1,4 @@
-# Roofline custom designs, slice 2 — bench steps (written 2026-11-05; steps 1–4b run 2026-11-06; steps 7–11 written 2026-11-06, NOT run)
+# Roofline custom designs, slice 2 — bench steps (written 2026-11-05; steps 1–4b run 2026-11-06; steps 7–10 run 2026-11-06, second window, at 4ee8e2d; step 11 NOT run)
 
 Branch `feat/123-roofline-slice2` from `2b03208` (the tip of
 `feat/123-roofline-slice1-w2`, build-122 plus slice 1). Builds on the slice 1
@@ -11,8 +11,21 @@ below assumes a design that slice 1's gate already lets through.
 slice 2); the raw record is the bench window's `bench-s2-results/results.md`.
 Step 1 set the caps (elements, not bytes — see below). Step 4 FAILED on the
 original body shape and PASSED on the bounds-first shape; the branch now emits
-bounds-first (commit "bounds-first design preset body"). Steps 5 (0.15.1,
-16.0.1) and 7–11 have not been run.
+bounds-first (commit "bounds-first design preset body"). A second window the
+same evening, on the branch at `4ee8e2d` (the fix series), ran steps 7, 8, 9
+and 10 — the hardware halves curl-driven on the spare with the real builder's
+body, the gate halves under `flutter test` against a request-counting fake —
+all PASS, and the spare was restored byte-identical afterwards (presets.json
+2,862 B, state and cfg as snapshotted, timers empty). Step 10 grew
+presets.json to 100,211 B with no anomaly: the audit's 32 KB figure did NOT
+reproduce, the real ceiling is above 100 KB and unmeasured, and the byte cap
+was raised from 4,000 to 6,000 on 2026-11-07 (commit "raise the design
+preset byte cap"). NOT run: step 5 (0.15.1, 16.0.1), step 11, and every item
+that needs the app in the loop — the picker hand-off on a phone, the
+editor-to-sync path writing slot 10 itself, "one write then none" on a second
+sync, the read-back and its unreadable retry, the transient-versus-persistent
+purge on a live controller, and the healer / restart watch when the app
+returns (step 4.5).
 
 **The spare only** (`.179`, 0.15.4 — the unit the firmware allowlist names; or
 the 16.0.1 unit at `.204` and a 0.15.1 unit for step 5). **Never the `.150`
@@ -41,8 +54,9 @@ What slice 2 ships, so the steps make sense:
   (`kDesignApiPresetProvenFirmware` = `0.15.4`); the controller model proven
   (`kDesignApiPresetProvenArch` = `esp32`, `/json/info` `arch`); the wire body
   under BOTH caps — `kDesignApiPresetMaxElements` = **1,700** JSON elements (the
-  limit the firmware enforces) and `kDesignApiPresetMaxBytes` = **4,000** (a
-  sanity limit); at most 4 painted designs per account.
+  limit the firmware enforces, and the cap that decides first for a typical
+  body, at about 5.2 KB) and `kDesignApiPresetMaxBytes` = **6,000** (a
+  backstop); at most 4 painted designs per account.
 - Flash safety: the sync writes the preset only when a SHA-256 of the stored copy
   differs from the body (keys sorted; `o`/`v`/`time`/`error`/`psave` set aside;
   the name is inside the hash); one writer at a time; `/presets.json` is read
@@ -105,9 +119,14 @@ dense body = one-digit indices, small colour values):
 
 The file-load path at fire time handled the same 2,019 elements. The audit's
 "about 6.0 KB" did not reproduce (6,007 B passed). Caps set from this:
-`kDesignApiPresetMaxElements` = 1,700 (15 % under the proven 2,019) and
-`kDesignApiPresetMaxBytes` = 4,000 (15 % under the dense failure; the former
-5,000 admitted the 4,700 B body). `{"pdel":N}` pads the deleted object with
+`kDesignApiPresetMaxElements` = 1,700 (15 % under the proven 2,019) and, on
+the day, `kDesignApiPresetMaxBytes` = 4,000 (15 % under the dense failure,
+chosen to bound presets.json growth; the former 5,000 admitted the 4,700 B
+body). After step 10 (the file grew to 100,211 B with no anomaly) the byte
+cap was raised to 6,000 on 2026-11-07: a typical body runs about 3.0–3.3 B
+per element, so the element cap bites first at about 5.2 KB and bytes are a
+backstop; 5,075 B (step 8), 6,007 B and 6,152 B all stored and fired, so
+6,000 stays inside what was proven. `{"pdel":N}` pads the deleted object with
 spaces instead of shrinking presets.json; later writes reuse the padding.
 
 The procedure, for another unit or family (slots 20–24, the app's schedule
@@ -163,7 +182,8 @@ byte-identical to the snapshot — this is the file-integrity half of step 6).
 Run 2026-11-06: 2 and 4 passed with the builder's body posted by curl (one
 write, stored 891 B, hash of the stored copy equal to the sync's expected hash
 offline, 10:21 timer fire from master-off painted all three buses 0/100). 1, 3
-and 5 — the app in the loop — were NOT run; they are what step 7 proves.
+and 5 — the app in the loop — were NOT run; they are what step 7's app parts
+(7.2, 7.3) would prove, and those remain NOT run.
 
 Pass: one write then none, the timer paints all three buses from master-off.
 
@@ -235,8 +255,8 @@ Same as step 4, measured per bus with the live view:
    channel 2 unchecked, re-pick it in the schedule, sync, power-cycle, fire):
    expect bus 1 dark (`on:false` with bounds) and buses 0 and 2 painted — the
    left-out bus is still bounded. With the bounds-first body this is expected to
-   PASS from a cold boot (it did on 2026-11-06, curl-driven; step 7 re-proves it
-   with the app's own write).
+   PASS from a cold boot (it did on 2026-11-06, curl-driven, and again in step 7
+   with the real builder's body; the app's own write remains unproven).
 
 Pass: per-bus 0/N on every painted bus after the power cycle; a left-out bus is
 dark and bounded.
@@ -291,7 +311,7 @@ only written slots changed, restored byte-identical by upload.
 Pass: the file parses after every write and delete, no stray bytes appear, and
 only the written slots change.
 
-## Step 7 — cold-boot re-proof with the real builder's body, through the app — NOT run
+## Step 7 — cold-boot re-proof with the real builder's body, through the app — RUN 2026-11-06 (second window, curl-driven; the app parts NOT run)
 
 The 2026-11-06 proof used the builder's body posted by curl. This step proves
 the same thing with the APP writing: pick, editor, compose, save, sync, timer,
@@ -319,7 +339,24 @@ power cycle.
 Pass: the app's own write paints every included bus and darkens the excluded
 one from a cold boot, with one write and no rewrite.
 
-## Step 8 — the element cap: just under fires, just over is refused before any write — NOT run
+Run 2026-11-06 (branch at `4ee8e2d`): PASS for the body. 7.1 — the real
+`buildDesignApiPresetBody` under `flutter test`, for the 100/100/100 fixture
+with the middle channel excluded, gives 770 B / 202 elements, wire keys
+`o,on,bri,seg,n,psave`, and the segment array AND the whole wire text are
+byte-identical to the hand-built body that fired on power cycle #2 (both sha
+`b8baa3bf…`). Saved to slot 10 by curl (stored 750 B, six entries in the
+posted order); the stored copy's `presetPayloadHash` equals the hash the
+sync computes before a write (`cb8860a7…`), so the no-rewrite precondition
+holds for the bounds-first shape. 7.4–7.5 — ON armed, parked off, ONE power
+cycle, clock set by API, fire at 16:39 with nothing on the LAN: three bounded
+segments, the left-out one `on:false`; `/ws` at +10 s and +3 min identical:
+buses 0 and 2 painted with 0/100 LEDs differing, bus 1 dark and bounded;
+uptime monotonic; presets.json unchanged. Deviation: the owner's reply came
+after the armed minute, so the row was re-armed three minutes ahead with no
+preset write. NOT run: 7.2 and 7.3 (the picker hand-off, the app's own
+`savePreset`, the read-back and "no second write" on a second sync).
+
+## Step 8 — the element cap: just under fires, just over is refused before any write — RUN 2026-11-06 (hardware half by curl, gate half under flutter test)
 
 1. Build two designs on the spare's layout whose wire bodies count 1,700 and
    1,701 elements (`designApiPresetWireElements`; the dense fixture in
@@ -344,7 +381,31 @@ one from a cold boot, with one write and no rewrite.
 Pass: 1,700 fires; 1,701 is refused by the app at pick time and at write time
 with no controller traffic for it.
 
-## Step 9 — the model (arch) refusal — NOT run
+Run 2026-11-06: PASS. Hardware half — a typical-shape bounds-first body of
+1,647 elements (two-digit indices, three-digit colours, 256 accents; 5,075 B
+on the wire, "Pattern: Bench cap 1650") saved to slot 10 by curl: 200 in
+0.29 s, stored 5,055 B, presets.json 2,862 → 7,923 B parsing with no stray
+bytes and the other slots byte-identical; applied by `ps` and fired by timer
+from master-off at 16:46: three bounded frozen segments, `/ws` at +10 s and
++3 min 0/100 differing on every bus; uptime monotonic. Note: at this shape
+1,647 elements is 5,075 B, OVER the 4,000-byte cap in force that day — the
+app would have refused by bytes first — which is one reason the cap moved to
+6,000 (see step 1). Gate half (`flutter test`, request-counting fake): the
+pure cap question both gates share refuses exactly 1,701 elements (naming
+1,701 details and the 1,700 limit) and exactly one byte over the byte cap —
+6,001 bytes with the cap now at 6,000 (4,001 against the 4,000 in force on
+the day; the boundary tests moved with the cap) — with zero requests by
+construction; the pick verdict over the providers refuses an over-cap design
+after one GET `/json/info` (the firmware and model read precedes the caps in
+the gate order) and no write; the sync's write gate refuses the
+1,701-element body and the one-byte-over body with the same sentence and
+sends no `psave`, `pdel` or cfg write for the design (its other traffic on
+an empty fake — the ladder presets 1–5 and one live-state restore — is
+build-122 behaviour). NOT run: 8.2 and 8.3 in the app (the picker on a
+phone), and 8.4's curl parse of a 1,701-element body (step 1 already parsed
+1,971 and 2,019).
+
+## Step 9 — the model (arch) refusal — RUN 2026-11-06 (flutter test only, no hardware)
 
 Only `arch` = `esp32` is proven. Without a non-classic unit, prove the refusal
 with the version-string trick used for step 5: on a scratch build, replace
@@ -368,12 +429,23 @@ which is why the model is gated.
 Pass: an unproven model is refused at pick and write time with the sentence;
 restoring the allowlist recovers with one write.
 
-## Step 10 — presets.json growth toward the 32 KB figure — NOT run
+Run 2026-11-06 (`flutter test` with the fake reporting `arch` "esp32s3"; the
+spare was not contacted for this step): PASS. Pick: the `archUnproven`
+verdict with the model sentence after exactly ONE GET `/json/info` (ver and
+arch from the same read), zero writes. Sync with nothing landed: refused, no
+`psave`, `pdel` or cfg write for the design. Sync with a copy already in
+slot 10: refused, no `psave`, no cfg write, and ONE `pdel` of slot 10 — an
+unproven model is a PERSISTENT refusal (C1), so the stale slot is purged
+after the refusal, never before it. 9.3 (restore the constant, one write)
+NOT run.
 
-The audit put presets.json's safe size near 32 KB; the byte cap (4,000 per
-design, four designs per account) bounds the app's own contribution to about
-16 KB plus the ladder and lease slots. Measure the controller rather than the
-estimate:
+## Step 10 — presets.json growth toward the 32 KB figure — RUN 2026-11-06, PASS to 100,211 B, no anomaly
+
+The audit put presets.json's safe size near 32 KB — a figure this run did
+NOT reproduce: the file reached 100,211 B with no anomaly, so the real
+ceiling is above 100 KB and unmeasured. The byte cap (6,000 per design, four
+designs per account) bounds the app's own contribution to about 24 KB plus
+the ladder and lease slots. Measure the controller rather than the estimate:
 
 1. Snapshot presets.json. Record `fs.u` from `/json/info`.
 2. By curl, save bounds-first API bodies of ~3,900 B into slots 20, 21, 22, 23
@@ -394,7 +466,39 @@ estimate:
 Pass: 32 KB of presets.json saves, parses, fires and survives a power cycle;
 the first failure point is recorded as the real ceiling for the ledger.
 
-## Step 11 — the +122 sunrise and sunset rows are untouched — NOT run
+Run 2026-11-06: PASS, no anomaly. Base 7,923 B (slots 0/2/10/11, slot 10 =
+step 8's body), baseline freeheap 121,368. Every save answered 200 in
+0.05–0.49 s; after each the file parsed with zero stray bytes, every other
+slot was byte-identical, and the slot applied from master-off with 0/100
+LEDs differing per bus (catalog slots: on/ps correct).
+
+| phase | slots | presets.json | freeheap after |
+|---|---|---|---|
+| 10.2 | 20, 21, 22, 23 (API, 3,914 B wire, 1,263 elements) | 11,823 / 15,723 / 19,623 / 23,523 B | 123,080 / 121,608 / 123,084 / 123,088 |
+| 10.2 | 24, 25 (catalog, 459 B) | 24,801 / 26,079 B | 123,088 / 121,608 |
+| 10.2 | 26, 28, 41 (API, lease slots) | 29,979 / 33,879 / 37,779 B | 123,088 / 122,676 / 122,668 |
+| 10.5 | 100–115 (API, ~3,916 B each, 16 steps) | 41,681 B rising 3,902 B per step to 100,211 B | 120,884–123,016 |
+
+10.3 — `ps` fires 20–23 from master-off and timer fires 20/21/22/23 one per
+minute (16:57–17:00), each on/ps correct, three bounded frozen segments,
+0/100 per bus. 10.4 — ONE power cycle at 37,779 B (past the audit's 32 KB):
+boot to one segment, clock set by API, slot 23 by timer from the collapsed
+layout at 17:11: 0/100 on every bus at +10 s and +3 min; presets.json
+byte-identical through the cycle (sha `8a11f3f6…`). Deviation: the reply
+came 46 s before the armed minute, so the row was re-armed three minutes
+ahead with no preset write. 10.5 — stopped at a 16-step bound set for the
+window (about 100 KB, three times the audit's figure), NOT at a failure:
+the heap stayed within 0.5 KB of the baseline (lowest 120,884, recovered)
+and save times stayed under 0.5 s. 10.6 — all 25 slots deleted by `pdel`,
+the file parsing after each with the remaining slots byte-identical; the
+length stays 100,211 B (pdel pads with spaces) until the `/upload` restore
+put the 2,862 B snapshot back byte for byte. Observation to re-read after
+the spare's next cold boot: `/json/info` `fs.u` read 221 KB after this test
+against 45 KB before, while presets.json was back to 2,862 B — LittleFS
+usage accounting rather than file content; a reboot or later writes should
+reclaim it. (After 10.4's reboot `fs.u` read 57 against 94 before it.)
+
+## Step 11 — the +122 sunrise and sunset rows are untouched — NOT run (needs the app on the phone)
 
 Slice 2 must change nothing for a non-design schedule. The +122 bench proved
 the sun rows on the spare (sunset flip 17:15:18, Wednesday sunrise OFF); the
@@ -423,14 +527,16 @@ a design schedule beside them, and after it is removed.
 ## What to bring back
 
 - The measured ceiling (step 1: elements first, bytes second) and the final
-  values of `kDesignApiPresetMaxElements` and `kDesignApiPresetMaxBytes`.
+  values of `kDesignApiPresetMaxElements` and `kDesignApiPresetMaxBytes`
+  (1,700 and 6,000 as of 2026-11-07).
 - For each firmware family and model: pass/fail per step and the exact `ver`
   and `arch` strings.
 - The step 4 / 4b / 7 `/json/state` and `/ws` evidence (three segments at the
   bounds, per-bus 0/N after a cold boot, the left-out bus dark) — the proof for
   owner decision 1 as re-decided on 2026-11-06 (bounds-first).
 - presets.json byte lengths before / after each write, after restore, and the
-  growth ceiling from step 10.
+  growth ceiling from step 10 (above 100 KB on the spare, unmeasured; the
+  32 KB figure did not reproduce).
 - Any sync that wrote slot 10 twice (a hash that did not match the stored copy):
   that is a defect in `presetPayloadHash`'s canonicalisation against what this
   firmware stores, and the raw stored copy is the evidence.
