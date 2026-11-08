@@ -1,10 +1,10 @@
 # Release notes and tester messages
 
-*Describes build: 2.5.10+123 · Last verified: 2026-11-07 · Internal; the tester text is what testers receive.*
+*Describes build: 2.5.10+123 · Last verified: 2026-11-08 · Internal; the tester text is what testers receive.*
 
 One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
 
-## 2.5.10 build 123 — candidate, not yet tagged
+## 2.5.10 build 123 — 2026-11-08
 
 **What changed:** A custom roofline design can be put on the weekly schedule when your controller's layout matches the layout the design was saved for, on controllers the app supports for this; when it does not match, the app says so and does not schedule it. Design Studio can make colour variations of a saved design, and a variation keeps the saved design's layout. Design Studio understands direction words such as "left to right" and "moving right" as the direction of motion, not as a place on the house. Dancing Shadows starts slower. Animated designs can't be scheduled yet.
 
