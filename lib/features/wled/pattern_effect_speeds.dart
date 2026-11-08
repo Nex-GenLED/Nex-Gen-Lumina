@@ -197,7 +197,7 @@ const Map<int, int> kEffectDefaultSpeed = <int, int>{
   101: 25, // roofline pace · Pacifica
   105: 30, // roofline pace · Phased
   110: 30, // roofline pace · Flow
-  112: 20, // too fast (owner 09-29) · spotlight speed x(1+sx)/100: 20 → x0.21, 128 → x1.29 · Dancing Shadows
+  112: 10, // too fast (owner 09-29); 20 halved for +123 — 20 was already Very Slow, the slowest band · spotlight speed x(1+sx)/100: 10 → x0.11, 20 → x0.21, 128 → x1.29 · Dancing Shadows
   115: 30, // roofline pace · Blends
   116: 60, // roofline pace · TV Simulator
   69: 30, // roofline pace · Fill Noise
