@@ -310,11 +310,8 @@ None of the slice 1, 2 or 3 bench items has been run with this candidate on a ph
    the tile, and below the slider's own minimum of 5, because cards scale the table
    value by the collection's pace. A per-effect floor in `scaledEffectDefaultSpeed`
    would change every effect, so it was not done.
-4. **Going back to build 122 with a design schedule saved on 123 is untested.**
-   Build 122's sync treats an API-command body as a catalog pattern: it splices
-   `ib:true` into it and psaves it on every sync (slice 2's own fail-before
-   description). What the controller then shows is not measured. This matters for
-   the withdrawal tester text.
+4. **Going back to build 122 with a design schedule saved on 123** is analysed in
+   section 12, which also holds the withdrawal tester text.
 5. **Item A's write-time check makes one Firestore read per sync**, and only when
    a design schedule is present. If the designs can't be read within 3 s, a design
    schedule that has not landed yet waits for the next sync, while a landed copy
@@ -492,6 +489,99 @@ None of the slice 1, 2 or 3 bench items has been run with this candidate on a ph
   - move T-D4, T-D5, T-G3, T-G4 and T-E4 in `docs/FACTS.md` to `SHIPPED (123)`;
   - move T-B1 to build 123 with its TestFlight number;
   - add the build's ledger rows and the withdrawal tester text to
-    `docs/guides/internal/31-release-notes.md` (see section 8, item 4).
+    `docs/guides/internal/31-release-notes.md` (the text is in section 12).
 - Android: versionCode 123 is not consumed until a bundle is built; bump nothing
   before that.
+
+## 12. Rolling back to build 122 — what build-122 does with a 123 design schedule
+
+Read-only, 2026-11-07.
+
+**How it was run.**
+- **Where:** a throwaway worktree of `build-122` (`f7b8317`). The tag was not
+  touched, and the worktree was removed afterwards.
+- **What ran:** build-122's real `ScheduleItem.fromJson` and
+  `ScheduleSyncService.syncAll`, against a fake controller (three buses of 100,
+  WLED 0.15.4, classic ESP32). Its `savePreset` ran build-122's own code in
+  simulation mode, including its normalizer and freeze guard, so the recorded
+  body is build-122's wire body.
+- **Input:** the exact entry 123 stores for "Bench nightly 3-bus" (3 × 100,
+  channel 2 left out). That is `toJson` with `design_id`, `preset_kind: api`, the
+  bounds-first `o:true` body and `presetId` 10, plus the copy 123's sync leaves in
+  slot 10.
+- **The way back** to 123 ran on the tip the same way.
+- **Not run:** what WLED then shows on the lights is reasoned from the 2026-11-06
+  bench facts, not run on hardware.
+
+**What 122 receives.** It reads the entry as a catalog pattern:
+- the label, slot 10 and the bounds-first `o:true` body come through intact;
+- `design_id` and `preset_kind` are ignored;
+- 122's own `toJson` writes the entry back without them, and any schedule save on
+  122 rewrites the whole schedules array.
+
+**What 122 writes, on every sync.** This is the catalog-pattern path,
+`alwaysWrite`.
+- **The request:** `POST /json/state` with `psave: 10`,
+  `n: "Pattern: Bench nightly 3-bus"` and the body.
+- **What 122 adds:** `ib:true`, `on:true` and `bri:255`, plus `frz:false` on the
+  three bounds entries and on the left-out entry (122's freeze guard).
+- **What stays:** `o:true`, so it is still an API-command preset; the bounds,
+  because the preset save does not pass 122's geometry wire pin; and the paint
+  entries, unchanged.
+- **No checks:** no layout, firmware, model, size or read-back check, and no
+  warning. The sync reports success.
+- **Both starting points behave the same:** a controller holding 123's copy (a
+  rewrite) and an empty controller (a first write).
+
+**Timer row and stored copy.**
+- The 19:00 ON row (macro 10) and the 23:00 OFF row (preset 2) stay armed.
+- Slot 10 is still owned, so nothing is purged.
+- The stored copy becomes 123's body plus `ib:true` and the `frz:false` keys.
+
+**On the lights (reasoned).** WLED replays an API-command preset as the request:
+- the bounds group first (the added `frz:false` on a bounds entry changes nothing
+  visible);
+- then the paint, which freezes the painted channels;
+- then the left-out channel, off.
+
+So at the ON time the house should show the same picture as on 123, also after a
+power cut (bounds first, as benched), and OFF at 23:00 ends it as before.
+- **Not dark, no loop, no error.** The cost is one slot-10 write per sync, against
+  123's write-only-on-change. The extra keys are not bench-proven.
+
+**Where it can go wrong.**
+1. **The layout changed after the design was picked.** 122 checks nothing. At
+   every fire the body re-bounds the segments to the saved lengths, so the picture
+   lands on the wrong lights until the app re-splits the controller on its next
+   home connect, and 122 re-arms it every sync.
+2. **Firmware.** 122 writes it whatever the controller runs; 123 only proves WLED
+   0.15.4 on a classic ESP32.
+3. **The app is open during the schedule's window.** 122's enforcement re-applies
+   the stored body live. Its geometry wire pin strips the bounds (an assertion in a
+   debug build; a release build strips and carries on), so the paint lands on the
+   segments the controller already has. That is the same look on a split layout,
+   but it can land wrong after a power cut, before the app re-splits.
+
+**Coming back to 123** (ran on the tip):
+- **(a) Nothing was saved on 122**, so the fields are intact. 123 rewrites slot 10
+  once (122's copy hashes differently), reads it back and arms it. Normal.
+- **(b) Any schedule was saved on 122**, so the fields are gone. 123 refuses the
+  schedule: a painted design that "reached your schedule without being checked …
+  open it and pick the design again from My Designs to arm it".
+  - Slot 10 is purged, and nothing of that schedule is armed, its OFF row included.
+  - It stays in the list until the design is picked again.
+
+**Withdrawal tester text** (for the build's release-notes entry once the ledger
+row lands):
+
+> Before you install build 122, open Schedule on build 123, delete every schedule
+> that runs a painted design, and let the app sync once on your home Wi-Fi. Build
+> 122 can't check a painted design against your lights, so a schedule left in place
+> keeps firing the saved picture even if your channels change, and it must be
+> picked again when you come back to 123. Your other schedules are not affected.
+> Send reports to general@nex-genled.com with the date and time.
+
+The last sentence is the line every tester message ends with (release notes
+convention). "Other schedules are not affected" is grounded: 123 writes a
+non-design schedule's entry exactly as 122 does (`design_id` and `preset_kind` are
+omitted when null).
