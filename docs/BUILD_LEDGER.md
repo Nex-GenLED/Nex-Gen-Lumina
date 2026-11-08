@@ -133,6 +133,27 @@ assertion rejects. Nothing reached TestFlight; build-111 carried the fixes.
 Codemagic's stable is kept as a standalone SDK at
 `%USERPROFILE%\.lumina\sdk\flutter` (outside the repo and outside the everyday
 `C:\develop\flutter`; refresh it when `releases_windows.json` says stable moved).
+
+**Codemagic's SDK as of 2026-11-07: Flutter 3.47.9 (Dart 3.13.7).** `codemagic.yaml`
+builds on `flutter: stable`. `releases_windows.json` names 3.47.9 as stable
+(released 2026-10-29); before that it was 3.47.5.
+- **The standalone copy** at `%USERPROFILE%\.lumina\sdk\flutter` still reads
+  3.47.5 and is due a refresh.
+- **The +123 candidate** (`feat/123-candidate`) was gated on 3.47.9 from a scratch
+  install. Analyze 0 / 12 / 362 was line-for-line identical to 3.47.5's; the suite
+  and the golden matched 3.41.2; the `pub get` rewrites were identical to 3.47.5's.
+  Details are in `docs/release/build_123_candidate.md` §2.
+
+An SDK unpacked under a long path (about 100 characters) needs the archive
+extracted through the `\\?\` prefix, and three things after that:
+- empty `.dartignore` markers in the SDK's `dev/`, `examples/` and `packages/`,
+  because `flutter analyze` walks the whole SDK repo;
+- the first-run `pub cache preload` done in batches, because one command line
+  overflows Windows' limit;
+- the SDK's `.pub-preload-cache` then removed, as the tool does itself.
+
+The standalone path is short and needs none of this.
+
 From the release worktree, on the exact commit that will be tagged:
 
 ```
@@ -147,7 +168,7 @@ git checkout -- pubspec.lock analysis_options.yaml   # toolchain rewrites; never
 Read it right: `TZ=UTC0` gives Windows Dart a zero base offset but keeps the
 system daylight rule, so winter-dated code runs at UTC and summer-dated code at
 +60 min — enough to expose a clock-face assumption, not a perfect UTC clone. The
-3.47.5 `pub get` rewrites `pubspec.lock` (SDK-pinned transitive bumps) and
+Codemagic SDK's `pub get` (3.47.5 and 3.47.9 alike) rewrites `pubspec.lock` (SDK-pinned transitive bumps) and
 migrates `analysis_options.yaml` (platform/build excludes); Codemagic makes the
 same rewrites on its clone, so gate against them and then restore both. After the
 tag, poll the GitHub check-run on the tag SHA until `completed` and read its step

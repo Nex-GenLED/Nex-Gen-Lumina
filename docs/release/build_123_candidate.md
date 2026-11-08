@@ -22,7 +22,10 @@ TestFlight 357, Android versionCode 122).
 | 6 | `fadbf34` | **Item A:** animated designs refused for scheduling at pick, compose and write time (section 5). |
 | 7 | `f7aaee3` | **Item B:** Dancing Shadows starts at speed 10, not 20 (section 6). |
 | 8 | `080e38d` | **Item C:** FACTS.md re-stamp and the build 123 release-notes entry (ledger convention 6). |
-| 9 | the tip | **Item D:** this file. |
+| 9 | `9ea97ca` | **Item D:** this file. |
+| 10 | `9a3ec86` | Collection cards keep their build-122 speeds; only the Dancing Shadows *tile* starts at 10 (section 6). FACTS T-E4 follows. |
+| 11 | `048451f` | Rollback analysis and withdrawal tester text (section 12). |
+| 12 | the tip | The ledger records Codemagic's SDK as 3.47.9; this file's gate table covers three SDKs. |
 
 Items A and B are app code that lands *after* the bump. So the bump commit is no
 longer the build point, and per ledger convention 1 the tag goes on the tip, which
@@ -51,22 +54,44 @@ byte-identical to the trial.
 
 ## 2. Gates
 
-Run on `080e38d`, which is the final app and test tree. This file is docs only,
-outside docs_guard's scope, and read by no test.
+The final app and test tree is `9a3ec86`. Every commit after it is docs only:
+nothing under `lib/` or `test/` changes, no test reads `docs/`, and this file is
+outside docs_guard's scope. The 3.47.5 column ran on `080e38d`, the tree before
+`9a3ec86` (that commit added the four card tests and the card base).
 
-| Gate | Flutter 3.41.2 (this PC) | Flutter 3.47.5 (separate install, scratchpad) |
-|---|---|---|
-| `flutter analyze` (3.47.5 with the ledger's `--no-fatal-warnings --no-fatal-infos`) | **0 / 12 / 357**. With line:col stripped, the issue set is identical to build-122 + slices; the one moved line is the existing `unnecessary_cast` in `schedule_sync.dart`, 1127 → 1156. | **0 / 12 / 362**, exit 0 |
-| `TZ=UTC0 flutter test` | **6,306 passed / 39 skipped / 0 failed** (12:08) | **6,306 passed / 39 skipped / 0 failed** (11:20) |
-| golden `test/regression/single_controller_guard_test.dart` | **1 / 1** | **1 / 1** |
-| `node scripts/docs_guard.mjs` | 44 files, 124 facts, 0 failures, 0 warnings | (no Flutter) |
+| Gate | Flutter 3.41.2 (this PC) on `9a3ec86` | Flutter 3.47.5 (scratch install) on `080e38d` | Flutter 3.47.9 = Codemagic stable (scratch install) on `9a3ec86` |
+|---|---|---|---|
+| `flutter analyze` (the 3.47 runs with the ledger's `--no-fatal-warnings --no-fatal-infos`) | **0 / 12 / 357**, the same issue list as `080e38d` (diff 0 lines) | **0 / 12 / 362**, exit 0 | **0 / 12 / 362**, exit 0, line-for-line identical to 3.47.5 (messages included) |
+| `TZ=UTC0 flutter test` | **6,310 passed / 39 skipped / 0 failed** (8:48) | **6,306 / 39 / 0** (11:20) | **6,310 / 39 / 0** (11:17) |
+| golden `test/regression/single_controller_guard_test.dart` | **1 / 1** | **1 / 1** | **1 / 1** |
+| `pub get` rewrites (restored afterwards) | — | lock +9/−9, `analysis_options.yaml` +6 | byte-identical to 3.47.5's |
+| `node scripts/docs_guard.mjs` | 44 files, 124 facts, 0 failures, 0 warnings | (no Flutter) | (no Flutter) |
 
 Earlier runs, kept for the arithmetic:
 
 - the pure merge `872a96e`: 6,288 / 39 / 0 (6,142 + 146);
-- `92cd072`: 6,295 / 39 / 0 (+7 cross-slice).
+- `92cd072`: 6,295 / 39 / 0 (+7 cross-slice);
+- `080e38d`: 6,306 / 39 / 0 (items A and B, +8 and +3).
 
-Items A and B add 8 and 3 tests, so 6,295 + 11 = **6,306**.
+`9a3ec86` adds the four card tests, so 6,306 + 4 = **6,310**.
+
+The first 3.41.2 run on `9a3ec86` read 6,310 / 39 / **1 failed**. The failure was
+my own throwaway probe: a file under `test/` that I added and deleted while the
+suite was running, and the run picked it up and could not load it. A clean re-run
+with nothing touching `test/` gave 6,310 / 39 / 0.
+
+**3.47.9 against 3.47.5:**
+- **Analyze, golden and the toolchain rewrites:** no difference.
+- **Tests:** 6,310 against 6,306. That is the four card tests from `9a3ec86`,
+  which ran on 3.47.9 and not on 3.47.5.
+- **Against 3.41.2:** exactly the 3.47.5 differences listed below.
+- **Code changes needed:** none.
+- **One more tooling step than 3.47.5.** 3.47.9 bundles 194 package archives for a
+  first-run `pub cache preload`, and under the scratchpad path the single command
+  line overflowed Windows' limit ("The filename or extension is too long"). The same
+  preload was run in five batches with 3.47.9's own `dart`. The SDK's
+  `.pub-preload-cache` was then removed, which is what the tool does after it
+  preloads.
 
 **3.47.5 against 3.41.2, every difference.** No code change is needed, and none
 was made.
@@ -112,7 +137,7 @@ was made.
 
 No existing test file was changed by this candidate's own commits. The two merges
 are conflict-free, and `37a74bf`'s tree equals `fd48bdf`'s.
-`0c3f413` and `f7aaee3` add new files. `fadbf34` adds 8 tests and helpers to this
+`0c3f413`, `f7aaee3` and `9a3ec86` add new files. `fadbf34` adds 8 tests and helpers to this
 candidate's own cross-slice file; that file's original 7 tests are unchanged
 (diff: 0 lines removed). In the slices' own history, slices 2 and 3 only add test
 files. Slice 1 modifies three existing tests (`segment_count_save_test`,
@@ -120,10 +145,11 @@ files. Slice 1 modifies three existing tests (`segment_count_save_test`,
 already accepted on its branch.
 
 **Codemagic's SDK:** `codemagic.yaml` builds with `flutter: stable`, and
-`releases_windows.json` says stable is now **3.47.9** (3.47.5 was released
-2026-09-18). The ledger's local copy at `~/.lumina/sdk/flutter` is still 3.47.5.
-The 3.47.5 column is what was asked for; whether Codemagic now builds on 3.47.9
-is not verified here.
+`releases_windows.json` says stable is **3.47.9** (released 2026-10-29; 3.47.5 was
+2026-09-18). The ledger now records 3.47.9 (convention 5). Its standalone copy at
+`~/.lumina/sdk/flutter` still reads 3.47.5 and is due a refresh. That Codemagic
+itself resolves `stable` to 3.47.9 is inferred from the yaml and the release
+index, not read from a Codemagic build log.
 
 ## 3. Version
 
@@ -218,7 +244,7 @@ controller:
 | Pattern library tuner (Explore → a colourway → tune → **Pulse** filter → the tile) | `_selectEffect(112)` → `effectDefaultSpeedOr(112, current)` = `kEffectDefaultSpeed[112]` | fx 112; intensity: the slider's current value (no default for 112); palette by effect | **20 → 10** | Very Slow → Very Slow |
 | Home Tune panel (effect menu → "Dancing Shadows") | `_applyEffect(112)` → same function | fx 112; intensity: the current value | **20 → 10** | Very Slow |
 | Edit pattern screen | `effectDefaultSpeedOr` | fx 112 | 20 → 10 | Very Slow |
-| Library cards "<colourway> Shadows" (not named "Dancing Shadows") | `scaledEffectDefaultSpeed(112, folder pace)` | fx 112; intensity: the folder's | pace 128: 20 → 10; pace 30: 5 → 2; pace 255: 40 → 20 | Very Slow |
+| Library cards "<colourway> Shadows" and the theme grid (not named "Dancing Shadows") | `scaledEffectDefaultSpeed(112, folder pace)`, base `kCollectionCardBaseSpeed[112]` = 20 since `9a3ec86` | fx 112; intensity: the folder's | **unchanged from build-122**: pace 128 → 20, pace 30 → 5, pace 255 → 40 (at `f7aaee3` they had dropped to 10, 2 and 20) | Very Slow |
 | Lumina chat (when the cloud states no speed) | `EffectDecisionTree.recommendSpeed` from `effect_database` (default 60, min 0, max 255) | fx 112 | **60, unchanged** (energy low 21, high 187) | Slow |
 | AI studio / autopilot / Game Day celebrations | not offered by name. The studio's effect words are chase, wave, twinkle and pulse. Autopilot and Game Day code never names 112 and reads none of these speed sources (their fixed looks use effects 0, 2, 11, 28, 52 and 65); a look the cloud chooses carries the cloud's own speed. 112 is not a celebration pick. | — | — | — |
 | Game Day design picker | opens the same tuner, so the same path as row 1 | — | 20 → 10 | — |
@@ -291,10 +317,13 @@ fixed", left on the owner's instruction):
    legacy table, but 97 is Plasma in WLED. At run time the entry is re-keyed by name
    to 112, so no customer sees the wrong name (section 6). The source label is still
    wrong.
-3. **Dancing Shadows' defaults disagree.** The table now says 10 (it was 20), and it
-   is used by the tiles. The speed profile's `rawDefault` 35 is unused for 112.
-   `effect_database`'s 60 is used by the Lumina chat path when the cloud states no
-   speed (section 6).
+3. **Dancing Shadows' defaults disagree.**
+   - The tile table says 10 (it was 20).
+   - The collection cards scale 20 (`kCollectionCardBaseSpeed`, on purpose; see
+     section 6).
+   - The speed profile's `rawDefault` 35 is unused for 112.
+   - `effect_database`'s 60 is used by the Lumina chat path when the cloud states no
+     speed.
 
 None of the slice 1, 2 or 3 bench items has been run with this candidate on a phone.
 
@@ -305,11 +334,15 @@ None of the slice 1, 2 or 3 bench items has been run with this candidate on a ph
    (`effect_database.dart` 1873–1887), so the 97 label is source-only.
 2. **Lumina chat can still start Dancing Shadows at 60** (Slow) when the cloud
    reply carries no speed. Item B changed only the tile's path, as instructed.
-3. **Calm library collections now start their "… Shadows" card at speed 2–4**
-   (pace 30 → 2, 40 → 3, 50 → 4). That is below the floor of 5 the owner set for
-   the tile, and below the slider's own minimum of 5, because cards scale the table
-   value by the collection's pace. A per-effect floor in `scaledEffectDefaultSpeed`
-   would change every effect, so it was not done.
+3. **Fixed in `9a3ec86`:** calm collections had started their "… Shadows" card at
+   speed 2–4 after `f7aaee3`. The cards now keep build-122's speeds.
+   - **Proven by a throwaway dump of every generated collection card** (32,382
+     cards: 1,325 library nodes and every theme subcategory) on build-122's code and
+     on the tip.
+   - **At `9ea97ca`:** 1,033 cards differed, every one an fx 112 "… Shadows" card,
+     across 17 paces; no other card differed, in speed or in any other segment
+     field.
+   - **After `9a3ec86`:** the two dumps are byte-identical.
 4. **Going back to build 122 with a design schedule saved on 123** is analysed in
    section 12, which also holds the withdrawal tester text.
 5. **Item A's write-time check makes one Firestore read per sync**, and only when
@@ -463,8 +496,9 @@ None of the slice 1, 2 or 3 bench items has been run with this candidate on a ph
 39. Home → Tune → effect menu → Dancing Shadows. *Expect:* the same pace. Laptop:
     speed 10.
 40. Explore → a calm collection (Nature & Outdoors) → a colourway → its
-    "… Shadows" card. *Expect:* it still visibly moves; calm collections now start
-    it at speed 2–5. Write down whether it looks still.
+    "… Shadows" card. *Expect:* it moves at the same pace as on build 122 (speed 5
+    or more in calm collections), not slower like the tile in step 38. Laptop: the
+    controller's state shows the build-122 speed.
 
 **+122 sunrise and sunset — must not have regressed**
 
