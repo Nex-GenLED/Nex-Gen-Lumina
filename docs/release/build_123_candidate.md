@@ -1,7 +1,9 @@
 # Build +123 candidate — `feat/123-candidate`
 
-Assembled 2026-11-07 from tag `build-122` (`f7b8317`). Roofline custom designs
-slices 1, 2 and 3, one cross-slice test, and the version bump. **Not tagged, not
+Assembled 2026-11-07 from tag `build-122` (`f7b8317`): roofline custom designs
+slices 1, 2 and 3, a cross-slice test, the version bump, then items A–D of the
+same day. Those are animated designs refused for scheduling, Dancing Shadows
+slower, the FACTS and release-notes re-stamp, and these notes. **Not tagged, not
 built, not deployed. No controller, bench unit or production system was contacted
 to assemble it.** The tag waits for the owner's go.
 
@@ -15,8 +17,18 @@ TestFlight 357, Android versionCode 122).
 | 1 | `37a74bf` | Merge `feat/123-roofline-slice2` @ `fd48bdf54b13` (no-ff). Carries slice 1 (`2b03208`, 7 commits) and slice 2 (30 commits on `2b03208`). |
 | 2 | `872a96e` | Merge `feat/123-roofline-slice3` @ `7a102d43d052` (no-ff). Slice 3: 11 commits on `2b03208`. |
 | 3 | `0c3f413` | Test only: a slice 3 colour variation through slice 2's schedule gates (section 4). |
-| 4 | this file | Docs only. |
-| 5 | the bump | `chore(release): bump to 2.5.10+123`. `pubspec.yaml` and `lib/app_version.dart` only. It is the last commit, so per ledger convention 1 the tag goes on it. |
+| 4 | `f626268` | First version of this file. |
+| 5 | `92cd072` | `chore(release): bump to 2.5.10+123`. `pubspec.yaml` and `lib/app_version.dart` only. |
+| 6 | `fadbf34` | **Item A:** animated designs refused for scheduling at pick, compose and write time (section 5). |
+| 7 | `f7aaee3` | **Item B:** Dancing Shadows starts at speed 10, not 20 (section 6). |
+| 8 | `080e38d` | **Item C:** FACTS.md re-stamp and the build 123 release-notes entry (ledger convention 6). |
+| 9 | the tip | **Item D:** this file. |
+
+Items A and B are app code that lands *after* the bump. So the bump commit is no
+longer the build point, and per ledger convention 1 the tag goes on the tip, which
+is the commit carrying every app byte. `git log 92cd072..<tip>` lists exactly
+what came after the bump. No re-bump was made: there was no instruction to, and
+`+123` is unchanged.
 
 Source tips (all three are pushed, and none was changed):
 
@@ -39,49 +51,91 @@ byte-identical to the trial.
 
 ## 2. Gates
 
-Flutter 3.41.2. Run on the tree of commit 5: 0c3f413 plus the bump. This file is
-docs only and is not read by any test.
+Run on `080e38d`, which is the final app and test tree. This file is docs only,
+outside docs_guard's scope, and read by no test.
 
-| Gate | Expected | Result |
+| Gate | Flutter 3.41.2 (this PC) | Flutter 3.47.5 (separate install, scratchpad) |
 |---|---|---|
-| `flutter analyze` | 0 errors / 12 warnings / 357 infos | **0 / 12 / 357**. With line:col stripped, the issue set is identical to slice 2's and slice 3's own runs; the only differences are line shifts in files the other slice edited. |
-| `TZ=UTC0 flutter test` on the pure merge (`872a96e`) | 6,142 + 146 = 6,288 | **6,288 passed / 39 skipped / 0 failed** (12:13) |
-| `TZ=UTC0 flutter test` on the final tree | 6,288 + 7 new | **6,295 passed / 39 skipped / 0 failed** (10:54) |
-| `test/regression/single_controller_guard_test.dart` | 1 / 1 | **1 / 1** (on the merge and on the final tree) |
-| `node scripts/docs_guard.mjs` | 0 failures | 44 files, 119 facts, 0 failures, 0 warnings (on the merge) |
+| `flutter analyze` (3.47.5 with the ledger's `--no-fatal-warnings --no-fatal-infos`) | **0 / 12 / 357**. With line:col stripped, the issue set is identical to build-122 + slices; the one moved line is the existing `unnecessary_cast` in `schedule_sync.dart`, 1127 → 1156. | **0 / 12 / 362**, exit 0 |
+| `TZ=UTC0 flutter test` | **6,306 passed / 39 skipped / 0 failed** (12:08) | **6,306 passed / 39 skipped / 0 failed** (11:20) |
+| golden `test/regression/single_controller_guard_test.dart` | **1 / 1** | **1 / 1** |
+| `node scripts/docs_guard.mjs` | 44 files, 124 facts, 0 failures, 0 warnings | (no Flutter) |
 
-Accounting: slice 1's suite was 5,975, slice 3's 6,121 (+146) and slice 2's
-6,142. The merge adds the two deltas, 6,142 + 146 = 6,288 exactly. The cross-slice
-file adds 7.
+Earlier runs, kept for the arithmetic:
 
-No test file was changed in assembling the candidate. The two merges are
-conflict-free, `37a74bf`'s tree equals `fd48bdf`'s, and `0c3f413` adds one new file.
-In the slices' own history, slices 2 and 3 only add test files. Slice 1 modifies
-three existing tests (`segment_count_save_test`,
+- the pure merge `872a96e`: 6,288 / 39 / 0 (6,142 + 146);
+- `92cd072`: 6,295 / 39 / 0 (+7 cross-slice).
+
+Items A and B add 8 and 3 tests, so 6,295 + 11 = **6,306**.
+
+**3.47.5 against 3.41.2, every difference.** No code change is needed, and none
+was made.
+
+- **Tests:** none. The same 6,306 / 39 / 0, and the golden passes under both.
+- **Analyze:** errors 0 = 0 and warnings 12 = 12 (the same set); infos 357 → 362
+  (+5). Compared by severity, location and rule:
+  - **+6 `deprecated_member_use`:** `ReorderableListView.onReorder` is deprecated
+    in 3.47 ("use onReorderItem"). The six sites:
+    - `lib/features/design/roofline_setup_wizard.dart:937`
+    - `lib/features/design/segment_setup_screen.dart:236`
+    - `lib/features/neighborhood/widgets/member_position_list.dart:184`
+    - `lib/features/site/roofline_editor_screen.dart:426`
+    - `lib/screens/commercial/onboarding/screens/your_teams_screen.dart:187`
+    - `lib/widgets/team_priority_list.dart:51`
+  - **−1 `prefer_initializing_formals`:**
+    `lib/features/design/models/design_intent.dart:630` is no longer reported.
+  - **Moved:** `use_build_context_synchronously` at
+    `lib/features/geofence/geofence_monitor.dart:152` is reported at column 18
+    instead of 9 (the same finding).
+  - **None of these eight files** was changed by this candidate since build-122.
+    All are infos, and the ledger's flags pass infos.
+  - **The message wording** of many deprecation infos changed between the SDKs;
+    the findings themselves did not.
+- **Toolchain rewrites from 3.47.5's `pub get`.** These are exactly what convention
+  5 predicts, and both were restored with `git checkout`:
+  - `pubspec.lock`: matcher 0.12.18 → 0.12.20, meta 1.17.0 → 1.19.0, test_api
+    0.7.9 → 0.7.12, vector_math 2.2.0 → 2.4.4, and the Dart floor ≥3.9.0 →
+    ≥3.11.0-0;
+  - `analysis_options.yaml`: +6 lines excluding `build/**`, `android/**`, `ios/**`
+    and `web/**`.
+- **How the 3.47.5 gate was run.** The archive came from Google's release index,
+  SHA-256 checked. It was extracted under the scratchpad through the `\\?\` prefix,
+  because long paths are off on this PC and the scratchpad path is 105 characters.
+  The steps were `flutter clean`, then `pub get`, analyze, the suite and the
+  golden, then a restore to 3.41.2 (clean and `pub get`). PATH and
+  `C:\develop\flutter` were untouched; the default pub cache was used.
+- **One tooling workaround.** `flutter analyze` walks the whole SDK repo
+  (`getRepoPackages()`, used only under `--flutter-repo`) and crashed on an SDK
+  directory deeper than 260 characters. Three empty `.dartignore` markers in the
+  scratchpad SDK's `dev/`, `examples/` and `packages/` stop that walk. No SDK code
+  and no project file was changed.
+
+No existing test file was changed by this candidate's own commits. The two merges
+are conflict-free, and `37a74bf`'s tree equals `fd48bdf`'s.
+`0c3f413` and `f7aaee3` add new files. `fadbf34` adds 8 tests and helpers to this
+candidate's own cross-slice file; that file's original 7 tests are unchanged
+(diff: 0 lines removed). In the slices' own history, slices 2 and 3 only add test
+files. Slice 1 modifies three existing tests (`segment_count_save_test`,
 `base_ladder_repair_bus_change_test`, `sync_start_look_kinds_matrix_test`), as
 already accepted on its branch.
 
-**Owed before the tag** (ledger conventions, not run here):
-
-- **Convention 5:** analyze plus `TZ=UTC0` test under Codemagic's SDK (3.47.5, at
-  `%USERPROFILE%\.lumina\sdk\flutter`), on the exact commit to be tagged.
-- **Convention 6:** re-stamp every `docs/FACTS.md` row this build changes, and add
-  the build's entry to `docs/guides/internal/31-release-notes.md`. Not done: no
-  slice has been benched with the app in the loop, and a guide must not describe
-  unshipped behaviour.
+**Codemagic's SDK:** `codemagic.yaml` builds with `flutter: stable`, and
+`releases_windows.json` says stable is now **3.47.9** (3.47.5 was released
+2026-09-18). The ledger's local copy at `~/.lumina/sdk/flutter` is still 3.47.5.
+The 3.47.5 column is what was asked for; whether Codemagic now builds on 3.47.9
+is not verified here.
 
 ## 3. Version
 
 **`2.5.10+123`.** I deviated from the "358 / 2.5.11" in the prompt; the reasons:
 
 - **Build number.** In this repo `+N` is the build tag's number and the Android
-  versionCode: build-119 through build-122 are `+119` through `+122`, and convention
-  1 tags the bump commit itself. The iOS build number is not taken from the
-  pubspec: Codemagic writes its own `PROJECT_BUILD_NUMBER` over it at build time
-  (`codemagic.yaml`, "Set build number"). That counter gave build-122 TestFlight
-  357, so it will most likely give this build 358 by itself. Putting 358 in the
-  pubspec would make the Android versionCode 358 and break the tag-equals-`+N` join
-  the ledger relies on.
+  versionCode: build-119 through build-122 are `+119` through `+122`. The iOS build
+  number is not taken from the pubspec: Codemagic writes its own
+  `PROJECT_BUILD_NUMBER` over it at build time (`codemagic.yaml`, "Set build
+  number"). That counter gave build-122 TestFlight 357, so it will most likely give
+  this build 358 by itself. Putting 358 in the pubspec would make the Android
+  versionCode 358 and break the tag-equals-`+N` join the ledger relies on.
 - **Version name.** Every ledger row from +78 to +122 is `2.5.10`, and every bump
   commit changed only `+N`. A new marketing version starts a new TestFlight version
   train, which needs Beta App Review again before external testers get the build.
@@ -91,8 +145,8 @@ already accepted on its branch.
 
 ## 4. Cross-slice proof
 
-`test/features/schedule/variation_schedule_cross_slice_test.dart`: 7 tests, all
-passing.
+`test/features/schedule/variation_schedule_cross_slice_test.dart`: 15 tests, all
+passing (7 from `0c3f413`, 8 from item A).
 
 The variation is made by the real slice 3 code:
 
@@ -103,9 +157,10 @@ The variation is made by the real slice 3 code:
 
 It then goes through slice 2's pick-time verdict, `designSchedulePickVerdict`.
 That verdict runs slice 1's fit gate, the bus-starts check, the firmware and model
-check, the bounds-first builder, and both caps. Finally the test runs the checks
-the sync makes before it writes: body shape, bounds against the controller's buses,
-and both caps with the real slot and name.
+check, the bounds-first builder, and both caps. Then come the checks the sync
+makes before it writes: body shape, bounds against the controller's buses, and both
+caps with the real slot and name. Item A's tests also drive the real
+`ScheduleSyncService.syncAll`.
 
 | Variation (3 buses × 100, stamp `[100,100,100]` on ctl-a) | Verdict | Elements / bytes |
 |---|---|---|
@@ -113,42 +168,88 @@ and both caps with the real slot and name.
 | same, channel 2 switched off in the editor | admitted. Bus 1 is in the bounds group and at the end as `{id,start,stop,on:false}`. | 721 |
 | "1 on 3 off" on the controller with channel 2 at 120 | refused at the fit gate, with no body | — |
 | "every other light" | **refused as too detailed** by the element cap (1,890 > 1,700). Its bytes are under the 6,000 byte cap, and the body is still bounds-first. | 1,890 / 5,246 |
+| "chase left to right" (effect 28) | **refused: animated** at pick (no device read), at compose, and at write | — |
+| "wave effect moving right to left" (effect 67) | **refused: animated** | — |
 
 The element counts were worked out by hand in the test file's header before the
 first run, and the code gave the same three numbers.
 
-## 5. Dancing Shadows: decision owed, NOT changed
+## 5. Item A — animated designs are refused for scheduling
 
-- **Where the speed lives: app code only.** No cloud library holds a copy, and no
-  bundled asset does either. The value is `kEffectDefaultSpeed[112] = 20` in
-  `lib/features/wled/pattern_effect_speeds.dart` (line 200). Every place a customer
-  starts the effect reads it: Explore cards, the palette tuner, the Home Tune panel,
-  the edit screen and Lumina.
-- **The app's speed levels:** the five bands of the speed slider. They are
-  `EffectSpeedProfile.speedLabel` in `lib/features/wled/effect_speed_profiles.dart`
-  (lines 130–137), mapped through each effect's own profile. Dancing Shadows'
-  profile (line 411) is min 5, max 100, logarithmic, and gives these bands:
+A design whose motion is on with a non-zero effect id (`motionEffectOf`) used to
+pass slice 2's gates. It was saved as the still preset (`fx:0` plus an `i` frame)
+and fired as one still frame at the ON time. It is now refused, never converted,
+with: **"<name>" is an animated design. Animated designs can't be scheduled yet.
+Pick a still design, or save a still version.**
 
-  | Band | Speed values |
-  |---|---|
-  | Very Slow | 5–47 |
-  | Slow | 48–67 |
-  | Medium | 68–81 |
-  | Fast | 82–91 |
-  | Very Fast | 92–100 |
+- **Pick time.** `designSchedulePickVerdict` refuses before the `/json/info` read.
+  The schedule selection gate shows the sentence and hands nothing back.
+- **Compose time** (slice 2's own name for the verdict). `designScheduleEligibility`
+  returns the new `animated` verdict ahead of every other gate, and
+  `buildDesignApiPresetBody` builds no body for an animated design.
+- **Write time.** The sync reads the owner's saved designs once per sync, and only
+  when the sync holds a design schedule (`designsStreamProvider`, waiting up to
+  3 s). Then, under the C1 rule:
+  - **design is animated:** a *persistent* refusal. Not written, not armed, and a
+    copy already on the controller is purged.
+  - **designs can't be read:** *transient*, "couldn't check … left exactly as it
+    is". A copy already on the controller stays armed.
+  - **design isn't in the list** (deleted): judged exactly as before.
+- **Unaffected:** still painted designs, colour-only variations, and the Game Day
+  and Sync per-pixel blocks. Slice 2's design suites plus the Sync per-pixel block
+  tests ran 145 / 145.
 
-- **The problem:** 20 is already in **Very Slow**, the lowest band, so there is no
-  level below it. The profile's own `rawDefault` (35) is also Very Slow, and it is
-  not read for this effect.
-- **Choices for the owner** (none applied):
-  - a lower number inside Very Slow, for example 10 (firmware pace × 0.11 against
-    × 0.21 today);
-  - the slider floor, 5;
-  - a different meaning of "one level".
-- Whichever is chosen goes in before the bump commit (or in a new bump), with a test
-  that pins the value.
+**Fail-before.** The new tests were run against `92cd072`'s lib: **9 passed /
+6 failed**.
+- The chase pick, the wave pick and the compose verdict read `allowed`.
+- The write saved slot 10 and armed it.
+- A landed copy was not purged.
+- No transient sentence appeared.
 
-## 6. Known, not fixed — from the bench docs
+The two "still admitted" tests passed before and after. With the fix: 15 / 15.
+
+## 6. Item B — Dancing Shadows starts one band slower
+
+**Trace.** What the tile named "Dancing Shadows" sends, from the tap to the
+controller:
+
+| Where | Tap → speed | Effect / intensity | Speed sent (old → new) | Band |
+|---|---|---|---|---|
+| Pattern library tuner (Explore → a colourway → tune → **Pulse** filter → the tile) | `_selectEffect(112)` → `effectDefaultSpeedOr(112, current)` = `kEffectDefaultSpeed[112]` | fx 112; intensity: the slider's current value (no default for 112); palette by effect | **20 → 10** | Very Slow → Very Slow |
+| Home Tune panel (effect menu → "Dancing Shadows") | `_applyEffect(112)` → same function | fx 112; intensity: the current value | **20 → 10** | Very Slow |
+| Edit pattern screen | `effectDefaultSpeedOr` | fx 112 | 20 → 10 | Very Slow |
+| Library cards "<colourway> Shadows" (not named "Dancing Shadows") | `scaledEffectDefaultSpeed(112, folder pace)` | fx 112; intensity: the folder's | pace 128: 20 → 10; pace 30: 5 → 2; pace 255: 40 → 20 | Very Slow |
+| Lumina chat (when the cloud states no speed) | `EffectDecisionTree.recommendSpeed` from `effect_database` (default 60, min 0, max 255) | fx 112 | **60, unchanged** (energy low 21, high 187) | Slow |
+| AI studio / autopilot / Game Day celebrations | not offered by name. The studio's effect words are chase, wave, twinkle and pulse. Autopilot and Game Day code never names 112 and reads none of these speed sources (their fixed looks use effects 0, 2, 11, 28, 52 and 65); a look the cloud chooses carries the cloud's own speed. 112 is not a celebration pick. | — | — | — |
+| Game Day design picker | opens the same tuner, so the same path as row 1 | — | 20 → 10 | — |
+
+Further facts from the trace:
+
+- **No slider memory.** `effectDefaultSpeedOr(112, x)` is the table value for every
+  `x`.
+- **The wire chokepoint leaves it alone.** `normalizeWledPayload` passes sx 10 (and
+  20) unchanged; the flash caps cover only 23, 24 and 57. So the controller
+  receives the table value.
+- **The bands** on effect 112's profile (`effect_speed_profiles.dart` 130–137 and
+  411; min 5, recommended max 100, logarithmic) are Very Slow 5–47, Slow 48–67,
+  Medium 68–81, Fast 82–91 and Very Fast 92–100.
+- **The rule applied.** 20 was already Very Slow, the slowest band, so by the
+  owner's rule it was halved with a floor of 5: **20 → 10**. That is a firmware
+  pace of × 0.11 against × 0.21 before.
+- **Left alone:** no effect was renamed and no other effect changed. The profile's
+  unused `rawDefault` of 35 (Very Slow) stays as it is.
+- **effect_database:** the legacy table's key **97** is named "Dancing Shadows" and
+  there is no key 112. The app re-keys every entry by name, so at run time 97 is
+  Plasma (default 100) and 112 is Dancing Shadows (default 60). The picker reads
+  names from the catalog: **both appear**, as "Plasma" (97) and "Dancing Shadows"
+  (112), and nothing shows "Dancing Shadows" twice.
+- **Tests.** `test/features/wled/dancing_shadows_speed_test.dart` pins the table
+  value, and end to end, the speed both tiles send: the tuner tile's recorded
+  payload, and the Home Tune body the controller would receive. Before the change it
+  ran 0/3 (each "expected 10, actual 20"); after, 3/3. No existing test pinned 20,
+  and the existing speed suites ran 84/84.
+
+## 7. Known, not fixed
 
 **Slice 2** (`docs/bench/roofline_slice2_bench_2026-11-05.md`):
 
@@ -180,30 +281,52 @@ fixed", left on the owner's instruction):
    the document, not on the lights (the design payload carries no `rev`, #76). A
    design carries one motion, so a second layer's effect does not reach the device.
 
+**Added 2026-11-07:**
+
+1. **"Every other light"** can be scheduled only up to about **268 lights on three
+   channels**. Its element count is 6 + 28 × channels + 6 × lights against the
+   1,700 cap. The slice 3 bench layout (162/128/100) works out to 2,430 (computed).
+   The real fix is segment grouping and spacing: the runs-as-segments follow-up.
+2. **Effect id 97 is labelled "Dancing Shadows"** in `effect_database.dart`'s
+   legacy table, but 97 is Plasma in WLED. At run time the entry is re-keyed by name
+   to 112, so no customer sees the wrong name (section 6). The source label is still
+   wrong.
+3. **Dancing Shadows' defaults disagree.** The table now says 10 (it was 20), and it
+   is used by the tiles. The speed profile's `rawDefault` 35 is unused for 112.
+   `effect_database`'s 60 is used by the Lumina chat path when the cloud states no
+   speed (section 6).
+
 None of the slice 1, 2 or 3 bench items has been run with this candidate on a phone.
 
-## 7. Found while assembling, not changed
+## 8. Found while assembling, not changed
 
-1. **A motion variation is scheduled as a still picture.** This needs both slices
-   to show up. In a variation session, "chase left to right" or "wave effect moving
-   right to left" saves a design with `has_motion: true` and `effect_id` 28 or 67.
-   Slice 2's pick admits it, but the scheduled body is `fx:0` plus a still `i`
-   frame. At the ON time the house shows a still picture, not the chase. Found with
-   a throwaway probe, not pinned by a test. A fix would refuse motion designs at the
-   schedule pick, or schedule them as an effect preset.
-2. **"Every other light"**, one of the three suggested variations, can be scheduled
-   only on small rooflines. On three buses the element count is 6 + 28 × buses +
-   6 × lights, which reaches the 1,700 cap above 268 lights. The slice 3 bench
-   layout (162/128/100) works out to 2,430 elements (computed, not run). "One on,
-   three off" and "Two on, two off" stay under the cap there.
-3. `lib/features/wled/effect_database.dart` names id **97** "Dancing Shadows"
-   (default speed 60). In WLED, 97 is Plasma and Dancing Shadows is 112. This is one
-   of the wrong-effect entries noted on 2026-10-20, and the AI path reads speeds
-   from that table.
-4. Dancing Shadows has two app defaults that disagree: the table's 20, which is
-   used, and the profile's 35, which is not (section 5).
+1. **Correction to the first version of this file.** It said the AI path reads id
+   97 as Dancing Shadows. It does not: `EffectDatabase.effects` re-keys by name
+   (`effect_database.dart` 1873–1887), so the 97 label is source-only.
+2. **Lumina chat can still start Dancing Shadows at 60** (Slow) when the cloud
+   reply carries no speed. Item B changed only the tile's path, as instructed.
+3. **Calm library collections now start their "… Shadows" card at speed 2–4**
+   (pace 30 → 2, 40 → 3, 50 → 4). That is below the floor of 5 the owner set for
+   the tile, and below the slider's own minimum of 5, because cards scale the table
+   value by the collection's pace. A per-effect floor in `scaledEffectDefaultSpeed`
+   would change every effect, so it was not done.
+4. **Going back to build 122 with a design schedule saved on 123 is untested.**
+   Build 122's sync treats an API-command body as a catalog pattern: it splices
+   `ib:true` into it and psaves it on every sync (slice 2's own fail-before
+   description). What the controller then shows is not measured. This matters for
+   the withdrawal tester text.
+5. **Item A's write-time check makes one Firestore read per sync**, and only when
+   a design schedule is present. If the designs can't be read within 3 s, a design
+   schedule that has not landed yet waits for the next sync, while a landed copy
+   stays armed. Pattern schedules never wait.
+6. **FACTS rows T-D4, T-D5, T-G3, T-G4 and T-E4 say `BUILT NOT SHIPPED (123
+   candidate)`, and T-B1 names build 122.** That is true until the tag. After the
+   tag they move to `SHIPPED (123)` (section 11).
+7. **The release-notes guide lists no entries for builds 117–122,** and FACTS.md
+   was last re-stamped for 116. Convention 6 was not followed for 117–122; this
+   candidate fixed only its own rows and the intro sentence.
 
-## 8. NOT in this candidate
+## 9. NOT in this candidate
 
 - **Account deletion hardening.** `feat/123-account-deletion` sits at `f7b8317`
   with nothing committed; the Stage 1 audit stopped on 2026-11-05. Build-122's
@@ -221,15 +344,15 @@ None of the slice 1, 2 or 3 bench items has been run with this candidate on a ph
   - The solar flag read in error is treated as OFF by the lease write (the fix
     shape is noted 11-03). Not built.
   - Slice 2's allowlist additions (0.15.1, 16.0.1). They wait on bench step 5.
-  - The Dancing Shadows speed (section 5).
+  - Runs-as-segments (the real fix for "every other light" on long rooflines).
 
-## 9. Phone checklist
+## 10. Phone checklist
 
 **Before you start**
 
 - Use the **spare controller** (0.15.4, three channels of 100). Never use the home
-  controller for steps that save a design to the controller (steps 12–23, 35 and
-  42).
+  controller for steps that save a design to the controller (steps 12–23, 35–37
+  and 46).
 - Use a bench account with a Game Day team set up (steps 9–11).
 - The spare's clock resets when it loses power. After every unplug, set its clock
   from the laptop before you wait for a timer.
@@ -322,30 +445,53 @@ None of the slice 1, 2 or 3 bench items has been run with this candidate on a ph
 34. Type "red chase on the peaks and blue wave on the corners". *Expect:* two
     direction questions. Apply. *Expect:* a chase on both areas (one motion per
     design). Write down what you see.
-35. Known gap (spare only): pick the chase design from step 29 for a schedule, with
-    ON a few minutes ahead. *Expect:* it is accepted, but at the ON minute it shows
-    a still picture, not a chase (section 7, item 1). Delete the schedule
-    afterwards.
 
-**Dancing Shadows** (no change in this build; this records today's pace)
+**Item A — animated designs can't be scheduled** (spare only)
 
-36. Explore → any colourway → Dancing Shadows. *Expect:* the speed slider reads
-    "Very Slow". Note how fast it looks, so the change can be judged later
-    (section 5).
+35. Design Studio → "Variations of Bench stamp 3x100" → type "chase left to right"
+    → Save. Schedule → new → Run a pattern → Pick → My Designs → that variation.
+    *Expect:* "… is an animated design. Animated designs can't be scheduled yet.
+    Pick a still design, or save a still version." Nothing is picked.
+36. Do the same with "wave effect moving right to left", and with the chase design
+    from step 29. *Expect:* the same sentence each time.
+37. Save a "1 on 3 off" variation the same way and pick it. *Expect:* it is
+    accepted, with the "saved to your controller as a picture" line. Delete the
+    schedule afterwards.
+
+**Item B — Dancing Shadows is slower**
+
+38. Explore → any colourway → tune → Pulse → Dancing Shadows. *Expect:* the speed
+    slider reads "Very Slow", and the shadows move about half as fast as on build
+    122. Laptop: the controller's state shows speed 10.
+39. Home → Tune → effect menu → Dancing Shadows. *Expect:* the same pace. Laptop:
+    speed 10.
+40. Explore → a calm collection (Nature & Outdoors) → a colourway → its
+    "… Shadows" card. *Expect:* it still visibly moves; calm collections now start
+    it at speed 2–5. Write down whether it looks still.
 
 **+122 sunrise and sunset — must not have regressed**
 
-37. Schedule Warm White on at sunset and off at sunrise, every day, then sync.
+41. Schedule Warm White on at sunset and off at sunrise, every day, then sync.
     *Expect:* no warning.
-38. At sunset. *Expect:* Warm White comes on within a minute of the app's sunset
+42. At sunset. *Expect:* Warm White comes on within a minute of the app's sunset
     time.
-39. At the next sunrise. *Expect:* the lights go off.
-40. Before a sunset, unplug the controller for 10 s with the phone away, plug it
+43. At the next sunrise. *Expect:* the lights go off.
+44. Before a sunset, unplug the controller for 10 s with the phone away, plug it
     back in, and set its clock if it is the spare. *Expect:* it still comes on at
     sunset, not at sunrise.
-41. Turn on a sunrise OFF for one weekday only. *Expect:* the lights go off at
+45. Turn on a sunrise OFF for one weekday only. *Expect:* the lights go off at
     sunrise on that day.
-42. Add "Bench nightly 3-bus" at a clock time beside the sunset schedule, then
-    sync. *Expect:* the sunset and sunrise behave exactly as in steps 38–39.
-43. Delete the design schedule and sync. *Expect:* sunset and sunrise still work,
+46. Add "Bench nightly 3-bus" at a clock time beside the sunset schedule, then
+    sync. *Expect:* the sunset and sunrise behave exactly as in steps 42–43.
+47. Delete the design schedule and sync. *Expect:* sunset and sunrise still work,
     and Warm White is unchanged.
+
+## 11. After the tag
+
+- In the ledger commit, which goes outside the tag:
+  - move T-D4, T-D5, T-G3, T-G4 and T-E4 in `docs/FACTS.md` to `SHIPPED (123)`;
+  - move T-B1 to build 123 with its TestFlight number;
+  - add the build's ledger rows and the withdrawal tester text to
+    `docs/guides/internal/31-release-notes.md` (see section 8, item 4).
+- Android: versionCode 123 is not consumed until a bundle is built; bump nothing
+  before that.
