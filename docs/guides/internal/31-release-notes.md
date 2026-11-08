@@ -1,8 +1,14 @@
 # Release notes and tester messages
 
-*Describes build: 2.5.10+116 · Last verified: 2026-10-09 · Internal; the tester text is what testers receive.*
+*Describes build: 2.5.10+123 · Last verified: 2026-11-07 · Internal; the tester text is what testers receive.*
 
-One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Builds not listed (113) were never built or shipped. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+
+## 2.5.10 build 123 — candidate, not yet tagged
+
+**What changed:** A custom roofline design can be put on the weekly schedule when your controller's layout matches the layout the design was saved for, on controllers the app supports for this; when it does not match, the app says so and does not schedule it. Design Studio can make colour variations of a saved design, and a variation keeps the saved design's layout. Design Studio understands direction words such as "left to right" and "moving right" as the direction of motion, not as a place on the house. Dancing Shadows starts slower. Animated designs can't be scheduled yet.
+
+**Tester text:** written with the build's ledger row, after the tag.
 
 ## 2.5.10 build 116 — 2026-10-07
 
@@ -40,4 +46,4 @@ One entry per build that reached TestFlight, newest first. Each entry is copied 
 
 See the rows in `docs/BUILD_LEDGER.md`.
 
-*Facts: T-B1, T-E3, T-S1, T-S2, T-L1, T-V1, T-E1, T-C1, T-C3, T-G1, T-GD1, T-GD4, T-E2, T-D1, T-L2, T-R8, T-R1, T-SU1, T-SU2.*
+*Facts: T-B1, T-D4, T-D5, T-G3, T-G4, T-E4, T-E3, T-S1, T-S2, T-L1, T-V1, T-E1, T-C1, T-C3, T-G1, T-GD1, T-GD4, T-E2, T-D1, T-L2, T-R8, T-R1, T-SU1, T-SU2.*
