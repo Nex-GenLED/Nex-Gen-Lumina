@@ -8,6 +8,7 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 import '../autopilot/game_day_autopilot_config.dart';
@@ -20,6 +21,14 @@ import '../autopilot/game_day_autopilot_config.dart';
 /// summary fields can never disagree with what it fires, and
 /// [GameDayAutopilotConfig.designLabel] derives the card's text from it.
 /// [designName] is the palette's name; the effect suffix is NOT stored.
+///
+/// Roofline slice 1, item 4 — throws [PerPixelDesignRefused] (a plain,
+/// customer-readable message) when [wledPayload] carries per-pixel data
+/// (`seg[].i`). Game Day fires the stored payload unattended as one
+/// applyJson, through the bridge or the LAN, with no key filter on the
+/// server; a per-pixel body would freeze the segment with a frame the
+/// post-game revert cannot clear. This is the one write into a plan, so the
+/// refusal lives here rather than only in the picker.
 Map<String, dynamic> gameDayDesignUpdate({
   required String designName,
   required Map<String, dynamic> wledPayload,
@@ -29,6 +38,9 @@ Map<String, dynamic> gameDayDesignUpdate({
   int? brightness,
   DateTime? now,
 }) {
+  if (payloadCarriesPerPixel(wledPayload)) {
+    throw PerPixelDesignRefused(perPixelGameDayRefusedMessage(designName));
+  }
   final seg = wledPayload['seg'];
   final first = seg is List ? (seg.isEmpty ? null : seg.first) : seg;
   final segMap = first is Map ? first : const <String, dynamic>{};

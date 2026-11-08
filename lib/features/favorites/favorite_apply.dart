@@ -88,17 +88,23 @@ Future<FavoriteApplyOutcome> applyFavoritePayloadWith(
     // effective set), the way an effect favourite on the same grid does;
     // a DESIGN apply (Design Studio, My Designs) goes to the channels the
     // design carries content for instead.
-    final result = await applyPositionalDesignWith(
+    final report = await applyPositionalDesignDetailed(
       read,
       design.copyWith(brightnessStated: favoriteStatesBrightness(payload)),
       targets: DesignApplyTargets.effective,
     );
     return FavoriteApplyOutcome(
-      result == DesignApplyResult.applied
+      report.result == DesignApplyResult.applied
           ? FavoriteApplyStatus.applied
           : FavoriteApplyStatus.failed,
       payload,
       perPixel: true,
+      // Roofline slice 1, item 2: a stamped design refused for its layout
+      // carries the fit sentence, so the grid can say what does not match
+      // instead of blaming the connection.
+      reason: report.result == DesignApplyResult.layoutMismatch
+          ? report.message
+          : null,
     );
   }
 

@@ -2,6 +2,13 @@ import 'dart:convert';
 
 import 'package:nexgen_command/features/patterns/utils/pattern_display_name.dart';
 
+/// The [ScheduleItem.presetKind] of a painted design scheduled nightly: the
+/// sync writes a WLED API-command preset (`o:true`) for it. The one value
+/// this field can take today; absent means the ordinary captured-state
+/// preset. Defined here (pure Dart) so the model, the sync, the picker and
+/// the bench harness all read the same string.
+const String kSchedulePresetKindApi = 'api';
+
 /// Represents a single automation schedule for lights/patterns.
 ///
 /// Each schedule has an "on" time when the pattern/action starts
@@ -96,6 +103,32 @@ class ScheduleItem {
   /// there. Null whenever [channels] is null.
   final String? controllerId;
 
+  /// Roofline slice 2 — the saved design this schedule replays, when it is a
+  /// PAINTED (per-pixel) design scheduled nightly. Null for every other
+  /// schedule (catalog patterns, Turn Off, Brightness, React to Music).
+  ///
+  /// Stored as `design_id`. The sync reads [presetKind], not this, to choose
+  /// the preset builder; this is the back-reference the UI and support use.
+  final String? designId;
+
+  /// Roofline slice 2 — which KIND of WLED preset the sync writes for this
+  /// schedule. Null (every schedule before this field existed, and every
+  /// catalog pattern) means the ordinary captured-state preset: the body is
+  /// scoped, fanned out over the buses and psaved as live state.
+  /// `kSchedulePresetKindApi` ('api') means a WLED API-command preset
+  /// (`o:true`): the stored [wledPayload] IS the request the controller
+  /// replays at fire time, one entry per bus with explicit bounds, carrying
+  /// the painted picture (`seg[].i`). The sync bypasses scoping and fan-out
+  /// for it and gates it (LAN, layout fit, firmware, byte cap) before any
+  /// write. See design_api_preset.dart.
+  ///
+  /// Stored as `preset_kind`. DURABILITY: an older build rewrites the whole
+  /// `schedules` array through its own `toJson()` and would drop both fields;
+  /// the schedule then reads as a plain per-pixel payload, which the sync
+  /// REFUSES to psave (it would fire dark), so the failure is a refusal, not
+  /// a wrong look. No sidecar in this slice.
+  final String? presetKind;
+
   const ScheduleItem({
     required this.id,
     required this.timeLabel,
@@ -111,10 +144,16 @@ class ScheduleItem {
     this.sortKey = 0,
     this.channels,
     this.controllerId,
+    this.designId,
+    this.presetKind,
   });
 
   /// True when this item targets a subset of channels rather than the strip.
   bool get isChannelScoped => channels != null;
+
+  /// True when the sync must write this schedule as a WLED API-command preset
+  /// (a painted design) — see [presetKind].
+  bool get isDesignApiPreset => presetKind == kSchedulePresetKindApi;
 
   /// UI-safe action label. Routes the pattern-name portion of a
   /// `"Pattern: <name>"` [actionLabel] through the centralized slug
@@ -168,6 +207,11 @@ class ScheduleItem {
     /// Clears BOTH scope fields. Needed because `channels: null` cannot mean
     /// "remove the scope" through the usual `?? this.x` idiom.
     bool clearScope = false,
+    String? designId,
+    String? presetKind,
+    /// Clears BOTH design fields (a re-pick of a catalog pattern over a
+    /// painted design must not keep calling the schedule a design).
+    bool clearDesign = false,
   }) =>
       ScheduleItem(
         id: id ?? this.id,
@@ -186,6 +230,8 @@ class ScheduleItem {
         channels: clearScope ? null : (channels ?? this.channels),
         controllerId:
             clearScope ? null : (controllerId ?? this.controllerId),
+        designId: clearDesign ? null : (designId ?? this.designId),
+        presetKind: clearDesign ? null : (presetKind ?? this.presetKind),
       );
 
   Map<String, dynamic> toJson() => {
@@ -207,6 +253,10 @@ class ScheduleItem {
         // them, today) writes the same document it always did.
         if (channels != null) 'channels': channels,
         if (controllerId != null) 'controllerId': controllerId,
+        // Omitted when null so every schedule that is not a painted design
+        // writes the same document it always did.
+        if (designId != null) 'design_id': designId,
+        if (presetKind != null) 'preset_kind': presetKind,
       };
 
   factory ScheduleItem.fromJson(Map<String, dynamic> json) => ScheduleItem(
@@ -229,7 +279,17 @@ class ScheduleItem {
         sortKey: (json['sortKey'] as num?)?.toInt() ?? 0,
         channels: _tryParseChannels(json['channels']),
         controllerId: json['controllerId'] as String?,
+        designId: _tryParseNonEmptyString(json['design_id']),
+        presetKind: _tryParseNonEmptyString(json['preset_kind']),
       );
+
+  /// Absent, wrong type, or empty collapse to null rather than throw or keep
+  /// an empty marker a reader could mistake for a kind.
+  static String? _tryParseNonEmptyString(dynamic raw) {
+    if (raw is! String) return null;
+    final t = raw.trim();
+    return t.isEmpty ? null : t;
+  }
 
   /// Absent, wrong type, or non-numeric members all collapse rather than
   /// throw. An empty list survives as empty — "explicitly none" is a different

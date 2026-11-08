@@ -9,9 +9,12 @@ import '../../wled/pattern_grid_widgets.dart';
 import '../../wled/pattern_providers.dart';
 import '../../wled/pattern_repository.dart';
 import '../../wled/wled_effects_catalog.dart';
+import '../../design/per_pixel_payload_guard.dart'
+    show kPerPixelSyncRefusedMessage;
 import '../neighborhood_models.dart';
 import '../neighborhood_providers.dart';
 import '../neighborhood_sync_engine.dart';
+import '../sync_per_pixel_guard.dart';
 import '../sync_start_feedback.dart';
 import '../services/group_autopilot_service.dart';
 import '../services/path1_complement_theme.dart';
@@ -80,8 +83,18 @@ const kFeaturedSyncRefs = <FeaturedPatternRef>[
 bool isWellFormedSyncAssignment(SyncPatternAssignment a) {
   if (a.colors.isEmpty) return false;
   if (WledEffectsCatalog.getById(a.effectId) == null) return false;
+  // Roofline slice 1, item 4: a per-pixel payload can never be fanned out
+  // (the server whitelist drops `i`; a member would show the black base).
+  if (syncAssignmentCarriesPerPixel(a)) return false;
   return true;
 }
+
+/// Why [a] cannot be started, in the host's words — the per-pixel sentence
+/// when that is the reason, else the generic one.
+String syncAssignmentRefusalMessage(SyncPatternAssignment a) =>
+    syncAssignmentCarriesPerPixel(a)
+        ? kPerPixelSyncRefusedMessage
+        : "That design can't be applied — please pick another.";
 
 /// Resolve curated [refs] against the LIVE catalog via [repo]. Each ref is
 /// looked up by id; only refs that resolve to a real palette node AND yield a
@@ -1282,10 +1295,9 @@ class _SyncControlPanelState extends ConsumerState<SyncControlPanel> {
       if (!isWellFormedSyncAssignment(global)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-              "That design can't be applied — please pick another.",
-            ),
+            content: Text(syncAssignmentRefusalMessage(global)),
             backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 7),
           ),
         );
         return;

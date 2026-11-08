@@ -27,7 +27,15 @@ import 'package:nexgen_command/features/design/apply_saved_design.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
+    show perPixelPickerRefusalMessage;
 import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
+import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart'
+    show kSchedulePresetKindApi;
+import 'package:nexgen_command/features/wled/design_schedule_pick.dart';
+import 'package:nexgen_command/features/schedule/design_api_preset.dart'
+    show DesignScheduleEligibility;
 import 'package:nexgen_command/features/wled/pattern_apply_gate.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/shared/write_result.dart';
@@ -275,7 +283,7 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   /// Selection-mode handler: resolve the saved
   /// design and hand it back via [LibraryBrowserScreen.onDesignSelected] (its
   /// RAW payload) WITHOUT applying it. The callback owns dismissing the picker.
-  void _returnSavedDesignSelection(String? designId) {
+  Future<void> _returnSavedDesignSelection(String? designId) async {
     if (!mounted) return;
     final cb = widget.onDesignSelected;
     if (cb == null) return;
@@ -308,15 +316,20 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
     // colours, positions dropped, fx:83 — audit F3), which scheduled a look
     // the user never made. Refuse plainly rather than schedule the wrong
     // thing; the design still applies faithfully from My Designs.
+    // Roofline slice 1, item 4: the sentence names the destination (Game
+    // Day has its own), and the plan write refuses the same payload itself
+    // (game_day_design_write.dart), so this is the early word, not the gate.
+    //
+    // Roofline slice 2 (A2): the SCHEDULE destination never reaches this
+    // handler with a painted design — the card builder routes it to
+    // _ScheduleDesignGate, which decides in place and hands an allowed
+    // design back itself. This branch is the other destinations' word.
     if (match.isPositional) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
-          content: Text(
-              '"${match.name}" is a per-pixel design. Those can\'t be scheduled '
-              'yet — your controller\'s timers can only replay colours and '
-              'effects, not a painted picture. You can still apply it any time '
-              'from My Designs.'),
+          content: Text(perPixelPickerRefusalMessage(
+              match.name, widget.saveDestinationLabel)),
           duration: const Duration(seconds: 7),
         ));
       return; // stay in the picker so another design can be chosen
@@ -325,6 +338,20 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
       id: match.id,
       name: match.name,
       wledPayload: match.toWledPayload(),
+    ));
+  }
+
+  /// Roofline slice 2 — the repair a too-detailed design is offered: the
+  /// paint editor over the live buses (the same door the detail screen's Edit
+  /// opens). Pushed on the root navigator, above the picker.
+  Future<void> _openDesignEditor(CustomDesign design) async {
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        backgroundColor: NexGenPalette.matteBlack,
+        appBar: GlassAppBar(title: Text('Edit ${design.name}')),
+        body: ManualDesignEditor(initialDesign: design),
+      ),
     ));
   }
 
@@ -483,8 +510,29 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                           // schedule or Game Day. The picker used to show a
                           // spinner that never resolved while a snackbar said
                           // so; it now says so in place, with a way back.
+                          //
+                          // Roofline slice 2 (A2): for the SCHEDULE
+                          // destination a painted design CAN be scheduled —
+                          // as the API-command preset the sync writes — when
+                          // the owner's gates pass (design_schedule_pick.dart:
+                          // stamped, on the LAN, the live layout fits the
+                          // stamp, a proven firmware and model, under the
+                          // caps). The gate decides IN PLACE: allowed hands
+                          // the design back once; refused shows the gate's
+                          // own sentence here, with a way back. Every other
+                          // destination keeps row 92's card exactly.
                           final pending = _resolveDesign(designId ?? '');
                           if (pending != null && pending.isPositional) {
+                            if (widget.saveDestinationLabel?.toLowerCase() ==
+                                'schedule') {
+                              return _ScheduleDesignGate(
+                                key: ValueKey(
+                                    'schedule-design-gate-${pending.id}'),
+                                design: pending,
+                                onAllowed: widget.onDesignSelected!,
+                                onOpenEditor: _openDesignEditor,
+                              );
+                            }
                             return _PerPixelNotSelectable(
                                 designName: pending.name);
                           }
@@ -594,11 +642,96 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
   }
 }
 
+/// Roofline slice 2 (A2) — a painted design in the SCHEDULE picker. The
+/// owner's gates (design_schedule_pick.dart) decide IN PLACE: a spinner while
+/// the verdict is pending (one firmware read on the LAN); allowed → the
+/// design is handed back ONCE through [onAllowed] with the API body the sync
+/// will write (the callback owns dismissing the picker); refused → the
+/// gate's own sentence under row 92's title, a way back, and the editor when
+/// the gate offers it (a body over the caps). Nothing is handed back on a
+/// refusal.
+class _ScheduleDesignGate extends ConsumerStatefulWidget {
+  const _ScheduleDesignGate({
+    super.key,
+    required this.design,
+    required this.onAllowed,
+    required this.onOpenEditor,
+  });
+
+  final CustomDesign design;
+  final void Function(LibraryDesignSelection selection) onAllowed;
+  final void Function(CustomDesign design) onOpenEditor;
+
+  @override
+  ConsumerState<_ScheduleDesignGate> createState() =>
+      _ScheduleDesignGateState();
+}
+
+class _ScheduleDesignGateState extends ConsumerState<_ScheduleDesignGate> {
+  late final Future<DesignScheduleEligibility> _verdict;
+  bool _handedBack = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _verdict = designSchedulePickVerdict(ref.read, widget.design);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final design = widget.design;
+    return FutureBuilder<DesignScheduleEligibility>(
+      future: _verdict,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return _PerPixelNotSelectable(designName: design.name);
+        }
+        final verdict = snap.data;
+        if (verdict == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (verdict.allowed) {
+          if (!_handedBack) {
+            _handedBack = true;
+            final body = verdict.body!;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              widget.onAllowed(LibraryDesignSelection(
+                id: design.id,
+                name: design.name,
+                wledPayload: body,
+                designId: design.id,
+                presetKind: kSchedulePresetKindApi,
+              ));
+            });
+          }
+          return const Center(child: CircularProgressIndicator());
+        }
+        return _PerPixelNotSelectable(
+          designName: design.name,
+          detail: verdict.message ??
+              perPixelPickerRefusalMessage(design.name, 'schedule'),
+          onOpenEditor:
+              verdict.offersEditor ? () => widget.onOpenEditor(design) : null,
+        );
+      },
+    );
+  }
+}
+
 /// Row 92 — shown in place of the never-ending spinner when a schedule or Game
-/// Day picker lands on a per-pixel design.
+/// Day picker lands on a per-pixel design. [detail] replaces the generic
+/// sentence when a gate has a more exact one (A2); [onOpenEditor] adds the
+/// editor when that gate offers it.
 class _PerPixelNotSelectable extends StatelessWidget {
   final String designName;
-  const _PerPixelNotSelectable({required this.designName});
+  final String? detail;
+  final VoidCallback? onOpenEditor;
+  const _PerPixelNotSelectable({
+    required this.designName,
+    this.detail,
+    this.onOpenEditor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -620,12 +753,14 @@ class _PerPixelNotSelectable extends StatelessWidget {
                   fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
-            const Text(
-              "Your controller's timers can replay colours and effects, not a "
-              'painted picture, so this one can\'t be chosen here. You can '
-              'still apply it any time from My Designs.',
+            Text(
+              detail ??
+                  "Your controller's timers can replay colours and effects, "
+                      'not a painted picture, so this one can\'t be chosen '
+                      'here. You can still apply it any time from My Designs.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: NexGenPalette.textMedium, fontSize: 13),
+              style: const TextStyle(
+                  color: NexGenPalette.textMedium, fontSize: 13),
             ),
             const SizedBox(height: 16),
             FilledButton(
@@ -633,6 +768,14 @@ class _PerPixelNotSelectable extends StatelessWidget {
               onPressed: () => Navigator.of(context).maybePop(),
               child: const Text('Choose another design'),
             ),
+            if (onOpenEditor != null) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                key: const ValueKey('per-pixel-open-editor'),
+                onPressed: onOpenEditor,
+                child: const Text('Open editor'),
+              ),
+            ],
           ],
         ),
       ),

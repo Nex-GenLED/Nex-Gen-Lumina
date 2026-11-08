@@ -782,6 +782,13 @@ class _AIDesignStudioScreenState extends ConsumerState<AIDesignStudioScreen> {
             'This design has no lit pixels to apply.',
             Colors.orange.shade800
           ),
+        // Roofline slice 1, item 2: a stamped design that does not fit the
+        // live buses (or has no bus data off the LAN). Nothing was written;
+        // the message says what differs and how to fix it.
+        DesignApplyResult.layoutMismatch => (
+            report.message ?? 'This design does not fit your lights\' current layout.',
+            Colors.orange.shade800
+          ),
         DesignApplyResult.error => (
             // #94 — an identity refusal must say so, not blame the network.
             takeIdentityRefusalMessage() ??

@@ -37,9 +37,13 @@ import 'package:nexgen_command/features/neighborhood/neighborhood_models.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_service.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_sync_engine.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
+    show kPerPixelSyncRefusedMessage;
 import 'package:nexgen_command/features/neighborhood/sync_fanout_feature_flag.dart';
+import 'package:nexgen_command/features/neighborhood/sync_per_pixel_guard.dart'
+    show syncAssignmentCarriesPerPixel;
 import 'package:nexgen_command/features/neighborhood/widgets/sync_control_panel.dart'
-    show isWellFormedSyncAssignment;
+    show isWellFormedSyncAssignment, syncAssignmentRefusalMessage;
 import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -413,6 +417,17 @@ void main() {
       test(kind.label, () async {
         // 1. The panel's refuse-before-write guard (sync_control_panel.dart:1253)
         //    must PASS for this kind, or Start ends with the red snackbar.
+        //    Roofline slice 1, item 4 (owner decision D5): the PER-PIXEL kind
+        //    is now the one look the panel refuses, with its own sentence —
+        //    the server whitelist drops `i`, so a closed-app neighbour would
+        //    show the black base under the design's name. Nothing starts.
+        if (syncAssignmentCarriesPerPixel(kind.assignment)) {
+          expect(isWellFormedSyncAssignment(kind.assignment), isFalse,
+              reason: 'a painted picture cannot be fanned out');
+          expect(syncAssignmentRefusalMessage(kind.assignment),
+              kPerPixelSyncRefusedMessage);
+          return;
+        }
         expect(isWellFormedSyncAssignment(kind.assignment), isTrue,
             reason: 'the panel would refuse this look with the red snackbar');
 

@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/utils/sun_utils.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart';
+import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 
 /// A resolved clock time for a dated entry, and whether it came from the sun.
 class DatedClock {
@@ -112,6 +114,42 @@ Color? firstColorOfPayload(Map<String, dynamic>? payload) {
 /// What a single-night entry does when it fires.
 enum DatedAction { runPattern, powerOff, brightness }
 
+/// D4 — [composeDatedEntry] for a caller that shows refusals instead of
+/// throwing them: the entry, or the customer sentence when the payload is a
+/// painted design (per-pixel, or its API-command preset body). The editor's
+/// "Just this day" save goes through this; the throwing form stays for the
+/// lease manager, whose tests pin it.
+({CalendarEntry? entry, String? refusal}) composeDatedEntryOrRefusal({
+  required DateTime date,
+  required DatedAction action,
+  required String onHhmm,
+  required String? offHhmm,
+  String? patternName,
+  Map<String, dynamic>? patternPayload,
+  int brightnessPercent = 100,
+  List<int>? channels,
+  String? controllerId,
+}) {
+  try {
+    return (
+      entry: composeDatedEntry(
+        date: date,
+        action: action,
+        onHhmm: onHhmm,
+        offHhmm: offHhmm,
+        patternName: patternName,
+        patternPayload: patternPayload,
+        brightnessPercent: brightnessPercent,
+        channels: channels,
+        controllerId: controllerId,
+      ),
+      refusal: null,
+    );
+  } on PerPixelDesignRefused catch (e) {
+    return (entry: null, refusal: e.message);
+  }
+}
+
 /// Build the dated entry the "+" editor writes for "Just this day".
 ///
 /// The entry is the customer's own: `type user`, `autopilot false`,
@@ -157,6 +195,18 @@ CalendarEntry composeDatedEntry({
         controllerId: controllerId,
       );
     case DatedAction.runPattern:
+      // Roofline slice 2 — a painted design (per-pixel, or its API-command
+      // preset body) is a weekly schedule, never a one-night entry: the lease
+      // path psaves live state with none of the design gates, and a picture
+      // psaved that way fires dark. Refused here, in the editor, and again at
+      // the lease write.
+      if (payloadCarriesPerPixel(patternPayload) ||
+          isDesignApiPresetBody(patternPayload)) {
+        throw PerPixelDesignRefused(designOneNightRefusedMessage(
+            (patternName == null || patternName.trim().isEmpty)
+                ? 'Custom'
+                : patternName.trim()));
+      }
       final payloadBri = patternPayload?['bri'];
       final bri = payloadBri is num
           ? (payloadBri / 255 * 100).round().clamp(1, 100)

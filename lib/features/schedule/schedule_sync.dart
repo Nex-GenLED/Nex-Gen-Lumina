@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:nexgen_command/features/wled/device_channel.dart';
@@ -7,6 +9,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart';
+import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
 import 'package:nexgen_command/features/schedule/preset_repair_convergence.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
@@ -311,8 +315,26 @@ Future<CfgPushOutcome> pushCfgWithVerify({
 /// steady-state sync (few or zero real psaves) exactly as fast as before.
 const Duration kControllerWritePace = Duration(milliseconds: 300);
 
+/// C2 — settle before the one retry of a failed presets.json read-back after
+/// a design preset write, and the budget for the whole read-back (two reads
+/// and the settle). 1.5 s covers the flash commit the write itself does
+/// (bench 2026-11-06: every design read-back answered within 0.4 s once the
+/// write returned); 5 s is the owner's bound.
+const Duration kDesignReadBackSettle = Duration(milliseconds: 1500);
+const Duration kDesignReadBackBudget = Duration(seconds: 5);
+
 class ScheduleSyncService {
-  const ScheduleSyncService({this.paceDelay = kControllerWritePace});
+  const ScheduleSyncService({
+    this.paceDelay = kControllerWritePace,
+    this.readBackSettle = kDesignReadBackSettle,
+    this.readBackBudget = kDesignReadBackBudget,
+  });
+
+  /// C2 — after a design preset write, a presets.json read that fails is
+  /// retried ONCE after this settle (the controller is committing the file);
+  /// the whole read-back is bounded by [readBackBudget]. Tests pass zero.
+  final Duration readBackSettle;
+  final Duration readBackBudget;
 
   /// Floor delay BETWEEN consecutive controller WRITES inside one [syncAll]
   /// (audit/SYNC_PACING_FIX_STATUS.md §1(a) — previously absent entirely).
@@ -520,6 +542,20 @@ class ScheduleSyncService {
     bool compareSegments = true,
     bool requireAllExpectedSegments = false,
   }) {
+    // ROOFLINE SLICE 2 — an API-command preset (a painted design, `o:true`)
+    // is judged by the hash of the WHOLE stored payload, never field by field:
+    // its segments carry `i` lists, which `!=` can never call equal, so the
+    // compare below would report every design preset unsatisfied on every
+    // sync (a flash write and a visible repaint per connect, then a
+    // non-convergence refusal). The hash sets aside the keys WLED strips on
+    // save and compares everything else — picture, bounds, name, root. See
+    // presetPayloadHash. `expectedName` is inside the hash (`n`), so it is
+    // not checked separately; `compareSegments` does not apply (there is no
+    // ladder to repair in a picture).
+    if (expected['o'] == true) {
+      return presetPayloadHash(stored) == presetPayloadHash(expected);
+    }
+
     if (expectedName != null && !_presetNamed(stored, expectedName)) {
       return false;
     }
@@ -994,6 +1030,11 @@ class ScheduleSyncService {
     // never saved (the silent-arm bug). A macro is only armed if its preset id
     // is in this set or maps to a legacy on/off/brightness preset.
     final Set<int> savedPresetIds = <int>{};
+    // C2 — slots written this sync whose read-back could not be done
+    // (presets.json unreadable twice within the budget): kept on the
+    // controller (never purged) but NOT armed until a later sync reads them
+    // back; disjoint from savedPresetIds, which is the armable set.
+    final Set<int> keepPresetIds = <int>{};
 
     // ── Idempotent-write + capture/restore scaffolding ──────────────────
     // ROOT CAUSE this guards against: every `savePreset` POSTs its inline
@@ -1128,6 +1169,18 @@ class ScheduleSyncService {
       /// expectation names but the controller lacks a FAILURE rather than
       /// silence — see presetSatisfies.
       bool scoped = false,
+      /// ROOFLINE SLICE 2 — run after a successful write (owner decision 6:
+      /// read back after every write). [DesignReadBack.landed] arms the slot
+      /// and clears its repair counter; [DesignReadBack.mismatch] is the one
+      /// outcome that counts a repair attempt — the slot is NOT armable and
+      /// [readBackMismatchMessage] is reported; [DesignReadBack.unreadable]
+      /// (C2) is "written, not verified": not armed, not purged
+      /// (keepPresetIds), no attempt counted, [readBackUnverifiedMessage]
+      /// reported — the next sync re-reads and arms without rewriting when
+      /// the stored hash matches.
+      Future<DesignReadBack> Function()? readBackVerify,
+      String? readBackMismatchMessage,
+      String? readBackUnverifiedMessage,
     }) async {
       bool isSatisfied(Map<String, dynamic> existingDef) => alwaysWrite
           ? false
@@ -1203,6 +1256,10 @@ class ScheduleSyncService {
       // A CONVERGED slot (see `converged` above) is not consulted and its
       // counter is cleared: the write that follows is Option A's policy, not
       // a repair attempt, and it cannot be "the save that is not fixing it".
+      // C2 — a slot with a read-back records its attempt AFTER the read-back,
+      // and only for a readable mismatch: an unreadable presets.json is not a
+      // save that failed to converge, it is a save nobody could look at yet.
+      final deferAttempt = readBackVerify != null;
       if (converged) {
         await repairAttempts.recordSatisfied(id);
       } else {
@@ -1213,7 +1270,7 @@ class ScheduleSyncService {
           savedPresetIds.add(id); // left alone deliberately, not lost
           return;
         }
-        await repairAttempts.recordAttempt(id);
+        if (!deferAttempt) await repairAttempts.recordAttempt(id);
       }
 
       // PACE. Only reached once every skip/refuse branch above has returned,
@@ -1230,6 +1287,33 @@ class ScheduleSyncService {
       );
       if (ok) {
         didWriteAnyPreset = true;
+        if (readBackVerify != null) {
+          DesignReadBack outcome;
+          try {
+            outcome = await readBackVerify();
+          } catch (e) {
+            debugPrint('ScheduleSync: read-back of preset $id threw — $e');
+            outcome = DesignReadBack.unreadable;
+          }
+          switch (outcome) {
+            case DesignReadBack.landed:
+              await repairAttempts.recordSatisfied(id);
+              break;
+            case DesignReadBack.mismatch:
+              await repairAttempts.recordAttempt(id);
+              presetErrors.add(readBackMismatchMessage ??
+                  'preset $id ($name) did not read back as written — not armed');
+              debugPrint('ScheduleSync: preset $id ($name) READ-BACK MISMATCH');
+              return; // not in savedPresetIds: not armed
+            case DesignReadBack.unreadable:
+              keepPresetIds.add(id); // written: never purged
+              presetErrors.add(readBackUnverifiedMessage ??
+                  'preset $id ($name) was written but could not be read back '
+                      '— not armed until a later sync verifies it');
+              debugPrint('ScheduleSync: preset $id ($name) WRITTEN, NOT VERIFIED');
+              return; // not armed, not purged, no attempt counted
+          }
+        }
         savedPresetIds.add(id);
       } else {
         presetErrors.add('Failed to save preset $id ($name)');
@@ -1348,6 +1432,15 @@ class ScheduleSyncService {
 
     int nextPresetId = _firstSchedulePresetId;
 
+    // ROOFLINE SLICE 2 — schedules whose design preset was refused or did not
+    // land. They already carry their own sentence in presetErrors; the arming
+    // partition below counts them as refused without adding the generic
+    // "has no saved design" line on top.
+    final Set<String> refusedDesignScheduleIds = <String>{};
+    // Painted designs written (or found converged) so far this sync: the
+    // per-account cap, judged at write time as well as at save time.
+    var designSchedulesSeen = 0;
+
     for (final schedule in enabled) {
       // If this schedule uses audio reactivity, build a WLED payload with a
       // random audio-reactive effect from the controller. This can turn an
@@ -1380,6 +1473,28 @@ class ScheduleSyncService {
         }
       }
 
+      // ── ROOFLINE SLICE 2: a PICTURE never goes through the pattern path ──
+      // A per-pixel payload (`seg[].i`) psaved as live state stores no pixels
+      // and captures frz:true, so the timer fires DARK (audit §B.1). Only a
+      // schedule the editor built from My Designs — stamped, fit-checked and
+      // marked preset_kind 'api' — may carry one, and it goes through the
+      // design branch below. Anything else carrying a picture (Lumina chat, a
+      // calendar intent, a schedule an older build stripped the kind from) is
+      // refused HERE, at the builder, with a plain sentence: not written, not
+      // armed, no slot consumed. The picker's refusal is the early word; this
+      // is the gate.
+      if (!effectiveSchedule.isDesignApiPreset &&
+          payloadCarriesPerPixel(effectiveSchedule.wledPayload)) {
+        final msg = designApiPresetStrayMessage(
+            plainDesignName(effectiveSchedule.actionLabel));
+        presetErrors.add(msg);
+        debugPrint('ScheduleSync: REFUSED stray per-pixel payload on '
+            '"${effectiveSchedule.actionLabel}" — not a design-kind schedule');
+        refusedDesignScheduleIds.add(effectiveSchedule.id);
+        updatedSchedules.add(effectiveSchedule);
+        continue;
+      }
+
       if (effectiveSchedule.hasWledPayload) {
         // Payload-bearing (pattern / audio-reactive): consume a per-schedule
         // preset slot in the 10–25 range and psave the design there.
@@ -1394,6 +1509,136 @@ class ScheduleSyncService {
         }
         final presetId = effectiveSchedule.presetId ?? nextPresetId;
         if (effectiveSchedule.presetId == null) nextPresetId++;
+
+        // ── ROOFLINE SLICE 2: the DESIGN KIND — an API-command preset ──────
+        // The stored wledPayload IS the body the controller replays (`o:true`,
+        // bounds-first: one {id,start,stop} entry per bus, then the paint
+        // entries without bounds, then the left-out buses as on:false —
+        // design_api_preset.dart; bounds on a paint entry painted one bus
+        // after a cold boot, bench 2026-11-06).
+        // It bypasses the scope rule, the fan-out and the ib/on/bri splice:
+        // the body is written as stored, plus the name. Before any write, the
+        // owner's gates in order: a well-formed body, a direct-LAN service
+        // (the relay has no bus facts, no firmware read, no read-back), the
+        // bus layout READ (never write while it is unread), the body's
+        // bounds EQUAL to the controller's own buses, a proven firmware
+        // version, the byte cap, the per-account count. Then: write only
+        // when the stored hash differs (presetSatisfies → presetPayloadHash),
+        // one writer at a time, read back after the write.
+        if (effectiveSchedule.isDesignApiPreset) {
+          final name = effectiveSchedule.actionLabel;
+          final plain = plainDesignName(name);
+          final rawPayload = effectiveSchedule.wledPayload!;
+          String? refusal;
+          // C1 — TRANSIENT: a device read failed (the bus layout, the
+          // firmware/model read), so nothing is known to be wrong with the
+          // design. PERSISTENT: the design no longer fits, the firmware or
+          // model is not allowed, a cap is exceeded, the body is malformed.
+          var transient = false;
+          final problem = designApiPresetBodyProblem(rawPayload);
+          if (problem != null) {
+            debugPrint('ScheduleSync: design preset body for "$name" — $problem');
+            refusal = designApiPresetMalformedMessage(plain);
+          } else if (activeRepo is! WledService) {
+            refusal = designScheduleOffLanMessage(plain);
+          } else if (gateExpectedShape.isEmpty) {
+            transient = true;
+            refusal = designApiPresetCouldNotVerifyMessage(plain);
+          } else if (!designApiPresetBoundsMatch(rawPayload, gateExpectedShape)) {
+            debugPrint('ScheduleSync: design preset "$name" bounds do not '
+                'match the live buses ${gateExpectedShape.join(' ')}');
+            refusal = designApiPresetLayoutChangedMessage(plain);
+          } else {
+            final info = await _controllerInfoOrNull(activeRepo);
+            final ver = info?.ver;
+            if (ver == null || ver.trim().isEmpty) {
+              transient = true;
+              refusal = designApiPresetCouldNotVerifyMessage(plain);
+            } else if (!isDesignApiPresetFirmwareProven(ver)) {
+              refusal = designScheduleFirmwareUnprovenMessage(plain, ver.trim());
+            } else if (!isDesignApiPresetArchProven(info?.arch)) {
+              // B4 — only the classic ESP32 is proven; the element ceiling is
+              // that model's parser pool.
+              refusal = designScheduleArchUnprovenMessage(plain, info?.arch);
+            } else {
+              // B3 — both caps at write time, the same question the picker
+              // asked: the element count the firmware enforces and the byte
+              // sanity limit.
+              final tooDetailed = designApiPresetCapRefusal(rawPayload,
+                  presetId: presetId, presetName: name, designName: plain);
+              if (tooDetailed != null) {
+                refusal = tooDetailed;
+              } else if (designSchedulesSeen >= kMaxDesignSchedulesPerAccount) {
+                refusal = designScheduleTooManyMessage(plain);
+              }
+            }
+          }
+          if (refusal != null) {
+            if (transient) {
+              // C1 — could not verify: the slot, its stored copy, its hash
+              // record and its timer row stay exactly as they were, no repair
+              // attempt is counted, and the next sync checks again. A copy
+              // the controller is known (or, with presets.json unreadable,
+              // presumed) to hold keeps its row armed; a design that never
+              // landed is not armed and has nothing to purge.
+              final landedCopy =
+                  presetsUnreadable || existingPresets.containsKey(presetId);
+              presetErrors.add(refusal);
+              debugPrint('ScheduleSync: design preset "$name" NOT VERIFIED — '
+                  'left as is (copy on device: $landedCopy)');
+              if (landedCopy) {
+                savedPresetIds.add(presetId); // kept: not purged, row kept
+              } else {
+                refusedDesignScheduleIds.add(effectiveSchedule.id);
+              }
+            } else {
+              presetErrors.add(refusal);
+              debugPrint('ScheduleSync: design preset "$name" REFUSED — $refusal');
+              refusedDesignScheduleIds.add(effectiveSchedule.id);
+            }
+            updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
+            continue;
+          }
+          designSchedulesSeen++;
+
+          // The body as the controller will hold it: the stored request plus
+          // the name the save adds, so the hash the predicate computes is the
+          // hash of the stored copy. Deep-copied so nothing downstream can
+          // reach the schedule's own map.
+          final body = <String, dynamic>{
+            ...(jsonDecode(jsonEncode(rawPayload)) as Map<String, dynamic>),
+            'n': name,
+          };
+          final expectedHash = presetPayloadHash(body);
+          final svcForReadBack = activeRepo as WledService;
+          await designPresetWriteLock.synchronized(() => psaveIfChanged(
+                id: presetId,
+                state: body,
+                name: name,
+                // NOT alwaysWrite: the hash decides (flash safety).
+                // C2 — read back; an unreadable presets.json gets ONE retry
+                // after a short settle, the whole read-back bounded by the
+                // budget. Unreadable twice is "written, not verified", never
+                // a mismatch.
+                readBackVerify: () => _readBackDesignPreset(
+                  svcForReadBack,
+                  presetId: presetId,
+                  expectedHash: expectedHash,
+                  settle: readBackSettle,
+                  budget: readBackBudget,
+                ),
+                readBackMismatchMessage: designApiPresetReadBackMessage(plain),
+                readBackUnverifiedMessage:
+                    designApiPresetUnverifiedMessage(plain),
+              ));
+          if (!savedPresetIds.contains(presetId)) {
+            // Gate refusal, non-convergence, a failed save or a read-back
+            // mismatch: each already reported its own sentence.
+            refusedDesignScheduleIds.add(effectiveSchedule.id);
+          }
+          updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
+          continue;
+        }
 
         // Option A (2026-07-22): ALWAYS psave the schedule's design — no
         // idempotent skip. The old fx+first-color skip (_scheduleDesignMatches)
@@ -1477,9 +1722,13 @@ class ScheduleSyncService {
     // NOT apply live state, so it never trips didWriteAnyPreset / restore.
     // Never pdel on an unreadable read — we cannot tell an orphan from a slot
     // we simply failed to see, and pdel is what corrupts presets.json (P1-52).
+    // C2 — a slot written this sync but not yet read back (keepPresetIds) is
+    // not an orphan: it is kept for the next sync to verify.
     if (activeRepo is WledService && !presetsUnreadable) {
       for (var id = _firstSchedulePresetId; id <= _lastSchedulePresetId; id++) {
-        if (existingPresets.containsKey(id) && !savedPresetIds.contains(id)) {
+        if (existingPresets.containsKey(id) &&
+            !savedPresetIds.contains(id) &&
+            !keepPresetIds.contains(id)) {
           final deleted = await activeRepo.deletePreset(id);
           if (!deleted) {
             debugPrint('ScheduleSync: failed to delete orphaned preset $id');
@@ -1570,6 +1819,13 @@ class ScheduleSyncService {
       // Its preset was still written above, so it is ready when the eviction
       // expires and the next sync re-arms it.
       if (s.isCurrentlyEvicted) continue;
+      // ROOFLINE SLICE 2 — a refused or unlanded design preset: counted as a
+      // refusal (so an all-refused sync still skips the clobbering write),
+      // its own sentence already in presetErrors.
+      if (refusedDesignScheduleIds.contains(s.id)) {
+        countRefusal(s);
+        continue;
+      }
       final isPatternAction = s.actionLabel.toLowerCase().startsWith('pattern');
       final presetSaved =
           s.presetId != null && savedPresetIds.contains(s.presetId);
@@ -2058,6 +2314,17 @@ class ScheduleSyncService {
   }) {
     if (channels == null) return payload;
 
+    // ROOFLINE SLICE 2 — a PICTURE is never templated. A painted design's
+    // body (an API-command preset, `o:true`, or any body carrying `seg[].i`)
+    // names every bus itself, each with its own paint; copying the first
+    // segment onto the census would hand every bus one bus's picture and
+    // strip the bounds the preset needs after a power cycle (audit §B.2).
+    // The sync's design branch bypasses this rule and the fan-out; this is
+    // the backstop for any caller that reaches the scope rule with one.
+    if (payloadCarriesPerPixel(payload) || payload['o'] == true) {
+      return payload;
+    }
+
     final live = liveState?['seg'];
     final liveIds = <int>[];
     if (live is List) {
@@ -2110,6 +2377,59 @@ class ScheduleSyncService {
           <String, dynamic>{'id': id, 'on': false},
     ];
     return out;
+  }
+
+  /// C2 — the read-back after a design preset write. presets.json is read;
+  /// if it cannot be read, ONE more read after [settle]; the whole thing is
+  /// bounded by [budget] (a timeout counts as unreadable). A readable store
+  /// decides landed/mismatch by the stored copy's hash against
+  /// [expectedHash]; unreadable twice is [DesignReadBack.unreadable] —
+  /// written, not verified — never a mismatch.
+  static Future<DesignReadBack> _readBackDesignPreset(
+    WledService svc, {
+    required int presetId,
+    required String expectedHash,
+    required Duration settle,
+    required Duration budget,
+  }) async {
+    Future<DesignReadBack> attempt() async {
+      var read = await svc.readPresets();
+      if (!read.isKnown) {
+        if (settle > Duration.zero) await Future<void>.delayed(settle);
+        read = await svc.readPresets();
+      }
+      if (!read.isKnown) return DesignReadBack.unreadable;
+      final got = read.presets[presetId];
+      return got != null && presetPayloadHash(got) == expectedHash
+          ? DesignReadBack.landed
+          : DesignReadBack.mismatch;
+    }
+
+    if (budget <= Duration.zero) return attempt();
+    try {
+      return await attempt().timeout(budget);
+    } on TimeoutException {
+      debugPrint('ScheduleSync: read-back of preset $presetId exceeded '
+          '${budget.inMilliseconds} ms — written, not verified');
+      return DesignReadBack.unreadable;
+    }
+  }
+
+  /// ROOFLINE SLICE 2 — the controller's firmware version and model
+  /// (`/json/info` `ver` and `arch`, ONE read), or null when the read fails.
+  /// The same read the installer and the restart watch make; nothing is
+  /// cached, because the gate must judge the controller the sync is talking
+  /// to now.
+  static Future<({String ver, String arch})?> _controllerInfoOrNull(
+      WledService svc) async {
+    try {
+      final info = await svc.getInfo();
+      if (info == null) return null;
+      return (ver: info.ver, arch: info.arch);
+    } catch (e) {
+      debugPrint('ScheduleSync: firmware version read failed — $e');
+      return null;
+    }
   }
 
   // _presetAllSegmentsOn and _presetIsOff are GONE (D3). Both were

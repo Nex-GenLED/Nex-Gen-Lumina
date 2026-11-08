@@ -545,6 +545,18 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
               brightness: wledState.brightness);
       final keepStored = existing != null && existing.statesBrightness;
 
+      // LAYOUT STAMP (roofline slice 1, item 1). The picture this editor
+      // saves is laid over the LIVE buses — the document was initialised from
+      // `deviceChannelsProvider` and every run is channel-local — so the
+      // save records which controller and which bus lengths it was painted
+      // for. The apply-time fit gate (item 2) refuses the design on any
+      // other layout and sends the customer back here to re-fit it. An edit
+      // re-stamps for the same reason: the picture was just reconciled over
+      // the live lengths. (The editor cannot initialise without the lengths,
+      // so a null stamp here is not reachable in practice; it would leave
+      // the design unstamped, which is today's behaviour.)
+      final stamp = liveDesignLayoutStamp(ref.read);
+
       // copyWith on the loaded doc for an edit: every field the editor does
       // not own (tags, description, composedPattern, roofline/segment
       // metadata) round-trips untouched.
@@ -557,6 +569,7 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
               perPixel: true,
               brightness: keepStored ? null : live,
               brightnessStated: keepStored ? true : live != null,
+              layoutStamp: stamp,
             )
           : CustomDesign(
               id: '',
@@ -573,6 +586,7 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
               // classed "effect", so Edit opened the colourway tuner instead
               // of this editor.
               perPixel: true,
+              layoutStamp: stamp,
             );
       await ref.read(designServiceProvider).saveDesign(uid, design);
       if (mounted) {

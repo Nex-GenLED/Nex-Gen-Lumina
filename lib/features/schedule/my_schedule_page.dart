@@ -38,6 +38,9 @@ import 'package:nexgen_command/features/schedule/schedule_overload_banner.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/schedule/dated_entry_compose.dart';
+import 'package:nexgen_command/features/schedule/design_api_preset.dart';
+import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
+    show payloadCarriesPerPixel;
 import 'package:nexgen_command/features/schedule/widgets/dated_schedule_controls.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
@@ -4240,10 +4243,32 @@ ScheduleItem composeEditedSchedule({
   required bool isRunPattern,
   required bool useAudioReactive,
   required Map<String, dynamic>? pickedPayload,
+  /// Roofline slice 2 — the picked design's id and kind (null for a catalog
+  /// pattern). Read only when [pickedPayload] is set: a re-pick decides the
+  /// design fields the way it decides the payload; no re-pick carries the
+  /// schedule's own; any other action clears them.
+  String? pickedDesignId,
+  String? pickedPresetKind,
 }) {
-  final wledPayload = (isRunPattern && !useAudioReactive)
-      ? (pickedPayload ?? editing?.wledPayload)
-      : editing?.wledPayload;
+  final patternAction = isRunPattern && !useAudioReactive;
+  final repicked = patternAction && pickedPayload != null;
+  final carried = editing?.wledPayload;
+  // Roofline slice 2 — a painted design's body (per-pixel / API-command) is
+  // never carried into an action that cannot fire it: the sync refuses a
+  // picture on anything but a design-kind schedule (it would fire dark), so
+  // Turn Off / Brightness / React to Music drop it instead of round-tripping
+  // it. Every other payload keeps today's round-trip rule.
+  final carriedIsPicture =
+      payloadCarriesPerPixel(carried) || isDesignApiPresetBody(carried);
+  final wledPayload = patternAction
+      ? (pickedPayload ?? carried)
+      : (carriedIsPicture ? null : carried);
+  final designId = !patternAction
+      ? null
+      : (repicked ? pickedDesignId : editing?.designId);
+  final presetKind = !patternAction
+      ? null
+      : (repicked ? pickedPresetKind : editing?.presetKind);
   return ScheduleItem(
     id: id,
     timeLabel: timeLabel,
@@ -4254,6 +4279,8 @@ ScheduleItem composeEditedSchedule({
     wledPayload: wledPayload,
     presetId: editing?.presetId,
     useAudioReactive: useAudioReactive ? true : null,
+    designId: designId,
+    presetKind: presetKind,
   );
 }
 
@@ -4565,7 +4592,13 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
         _action = _ActionType.runPattern;
         final idx = a.indexOf(':');
         final name = (idx != -1 && idx + 1 < a.length) ? a.substring(idx + 1).trim() : a.replaceFirst(RegExp(r'^pattern', caseSensitive: false), '').trim();
-        _selectedPattern = PatternSelection(id: 'existing', name: name, imageUrl: '');
+        _selectedPattern = PatternSelection(
+          id: 'existing',
+          name: name,
+          imageUrl: '',
+          designId: widget.editing?.designId,
+          presetKind: widget.editing?.presetKind,
+        );
       } else if (lower.startsWith('brightness')) {
         _action = _ActionType.brightness;
         final mm = RegExp(r'(\d{1,3})%').firstMatch(lower);
@@ -4616,6 +4649,15 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
           'or My Designs.');
       return;
     }
+    // Roofline slice 2 — a painted design is a weekly (nightly) schedule, not
+    // a one-night lease: the lease path has none of the design gates
+    // (composeDatedEntry and the lease manager refuse it too).
+    if (_action == _ActionType.runPattern &&
+        ((_selectedPattern?.isDesign ?? false) ||
+            isDesignApiPresetBody(_selectedPattern?.wledPayload))) {
+      say(designOneNightRefusedMessage(_selectedPattern!.name), seconds: 7);
+      return;
+    }
     final now = DateTime.now();
     if (_date.isBefore(DateTime(now.year, now.month, now.day))) {
       say('Pick today or a later day');
@@ -4643,7 +4685,10 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
             longitude: profile?.longitude,
           )
         : null;
-    final entry = composeDatedEntry(
+    // D4 — the composer refuses a painted design by throwing; the editor
+    // shows that sentence instead of crashing on it (reachable now that the
+    // picker hands painted designs to the schedule, A2).
+    final composedEntry = composeDatedEntryOrRefusal(
       date: _date,
       action: switch (_action) {
         _ActionType.powerOff => DatedAction.powerOff,
@@ -4658,6 +4703,11 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
       channels: _channels,
       controllerId: _controllerId,
     );
+    if (composedEntry.refusal != null) {
+      say(composedEntry.refusal!, seconds: 7);
+      return;
+    }
+    final entry = composedEntry.entry!;
 
     final notifier = ref.read(calendarScheduleProvider.notifier);
     final refusals =
@@ -5089,9 +5139,27 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                               name: sel!.name,
                               imageUrl: sel!.imageUrl,
                               wledPayload: sel!.wledPayload,
+                              designId: sel!.designId,
+                              presetKind: sel!.presetKind,
                             ));
                       }
                     },
+                  ),
+                // Roofline slice 2 — a painted design on the schedule: say
+                // what will be saved to the controller and what to do when
+                // the roofline changes.
+                if (_action == _ActionType.runPattern &&
+                    !_useAudioReactive &&
+                    (_selectedPattern?.isDesign ?? false))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      kDesignScheduleHelperCopy,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: NexGenPalette.textMedium),
+                    ),
                   ),
                 if (_action == _ActionType.brightness)
                   Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -5224,7 +5292,7 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                     // Single write-path construction (pure + unit-tested):
                     // preserves the id for in-place edit (no duplicate) and the
                     // design-payload fallback rules. See composeEditedSchedule.
-                    final item = composeEditedSchedule(
+                    final composed = composeEditedSchedule(
                       id: id, // widget.editing?.id when editing → same doc
                       editing: widget.editing,
                       timeLabel: timeLabel,
@@ -5235,12 +5303,18 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       isRunPattern: _action == _ActionType.runPattern,
                       useAudioReactive: _useAudioReactive,
                       pickedPayload: _selectedPattern?.wledPayload,
-                    ).copyWith(
-                      // D4/D1 — scope rides the model AND the sidecar (the
-                      // repository writes the sidecar from these fields).
+                      pickedDesignId: _selectedPattern?.designId,
+                      pickedPresetKind: _selectedPattern?.presetKind,
+                    );
+                    // D4/D1 — scope rides the model AND the sidecar (the
+                    // repository writes the sidecar from these fields).
+                    // Roofline slice 2 — a painted design names every bus in
+                    // its own body (a left-out channel is dark by the body),
+                    // so a design schedule carries no channel scope.
+                    final item = composed.copyWith(
                       channels: _channels,
                       controllerId: _controllerId,
-                      clearScope: _channels == null,
+                      clearScope: _channels == null || composed.isDesignApiPreset,
                     );
 
                     // D4 — refuse BEFORE the write when the pool is full,
@@ -5257,12 +5331,22 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                       editingId: widget.editing?.id,
                       sunriseOffOn: ref.read(sunriseOffEnabledProvider),
                     );
-                    if (sunRefusal != null) {
+                    // Roofline slice 2 — the per-account cap on painted
+                    // designs (owner decision 5), judged here with the
+                    // editing id so editing one of four keeps working; the
+                    // notifier backstops it.
+                    final designRefusal = sunRefusal ??
+                        designScheduleCountRefusal(
+                          candidate: item,
+                          schedules: ref.read(schedulesProvider),
+                          editingId: widget.editing?.id,
+                        );
+                    if (designRefusal != null) {
                       await showDialog<void>(
                         context: context,
                         builder: (ctx) => AlertDialog(
                           title: const Text("Can't save this schedule"),
-                          content: Text(sunRefusal),
+                          content: Text(designRefusal),
                           actions: [
                             TextButton(
                                 onPressed: () => Navigator.of(ctx).pop(),
@@ -5408,12 +5492,25 @@ class PatternSelection {
   /// already-saved payload.
   final Map<String, dynamic>? wledPayload;
 
+  /// Roofline slice 2 — set when the pick is a PAINTED design: [wledPayload]
+  /// is then the API-command preset body and these are the design's id and
+  /// `kSchedulePresetKindApi`, carried onto the schedule as design_id /
+  /// preset_kind. Hydrated from the schedule being edited so the editor
+  /// still knows a design schedule when nothing is re-picked.
+  final String? designId;
+  final String? presetKind;
+
   const PatternSelection({
     required this.id,
     required this.name,
     required this.imageUrl,
     this.wledPayload,
+    this.designId,
+    this.presetKind,
   });
+
+  /// True when this selection is a painted design (an API-command preset).
+  bool get isDesign => presetKind == kSchedulePresetKindApi;
 }
 
 class _PatternPickerRow extends StatelessWidget {

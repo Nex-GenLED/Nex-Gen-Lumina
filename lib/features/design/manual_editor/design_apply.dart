@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/app_providers.dart';
+import 'package:nexgen_command/features/design/design_layout_fit.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/per_pixel.dart';
@@ -28,7 +29,19 @@ import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 /// nothing about keeps its power exactly as it is (E1's rule: an apply never
 /// changes a channel's power).
 
-enum DesignApplyResult { applied, noMap, staleApplied, error }
+enum DesignApplyResult {
+  applied,
+  noMap,
+  staleApplied,
+  error,
+
+  /// Roofline slice 1, item 2 — a STAMPED design was refused because the
+  /// live buses (count, any bus length, or the controller) do not match its
+  /// stamp, or because there is no bus data to check against (off the LAN).
+  /// Nothing was written. The report's message says what does not match and
+  /// how to fix it (design_layout_fit.dart).
+  layoutMismatch,
+}
 
 /// What actually happened on the wire. Every caller of the spine gets this —
 /// the spine used to `await` both device writes, DROP both booleans and
@@ -153,6 +166,33 @@ List<int> designTargetChannels(
   final participating = read(participatingChannelIdsProvider);
   if (participating != null) ids = ids.intersection(participating.toSet());
   return ids.toList()..sort();
+}
+
+/// Roofline slice 1, item 2 — does [design] fit the buses the app sees now?
+/// The pure verdict (`layoutFitOf`) over the live providers: the channel list
+/// (device truth from the LAN cfg read), the selected controller's record id
+/// and, only when a stamped design meets an empty channel list, remote mode.
+/// An unstamped design always fits (not gated).
+LayoutFit designLayoutFit(ProviderReader read, CustomDesign design) {
+  final stamp = design.layoutStamp;
+  if (stamp == null) {
+    return layoutFitOf(
+      designName: design.name,
+      stamp: null,
+      liveChannels: const [],
+      remote: () => false,
+    );
+  }
+  final live = read(deviceChannelsProvider);
+  return layoutFitOf(
+    designName: design.name,
+    stamp: stamp,
+    liveChannels: live,
+    // Read only when there are buses to compare against: a missing selection
+    // must never stand between a customer and a design that fits.
+    liveControllerId: live.isEmpty ? null : read(selectedControllerIdProvider),
+    remote: () => read(isRemoteModeProvider),
+  );
 }
 
 /// The spine itself. See [applyBaseAndSpansDetailed].
@@ -358,6 +398,20 @@ Future<DesignApplyReport> applyPositionalDesignDetailed(
     return const DesignApplyReport(
       DesignApplyResult.noMap,
       message: 'This design has no lit pixels to apply.',
+    );
+  }
+
+  // Roofline slice 1, item 2 — the FIT GATE, before any write and before
+  // the census narrows the targets (the census would silently DROP a bus the
+  // design paints; the gate names it instead). Only a stamped design is
+  // judged; an unstamped one is applied exactly as before. Off the LAN there
+  // is no bus data, so a stamped design is refused there with the
+  // home-network sentence. The remote flag is read only on that branch.
+  final fit = designLayoutFit(read, design);
+  if (!fit.applies) {
+    return DesignApplyReport(
+      DesignApplyResult.layoutMismatch,
+      message: fit.message,
     );
   }
 
