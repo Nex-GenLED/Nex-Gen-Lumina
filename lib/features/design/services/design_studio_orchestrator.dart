@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/design/design_color_summary.dart';
 import 'package:nexgen_command/features/design/models/clarification_models.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
 import 'package:nexgen_command/features/design/models/design_intent.dart';
@@ -36,9 +37,16 @@ class DesignStudioOrchestrator {
   /// - [DesignStudioStatus.needsClarification]: Questions need answers
   /// - [DesignStudioStatus.ready]: Pattern is ready to apply
   /// - [DesignStudioStatus.error]: Something went wrong
+  ///
+  /// [baseColors] — roofline slice 3, "Variations of …": the saved design's
+  /// colours. They seed the composition ONLY when [prompt] names no colour
+  /// of its own ([NLUService.mentionsColor]); a prompt that says "white"
+  /// means white. The returned intent is the one actually composed, seeded
+  /// colours included, so the understanding panel shows them.
   Future<DesignStudioResult> processUserInput({
     required String prompt,
     required RooflineConfiguration? config,
+    DesignColorSummary? baseColors,
   }) async {
     if (config == null) {
       return DesignStudioResult.error(
@@ -93,6 +101,7 @@ class DesignStudioOrchestrator {
       final compositionResult = _patternComposer.compose(
         intent: updatedIntent,
         config: config,
+        baseColors: seedFor(prompt, baseColors),
       );
 
       if (!compositionResult.isSuccess) {
@@ -104,7 +113,7 @@ class DesignStudioOrchestrator {
       }
 
       return DesignStudioResult.ready(
-        intent: updatedIntent,
+        intent: compositionResult.pattern!.sourceIntent ?? updatedIntent,
         pattern: compositionResult.pattern!,
         warnings: compositionResult.warnings,
       );
@@ -116,12 +125,23 @@ class DesignStudioOrchestrator {
     }
   }
 
+  /// The base colours to compose with: [baseColors] when the prompt names no
+  /// colour of its own, else none. Pure; public for the tests.
+  static DesignColorSummary? seedFor(String prompt, DesignColorSummary? baseColors) {
+    if (baseColors == null || baseColors.isEmpty) return null;
+    return NLUService.mentionsColor(prompt) ? null : baseColors;
+  }
+
   /// Apply user's clarification choices and continue processing.
+  ///
+  /// [baseColors] as on [processUserInput], judged against the intent's
+  /// original prompt.
   Future<DesignStudioResult> applyClarifications({
     required DesignIntent currentIntent,
     required List<ClarificationQuestion> questions,
     required Map<String, ClarificationOption> choices,
     required RooflineConfiguration config,
+    DesignColorSummary? baseColors,
   }) async {
     // Check if user wants manual controls
     final wantsManual = choices.values.any((opt) => opt.id == 'manual');
@@ -168,6 +188,7 @@ class DesignStudioOrchestrator {
     final compositionResult = _patternComposer.compose(
       intent: refinedIntent,
       config: config,
+      baseColors: seedFor(currentIntent.originalPrompt, baseColors),
     );
 
     if (!compositionResult.isSuccess) {
@@ -179,7 +200,7 @@ class DesignStudioOrchestrator {
     }
 
     return DesignStudioResult.ready(
-      intent: refinedIntent,
+      intent: compositionResult.pattern!.sourceIntent ?? refinedIntent,
       pattern: compositionResult.pattern!,
       warnings: compositionResult.warnings,
     );
@@ -202,10 +223,12 @@ class DesignStudioOrchestrator {
   CompositionResult quickCompose({
     required DesignIntent intent,
     required RooflineConfiguration config,
+    DesignColorSummary? baseColors,
   }) {
     return _patternComposer.compose(
       intent: intent,
       config: config,
+      baseColors: seedFor(intent.originalPrompt, baseColors),
     );
   }
 

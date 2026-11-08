@@ -17,8 +17,25 @@ class ComposedPattern {
   /// The original design intent this was composed from.
   final DesignIntent? sourceIntent;
 
-  /// LED color groups defining the static colors.
+  /// LED color groups defining the static colors, numbered across the WHOLE
+  /// controller (channel 0 first, then channel 1 after it, and so on). A
+  /// projection of [channelGroups] for the consumers that draw in one flat
+  /// index space (the studio preview, the live preview canvas).
   final List<LedColorGroup> colorGroups;
+
+  /// Roofline slice 3 — the same picture CHANNEL-LOCALLY: hardware channel
+  /// index (= bus index = WLED segment id) → that channel's colour groups,
+  /// 0-based within the channel. This is what the composer actually lays
+  /// down and what the per-channel writers (`channelsFromComposedPattern`,
+  /// the apply spine) should read. Empty on patterns built by hand or by
+  /// [ComposedPattern.solid], which carry only the flat [colorGroups].
+  final Map<int, List<LedColorGroup>> channelGroups;
+
+  /// Roofline slice 3 — LED count of every channel the composer laid the
+  /// pattern over, by channel index (device truth when the config carried
+  /// it, else the mapped total). Includes channels the pattern leaves dark.
+  /// Empty alongside an empty [channelGroups].
+  final Map<int, int> channelLengths;
 
   /// Primary WLED effect ID (0 = solid).
   final int effectId;
@@ -61,6 +78,8 @@ class ComposedPattern {
     this.description,
     this.sourceIntent,
     required this.colorGroups,
+    this.channelGroups = const {},
+    this.channelLengths = const {},
     this.effectId = 0,
     this.speed = 128,
     this.intensity = 128,
@@ -149,6 +168,8 @@ class ComposedPattern {
     String? description,
     DesignIntent? sourceIntent,
     List<LedColorGroup>? colorGroups,
+    Map<int, List<LedColorGroup>>? channelGroups,
+    Map<int, int>? channelLengths,
     int? effectId,
     int? speed,
     int? intensity,
@@ -167,6 +188,8 @@ class ComposedPattern {
       description: description ?? this.description,
       sourceIntent: sourceIntent ?? this.sourceIntent,
       colorGroups: colorGroups ?? this.colorGroups,
+      channelGroups: channelGroups ?? this.channelGroups,
+      channelLengths: channelLengths ?? this.channelLengths,
       effectId: effectId ?? this.effectId,
       speed: speed ?? this.speed,
       intensity: intensity ?? this.intensity,
@@ -196,6 +219,21 @@ class ComposedPattern {
               'end_led': g.endLed,
               'color': g.color,
             }).toList(),
+        // Roofline slice 3: the channel-local picture, keyed by channel index
+        // (as strings — this map is jsonEncoded into the design document).
+        'channel_groups': {
+          for (final e in channelGroups.entries)
+            '${e.key}': e.value
+                .map((g) => {
+                      'start_led': g.startLed,
+                      'end_led': g.endLed,
+                      'color': g.color,
+                    })
+                .toList(),
+        },
+        'channel_lengths': {
+          for (final e in channelLengths.entries) '${e.key}': e.value,
+        },
         'effect_id': effectId,
         'speed': speed,
         'intensity': intensity,

@@ -2,6 +2,9 @@ import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/design/design_color_summary.dart';
+import 'package:nexgen_command/features/design/design_studio_providers.dart'
+    show variationBaseProvider;
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
@@ -1317,6 +1320,19 @@ class LuminaBrain {
       buffer.write('\n\n$rooflineContext');
     }
 
+    // Roofline slice 3: the saved design the studio is making variations
+    // of — its bus lengths and a colour summary, nothing else (owner
+    // decision 2: never a controller id, a name, an address or an account
+    // identifier; AI requests are disclosed as shared with Anthropic).
+    try {
+      final base = ref.read(variationBaseProvider);
+      if (base != null) {
+        buffer.write('\n\n${buildSavedDesignContext(base)}');
+      }
+    } catch (e) {
+      debugPrint('LuminaBrain saved design context read error: $e');
+    }
+
     // Inject user variety preference for scheduling and multi-day requests
     try {
       final varietyProfile = ref.read(userVarietyProfileProvider);
@@ -1437,6 +1453,19 @@ class LuminaBrain {
       buffer.write('\n\n$rooflineContext');
     }
 
+    // Roofline slice 3: the saved design the studio is making variations
+    // of — its bus lengths and a colour summary, nothing else (owner
+    // decision 2: never a controller id, a name, an address or an account
+    // identifier; AI requests are disclosed as shared with Anthropic).
+    try {
+      final base = ref.read(variationBaseProvider);
+      if (base != null) {
+        buffer.write('\n\n${buildSavedDesignContext(base)}');
+      }
+    } catch (e) {
+      debugPrint('LuminaBrain saved design context read error: $e');
+    }
+
     // Audio reactivity context — enables AI to suggest mic-driven
     // effects when controller hardware supports it
     try {
@@ -1475,10 +1504,52 @@ class LuminaBrain {
     return _sanitizeResponse(buffer.toString());
   }
 
+  /// The roofline block of the AI context, for the snapshot test.
+  @visibleForTesting
+  static String buildRooflineContext(RooflineConfiguration config) =>
+      _buildRooflineContext(config);
+
+  /// "- Hardware channels: 3 (162, 128, 100 LEDs)", or null when the map
+  /// carries no bus lengths. Roofline slice 3: the model is asked for a
+  /// `seg` entry per affected segment and had no way to tell where one bus
+  /// ends and the next begins.
+  static String? _busLengthsLine(Map<int, int> lengthsByChannel) {
+    if (lengthsByChannel.isEmpty) return null;
+    final channels = lengthsByChannel.keys.toList()..sort();
+    final lengths = channels.map((c) => lengthsByChannel[c]).join(', ');
+    return '- Hardware channels: ${channels.length} ($lengths LEDs)';
+  }
+
+  /// Roofline slice 3 — the saved design the studio is making variations
+  /// of, as the AI context carries it: the stamped bus lengths and the
+  /// colour summary (colours by share of lights, the unlit share), then the
+  /// rule for what to do with it. Numbers only: no design name, no
+  /// controller id, no owner, nothing from the account (owner decision 2).
+  /// Never asks the model for per-pixel `i` arrays.
+  @visibleForTesting
+  static String buildSavedDesignContext(VariationBase base) {
+    final buffer = StringBuffer('SAVED DESIGN (the look to make variations of):\n');
+    final buses = _busLengthsLine(base.busLengthsByChannel);
+    if (buses != null) buffer.writeln(buses);
+    for (final line in base.colors.contextLines()) {
+      buffer.writeln('- $line');
+    }
+    buffer.writeln();
+    buffer.writeln('VARIATION GUIDANCE:');
+    buffer.writeln('- Propose variations of this look: keep its palette as the '
+        'starting point and change one colour or the arrangement');
+    buffer.writeln('- Describe the look with colours and an effect only; never '
+        'list individual LEDs or per-pixel `i` arrays');
+    return buffer.toString();
+  }
+
   static String _buildRooflineContext(RooflineConfiguration config) {
     final buffer = StringBuffer('ROOFLINE INSTALLATION:\n');
     buffer.writeln('- Total LED Count: ${config.totalPixelCount}');
     buffer.writeln('- Number of Segments: ${config.segmentCount}');
+    // Roofline slice 3: the buses and their LED counts, when known.
+    final buses = _busLengthsLine(config.channelPixelCounts);
+    if (buses != null) buffer.writeln(buses);
 
     final typeCounts = <SegmentType, int>{};
     for (final segment in config.segments) {

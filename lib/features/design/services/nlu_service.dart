@@ -108,6 +108,122 @@ class NLUService {
     return out;
   }
 
+  /// True when [prompt] names a colour this parser knows — a specific name
+  /// from the colour table or a vague one it would ask a shade question
+  /// about. Spacing phrases are canonicalised first, so the "off" in "1 on
+  /// 3 off" is not the colour black (the same rule [parseUserIntent] applies).
+  ///
+  /// Roofline slice 3: the orchestrator seeds a variation's colours from the
+  /// saved design ONLY when the prompt names none, so "white every other
+  /// light" stays white. Public + static so it can be tested directly.
+  static bool mentionsColor(String prompt) {
+    final normalized = canonicalizeSpacingPhrases(prompt
+        .toLowerCase()
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll('colour', 'color'));
+    for (final entry in _colorMap.values) {
+      for (final name in entry.names) {
+        if (normalized.contains(name)) return true;
+      }
+    }
+    for (final vague in _vagueColors.keys) {
+      if (normalized.contains(vague)) return true;
+    }
+    return false;
+  }
+
+  // ── Direction phrases that carry a side ────────────────────────────────
+  // "left" and "right" are also the names of the two SIDES of the house (the
+  // location zone, matched by substring). A direction of motion that names a
+  // side — "left to right", "chase left", "moving to the right" — is never a
+  // place: the motion parser reads these first and the zone parser blanks
+  // them before its scans, so "left side", "on the left" and "left of house"
+  // keep meaning the place. Before this, every such prompt (the studio's own
+  // "Chase Effect" quick idea among them) became a left-side or right-side
+  // layer that no segment matched, and composed nothing.
+
+  /// Every word the parser knows as a motion, for `<motion> left/right`.
+  static final String _motionWordAlternation = _motionTypeSynonyms.values
+      .expand((names) => names)
+      .map(RegExp.escape)
+      .join('|');
+
+  /// Always a direction, with or without a motion word.
+  static final _leftToRightPhrase =
+      RegExp(r'\b(?:left to right|l to r|rightwards?)\b');
+  static final _rightToLeftPhrase =
+      RegExp(r'\b(?:right to left|r to l|leftwards?)\b');
+
+  /// The direction table's other side-carrying entries. A direction when the
+  /// clause has a motion; "red to the left of the garage" stays a place.
+  static final _towardRightPhrase =
+      RegExp(r'\b(?:to the right|from left|toward right)\b');
+  static final _towardLeftPhrase =
+      RegExp(r'\b(?:to the left|from right|toward left)\b');
+
+  /// `<motion word> [to the | toward(s) (the)] left|right` — "moving right",
+  /// "chase left", "running toward the left". Group 1 is the side.
+  static final _motionTowardSide = RegExp(
+      '\\b(?:$_motionWordAlternation) (?:to the |towards? (?:the )?)?(left|right)\\b');
+
+  static bool _hasMotionWord(String clause) => _motionTypeSynonyms.values
+      .any((names) => names.any((name) => clause.contains(name)));
+
+  /// The direction a motion clause states with a side, or null when it
+  /// states none that way. The two-word forms win: "chase left to right" is
+  /// left-to-right, not "chase left". Public + static so it can be tested
+  /// directly.
+  static MotionDirection? sideDirectionOf(String clause) {
+    if (_leftToRightPhrase.hasMatch(clause)) return MotionDirection.leftToRight;
+    if (_rightToLeftPhrase.hasMatch(clause)) return MotionDirection.rightToLeft;
+    if (_towardRightPhrase.hasMatch(clause)) return MotionDirection.leftToRight;
+    if (_towardLeftPhrase.hasMatch(clause)) return MotionDirection.rightToLeft;
+    final m = _motionTowardSide.firstMatch(clause);
+    if (m == null) return null;
+    return m.group(1) == 'right'
+        ? MotionDirection.leftToRight
+        : MotionDirection.rightToLeft;
+  }
+
+  /// [clause] with every side-carrying direction phrase blanked, for the
+  /// zone scans. Public + static so it can be tested directly.
+  static String withoutSideDirectionPhrases(String clause) {
+    var out = clause
+        .replaceAll(_leftToRightPhrase, ' ')
+        .replaceAll(_rightToLeftPhrase, ' ')
+        .replaceAll(_motionTowardSide, ' ');
+    if (_hasMotionWord(clause)) {
+      out = out
+          .replaceAll(_towardRightPhrase, ' ')
+          .replaceAll(_towardLeftPhrase, ' ');
+    }
+    return out;
+  }
+
+  // ── The effect a prompted motion runs as ───────────────────────────────
+  // The same ids the studio's clarification sheet applies when the owner
+  // taps an effect chip (ClarificationService._applyEffectChoice) and the
+  // model's named constructors use (chaseLeftToRight 28, wave 67). Before
+  // this, a prompted motion carried no id: the composer read "no id" as "no
+  // effect" and emitted the still picture, the stored design said
+  // has_motion with effect_id 0, and motionEffectOf() read it as static —
+  // so "blue chase" typed and the "Chase" chip tapped behaved differently.
+  // A motion with no entry here (scan: in no existing table) carries no id
+  // and stays a still picture rather than guess one.
+  static const _motionEffectIds = <MotionType, int>{
+    MotionType.chase: 28, // WLED Chase
+    MotionType.wave: 67, // WLED Colorwaves
+    MotionType.twinkle: 80, // WLED Twinkle
+    MotionType.pulse: 2, // WLED Breathe
+    MotionType.flow: 68, // WLED Flow
+  };
+
+  /// The WLED effect id a prompted [type] runs as, or null when no existing
+  /// table names one. Public + static so the drift guard can hold it against
+  /// the clarification sheet.
+  static int? effectIdFor(MotionType type) => _motionEffectIds[type];
+
   /// Split a prompt into separate clauses for layer parsing.
   List<String> _splitIntoClauses(String prompt) {
     // Split on common clause separators
@@ -180,19 +296,39 @@ class NLUService {
       priority: index,
     );
 
-    return _ClauseParseResult(layer: layer, ambiguities: ambiguities);
+    // Every ambiguity this clause raised belongs to this layer. The
+    // clarification sheet applies an answer only to the layer the question
+    // names (ClarificationQuestion.affectedLayerId, copied from here) and
+    // skips the layer change when it names none — so, before this, "Which
+    // direction?" answered "Right to left" left the design moving left to
+    // right. The constraint solver already stamps its own ambiguities.
+    final bound = [
+      for (final a in ambiguities)
+        AmbiguityFlag(
+          type: a.type,
+          description: a.description,
+          choices: a.choices,
+          affectedLayerId: layer.id,
+          sourceClause: a.sourceClause,
+        ),
+    ];
+
+    return _ClauseParseResult(layer: layer, ambiguities: bound);
   }
 
   /// Parse zone selector from a clause.
   _ZoneParseResult _parseZoneSelector(String clause, RooflineConfiguration? config) {
     final ambiguities = <AmbiguityFlag>[];
 
+    // A direction of motion that names a side is not a place.
+    final zoneClause = withoutSideDirectionPhrases(clause);
+
     // Check for architectural role references
     final roles = <ArchitecturalRole>[];
 
     for (final entry in _architecturalSynonyms.entries) {
       for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
+        if (zoneClause.contains(synonym)) {
           roles.add(entry.key);
           break;
         }
@@ -244,7 +380,7 @@ class NLUService {
     // Check for location references
     for (final entry in _locationSynonyms.entries) {
       for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
+        if (zoneClause.contains(synonym)) {
           return _ZoneParseResult(
             selector: ZoneSelector.location(entry.key),
             ambiguities: ambiguities,
@@ -256,7 +392,7 @@ class NLUService {
     // Check for level references
     for (final entry in _levelSynonyms.entries) {
       for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
+        if (zoneClause.contains(synonym)) {
           return _ZoneParseResult(
             selector: ZoneSelector.level(entry.key),
             ambiguities: ambiguities,
@@ -390,36 +526,54 @@ class NLUService {
     return null;
   }
 
+  /// The vocabulary's words that only say "it moves" and name no look. They
+  /// decide the effect only when the clause names no explicit effect word.
+  static const _genericMotionWords = {
+    'moving', 'move', 'run', 'running', 'traveling', 'travel',
+  };
+
+  /// The first motion type, in table order, with a word of the asked kind
+  /// in [clause]: explicit effect words, or the generic motion words.
+  MotionType? _motionTypeOf(String clause, {required bool explicit}) {
+    for (final entry in _motionTypeSynonyms.entries) {
+      for (final synonym in entry.value) {
+        if (_genericMotionWords.contains(synonym) == explicit) continue;
+        if (clause.contains(synonym)) return entry.key;
+      }
+    }
+    return null;
+  }
+
   /// Parse motion settings from a clause.
   _MotionParseResult _parseMotion(String clause) {
     final ambiguities = <AmbiguityFlag>[];
 
-    // Check for motion type
-    MotionType? motionType;
-    for (final entry in _motionTypeSynonyms.entries) {
-      for (final synonym in entry.value) {
-        if (clause.contains(synonym)) {
-          motionType = entry.key;
-          break;
-        }
-      }
-      if (motionType != null) break;
-    }
+    // Check for motion type. An explicit effect word (chase, wave, twinkle,
+    // pulse, … as the vocabulary defines them) decides; a generic motion
+    // word ("moving", "running") decides only when the clause names no
+    // effect. Before, the scan took the first list in table order with any
+    // word present, and the chase list's "moving" made the placeholder's
+    // own "wave effect moving right to left" a chase.
+    final motionType = _motionTypeOf(clause, explicit: true) ??
+        _motionTypeOf(clause, explicit: false);
 
     if (motionType == null) {
       return _MotionParseResult(motion: null, ambiguities: []);
     }
 
-    // Check for direction
-    MotionDirection? direction;
+    // Check for direction. A direction stated with a side ("left to right",
+    // "moving right", "chase left") is read first: it is the most specific
+    // phrase, and the table's bare entries ("in", "up") match inside other
+    // words ("mov-in-g").
+    MotionDirection? direction = sideDirectionOf(clause);
     for (final entry in _directionSynonyms.entries) {
+      if (direction != null) break;
       for (final synonym in entry.value) {
         if (clause.contains(synonym)) {
           direction = entry.key;
           break;
         }
       }
-      if (direction != null) break;
     }
 
     // If we have motion but no direction, add ambiguity
@@ -463,6 +617,7 @@ class NLUService {
         direction: direction,
         speed: speed,
         reverse: direction == MotionDirection.rightToLeft,
+        effectId: effectIdFor(motionType),
       ),
       ambiguities: ambiguities,
     );
@@ -714,7 +869,8 @@ const _motionTypeSynonyms = <MotionType, List<String>>{
   ],
   MotionType.wave: [
     'wave', 'waving', 'ripple', 'rippling', 'undulating', 'rolling',
-    'pulse', 'pulsing', 'breathing'
+    // 'pulse', 'pulsing', 'breathing' moved to the pulse list they already
+    // sat in: scanned here first, they made a prompted pulse a wave (67).
   ],
   MotionType.twinkle: [
     'twinkle', 'twinkling', 'sparkle', 'sparkling', 'glitter', 'glittering',
