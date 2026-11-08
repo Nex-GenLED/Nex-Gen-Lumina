@@ -60,12 +60,30 @@ int effectDefaultSpeedOr(int effectId, int current) =>
 /// (60) slows every effect proportionally, a party folder (150) quickens it;
 /// 0 is a static folder and stays 0. An effect with no pace default keeps
 /// [nodeSpeed], exactly as before this table.
+///
+/// This is the speed of a generated COLLECTION CARD (the library's palette
+/// nodes and the theme grid). It scales [kCollectionCardBaseSpeed] where an
+/// effect has one, so a card can keep its pace when the tile default moves.
 int scaledEffectDefaultSpeed(int effectId, int nodeSpeed) {
   if (nodeSpeed <= 0) return 0;
-  final base = kEffectDefaultSpeed[effectId];
+  final base =
+      kCollectionCardBaseSpeed[effectId] ?? kEffectDefaultSpeed[effectId];
   if (base == null) return nodeSpeed.clamp(1, 255);
   return (base * nodeSpeed / 128).round().clamp(1, 255);
 }
+
+/// The base a collection card scales ([scaledEffectDefaultSpeed]) where it is
+/// NOT the tile default in [kEffectDefaultSpeed].
+///
+/// +123: the Dancing Shadows TILE starts at 10, but its "… Shadows" collection
+/// cards keep the 20 they scaled on build-122. Scaled from 10, a calm
+/// collection (pace 30 / 40 / 50) sent 2 / 3 / 4, below the slider's floor of
+/// 5; from 20 it sends build-122's 5 / 6 / 8. Cards only — the tile paths
+/// (library tuner, Home Tune effect menu, edit screen, Game Day picker) read
+/// [kEffectDefaultSpeed] through [effectDefaultSpeedOr].
+const Map<int, int> kCollectionCardBaseSpeed = <int, int>{
+  112: 20, // build-122's Dancing Shadows default, for its cards only
+};
 
 /// The ONE exception to "speed is the pace knob": effects whose firmware
 /// ignores `sx` and takes its rate from intensity. Selecting one sets this
