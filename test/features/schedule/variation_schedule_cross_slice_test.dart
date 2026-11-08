@@ -51,8 +51,15 @@ import 'package:nexgen_command/features/design/design_studio_providers.dart';
 import 'package:nexgen_command/features/design/models/composed_pattern.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/design/services/design_studio_orchestrator.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart'
+    show motionEffectOf;
+import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
+    show calendarLeaseActiveTimersProvider, LeaseLedgerEmpty;
 import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 import 'package:nexgen_command/features/schedule/gated_preset_save.dart';
+import 'package:nexgen_command/features/schedule/preset_repair_convergence.dart';
+import 'package:nexgen_command/features/schedule/schedule_models.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/wled/design_schedule_pick.dart';
 import 'package:nexgen_command/features/wled/wled_preset_ranges.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -303,6 +310,179 @@ void _expectPicture(Map<String, dynamic> body, int bus, bool Function(int) lit) 
   }
 }
 
+// ── +123 item A — animated designs: the write-time harness ─────────────────
+//
+// The REAL ScheduleSyncService.syncAll against a controller fake that answers
+// the reads the sync makes and stores a psave the way WLED stores an
+// API-command preset (the request minus o/psave, with n) — the same shape as
+// slice 2's schedule_sync_design_preset_test.dart. The saved designs reach
+// the sync through designsStreamProvider (the app's My Designs stream).
+
+class _SyncLan extends WledService {
+  _SyncLan({Map<int, Map<String, dynamic>>? presets})
+      : device = {...?presets},
+        super('http://mock');
+
+  final Map<int, Map<String, dynamic>> device;
+  final Map<int, Map<String, dynamic>> savedStates = {};
+  final List<int> deletedPresetIds = [];
+  Map<String, dynamic>? lastCfg;
+
+  @override
+  Future<WledHardwareConfig?> getConfig() async {
+    var start = 0;
+    final buses = <WledLedBus>[];
+    for (var i = 0; i < 3; i++) {
+      buses.add(WledLedBus(pin: [i], start: start, len: 100, type: 30, order: 1));
+      start += 100;
+    }
+    return WledHardwareConfig(totalLeds: 300, maxPowerMw: 30000, buses: buses);
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getState() async => {
+        'on': true,
+        'bri': 128,
+        'seg': [
+          for (var i = 0; i < 3; i++)
+            {
+              'id': i,
+              'start': i * 100,
+              'stop': i * 100 + 100,
+              'on': true,
+              'fx': 0,
+              'col': [
+                [255, 160, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+              ],
+            },
+        ],
+      };
+
+  @override
+  Future<WledInfoResponse?> getInfo() async =>
+      WledInfoResponse(maxseg: 10, arch: 'esp32', ver: '0.15.4');
+
+  @override
+  Future<Map<int, Map<String, dynamic>>> fetchPresets() async =>
+      {for (final e in device.entries) e.key: Map.of(e.value)};
+
+  @override
+  Future<PresetsRead> readPresets() async => device.isEmpty
+      ? const PresetsRead.deviceEmpty()
+      : PresetsRead.available(await fetchPresets());
+
+  @override
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
+    final ins = (lastCfg?['timers'] as Map?)?['ins'];
+    if (ins is List) {
+      return ins
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+    return null;
+  }
+
+  @override
+  Future<bool> applyGeometryJson(Map<String, dynamic> payload) async => true;
+
+  @override
+  Future<bool> savePreset({
+    required int presetId,
+    required Map<String, dynamic> state,
+    String? presetName,
+  }) async {
+    savedStates[presetId] = Map<String, dynamic>.from(state);
+    final stored = Map<String, dynamic>.from(state)
+      ..remove('o')
+      ..remove('psave');
+    if (presetName != null && presetName.isNotEmpty) stored['n'] = presetName;
+    device[presetId] = stored;
+    return true;
+  }
+
+  @override
+  Future<bool> deletePreset(int presetId) async {
+    deletedPresetIds.add(presetId);
+    device.remove(presetId);
+    return true;
+  }
+
+  @override
+  Future<bool> applyJson(Map<String, dynamic> payload) async => true;
+
+  @override
+  Future<bool> applyConfig(Map<String, dynamic> cfg) async {
+    lastCfg = cfg;
+    return true;
+  }
+
+  /// Macros armed by the last cfg write (timer rows with a macro > 0).
+  List<int> get armedMacros {
+    final ins = (lastCfg?['timers'] as Map?)?['ins'];
+    if (ins is! List) return const [];
+    return [
+      for (final t in ins)
+        if (t is Map && t['en'] == 1 && t['macro'] is int && t['macro'] > 0)
+          t['macro'] as int,
+    ];
+  }
+}
+
+final _syncRefProvider = Provider<Ref>((ref) => ref);
+
+/// A Ref for the sync, with the owner's saved designs as [designs] (a stream
+/// that errors models designs that cannot be read).
+Ref _syncRef(_SyncLan repo, Stream<List<CustomDesign>> designs) {
+  final c = ProviderContainer(overrides: [
+    wledRepositoryProvider.overrideWithValue(repo),
+    calendarLeaseActiveTimersProvider
+        .overrideWithValue(const LeaseLedgerEmpty()),
+    designsStreamProvider.overrideWith((ref) => designs),
+  ]);
+  addTearDown(c.dispose);
+  return c.read(_syncRefProvider);
+}
+
+/// A design schedule as the editor saves it from a My Designs pick.
+ScheduleItem _designSchedule(CustomDesign d, Map<String, dynamic> body) =>
+    ScheduleItem(
+      id: 'sch-${d.id}',
+      timeLabel: '7:00 PM',
+      offTimeLabel: '11:00 PM',
+      repeatDays: const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      actionLabel: _wireName(d),
+      enabled: true,
+      wledPayload: body,
+      designId: d.id,
+      presetKind: kSchedulePresetKindApi,
+    );
+
+/// The body an animated design's schedule carries when a build that did not
+/// refuse it at the pick stored it: the same picture, still (the builder
+/// never reads the motion). Built from a still copy of the design.
+Map<String, dynamic> _stillBodyOf(CustomDesign d) =>
+    buildDesignApiPresetBody(CustomDesign(
+      id: d.id,
+      name: d.name,
+      ownerId: d.ownerId,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+      perPixel: true,
+      layoutStamp: d.layoutStamp,
+      channels: d.channels,
+    ))!;
+
+/// What the controller holds after a save of [body] under [name].
+Map<String, dynamic> _storedCopy(Map<String, dynamic> body, String name) =>
+    <String, dynamic>{...body}
+      ..remove('o')
+      ..['n'] = name;
+
+const _kAnimatedSentence = "Animated designs can't be scheduled yet";
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -427,6 +607,143 @@ void main() {
               presetName: _wireName(variation),
               designName: variation.name),
           contains('too detailed'));
+    });
+  });
+
+  // +123 item A — an ANIMATED design (motionEffectOf: motion on, effect id
+  // non-zero) is refused at pick time, at compose time and at write time —
+  // never converted to the still picture the nightly preset would replay.
+  // FAIL-BEFORE: against 92cd072 every test in this group but the last two
+  // fails (the chase variation was admitted, built, written and armed).
+  // Written against APIs that exist on 92cd072 so that run compiles.
+  group('+123 item A — animated designs are refused for scheduling', () {
+    late CustomDesign chase;
+    late CustomDesign wave;
+    setUp(() async {
+      resetRepairAttempts();
+      chase = await _saveAndReadBack(
+          await _composeVariation('chase left to right', base), base);
+      wave = await _saveAndReadBack(
+          await _composeVariation('wave effect moving right to left', base),
+          base);
+      // Preconditions: slice 3 with the NLU fix composes real motion.
+      expect(motionEffectOf(chase)?.effectId, 28);
+      expect(motionEffectOf(wave)?.effectId, 67);
+      expect(chase.layoutStamp, kStamp);
+    });
+
+    test('pick time: the chase variation is refused with the animated '
+        'sentence, nothing handed back, before any device read', () async {
+      final lan = _Lan();
+      final v = await _pick(chase, lan: lan);
+      expect(v.verdict.name, 'animated');
+      expect(v.body, isNull);
+      expect(v.offersEditor, isFalse);
+      expect(v.message,
+          '"${chase.name}" is an animated design. $_kAnimatedSentence. '
+          'Pick a still design, or save a still version.');
+      expect(lan.infoReads, 0);
+    });
+
+    test('pick time: the placeholder wave design is refused too', () async {
+      final v = await _pick(wave, lan: _Lan());
+      expect(v.verdict.name, 'animated');
+      expect(v.body, isNull);
+      expect(v.message, contains(_kAnimatedSentence));
+    });
+
+    test('compose time: the verdict refuses both, and the builder builds no '
+        'body for either', () {
+      for (final d in [chase, wave]) {
+        final v = designScheduleEligibility(
+          design: d,
+          onLan: true,
+          liveChannels: kThree,
+          liveControllerId: 'ctl-a',
+          firmwareVersion: '0.15.4',
+          architecture: 'esp32',
+        );
+        expect(v.verdict.name, 'animated', reason: d.name);
+        expect(v.body, isNull, reason: d.name);
+        expect(buildDesignApiPresetBody(d), isNull, reason: d.name);
+      }
+    });
+
+    test('write time: a stored chase schedule is refused — not saved, not '
+        'armed, the animated sentence', () async {
+      final repo = _SyncLan();
+      final result = await const ScheduleSyncService(
+              paceDelay: Duration.zero, readBackSettle: Duration.zero)
+          .syncAll(_syncRef(repo, Stream.value([chase])),
+              [_designSchedule(chase, _stillBodyOf(chase))]);
+      expect(repo.savedStates.keys.where((id) => id >= 10 && id <= 25),
+          isEmpty);
+      expect(repo.armedMacros.where((m) => m >= 10 && m <= 25), isEmpty);
+      expect(result.presetErrors.join('\n'), contains(_kAnimatedSentence));
+    });
+
+    test('write time: the refusal is PERSISTENT — a landed copy is purged',
+        () async {
+      final body = _stillBodyOf(chase);
+      final repo = _SyncLan(presets: {10: _storedCopy(body, _wireName(chase))});
+      final result = await const ScheduleSyncService(
+              paceDelay: Duration.zero, readBackSettle: Duration.zero)
+          .syncAll(_syncRef(repo, Stream.value([chase])),
+              [_designSchedule(chase, body)]);
+      expect(repo.deletedPresetIds, [10]);
+      expect(repo.armedMacros, isNot(contains(10)));
+      expect(result.presetErrors.join('\n'), contains(_kAnimatedSentence));
+    });
+
+    test('write time: designs that cannot be read are TRANSIENT — a landed '
+        'copy of a still design is left exactly as it is and stays armed',
+        () async {
+      final still = await _saveAndReadBack(
+          await _composeVariation('1 on 3 off', base), base);
+      final body = buildDesignApiPresetBody(still)!;
+      final repo = _SyncLan(presets: {10: _storedCopy(body, _wireName(still))});
+      final result = await const ScheduleSyncService(
+              paceDelay: Duration.zero, readBackSettle: Duration.zero)
+          .syncAll(
+              _syncRef(repo, Stream.error(StateError('designs unreadable'))),
+              [_designSchedule(still, body)]);
+      expect(repo.savedStates.keys.where((id) => id >= 10 && id <= 25),
+          isEmpty);
+      expect(repo.deletedPresetIds, isEmpty);
+      expect(repo.armedMacros, contains(10));
+      expect(result.presetErrors.join('\n'), contains("couldn't check"));
+    });
+
+    test('still admitted: a static painted design — pick, compose, write',
+        () async {
+      final painted = _saved();
+      final v = await _pick(painted, lan: _Lan());
+      expect(v.verdict, DesignScheduleVerdict.allowed, reason: v.message);
+      final repo = _SyncLan();
+      final result = await const ScheduleSyncService(
+              paceDelay: Duration.zero, readBackSettle: Duration.zero)
+          .syncAll(_syncRef(repo, Stream.value([painted, chase])),
+              [_designSchedule(painted, v.body!)]);
+      expect(repo.savedStates[10]?['o'], isTrue);
+      expect(repo.armedMacros, contains(10));
+      expect(result.presetErrors, isEmpty);
+    });
+
+    test('still admitted: the colour-only "1 on 3 off" variation — pick, '
+        'compose, write', () async {
+      final colourOnly = await _saveAndReadBack(
+          await _composeVariation('1 on 3 off', base), base);
+      expect(motionEffectOf(colourOnly), isNull);
+      final v = await _pick(colourOnly, lan: _Lan());
+      expect(v.verdict, DesignScheduleVerdict.allowed, reason: v.message);
+      final repo = _SyncLan();
+      final result = await const ScheduleSyncService(
+              paceDelay: Duration.zero, readBackSettle: Duration.zero)
+          .syncAll(_syncRef(repo, Stream.value([colourOnly, chase])),
+              [_designSchedule(colourOnly, v.body!)]);
+      expect(repo.savedStates[10]?['seg'], v.body!['seg']);
+      expect(repo.armedMacros, contains(10));
+      expect(result.presetErrors, isEmpty);
     });
   });
 }

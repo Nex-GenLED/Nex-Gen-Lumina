@@ -49,7 +49,9 @@ Future<String?> controllerFirmwareVersion(WledRepository? repo) async =>
 /// * the bus list from `deviceChannelsProvider`, the selected controller's
 ///   record id only when there are buses to compare against;
 /// * the firmware version read ONLY on the LAN (one GET), after the stamp and
-///   LAN checks would already have refused, so an off-LAN pick costs nothing.
+///   LAN checks would already have refused, so an off-LAN pick costs nothing;
+/// * +123 item A — an ANIMATED design is refused before that read: the
+///   nightly preset would fire it as one still frame.
 ///
 /// The per-account count is left to the save path, which knows which
 /// schedule is being edited; the picker never refuses on it.
@@ -60,7 +62,10 @@ Future<DesignScheduleEligibility> designSchedulePickVerdict(
   final repo = read(wledRepositoryProvider);
   final onLan = repo is WledService && !read(isRemoteModeProvider);
   final live = read(deviceChannelsProvider);
-  final info = onLan && design.isPositional && design.layoutStamp != null
+  final info = onLan &&
+          design.isPositional &&
+          !isDesignAnimatedForSchedule(design) &&
+          design.layoutStamp != null
       ? await controllerInfo(repo)
       : null;
   return designScheduleEligibility(

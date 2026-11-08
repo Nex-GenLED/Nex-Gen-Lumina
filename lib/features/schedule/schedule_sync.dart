@@ -9,6 +9,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/audio/services/audio_capability_detector.dart';
 import 'package:nexgen_command/features/discovery/device_discovery.dart';
+import 'package:nexgen_command/features/design/design_models.dart'
+    show CustomDesign;
+import 'package:nexgen_command/features/design/design_providers.dart'
+    show designsStreamProvider;
 import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart';
 import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 import 'package:nexgen_command/features/schedule/pattern_preset_fanout.dart';
@@ -322,6 +326,31 @@ const Duration kControllerWritePace = Duration(milliseconds: 300);
 /// write returned); 5 s is the owner's bound.
 const Duration kDesignReadBackSettle = Duration(milliseconds: 1500);
 const Duration kDesignReadBackBudget = Duration(seconds: 5);
+
+/// +123 item A — how long the sync waits for the owner's saved designs before
+/// a design schedule is judged "couldn't check" (C1, transient).
+const Duration kScheduleSyncDesignsWait = Duration(seconds: 3);
+
+/// +123 item A — the owner's saved designs as the sync reads them at write
+/// time, to refuse a design schedule whose design is ANIMATED
+/// ([scheduledDesignIsAnimated]): the stored body is a still picture, so it
+/// would fire as one still frame. Null when the designs could not be read
+/// within [kScheduleSyncDesignsWait]. Called at most once per sync, and only
+/// when the sync holds a design schedule — a sync of catalog patterns never
+/// reads designs. Overridden in tests.
+final scheduleSyncDesignsProvider =
+    Provider<Future<List<CustomDesign>?> Function()>((ref) {
+  return () async {
+    try {
+      return await ref
+          .read(designsStreamProvider.future)
+          .timeout(kScheduleSyncDesignsWait);
+    } catch (e) {
+      debugPrint('ScheduleSync: saved designs could not be read — $e');
+      return null;
+    }
+  };
+});
 
 class ScheduleSyncService {
   const ScheduleSyncService({
@@ -1440,6 +1469,17 @@ class ScheduleSyncService {
     // Painted designs written (or found converged) so far this sync: the
     // per-account cap, judged at write time as well as at save time.
     var designSchedulesSeen = 0;
+    // +123 item A — the saved designs, read once, on the first design
+    // schedule this sync reaches (never for a sync of catalog patterns).
+    var savedDesignsRead = false;
+    List<CustomDesign>? savedDesigns;
+    Future<List<CustomDesign>?> savedDesignsForMotion() async {
+      if (!savedDesignsRead) {
+        savedDesignsRead = true;
+        savedDesigns = await ref.read(scheduleSyncDesignsProvider)();
+      }
+      return savedDesigns;
+    }
 
     for (final schedule in enabled) {
       // If this schedule uses audio reactivity, build a WLED payload with a
@@ -1536,11 +1576,27 @@ class ScheduleSyncService {
           // model is not allowed, a cap is exceeded, the body is malformed.
           var transient = false;
           final problem = designApiPresetBodyProblem(rawPayload);
+          // +123 item A — is the design this schedule names ANIMATED? The
+          // stored body is a still picture whatever the design is, so the
+          // answer comes from the saved design itself.
+          final designs = await savedDesignsForMotion();
           if (problem != null) {
             debugPrint('ScheduleSync: design preset body for "$name" — $problem');
             refusal = designApiPresetMalformedMessage(plain);
           } else if (activeRepo is! WledService) {
             refusal = designScheduleOffLanMessage(plain);
+          } else if (designs == null) {
+            // C1 — TRANSIENT: the saved designs could not be read, so
+            // nothing is known to be wrong; left exactly as it is.
+            transient = true;
+            refusal = designApiPresetCouldNotVerifyMessage(plain);
+          } else if (scheduledDesignIsAnimated(
+              designs, effectiveSchedule.designId)) {
+            // C1 — PERSISTENT: an animated design would fire as one still
+            // frame. Refused, never converted; a landed copy is purged.
+            debugPrint('ScheduleSync: design preset "$name" — the design is '
+                'animated; refused');
+            refusal = designScheduleAnimatedMessage(plain);
           } else if (gateExpectedShape.isEmpty) {
             transient = true;
             refusal = designApiPresetCouldNotVerifyMessage(plain);

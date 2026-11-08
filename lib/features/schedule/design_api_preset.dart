@@ -43,6 +43,8 @@ import 'dart:convert';
 
 import 'package:nexgen_command/features/design/design_layout_fit.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart'
+    show motionEffectOf;
 import 'package:nexgen_command/features/schedule/geometry_gate.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart';
@@ -161,10 +163,13 @@ const List<List<int>> _kBlackColSlots = [
 /// be saved dark). No `ib`/`sb`: those steer the captured-state save branch,
 /// which an API preset never takes.
 ///
-/// Returns null for a design that is not positional or carries no stamp; the
-/// eligibility verdict says why, this just declines to build.
+/// Returns null for a design that is not positional, is ANIMATED
+/// ([isDesignAnimatedForSchedule]) or carries no stamp; the eligibility
+/// verdict says why, this just declines to build. An animated design is
+/// never converted to a still body.
 Map<String, dynamic>? buildDesignApiPresetBody(CustomDesign design) {
   if (!design.isPositional) return null;
+  if (isDesignAnimatedForSchedule(design)) return null;
   final stamp = design.layoutStamp;
   if (stamp == null) return null;
 
@@ -520,6 +525,36 @@ final SerialWriteLock designPresetWriteLock = SerialWriteLock();
 
 // ── Customer-readable sentences ─────────────────────────────────────────────
 
+// ── Animated designs (+123 item A) ─────────────────────────────────────────
+
+/// True when [design] is ANIMATED: its motion is on with a non-zero effect id
+/// ([motionEffectOf]; a design with no motion, or motion with effect 0, is
+/// static). The nightly preset this file builds is a STILL picture (`fx:0`
+/// and an `i` frame), so an animated design scheduled through it would fire
+/// as one still frame at the ON time. It is refused — never converted — at
+/// pick time (design_schedule_pick.dart), at compose time
+/// ([designScheduleEligibility], [buildDesignApiPresetBody]) and at write time
+/// (schedule_sync.dart, a persistent refusal under C1).
+bool isDesignAnimatedForSchedule(CustomDesign design) =>
+    motionEffectOf(design) != null;
+
+/// Write time: true when the saved design [designId] names is in [designs]
+/// and is animated. A design that is not in the list (deleted, or saved by
+/// another account) is not known to be animated and is judged as before.
+bool scheduledDesignIsAnimated(
+    Iterable<CustomDesign> designs, String? designId) {
+  if (designId == null || designId.isEmpty) return false;
+  for (final d in designs) {
+    if (d.id == designId) return isDesignAnimatedForSchedule(d);
+  }
+  return false;
+}
+
+/// The refusal for an animated design, at pick, compose and write time.
+String designScheduleAnimatedMessage(String name) =>
+    "\"$name\" is an animated design. Animated designs can't be scheduled "
+    'yet. Pick a still design, or save a still version.';
+
 String designScheduleUnstampedMessage(String name) =>
     '"$name" was saved before Lumina recorded your roofline layout, so it '
     "can't be scheduled yet. Open the design, save it again, and then "
@@ -684,6 +719,11 @@ enum DesignScheduleVerdict {
   /// Not a painted design (the caller should not have asked).
   notPositional,
 
+  /// +123 item A — an animated design ([isDesignAnimatedForSchedule]): the
+  /// nightly preset is a still picture, so it would fire as one still frame.
+  /// Refused, never converted; checked before any device read.
+  animated,
+
   /// Saved before the layout stamp existed (slice 1): re-save from the editor.
   unstamped,
 
@@ -769,6 +809,12 @@ DesignScheduleEligibility designScheduleEligibility({
   if (!design.isPositional) {
     return const DesignScheduleEligibility._(
         DesignScheduleVerdict.notPositional);
+  }
+  // +123 item A — an animated design is refused before anything else that
+  // a re-save could fix: the preset would fire it as one still frame.
+  if (isDesignAnimatedForSchedule(design)) {
+    return DesignScheduleEligibility._(DesignScheduleVerdict.animated,
+        message: designScheduleAnimatedMessage(name));
   }
   if (design.layoutStamp == null) {
     return DesignScheduleEligibility._(DesignScheduleVerdict.unstamped,
