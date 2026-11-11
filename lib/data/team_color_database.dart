@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'team_led_colors.dart';
+
 // TODO(consolidation): This database and
 // lib/features/sports_alerts/data/team_colors.dart define overlapping team
 // color data for 155 domestic pro teams (NFL/NBA/MLB/NHL/MLS). The two cannot
@@ -33,8 +35,12 @@ class TeamColor {
         g = (hex >> 8) & 0xFF,
         b = hex & 0xFF;
 
-  /// Convert to a Flutter [Color].
+  /// Convert to a Flutter [Color] — the BRAND colour, for UI paint.
   Color toColor() => Color.fromARGB(255, r, g, b);
+
+  /// The LED colour a controller payload must carry for this team colour
+  /// (lib/data/team_led_colors.dart). [r]/[g]/[b] stay the brand values.
+  LedRgb get ledRgb => teamLedRgb((r << 16) | (g << 8) | b);
 
   Map<String, dynamic> toJson() => {
         'name': name,
@@ -107,10 +113,13 @@ class UnifiedTeamEntry {
     this.defaultIntensity = 180,
   });
 
-  /// LED-optimised RGB arrays with colour-correction for LED strips.
-  List<List<int>> get ledOptimizedRgb {
-    return colors.map((c) => _optimizeForLed(c.r, c.g, c.b)).toList();
-  }
+  /// Every team colour as the `[r, g, b, 0]` a controller payload carries —
+  /// the calibrated LED colour, never the brand hex ([TeamColor.ledRgb]).
+  ///
+  /// This used to run a threshold heuristic that left Packers #203731 as-is
+  /// (teal on the lights) and sent Lakers/Vikings purple as pure blue.
+  List<List<int>> get ledOptimizedRgb =>
+      colors.map((c) => c.ledRgb.toRgbw()).toList();
 
   /// Extract the team-name portion from an official name by stripping the
   /// leading city. E.g. "Kansas City Chiefs" -> "Chiefs".
@@ -120,44 +129,6 @@ class UnifiedTeamEntry {
       if (remainder.isNotEmpty) return remainder;
     }
     return officialName;
-  }
-
-  /// Optimize a color for LED display.
-  ///
-  /// LEDs display colors differently than monitors. Key adjustments:
-  /// 1. Reds with blue → appear pink/magenta, so strip blue
-  /// 2. Blues with red → appear purple, so strip red
-  /// 3. Dark blues → washed out, so boost
-  /// 4. Whites → keep pure
-  static List<int> _optimizeForLed(int r, int g, int b) {
-    if (r > 240 && g > 240 && b > 240) return [255, 255, 255, 0];
-
-    if (b > 50 && r < 30 && g < 80 && b > r && (b - g) > 30) {
-      final boostFactor = 255.0 / b;
-      return [0, (g * boostFactor * 0.3).round().clamp(0, 80), 255, 0];
-    }
-
-    const dominantThreshold = 150;
-    const noiseThreshold = 50;
-
-    if (r > dominantThreshold && g < r * 0.6 && b < r * 0.6) {
-      return [r, g > noiseThreshold ? g : 0, 0, 0];
-    }
-
-    if (r > dominantThreshold && g > 60 && g < 220 && b < noiseThreshold) {
-      return [r, g, 0, 0];
-    }
-
-    if (b > 80 && (b - r) > 30 && (b - g) > 30) {
-      final cleanG = (g > b * 0.5) ? g : (g > noiseThreshold ? (g * 0.5).round() : 0);
-      return [0, cleanG, b < 150 ? (b * 1.7).round().clamp(0, 255) : b, 0];
-    }
-
-    if (g > dominantThreshold && r < g * 0.5 && b < g * 0.5) {
-      return [0, g, 0, 0];
-    }
-
-    return [r, g, b, 0];
   }
 }
 

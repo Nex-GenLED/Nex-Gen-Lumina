@@ -25,6 +25,7 @@
 
 import 'dart:ui' show Color;
 
+import 'package:nexgen_command/data/team_led_colors.dart';
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart'
     show getSpeedProfile;
@@ -210,12 +211,10 @@ class TeamDesignCatalog {
 
   // ── Internal helpers ────────────────────────────────────────────
 
-  static List<int> _rgbw(Color c) => [
-        (c.r * 255.0).round().clamp(0, 255),
-        (c.g * 255.0).round().clamp(0, 255),
-        (c.b * 255.0).round().clamp(0, 255),
-        0, // W channel
-      ];
+  /// [c] is a team's BRAND colour; every catalog payload goes to a
+  /// controller, so it carries the LED colour (W = 0). See
+  /// lib/data/team_led_colors.dart.
+  static List<int> _rgbw(Color c) => teamLedRgb(c.toARGB32()).toRgbw();
 
   static Map<String, dynamic> _buildPayload({
     required int effectId,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../data/team_led_colors.dart';
 import '../../../theme.dart';
 import '../../../utils/time_format.dart';
 import '../../game_day/team_picker_sheet.dart';
@@ -976,13 +977,15 @@ class _SyncEventSetupScreenState extends ConsumerState<SyncEventSetupScreen> {
       );
     }
 
-    // Build colors from team
+    // Build colors from team. These PatternRefs are what the homes are sent
+    // (the setup screen repaints its swatches from kTeamColors[teamId]), so
+    // they carry the team's LED colours, not the brand hex.
     final colors = <int>[];
     if (_teamPrimaryColor != null) {
-      colors.add(_teamPrimaryColor!.value & 0xFFFFFF);
+      colors.add(teamLedRgb(_teamPrimaryColor!.toARGB32()).rgb);
     }
     if (_teamSecondaryColor != null) {
-      colors.add(_teamSecondaryColor!.value & 0xFFFFFF);
+      colors.add(teamLedRgb(_teamSecondaryColor!.toARGB32()).rgb);
     }
     if (colors.isEmpty) colors.add(0xFFFFFF);
 

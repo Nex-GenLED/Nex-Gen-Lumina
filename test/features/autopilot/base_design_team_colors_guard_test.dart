@@ -37,8 +37,8 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart'
 // Bills: blue + red, 120° apart — the design used on the bench.
 const Color _primary = Color(0xFF00338D);
 const Color _secondary = Color(0xFFC60C30);
-const List<int> _primaryRgbw = [0, 51, 141, 0];
-const List<int> _secondaryRgbw = [198, 12, 48, 0];
+const List<int> _primaryRgbw = [0, 92, 255, 0];
+const List<int> _secondaryRgbw = [255, 0, 34, 0];
 
 List<Map<String, dynamic>> _segs(Map<String, dynamic> payload) =>
     (payload['seg'] as List)

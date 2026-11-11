@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../data/team_led_colors.dart';
 import '../models/sport_type.dart';
 
 // TODO(consolidation): This database and lib/data/team_color_database.dart
@@ -10,6 +11,8 @@ import '../models/sport_type.dart';
 
 /// Official team color pair and metadata for LED alert effects.
 class TeamColors {
+  /// BRAND colours — the team's official hex. UI paint only (cards, dots,
+  /// pickers) and the value copied into Game Day config docs.
   final Color primary;
   final Color secondary;
   final String teamName;
@@ -23,6 +26,12 @@ class TeamColors {
     required this.sport,
     required this.espnTeamId,
   });
+
+  /// LED colours — what a controller payload must carry. A brand hex lit at
+  /// LED intensity reads wrong (Packers #203731 → teal); see
+  /// lib/data/team_led_colors.dart.
+  LedRgb get primaryLedRgb => teamLedRgb(primary.toARGB32());
+  LedRgb get secondaryLedRgb => teamLedRgb(secondary.toARGB32());
 }
 
 /// Master lookup of every team, keyed by slug (e.g. 'nfl_chiefs').

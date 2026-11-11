@@ -101,8 +101,8 @@ void main() {
         expect(seg['pal'], 0);
         final cols = seg['col'] as List;
         expect(cols.length, 2);
-        expect(cols[0], [0, 70, 135, 0]); // primary 0xFF004687
-        expect(cols[1], [189, 155, 96, 0]); // secondary 0xFFBD9B60
+        expect(cols[0], [0, 132, 255, 0]); // primary 0xFF004687
+        expect(cols[1], [255, 163, 0, 0]); // secondary 0xFFBD9B60
       }
 
       // Post Fix 3 Part 2 (2026-05-23): shortTeamName prefers the curated

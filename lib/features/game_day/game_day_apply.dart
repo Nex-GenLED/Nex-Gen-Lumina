@@ -16,8 +16,6 @@
 // [WledNotifier.applyPayloadWithLabel] exactly so the helper is
 // Riverpod-free and the tests can inject a fake.
 
-import 'dart:ui' show Color;
-
 import '../autopilot/game_day_autopilot_config.dart';
 import '../wled/wled_payload_utils.dart'
     show applyChannelFilter, kDesignSpacingDefaults;
@@ -59,8 +57,11 @@ Future<bool> applyGameDayConfigToDevice({
   // (apply_saved_design.dart:50-54).
   if (participatingChannels.isEmpty) return false;
 
-  final primary = Color(config.primaryColorValue);
-  final secondary = Color(config.secondaryColorValue);
+  // LED colours, never the brand ints: the config stores the team's BRAND
+  // colour for UI, and a brand hex lit at LED intensity reads wrong (Packers
+  // #203731 → teal). See lib/data/team_led_colors.dart.
+  final primary = config.primaryLedRgb;
+  final secondary = config.secondaryLedRgb;
   final basePayload = <String, dynamic>{
     'on': true,
     'bri': config.brightness.clamp(0, 255),
@@ -76,8 +77,8 @@ Future<bool> applyGameDayConfigToDevice({
         'ix': config.intensity,
         'pal': 0,
         'col': [
-          [primary.red, primary.green, primary.blue, 0],
-          [secondary.red, secondary.green, secondary.blue, 0],
+          primary.toRgbw(),
+          secondary.toRgbw(),
         ],
       }
     ],

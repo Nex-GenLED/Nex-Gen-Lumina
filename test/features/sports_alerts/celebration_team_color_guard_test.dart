@@ -192,7 +192,7 @@ void main() {
   group('the team colours are actually on the wire', () {
     test('slot 0 of every stage is the team primary, white channel zeroed', () {
       final primary = AlertTriggerService.colorToRgbw(_team.primary);
-      expect(primary, [227, 24, 55, 0]); // Chiefs red #E31837
+      expect(primary, [255, 0, 34, 0]); // Chiefs red #E31837
       for (final type in AlertEventType.values) {
         for (final step in AlertTriggerService.buildAnimationSteps(type, _team)) {
           for (final seg in _segsOf(step)) {

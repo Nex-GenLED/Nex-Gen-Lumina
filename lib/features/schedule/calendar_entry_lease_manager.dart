@@ -39,6 +39,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/data/team_led_colors.dart';
 import 'package:nexgen_command/features/game_day/served_game_day.dart'
     show ServedVerdict, servedGameDayEntryTestProvider;
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
@@ -1352,11 +1353,20 @@ class CalendarEntryLeaseManager {
     }
 
     final color = entry.color ?? const Color(0xFFFFFFFF);
-    // Mirror calendar_providers.dart:275-277 — new normalized Color API.
-    final r = (color.r * 255).round();
-    final g = (color.g * 255).round();
-    final b = (color.b * 255).round();
-    final colRgbw = rgbToRgbw(r, g, b, forceZeroWhite: true);
+    // A Game Day entry's colour is the team's BRAND colour — right for the
+    // calendar paint, wrong on the lights (Packers #203731 lit reads teal).
+    // The preset carries its LED colour instead. Every other entry's colour
+    // was picked by a person and ships as picked.
+    final List<int> colRgbw;
+    if (entry.sourceTag == CalendarEntrySourceTag.gameDay) {
+      colRgbw = teamLedRgb(color.toARGB32()).toRgbw();
+    } else {
+      // Mirror calendar_providers.dart:275-277 — new normalized Color API.
+      final r = (color.r * 255).round();
+      final g = (color.g * 255).round();
+      final b = (color.b * 255).round();
+      colRgbw = rgbToRgbw(r, g, b, forceZeroWhite: true);
+    }
     final bri = (entry.brightness.clamp(0, 100) * 255 / 100).round();
 
     return <String, dynamic>{
