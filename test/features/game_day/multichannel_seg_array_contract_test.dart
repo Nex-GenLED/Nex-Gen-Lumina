@@ -238,12 +238,12 @@ void main() {
     }
 
     test('the catalog mixes length-sensitive and length-free effects', () {
-      // Documented in the audit (§2): Running Dual (52) anchors a reverse wave
-      // on each segment's END and maps the palette positionally; Chase (28)
-      // scales dot position AND size with the segment length; Solid (0) and
-      // Fade (12) are length-free; Breathe (2) is time-only. Stripe (0 with
-      // grp 3) restarts its bands at every segment origin.
-      expect(catalog.map((d) => d.effectId).toList(), [52, 0, 28, 2, 12, 0]);
+      // Documented in the audit (§2): Chase (28) scales dot position AND size
+      // with the segment length; Solid (0) and Fade (12) are length-free;
+      // Breathe (2) is time-only. Build 124: design 1 is Chase 2 (37) and the
+      // Stripe is Solid Pattern (83) — both restart their blocks at every
+      // segment origin (was Running Dual 52, and Solid 0 with grp 3).
+      expect(catalog.map((d) => d.effectId).toList(), [37, 0, 28, 2, 12, 83]);
     });
   });
 

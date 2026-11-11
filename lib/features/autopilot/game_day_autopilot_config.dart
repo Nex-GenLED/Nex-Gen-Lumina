@@ -19,6 +19,26 @@ import '../wled/wled_effects_catalog.dart';
 // Estimated game durations by sport (used as post-game fallback)
 // ---------------------------------------------------------------------------
 
+// ─── Game Day default looks (build 124) ─────────────────────────────────────
+// Chosen by the owner on the spare controller, 2026-11-10 (WLED 0.15.4, colour
+// gamma 2.8), with the Chiefs pair 255,0,34 / 255,168,0, the third colour slot
+// black and pal 0. Running Dual (fx 52, sx 160, ix 128), the old default,
+// blends every pixel 50/50 between two waves: next to any hard-edged look it
+// read orange with very little red.
+//
+// The MOVING look: Chase 2 — equal blocks of 1 + ix/16 LEDs (9 at ix 128),
+// red then gold, stepping one LED every 50 + (255 − sx) ms (245 ms at sx 60).
+const int kGameDayDefaultEffectId = 37;
+const int kGameDayDefaultSpeed = 60;
+const int kGameDayDefaultIntensity = 128;
+
+// The STILL look: Solid Pattern — 1 + sx LEDs of the first colour, then
+// 1 + ix of the second (9 / 9 at sx 8, ix 8). Both effects read `col[]` only
+// under pal 0; under pal 5 they take colours by position along the run.
+const int kGameDayStillEffectId = 83;
+const int kGameDayStillSpeed = 8;
+const int kGameDayStillIntensity = 8;
+
 /// Estimated game duration per sport for the post-game fallback timer.
 /// If live end-of-game detection via ESPN fails, the system uses
 /// estimatedDuration + 60 min buffer before triggering the 30-min countdown.
@@ -248,9 +268,12 @@ class GameDayAutopilotConfig {
     this.designMode = AutopilotDesignMode.fallback,
     this.savedDesignName,
     this.savedDesignPayload,
-    this.effectId = 52,
-    this.speed = 160,
-    this.intensity = 128,
+    // Build 124 default look (owner's bench 2026-11-10): Chase 2, 9-LED
+    // red/gold stripes marching ~4 LEDs/s. Running Dual (52) blended every
+    // pixel 50/50 and read orange. See [kGameDayDefaultEffectId].
+    this.effectId = kGameDayDefaultEffectId,
+    this.speed = kGameDayDefaultSpeed,
+    this.intensity = kGameDayDefaultIntensity,
     this.brightness = 200,
     this.scoreCelebrationEnabled = true,
     this.liveScoringEnabled = true,
@@ -397,7 +420,8 @@ class GameDayAutopilotConfig {
     const names = {
       0: 'Solid', 2: 'Breathe', 12: 'Fade',
       28: 'Chase', 17: 'Twinkle', 20: 'Sparkle', 41: 'Lighthouse',
-      52: 'Running', 80: 'Twinklefox', 83: 'Pattern', 87: 'Glitter',
+      37: 'Chase 2', 52: 'Running', 80: 'Twinklefox', 83: 'Pattern',
+      87: 'Glitter',
     };
     return names[effectId] ?? WledEffectsCatalog.getName(effectId);
   }
@@ -468,9 +492,14 @@ class GameDayAutopilotConfig {
       savedDesignName: data['saved_design_name'] as String?,
       savedDesignPayload:
           _parseSavedDesignPayload(data['saved_design_payload']),
-      effectId: (data['effect_id'] as num?)?.toInt() ?? 52,
-      speed: (data['speed'] as num?)?.toInt() ?? 160,
-      intensity: (data['intensity'] as num?)?.toInt() ?? 128,
+      // A doc with no `effect_id` takes the build-124 default look. A doc that
+      // HAS one is not migrated: its missing speed / intensity keep the
+      // pre-124 fallbacks, so an armed team keeps the look it had.
+      effectId: (data['effect_id'] as num?)?.toInt() ?? kGameDayDefaultEffectId,
+      speed: (data['speed'] as num?)?.toInt() ??
+          (data['effect_id'] == null ? kGameDayDefaultSpeed : 160),
+      intensity: (data['intensity'] as num?)?.toInt() ??
+          (data['effect_id'] == null ? kGameDayDefaultIntensity : 128),
       brightness: (data['brightness'] as num?)?.toInt() ?? 200,
       scoreCelebrationEnabled:
           data['score_celebration_enabled'] as bool? ?? true,

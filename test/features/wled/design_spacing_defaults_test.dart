@@ -184,7 +184,7 @@ void main() {
       expect(seg.containsKey('mi'), isFalse);
     });
 
-    test('TeamDesignCatalog asserts grp (incl. the candy-cane 3) and spc:0',
+    test('TeamDesignCatalog asserts grp and spc:0 (the Stripe is Solid Pattern)',
         () {
       final catalog = TeamDesignCatalog.build(
         teamName: 'Royals',
@@ -196,9 +196,11 @@ void main() {
         expect(seg['grp'], d.colorGroupSize, reason: d.name);
         expect(seg['spc'], kDesignDefaultSpc, reason: d.name);
       }
-      // The stripe design is the one that genuinely owns its banding.
-      expect(catalog.last.colorGroupSize, 3);
-      expect(_firstSeg(catalog.last.wledPayload)['grp'], 3);
+      // Build 124: the Stripe is Solid Pattern (fx 83, 9 / 9 LEDs from sx / ix)
+      // at grp 1. It used to be Solid with grp 3, which lit the primary alone.
+      expect(catalog.last.effectId, 83);
+      expect(catalog.last.colorGroupSize, 1);
+      expect(_firstSeg(catalog.last.wledPayload)['grp'], 1);
     });
 
     test('CustomDesign.toWledPayload asserts defaults on every channel', () {

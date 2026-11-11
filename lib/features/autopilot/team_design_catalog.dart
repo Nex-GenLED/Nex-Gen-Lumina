@@ -5,12 +5,12 @@
 // variety across games when designVariety is rotating or random.
 //
 // Six designs cover a spectrum from subtle to dramatic:
-//   1. Team Colors       — Running Dual (fx 52) showing both colors
+//   1. Team Colors       — Chase 2 (fx 37) marching red/gold stripes
 //   2. Solid Secondary   — alternate team color as main
 //   3. Chase Primary→Secondary — motion, team-branded
 //   4. Breathe Primary   — subtle pulsing atmosphere
 //   5. Fade (both)       — slow full-strip crossfade primary ↔ secondary
-//   6. Candy Cane Stripe — alternating primary/secondary bands
+//   6. Stripe            — still primary/secondary stripes (fx 83)
 //
 // Each design is returned as a fully-built WLED payload ready to
 // hand to WledRepository.applyJson().
@@ -26,6 +26,14 @@
 import 'dart:ui' show Color;
 
 import 'package:nexgen_command/data/team_led_colors.dart';
+import 'package:nexgen_command/features/autopilot/game_day_autopilot_config.dart'
+    show
+        kGameDayDefaultEffectId,
+        kGameDayDefaultIntensity,
+        kGameDayDefaultSpeed,
+        kGameDayStillEffectId,
+        kGameDayStillIntensity,
+        kGameDayStillSpeed;
 import 'package:nexgen_command/features/wled/design_spacing_defaults.dart';
 import 'package:nexgen_command/features/wled/effect_speed_profiles.dart'
     show getSpeedProfile;
@@ -80,18 +88,21 @@ class TeamDesignCatalog {
     final s = _rgbw(secondary);
 
     return [
-      // 1. Team Colors — Running Dual (fx 52) showing both team colors
+      // 1. Team Colors — the Game Day default look (build 124): Chase 2
+      // (fx 37), 9-LED stripes of both team colours marching along the run.
+      // Was Running Dual (fx 52), which blends every pixel 50/50 and read
+      // orange on the owner's bench of 2026-11-10.
       TeamDesign(
         name: '$teamName Colors',
-        effectId: 52,
-        speed: 160,
-        intensity: 128,
+        effectId: kGameDayDefaultEffectId,
+        speed: kGameDayDefaultSpeed,
+        intensity: kGameDayDefaultIntensity,
         colorGroupSize: 1,
         wledPayload: _buildPayload(
-          effectId: 52,
+          effectId: kGameDayDefaultEffectId,
           colors: [p, s],
-          speed: 160,
-          intensity: 128,
+          speed: kGameDayDefaultSpeed,
+          intensity: kGameDayDefaultIntensity,
           brightness: brightness,
         ),
       ),
@@ -160,21 +171,22 @@ class TeamDesignCatalog {
           brightness: brightness,
         ),
       ),
-      // 6. Candy Cane Stripe — solid effect with colorGroupSize = 3 to
-      // create alternating 3-LED bands of primary/secondary.
+      // 6. Stripe — still stripes of both colours: Solid Pattern (fx 83),
+      // 9 LEDs primary then 9 secondary (sx 8, ix 8), pal 0. This used to be
+      // Solid (fx 0) with grp 3, which renders the PRIMARY alone on every
+      // LED — fx 0 never reads col[1], and grouping only widens pixels.
       TeamDesign(
         name: '$teamName Stripe',
-        effectId: 0,
-        speed: 128,
-        intensity: 128,
-        colorGroupSize: 3,
+        effectId: kGameDayStillEffectId,
+        speed: kGameDayStillSpeed,
+        intensity: kGameDayStillIntensity,
+        colorGroupSize: 1,
         wledPayload: _buildPayload(
-          effectId: 0,
+          effectId: kGameDayStillEffectId,
           colors: [p, s],
-          speed: 128,
-          intensity: 128,
+          speed: kGameDayStillSpeed,
+          intensity: kGameDayStillIntensity,
           brightness: brightness,
-          colorGroupSize: 3,
         ),
       ),
     ];

@@ -257,11 +257,12 @@ void main() {
     final container = ProviderContainer(overrides: _overrides(repo, db));
     addTearDown(container.dispose);
 
-    // Before: the default plan reads "<Team> Running" (effect 52) while the
+    // Before: the default plan reads "<Team> <default effect>" — Chase 2
+    // (37) since build 124, "Running" (52) before — while the
     // picker used to open on Solid — the reported mismatch.
     final before = GameDayAutopilotConfig.fromFirestore(
         (await _planDoc(db).get()).data()!);
-    expect(before.designLabel, 'Green Bay Packers Running');
+    expect(before.designLabel, 'Green Bay Packers Chase 2');
 
     await _pumpSelector(tester, container,
         destination: 'Game Day',

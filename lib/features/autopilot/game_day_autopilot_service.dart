@@ -745,13 +745,30 @@ class GameDayAutopilotService {
       // colour but the team's. Fade (12) is the whole strip crossfading
       // primary ↔ secondary from `col[]`, verified against the firmware's own
       // effect list and by live observation (see team_design_catalog.dart).
-      final (effectId, effectName, speed) = switch (styleCategory) {
-        _StyleCategory.static_ => (0, 'Solid', 128),      // Solid
-        _StyleCategory.motion  => (28, 'Chase', 180),      // Chase
+      //
+      // Build 124 (owner's bench 2026-11-10, Chiefs pair, pal 0): motion is
+      // the Game Day default look, Chase 2 (fx 37, sx 60, ix 128); static is
+      // its still form, Solid Pattern (fx 83, sx 8, ix 8) — both colours in
+      // 9-LED stripes, where Solid (fx 0) showed the primary alone. Dynamic is
+      // unchanged.
+      final (effectId, effectName, speed, intensity) = switch (styleCategory) {
+        _StyleCategory.static_ => (
+            kGameDayStillEffectId,
+            'Solid Pattern',
+            kGameDayStillSpeed,
+            kGameDayStillIntensity,
+          ),
+        _StyleCategory.motion => (
+            kGameDayDefaultEffectId,
+            'Chase 2',
+            kGameDayDefaultSpeed,
+            kGameDayDefaultIntensity,
+          ),
         _StyleCategory.dynamic => (
             kBaseDesignFadeEffectId,
             'Fade',
             kBaseDesignFadeSpeed,
+            180,
           ),
       };
 
@@ -760,14 +777,14 @@ class GameDayAutopilotService {
         designName: '$effectName in ${config.teamName} Colors',
         effectId: effectId,
         speed: speed,
-        intensity: 180,
+        intensity: intensity,
         brightness: config.brightness,
         colors: colors,
         wledPayload: _buildWledPayload(
           effectId: effectId,
           colors: colors,
           speed: speed,
-          intensity: 180,
+          intensity: intensity,
           brightness: config.brightness,
           participating: onResolveParticipatingChannels?.call(config),
         ),
