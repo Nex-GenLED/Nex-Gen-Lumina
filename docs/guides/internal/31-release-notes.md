@@ -1,8 +1,14 @@
 # Release notes and tester messages
 
-*Describes build: 2.5.10+123 · Last verified: 2026-11-08 · Internal; the tester text is what testers receive.*
+*Describes build: 2.5.10+124 · Last verified: 2026-11-11 · Internal; the tester text is what testers receive.*
 
 One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+
+## 2.5.10 build 124 — candidate, not yet tagged
+
+**What changed:** Team colours on the lights are tuned for LEDs. The app still shows each team's own colours, but the lights get the colour that looks right when lit: Chiefs red is deeper and no longer pinkish, and Chiefs gold, like the other golds, no longer looks whitish. Game Day's default look for a team without a saved design is stripes of the team's two colours marching along the lights; the static style shows the same stripes standing still, and the Stripe design now shows stripes. Teams already set up keep the effect they had. Lumina's replies about a team start with the same moving stripes. Twinkle on a warm white design has a darker background, so the twinkles stand out, and Glitter sparkles in the design's own colour instead of flashing white.
+
+**Tester text:** written with the build's ledger row, after the tag.
 
 ## 2.5.10 build 123 — 2026-11-08
 
@@ -46,4 +52,4 @@ One entry per build that reached TestFlight, newest first. Each entry is copied 
 
 See the rows in `docs/BUILD_LEDGER.md`.
 
-*Facts: T-B1, T-D4, T-D5, T-G3, T-G4, T-E4, T-E3, T-S1, T-S2, T-L1, T-V1, T-E1, T-C1, T-C3, T-G1, T-GD1, T-GD4, T-E2, T-D1, T-L2, T-R8, T-R1, T-SU1, T-SU2.*
+*Facts: T-B1, T-GD11, T-GD12, T-E5, T-E6, T-L5, T-D4, T-D5, T-G3, T-G4, T-E4, T-E3, T-S1, T-S2, T-L1, T-V1, T-E1, T-C1, T-C3, T-G1, T-GD1, T-GD4, T-E2, T-D1, T-L2, T-R8, T-R1, T-SU1, T-SU2.*
