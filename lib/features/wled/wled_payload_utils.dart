@@ -565,6 +565,31 @@ Map<String, dynamic> ensurePsaveClearsFreeze(
 /// and fixing builders cannot retroactively clean them. That wants a strip at
 /// the REPLAY boundary — where a stored blob is rehydrated, which no
 /// provisioning path crosses — or a migration. Not here.
+/// Glitter (fx 87).
+const int kGlitterEffectId = 87;
+
+/// Build 124, fix d5 — Glitter's sparkle colour.
+///
+/// WLED's Glitter sparkles in `col[2]`, and when `col[2]` is black it
+/// sparkles ULTRA-WHITE instead (R=G=B=W=255, FX.cpp `glitter_base`). The
+/// col pad above writes black into every missing third slot, so every
+/// two-colour Glitter flashed full white on the house — owner's bench,
+/// spare controller 2026-11-10, step 10: "looks a little cheaper"; the same
+/// design with `col[2]` = the second colour "colors look better".
+///
+/// So a Glitter segment whose third slot is black (padded or stated) gets
+/// its SECOND colour there — for a team look that is the team's LED
+/// secondary, already in `col[1]`. The background stays two-colour (the
+/// second colour is repeated, nothing new is added; under pal 5 its share
+/// rises). A design with a black second colour is left alone: there is no
+/// second colour to sparkle in. Any other effect is returned unchanged.
+List<List<int>> withGlitterSparkleColour(Object? fx, List<List<int>> col) {
+  if (fx != kGlitterEffectId || col.length < 3) return col;
+  bool isBlack(List<int> c) => c.every((v) => v == 0);
+  if (!isBlack(col[2]) || isBlack(col[1])) return col;
+  return [col[0], col[1], List<int>.from(col[1]), ...col.skip(3)];
+}
+
 Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
   // ── ROOFLINE SLICE 2: AN API-COMMAND PRESET BODY IS NEVER TOUCHED ──────
   // A painted design scheduled nightly is saved as a WLED API-command preset
@@ -730,7 +755,7 @@ Map<String, dynamic> normalizeWledPayload(Map<String, dynamic> payload) {
       while (padded.length < 3) {
         padded.add(const [0, 0, 0, 0]);
       }
-      s['col'] = padded;
+      s['col'] = withGlitterSparkleColour(s['fx'], padded);
     }
 
     // Normalize + validate per-pixel 'i' arrays. Canonicalizes the legacy
