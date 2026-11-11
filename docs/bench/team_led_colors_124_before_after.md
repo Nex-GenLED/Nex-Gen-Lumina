@@ -1,6 +1,6 @@
 # Team LED colours — build 124 before/after list
 
-For Tyler to review by eye on the spare controller (192.168.1.179 only). Generated from the real tables:
+For Tyler to review by eye on the spare controller only (never the home controller). Generated from the real tables:
 the team rows come from `kTeamColors`, `TeamColorDatabase`, `NcaaConferences` and the commercial geo table
 (the four tables `test/data/team_led_colors_test.dart` covers), the values from
 `lib/data/team_led_colors.dart` at this commit. "Lights at" applies the fleet's colour gamma 2.8 the way the
