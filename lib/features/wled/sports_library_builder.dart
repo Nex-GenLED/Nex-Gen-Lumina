@@ -127,7 +127,7 @@ class SportsLibraryBuilder {
             'city': team.city,
             'teamName': team.name,
             'nickname': team.nickname,
-            'suggestedEffects': [12, 41, 0], // Theater Chase, Running, Solid
+            'suggestedEffects': [12, 41, 0], // Fade, Lighthouse, Solid
             'defaultSpeed': 85,
             'defaultIntensity': 180,
           },

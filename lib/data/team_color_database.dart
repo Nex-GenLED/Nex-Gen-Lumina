@@ -108,7 +108,7 @@ class UnifiedTeamEntry {
     this.espnTeamId,
     this.aliases = const [],
     this.colors = const [],
-    this.suggestedEffects = const [12, 41, 65, 0],
+    this.suggestedEffects = kTeamSuggestedEffects,
     this.defaultSpeed = 85,
     this.defaultIntensity = 180,
   });
@@ -131,6 +131,23 @@ class UnifiedTeamEntry {
     return officialName;
   }
 }
+
+/// The effects every team suggests, first = the one a team look leads with.
+///
+/// Build 124 (owner's bench, spare controller 2026-11-10): Chase 2 (37) and
+/// Chase (28) are the two-colour moving looks the owner approved; Solid (0)
+/// stays last. The old pool [12, 41, 65, 0] was commented "Theater Chase,
+/// Running" on its siblings, but on WLED 0.15.x those ids are Fade (12),
+/// Lighthouse (41) and Palette (65), and each misbehaved on the bench:
+///   12 Fade — under pal 5 (what a payload without `pal` gets) only half the
+///      run animates; the palette is laid out red-then-gold along the strip;
+///   41 Lighthouse — its background is the RAW second colour (fade_out does
+///      not gamma-correct it), so a gold field reads pale yellow;
+///   65 Palette — with the app's option defaults (c1 128, o1 off) its
+///      gradient turns sideways and the whole run shows one still colour.
+/// 37 and 28 read `col[]` only under pal 0: a payload built from this pool
+/// must state `pal` (WledEffectsCatalog.setColorsPaletteFor).
+const List<int> kTeamSuggestedEffects = [37, 28, 0];
 
 // ---------------------------------------------------------------------------
 // TeamColorDatabase -- unified static facade
@@ -230,7 +247,7 @@ class TeamColorDatabase {
     required String league,
     required List<TeamColor> colors,
     List<String> aliases = const [],
-    List<int> suggestedEffects = const [12, 41, 65, 0],
+    List<int> suggestedEffects = kTeamSuggestedEffects,
     int defaultSpeed = 85,
     int defaultIntensity = 180,
   }) {
@@ -631,7 +648,7 @@ class TeamColorDatabase {
     required List<TeamColor> colors,
     required List<String> aliases,
     String? espnTeamId,
-    List<int> suggestedEffects = const [12, 41, 65, 0],
+    List<int> suggestedEffects = kTeamSuggestedEffects,
   }) {
     return UnifiedTeamEntry(
       id: id,

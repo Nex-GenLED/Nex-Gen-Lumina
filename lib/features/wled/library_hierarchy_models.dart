@@ -79,7 +79,7 @@ class LibraryNode {
     if (effects is List) {
       return effects.cast<int>();
     }
-    // Default effects: Theater Chase, Running, Breathe, Solid
+    // Default effects: Fade, Lighthouse, Breathe, Solid
     return const [12, 41, 2, 0];
   }
 

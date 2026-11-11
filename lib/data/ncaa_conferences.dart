@@ -353,7 +353,7 @@ class NcaaConferences {
             'school': school.name,
             'mascot': school.mascot,
             'sport': sport,
-            'suggestedEffects': [12, 41, 0], // Theater Chase, Running, Solid
+            'suggestedEffects': [12, 41, 0], // Fade, Lighthouse, Solid
           },
         ));
       }

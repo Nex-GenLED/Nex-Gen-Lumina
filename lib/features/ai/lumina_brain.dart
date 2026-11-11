@@ -839,7 +839,7 @@ class LuminaBrain {
     ];
   }
 
-  /// The first ANIMATED effect a team suggests, else Running (41).
+  /// The first ANIMATED effect a team suggests, else Lighthouse (41).
   static int _animatedEffectFor(UnifiedTeamEntry team) {
     for (final fx in team.suggestedEffects) {
       if (fx != 0) return fx;
@@ -1013,6 +1013,11 @@ class LuminaBrain {
           'fx': effectId,
           'sx': speed,
           'ix': intensity,
+          // Build 124: the palette that makes THIS effect play the team's
+          // col[] (0 for a colour-reading effect). Left out, the chokepoint
+          // fills pal 5, under which the team pool's Chase 2 / Chase take
+          // their colours by position along the run (bench 2026-11-10).
+          'pal': WledEffectsCatalog.setColorsPaletteFor(effectId),
         }
       ],
     };
