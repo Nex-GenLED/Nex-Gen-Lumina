@@ -30,6 +30,8 @@
 
 import 'dart:math' as math;
 
+import 'wled_cfg_gamma.dart' show kNglLightGammaConfig;
+
 /// Effects that draw sparkles over a field of `col[1]`. Source-verified above.
 const Set<int> kSparkleOverFieldEffectIds = {17, 20, 51, 80, 81, 106};
 
@@ -48,6 +50,27 @@ const double kSparkleFieldMinDistance = 120;
 /// colour gamma takes 30 % input to ~3 % light), bright enough that an
 /// architectural wash still reads as lit rather than dark.
 const double kSparkleFieldDimFactor = 0.30;
+
+/// Effects whose field is the RAW `col[1]`: Twinkle fades every pixel toward
+/// `colors[1]` (`Segment::fade_out`), and fade_out does NOT apply the colour
+/// gamma that SEGCOLOR gets. So the 30 % field above lit at 30 %, not ~3 %:
+/// owner's bench 2026-11-10 (spare, gamma 2.8) — the 3000 K Twinkle field
+/// `[77,53,33]` glowed pale; `[9,3,1]` (the same 30 % with the controller's
+/// gamma applied first) "looks more correct against the darker background".
+/// The rest of the family reads the field through SEGCOLOR (gamma-corrected)
+/// and keeps the plain 30 %. Other fade_out effects (40, 41, 59, 91, 111 …)
+/// are not sparkle fields and are not changed here.
+const Set<int> kSparkleRawFieldEffectIds = {17};
+
+/// The colour-gamma exponent the app writes to every controller
+/// (`light.gc.val`, [kNglLightGammaConfig]).
+final double _controllerGamma =
+    (kNglLightGammaConfig['val'] as num).toDouble();
+
+/// One channel through the controller's colour gamma, exactly as WLED builds
+/// its gamma table: `(int)(powf(v / 255, gamma) * 255 + 0.5)`.
+int controllerGammaChannel(int v) =>
+    (math.pow(v.clamp(0, 255) / 255.0, _controllerGamma) * 255 + 0.5).floor();
 
 double _rgbDistance(List<int> a, List<int> b) {
   double sum = 0;
@@ -96,9 +119,17 @@ SparkleColors readableSparkleColors(int effectId, List<List<int>> colors) {
     return SparkleColors(colors);
   }
 
+  final raw = kSparkleRawFieldEffectIds.contains(effectId);
   final dim = [
     for (int i = 0; i < 4; i++)
-      i < sparkle.length ? (sparkle[i] * kSparkleFieldDimFactor).round() : 0,
+      if (i >= sparkle.length)
+        0
+      else if (raw)
+        // The field is lit raw: apply the controller's gamma to the 30 %
+        // value here, so it lights at what the 30 % was meant to look like.
+        controllerGammaChannel((sparkle[i] * kSparkleFieldDimFactor).round())
+      else
+        (sparkle[i] * kSparkleFieldDimFactor).round(),
   ];
   final out = <List<int>>[
     sparkle,

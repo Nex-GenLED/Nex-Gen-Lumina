@@ -22,7 +22,9 @@ void main() {
       final r = readableSparkleColors(17, const [_warm1, _warm2]);
       expect(r.fieldReplaced, isTrue);
       expect(r.colors[0], _warm1);
-      expect(r.colors[1], [77, 53, 33, 0], reason: '30 % of the sparkle colour');
+      expect(r.colors[1], [9, 3, 1, 0],
+          reason: '30 % of the sparkle colour, controller gamma applied (fx 17 '
+              'fades toward the RAW col[1]; bench 2026-11-10 step 9)');
       expect(r.paletteOverride, 0,
           reason: 'pal 5 builds the sparkle palette FROM col[] — the dim field '
               'would become half the sparkles');
@@ -54,7 +56,7 @@ void main() {
     test('an RGBW white that lives in the W channel is compared on W as well', () {
       final r = readableSparkleColors(17, const [[0, 0, 0, 255], [0, 0, 0, 230]]);
       expect(r.fieldReplaced, isTrue);
-      expect(r.colors[1], [0, 0, 0, 77]);
+      expect(r.colors[1], [0, 0, 0, 9]);
     });
   });
 
@@ -69,7 +71,7 @@ void main() {
     )));
     expect(seg['fx'], 17, reason: 'still genuine Twinkle — nothing is substituted');
     expect(seg['pal'], 0);
-    expect((seg['col'] as List)[1], [77, 53, 33, 0]);
+    expect((seg['col'] as List)[1], [9, 3, 1, 0]);
     expect(seg['grp'], 1);
     expect(seg['spc'], 2, reason: 'the Architectural spacing is preserved');
     expect(seg['sx'], greaterThanOrEqualTo(180),
