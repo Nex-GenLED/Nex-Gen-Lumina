@@ -364,13 +364,17 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// never recorded (the in-flight sync owns the row until it resolves).
   Future<void> _recordSyncOutcome(ScheduleSyncResult result) async {
     final status = ScheduleSyncStatus.fromResult(result);
-    if (status == null) return;
+    if (status == null || !mounted) return;
     final uid = _ref.read(effectiveUserUidProvider);
     try {
       await _ref.read(scheduleSyncStatusProvider.notifier).record(status);
     } catch (e) {
       debugPrint('SchedulesNotifier: status record failed — $e');
     }
+    // Every await above is a chance for the notifier to be disposed
+    // (a signed-out teardown, a short-lived container): stop here
+    // rather than read a provider from a dead ref.
+    if (!mounted) return;
     if (uid != null) {
       // Fire-and-forget by contract: a rules rejection or no network must
       // never hold the sync's caller or surface to the customer.
@@ -393,6 +397,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         debugPrint('SchedulesNotifier: owed flag persist failed — $e');
       }
     }
+    if (!mounted) return;
     _syncLightsTrigger();
   }
 
@@ -429,6 +434,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       _resyncOwed = false;
     }
     _resyncOwedLoaded = true;
+    if (!mounted) return;
     _syncLightsTrigger();
   }
 
@@ -445,6 +451,10 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   Future<AutoResyncVerdict> _maybeAutoResync({required String trigger}) async {
     if (!_initialized) return AutoResyncVerdict.nothingOwed;
     await _loadResyncOwed();
+    // The owed-flag read is the first await on the launch path; a
+    // container torn down meanwhile (schedule_addall_test's shape) must
+    // not be read from. Same after every await below.
+    if (!mounted) return AutoResyncVerdict.nothingOwed;
     final repo = _ref.read(wledRepositoryProvider);
     final onLan = repo != null && repoCanWriteCfg(repo);
     final uid = _ref.read(effectiveUserUidProvider);
@@ -459,6 +469,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     }
     final store = _ref.read(scheduleSyncStatusStoreProvider);
     final ledger = uid == null ? AutoResyncLedger.empty : await store.readLedger(uid);
+    if (!mounted) return AutoResyncVerdict.nothingOwed;
     final now = autoResyncClock();
     final verdict = autoResyncDecision(
       owed: _resyncOwed,
@@ -482,6 +493,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         debugPrint('SchedulesNotifier: auto-resync ledger write failed — $e');
       }
     }
+    if (!mounted) return verdict;
     debugPrint('SchedulesNotifier: automatic re-sync ($trigger) running — '
         'attempt ${ledger.countOn(now) + 1} of $kAutoResyncMaxPerDay today');
     unawaited(runSyncNow());

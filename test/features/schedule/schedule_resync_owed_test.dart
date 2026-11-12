@@ -28,6 +28,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../helpers/home_dashboard_harness.dart';
 import '../../helpers/recording_wled_repository.dart';
 
+/// A store whose owed-flag read parks until the test releases [gate]: the
+/// launch trigger's first await, held open so the container can be torn
+/// down underneath it.
+class _HeldStore extends ScheduleSyncStatusStore {
+  _HeldStore() : super();
+  final gate = Completer<void>();
+
+  @override
+  Future<bool> readOwed(String uid) async {
+    await gate.future;
+    return true;
+  }
+}
+
 /// Returns the scripted results in order; the last one repeats.
 class _ScriptedSyncService extends ScheduleSyncService {
   _ScriptedSyncService(this.script) : super();
@@ -112,6 +126,7 @@ final _tenAm = DateTime(2026, 11, 12, 10, 0);
   WledRepository? repo,
   bool lightsOn = false,
   ScheduleSyncMirror? mirror,
+  ScheduleSyncStatusStore? store,
 }) {
   final stream = StreamController<List<ScheduleItem>>();
   final service = _ScriptedSyncService(script);
@@ -127,6 +142,7 @@ final _tenAm = DateTime(2026, 11, 12, 10, 0);
     authStateProvider.overrideWith((_) => Stream<User?>.value(_FakeUser())),
     userServiceProvider.overrideWithValue(_FakeUserService()),
     scheduleSyncMirrorProvider.overrideWithValue(mirror ?? rec),
+    if (store != null) scheduleSyncStatusStoreProvider.overrideWithValue(store),
   ]);
   addTearDown(() {
     container.dispose();
@@ -199,6 +215,25 @@ void main() {
       expect(n2.debugResyncOwed, isFalse, reason: 'converged → cleared');
       expect(s2.container.read(scheduleSyncStatusProvider)?.state,
           ScheduleSyncState.synced);
+    });
+
+    test('the launch trigger survives its container being disposed '
+        'mid-flight (schedule_addall_test\'s shape): no read after dispose, '
+        'no sync', () async {
+      final store = _HeldStore();
+      final h = harness(
+          script: [_ok], repo: RecordingWledRepository(), store: store);
+      final n = await _hydrated(h.container, h.stream);
+      expect(n.lastAutoResyncVerdict, isNull,
+          reason: 'parked on the owed-flag read');
+      // Torn down while the launch trigger waits on its first await —
+      // exactly what a short-lived test container or a signed-out
+      // teardown does. Before the guard this threw "Tried to read a
+      // provider from a ProviderContainer that was already disposed".
+      h.container.dispose();
+      store.gate.complete();
+      await pumpEventQueue();
+      expect(h.service.calls, isEmpty, reason: 'nothing ran on a dead ref');
     });
 
     test('a restart with nothing owed runs nothing', () async {
