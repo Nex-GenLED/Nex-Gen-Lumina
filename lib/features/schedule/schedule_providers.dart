@@ -137,7 +137,9 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
   /// The lights-off trigger: subscribed only while a re-sync is owed, so an
   /// account with nothing owed never touches the controller state provider
-  /// from here.
+  /// from here. The lights going off is a trigger MOMENT (a live LAN state
+  /// change while something is owed), not a gate — the decision itself no
+  /// longer looks at the lights.
   ProviderSubscription<WledStateModel>? _lightsSub;
 
   /// What the last automatic re-sync decision was (tests, diagnostics).
@@ -145,7 +147,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   AutoResyncVerdict? lastAutoResyncVerdict;
 
   /// The clock the daytime gate and the attempt ledger read. Tests pin it so
-  /// the suite is not red outside 8:00-17:00.
+  /// the suite is not red outside 9:00-15:00.
   @visibleForTesting
   DateTime Function() autoResyncClock = DateTime.now;
 
@@ -402,8 +404,10 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   }
 
   /// Subscribe to the controller's live state only while a re-sync is owed:
-  /// the lights going OFF on the home Wi-Fi is the moment an automatic
-  /// re-sync is least visible, so it is one of the three triggers.
+  /// the lights going OFF on the home Wi-Fi is a live-LAN moment at which an
+  /// automatic re-sync is worth another bounded attempt, so it is one of the
+  /// three triggers (launch, LAN return, lights off). Whether it RUNS is
+  /// decided by [autoResyncDecision] — the daytime window and the bounds.
   void _syncLightsTrigger() {
     if (!_resyncOwed) {
       _lightsSub?.close();
@@ -445,9 +449,10 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// The bounded automatic re-sync. Called on launch (first hydration), on a
   /// LAN return (the repository turning cfg-capable) and on the lights going
   /// off while one is owed. Runs at most one sync per call, and only when
-  /// [autoResyncDecision] allows: something owed, on the home Wi-Fi, lights
-  /// OFF, daytime, ten minutes since the last automatic attempt, fewer than
-  /// six today. A manual Retry (runSyncNow) bypasses all of this.
+  /// [autoResyncDecision] allows: something owed, on the home Wi-Fi, inside
+  /// the 9:00–15:00 local daytime window (lights on or off), ten minutes
+  /// since the last automatic attempt, fewer than six today. A manual Retry
+  /// (runSyncNow) bypasses all of this.
   Future<AutoResyncVerdict> _maybeAutoResync({required String trigger}) async {
     if (!_initialized) return AutoResyncVerdict.nothingOwed;
     await _loadResyncOwed();
@@ -458,15 +463,6 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     final repo = _ref.read(wledRepositoryProvider);
     final onLan = repo != null && repoCanWriteCfg(repo);
     final uid = _ref.read(effectiveUserUidProvider);
-    bool lightsOn = true;
-    if (_resyncOwed && onLan) {
-      try {
-        final live = _ref.read(wledStateProvider);
-        lightsOn = !live.connected || live.isOn;
-      } catch (_) {
-        lightsOn = true; // unknown = assume visible
-      }
-    }
     final store = _ref.read(scheduleSyncStatusStoreProvider);
     final ledger = uid == null ? AutoResyncLedger.empty : await store.readLedger(uid);
     if (!mounted) return AutoResyncVerdict.nothingOwed;
@@ -474,7 +470,6 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     final verdict = autoResyncDecision(
       owed: _resyncOwed,
       onLan: onLan,
-      lightsOn: lightsOn,
       now: now,
       ledger: ledger,
     );

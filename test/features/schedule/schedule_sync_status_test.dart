@@ -147,18 +147,17 @@ void main() {
     AutoResyncVerdict decide({
       bool owed = true,
       bool onLan = true,
-      bool lightsOn = false,
       DateTime? now,
       AutoResyncLedger ledger = AutoResyncLedger.empty,
     }) =>
         autoResyncDecision(
             owed: owed,
             onLan: onLan,
-            lightsOn: lightsOn,
             now: now ?? _at,
             ledger: ledger);
 
-    test('runs when owed, on LAN, lights off, daytime, within bounds', () {
+    test('runs when owed, on LAN, inside the daytime window, within bounds',
+        () {
       expect(decide(), AutoResyncVerdict.run);
     });
 
@@ -170,19 +169,25 @@ void main() {
       expect(decide(onLan: false), AutoResyncVerdict.offLan);
     });
 
-    test('lights on → held (a psave would be visible)', () {
-      expect(decide(lightsOn: true), AutoResyncVerdict.lightsOn);
+    test('the lights are not a gate: the decision has no lights input', () {
+      // A wrong schedule can keep the lights ON in the daytime (ON 05:00 /
+      // OFF 18:00 was audited); the repair must not wait for them to go off.
+      expect(AutoResyncVerdict.values.map((v) => v.name),
+          isNot(contains('lightsOn')));
     });
 
-    test('outside 8:00–17:00 local → held', () {
-      expect(decide(now: DateTime(2026, 11, 12, 7, 59)),
+    test('outside 9:00–15:00 local → held; 17:00 is dusk in winter', () {
+      expect(decide(now: DateTime(2026, 11, 12, 8, 59)),
           AutoResyncVerdict.outsideDaytime);
-      expect(decide(now: DateTime(2026, 11, 12, 17, 0)),
+      expect(decide(now: DateTime(2026, 11, 12, 15, 0)),
           AutoResyncVerdict.outsideDaytime);
+      expect(decide(now: DateTime(2026, 11, 12, 16, 30)),
+          AutoResyncVerdict.outsideDaytime,
+          reason: 'inside the old 8–17 window, outside the new one');
       expect(decide(now: DateTime(2026, 11, 12, 21, 30)),
           AutoResyncVerdict.outsideDaytime);
-      expect(decide(now: DateTime(2026, 11, 12, 8, 0)), AutoResyncVerdict.run);
-      expect(decide(now: DateTime(2026, 11, 12, 16, 59)),
+      expect(decide(now: DateTime(2026, 11, 12, 9, 0)), AutoResyncVerdict.run);
+      expect(decide(now: DateTime(2026, 11, 12, 14, 59)),
           AutoResyncVerdict.run);
     });
 
@@ -211,8 +216,8 @@ void main() {
     test('the numbers themselves', () {
       expect(kAutoResyncMaxPerDay, 6);
       expect(kAutoResyncMinGap, const Duration(minutes: 10));
-      expect(kAutoResyncDayStartHour, 8);
-      expect(kAutoResyncDayEndHour, 17);
+      expect(kAutoResyncDayStartHour, 9);
+      expect(kAutoResyncDayEndHour, 15);
     });
   });
 }

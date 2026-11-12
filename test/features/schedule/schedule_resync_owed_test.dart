@@ -5,7 +5,8 @@
 //     per account, and survives a restart (a second container over the same
 //     SharedPreferences);
 //   • a launch or a LAN return with the flag set runs ONE automatic sync,
-//     under the bounds (lights off, daytime, ten minutes apart, six a day);
+//     under the bounds (9:00–15:00 local whether the lights are on or off,
+//     ten minutes apart, six a day);
 //   • a verified converged sync clears it; the Firestore mirror is non-fatal.
 
 import 'dart:async';
@@ -205,7 +206,7 @@ void main() {
       expect(s1.service.calls, hasLength(1));
       s1.container.dispose();
 
-      // Session 2: at home, lights off, 10:00 — hydration is the launch.
+      // Session 2: at home, 10:00 — hydration is the launch.
       final s2 = harness(script: [_ok], repo: RecordingWledRepository());
       final n2 = await _hydrated(s2.container, s2.stream);
       await pumpEventQueue();
@@ -317,26 +318,54 @@ void main() {
       expect(h.service.calls, hasLength(8));
     });
 
-    test('held while the lights are on (a psave would be visible)', () async {
+    test('a lights-ON account inside the 9:00–15:00 window IS retried; the '
+        'same account outside the window is not', () async {
+      // The audited shape: a wrong schedule on the controller keeps the
+      // lights on all day (ON 05:00 / OFF 18:00). The repair must run while
+      // they are on, in daylight, or it never runs for this customer.
       final h = harness(script: [_offLan, _ok], lightsOn: true);
-      final n = await _hydrated(h.container, h.stream);
-      await n.runSyncNow();
+      final n = await _hydrated(h.container, h.stream,
+          clock: DateTime(2026, 11, 12, 13, 30));
+      await n.runSyncNow(); // deferred off-LAN → owed
+      expect(h.service.calls, hasLength(1));
+
+      // LAN return at 13:30, lights ON: runs.
       h.container.read(_repoSwitch.notifier).state = RecordingWledRepository();
       await pumpEventQueue();
-      expect(n.lastAutoResyncVerdict, AutoResyncVerdict.lightsOn);
-      expect(h.service.calls, hasLength(1));
-      expect(n.debugResyncOwed, isTrue, reason: 'still owed');
+      expect(n.lastAutoResyncVerdict, AutoResyncVerdict.run,
+          reason: 'lights on is not a hold inside the window');
+      expect(h.service.calls, hasLength(2));
+      expect(n.debugResyncOwed, isFalse, reason: 'converged → cleared');
+
+      // The same account, owed again, lights still ON, LAN return at 16:30:
+      // inside the old 8:00–17:00 window, outside the new one → held.
+      final h2 = harness(script: [_offLan, _ok], lightsOn: true);
+      final n2 = await _hydrated(h2.container, h2.stream,
+          clock: DateTime(2026, 11, 12, 16, 30));
+      await n2.runSyncNow();
+      h2.container.read(_repoSwitch.notifier).state =
+          RecordingWledRepository();
+      await pumpEventQueue();
+      expect(n2.lastAutoResyncVerdict, AutoResyncVerdict.outsideDaytime);
+      expect(h2.service.calls, hasLength(1));
+      expect(n2.debugResyncOwed, isTrue, reason: 'still owed');
     });
 
-    test('held outside daytime (8:00–17:00 local)', () async {
+    test('held outside the daytime window (9:00–15:00 local), lights off too',
+        () async {
       final h = harness(script: [_offLan, _ok]);
       final n = await _hydrated(h.container, h.stream,
-          clock: DateTime(2026, 11, 12, 21, 15));
+          clock: DateTime(2026, 11, 12, 8, 45));
       await n.runSyncNow();
       h.container.read(_repoSwitch.notifier).state = RecordingWledRepository();
       await pumpEventQueue();
       expect(n.lastAutoResyncVerdict, AutoResyncVerdict.outsideDaytime);
       expect(h.service.calls, hasLength(1));
+
+      // The manual Retry still runs at once, at any hour.
+      await n.runSyncNow();
+      expect(h.service.calls, hasLength(2));
+      expect(n.debugResyncOwed, isFalse);
     });
   });
 

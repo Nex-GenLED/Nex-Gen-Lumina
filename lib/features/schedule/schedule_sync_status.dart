@@ -237,16 +237,15 @@ const int kAutoResyncMaxPerDay = 6;
 const Duration kAutoResyncMinGap = Duration(minutes: 10);
 
 /// The local hours (inclusive start, exclusive end) in which an automatic
-/// re-sync may run. See [autoResyncDecision] for why.
-const int kAutoResyncDayStartHour = 8;
-const int kAutoResyncDayEndHour = 17;
+/// re-sync may run: 9:00 to 15:00. See [autoResyncDecision] for why.
+const int kAutoResyncDayStartHour = 9;
+const int kAutoResyncDayEndHour = 15;
 
 /// Why an automatic re-sync did or did not run now.
 enum AutoResyncVerdict {
   run,
   nothingOwed,
   offLan,
-  lightsOn,
   outsideDaytime,
   tooSoon,
   dailyCapReached,
@@ -298,29 +297,34 @@ class AutoResyncLedger {
 /// Whether the app may run an automatic re-sync right now.
 ///
 /// Order matters: the cheap "is anything owed / can we even write" checks
-/// come first, then the two customer-visibility gates, then the bounds.
+/// come first, then the customer-visibility gate, then the bounds.
 ///
-/// THE LIGHTS GATE. A re-sync psaves the schedule's pattern, and on this
+/// THE DAYTIME GATE. A re-sync psaves the schedule's pattern, and on this
 /// firmware a psave APPLIES its body to the strip before storing it (the
 /// sync restores the captured state straight after, with `transition:0`).
-/// With the lights ON the house would switch to the schedule's pattern for
-/// well under a second and snap back; with the lights OFF it would light up
-/// with that pattern for the same moment and go dark again. Neither is
-/// invisible on a dark house at night, so an automatic re-sync runs only
-/// while the lights are OFF and it is DAYTIME ([kAutoResyncDayStartHour] to
-/// [kAutoResyncDayEndHour] local): a sub-second flicker of unlit roofline
-/// LEDs in daylight is the least a customer can be asked to notice. A manual
-/// Retry runs at once, whatever the lights are doing — the customer pressed it.
+/// With the lights ON the house switches to the schedule's pattern for well
+/// under a second and snaps back; with the lights OFF it lights up with that
+/// pattern for the same moment and goes dark again. In daylight neither is
+/// visible on a roofline, so an automatic re-sync runs only inside the
+/// daytime window ([kAutoResyncDayStartHour] to [kAutoResyncDayEndHour]
+/// local, 9:00 to 15:00) — whether the lights are on or off.
+///
+/// The lights are deliberately NOT a gate. The accounts this repair exists
+/// for are the ones whose WRONG schedule is on the controller, and a wrong
+/// schedule can keep the lights on in the daytime (one audited device ran
+/// ON 05:00 / OFF 18:00): a lights-off condition would block the repair for
+/// exactly the customer who needs it. The window ends at 15:00 rather than
+/// 17:00 because 17:00 is already dusk in November and December. A manual
+/// Retry runs at once, whatever the time or the lights — the customer
+/// pressed it.
 AutoResyncVerdict autoResyncDecision({
   required bool owed,
   required bool onLan,
-  required bool lightsOn,
   required DateTime now,
   required AutoResyncLedger ledger,
 }) {
   if (!owed) return AutoResyncVerdict.nothingOwed;
   if (!onLan) return AutoResyncVerdict.offLan;
-  if (lightsOn) return AutoResyncVerdict.lightsOn;
   if (now.hour < kAutoResyncDayStartHour || now.hour >= kAutoResyncDayEndHour) {
     return AutoResyncVerdict.outsideDaytime;
   }
