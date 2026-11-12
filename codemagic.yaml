@@ -30,7 +30,11 @@ workflows:
     integrations:
       app_store_connect: NexGen
     environment:
-      flutter: stable
+      # PINNED 2026-11-11. Flutter 3.50.0 (stable from 2026-11-11) fails 22
+      # text-scale tests: a fonts-change relayout frame is left pending at test
+      # teardown. 3.47.9 is the SDK build 123 shipped on. Move this pin only after
+      # gating on the new SDK (docs/BUILD_LEDGER.md convention 5).
+      flutter: 3.47.9
       xcode: latest
       cocoapods: default
       groups:

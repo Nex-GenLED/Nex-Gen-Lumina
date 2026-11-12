@@ -130,13 +130,24 @@ tests that never ran under either condition — a sunset assertion written again
 the local clock face, and a `ListTile` inside a coloured card that 3.47's debug
 assertion rejects. Nothing reached TestFlight; build-111 carried the fixes.
 
-Codemagic's stable is kept as a standalone SDK at
+Codemagic's SDK is kept as a standalone SDK at
 `%USERPROFILE%\.lumina\sdk\flutter` (outside the repo and outside the everyday
-`C:\develop\flutter`; refresh it when `releases_windows.json` says stable moved).
+`C:\develop\flutter`; refresh it when the pin in `codemagic.yaml` moves).
 
-**Codemagic's SDK as of 2026-11-07: Flutter 3.47.9 (Dart 3.13.7).** `codemagic.yaml`
-builds on `flutter: stable`. `releases_windows.json` names 3.47.9 as stable
-(released 2026-10-29); before that it was 3.47.5.
+**Codemagic's SDK as of 2026-11-11: Flutter 3.47.9 (Dart 3.13.7), PINNED.**
+`codemagic.yaml` names the version (`flutter: 3.47.9`) instead of `flutter: stable`,
+so a new stable release no longer changes the gate without a commit here. It was
+pinned on 2026-11-11, after tag `build-124` failed the gate on Flutter 3.50.0 (the
++124 entry under Operational flags). 3.47.9 was stable from 2026-10-29 to
+2026-11-11; before it, 3.47.5.
+- **Moving the pin.** Move it only after gating on the new SDK: run this
+  convention's gates (analyze, the `TZ=UTC0` suite and the golden) under the new
+  version on the exact commit that will be tagged, all clean. Then change
+  `flutter:` and the comment above it in `codemagic.yaml`, and this paragraph, in
+  one commit. Known blocker for 3.50.0 (Dart 3.14.0): 22 text-scale tests fail
+  because the bundled-font load in `loadAppFontsForTest`
+  (`test/helpers/text_scale_harness.dart`) leaves a fonts-change relayout frame
+  pending at teardown; that helper needs its own fix first.
 - **The standalone copy** at `%USERPROFILE%\.lumina\sdk\flutter` still reads
   3.47.5 and is due a refresh.
 - **The +123 candidate** (`feat/123-candidate`) was gated on 3.47.9 from a scratch
@@ -158,7 +169,7 @@ From the release worktree, on the exact commit that will be tagged:
 
 ```
 FL="$USERPROFILE/.lumina/sdk/flutter/bin/flutter.bat"
-$FL --version                                   # must match Codemagic's stable
+$FL --version                                   # must match the pin in codemagic.yaml
 $FL pub get                                     # resolves from the COMMITTED lock
 $FL analyze --no-fatal-warnings --no-fatal-infos   # the yaml's exact flags: errors fail
 TZ=UTC0 $FL test                                # 0 failures
@@ -194,6 +205,15 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
   run by hand on this PC, like the gates in convention 5.
 
 ## Operational flags
+
+### +124 — build-124 tagged 2026-11-11 20:45:53Z (14:45:53 CST) — FAILED Codemagic's gate on Flutter 3.50.0; produced nothing
+
+| item | value |
+|---|---|
+| Tag | `build-124` = `38def5a` (the bump to 2.5.10+124 on `feat/124-colour`). Left where it is: a public tag is never moved, deleted or re-pushed (convention 5). |
+| Outcome | Codemagic's "iOS Release" run for the tag failed at "Test and analyze (build gate)": 6,371 pass / 39 skip / 22 fail. Nothing was built, signed or uploaded, so build 124 never reached TestFlight. Android was not built; versionCode 124 is unused. |
+| Cause | `codemagic.yaml` said `flutter: stable`, and Flutter 3.50.0 (Dart 3.14.0) became stable on 2026-11-11 at 18:46Z, two hours before the tag push. The local gates had run on 3.41.2 and 3.47.9. Under 3.50.0, 22 text-scale tests fail with "An animation is still running even after the widget tree was disposed": the bundled-font load in `loadAppFontsForTest` (`test/helpers/text_scale_harness.dart`) triggers a fonts-change relayout whose frame is still pending at teardown. Reproduced here on 3.50.0 at both `38def5a` and `build-123`, the same 22 tests; none fail on 3.41.2 or 3.47.9. App code is not involved. |
+| Fix | build-125: Flutter pinned to 3.47.9 in `codemagic.yaml` (convention 5), and the same app bumped to 2.5.10+125. The test-helper fix for 3.50.0 is a separate, later change. |
 
 ### +119 — build-119 tagged 2026-10-20 20:31:11Z (15:31:11 CDT) (Codemagic build number: pending) — first App Store candidate: Autopilot, weekly generation and Simple Mode withheld; Neighborhood Sync bottom band fixed
 
