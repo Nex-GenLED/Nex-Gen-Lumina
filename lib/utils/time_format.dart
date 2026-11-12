@@ -120,6 +120,74 @@ String formatScheduleWindow(
   return '$on → off at $off';
 }
 
+/// +126 (g) — one plain-words line for the schedule editor, built from the
+/// wheel values: "Lights on at 5:00 PM, off at 6:00 AM the next morning."
+///
+/// [onLabel] / [offLabel] are the labels the editor would save (a clock time
+/// in either format, or `Sunrise` / `Sunset`). [offNextDay] is the firing
+/// side's own answer (`offFallsNextDay`), so the sentence and the timers can
+/// never disagree about which day the lights go off. The part-of-day word
+/// follows the OFF time: before noon "morning", noon to 5 PM "afternoon",
+/// later "evening"; a same-day off says "this …", an overnight off says
+/// "the next …". No off time: the lights stay on until turned off.
+String scheduleWindowSentence({
+  required String onLabel,
+  String? offLabel,
+  required bool offNextDay,
+  String timeFormat = kTimeFormatDefault,
+}) {
+  final on = _sentenceTime(onLabel, timeFormat: timeFormat);
+  final hasOff = offLabel != null && offLabel.trim().isNotEmpty;
+  if (!hasOff) {
+    return 'Lights on at $on and they stay on until you turn them off.';
+  }
+  final off = _sentenceTime(offLabel, timeFormat: timeFormat);
+  final part = _partOfDay(offLabel);
+  final when = offNextDay ? 'the next $part' : 'this $part';
+  return 'Lights on at $on, off at $off $when.';
+}
+
+/// A label as it reads inside a sentence: clock times in the user's format,
+/// solar words in lower case ("at sunset", never "at Sunset").
+String _sentenceTime(String label, {required String timeFormat}) {
+  final lower = label.trim().toLowerCase();
+  if (lower == 'sunset' || lower == 'sunrise') return lower;
+  return formatTimeLabel(label, timeFormat: timeFormat);
+}
+
+/// "morning" / "afternoon" / "evening" for an OFF label. Sunrise is a
+/// morning, sunset an evening; a clock time goes by its hour; anything
+/// unreadable is called a day ("this day" never renders in practice because
+/// the editor only hands over labels it built itself).
+String _partOfDay(String label) {
+  final lower = label.trim().toLowerCase();
+  if (lower == 'sunrise') return 'morning';
+  if (lower == 'sunset') return 'evening';
+  final t = _clockHour(lower);
+  if (t == null) return 'day';
+  if (t < 12) return 'morning';
+  if (t < 17) return 'afternoon';
+  return 'evening';
+}
+
+/// The 0–23 hour a clock label names (either format), or null.
+int? _clockHour(String lower) {
+  final twelve = RegExp(r'^(\d{1,2}):(\d{2})\s*(am|pm)$').firstMatch(lower);
+  if (twelve != null) {
+    var h = int.parse(twelve.group(1)!);
+    if (h < 1 || h > 12) return null;
+    if (h == 12) h = 0;
+    if (twelve.group(3) == 'pm') h += 12;
+    return h;
+  }
+  final twentyFour = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(lower);
+  if (twentyFour != null) {
+    final h = int.parse(twentyFour.group(1)!);
+    return h <= 23 ? h : null;
+  }
+  return null;
+}
+
 /// Exposes the current user's [UserModel.timeFormat] preference.
 /// Falls back to 12-hour when the profile is unloaded or unset.
 final timeFormatPreferenceProvider = Provider<String>((ref) {

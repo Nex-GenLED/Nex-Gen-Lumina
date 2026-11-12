@@ -63,6 +63,8 @@ import 'package:nexgen_command/features/ai/light_effect_animator.dart';
 import 'package:nexgen_command/features/ai/pixel_strip_preview.dart';
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/theme.dart';
+import 'package:nexgen_command/features/schedule/cfg_payload_builder.dart'
+    show offFallsNextDay;
 import 'package:nexgen_command/utils/time_format.dart';
 import 'package:nexgen_command/widgets/glass_app_bar.dart';
 import 'package:nexgen_command/widgets/schedule_type_badge.dart';
@@ -4796,6 +4798,35 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
             'clock time.';
   }
 
+  /// +126 (g): the sentence under the wheels, from the editor's current
+  /// values — the labels the Save button would write, in the account's time
+  /// format, and [offFallsNextDay] over a throwaway item built from them.
+  String _windowSentence() {
+    final timeFormat = ref.read(timeFormatPreferenceProvider);
+    final onLabel = _onTrigger == _TriggerType.specificTime
+        ? formatTimeOfDay(_onTime, timeFormat: timeFormat)
+        : _onSolar;
+    final offLabel = _hasOffTime
+        ? (_offTrigger == _TriggerType.specificTime
+            ? formatTimeOfDay(_offTime, timeFormat: timeFormat)
+            : _offSolar)
+        : null;
+    final probe = ScheduleItem(
+      id: 'probe',
+      timeLabel: onLabel,
+      offTimeLabel: offLabel,
+      repeatDays: const [],
+      actionLabel: '',
+      enabled: true,
+    );
+    return scheduleWindowSentence(
+      onLabel: onLabel,
+      offLabel: offLabel,
+      offNextDay: offFallsNextDay(probe),
+      timeFormat: timeFormat,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final schedules = ref.watch(schedulesProvider);
@@ -4968,6 +4999,22 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                         ),
                       ],
                     ],
+                  ),
+                ),
+
+                // +126 (g): what the wheels above add up to, in plain words.
+                // Rebuilt from the same values the Save button writes, with
+                // the firing side's own overnight rule, so this line and the
+                // timers cannot disagree about which day the lights go off.
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    _windowSentence(),
+                    key: const ValueKey('schedule-window-sentence'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: NexGenPalette.textMedium,
+                        ),
+                    softWrap: true,
                   ),
                 ),
 
