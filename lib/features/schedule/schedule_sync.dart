@@ -1050,6 +1050,10 @@ class ScheduleSyncService {
     // write (a non-convergence refusal, a failed save). Reported on the
     // result so the app records and shows it; never a reason to disarm.
     final List<int> unconvergedPresetIds = [];
+    // +126 (d) — pattern slots psaved this sync, with the body each was
+    // asked to hold, for the one read-back of /presets.json that follows the
+    // pattern loop (see the READ-BACK block below).
+    final Map<int, ({Map<String, dynamic> state, String name})> patternWrites = {};
 
     // PACING STATE (audit/SYNC_PACING_FIX_STATUS.md §1(a)). Flipped by the
     // first REAL write this sync; every later real write waits [paceDelay]
@@ -1202,6 +1206,10 @@ class ScheduleSyncService {
       /// expectation names but the controller lacks a FAILURE rather than
       /// silence — see presetSatisfies.
       bool scoped = false,
+      /// +126 (d) — a pattern slot (10–25, captured-state body): a
+      /// successful write is noted in [patternWrites] for the single
+      /// read-back after the pattern loop.
+      bool patternSlot = false,
       /// ROOFLINE SLICE 2 — run after a successful write (owner decision 6:
       /// read back after every write). [DesignReadBack.landed] arms the slot
       /// and clears its repair counter; [DesignReadBack.mismatch] is the one
@@ -1321,6 +1329,7 @@ class ScheduleSyncService {
       );
       if (ok) {
         didWriteAnyPreset = true;
+        if (patternSlot) patternWrites[id] = (state: state, name: name);
         if (readBackVerify != null) {
           DesignReadBack outcome;
           try {
@@ -1762,6 +1771,7 @@ class ScheduleSyncService {
           state: presetPayload,
           name: effectiveSchedule.actionLabel,
           alwaysWrite: true, // Option A — see psaveIfChanged's doc comment
+          patternSlot: true, // +126 (d): read back below
         );
 
         updatedSchedules.add(effectiveSchedule.copyWith(presetId: presetId));
@@ -1772,6 +1782,56 @@ class ScheduleSyncService {
         // macro via _presetForAction to a real legacy preset 1–5 — all psaved
         // above — instead of a never-saved 10+ slot.
         updatedSchedules.add(effectiveSchedule.copyWith(clearPresetId: true));
+      }
+    }
+
+    // ── +126 (d): READ BACK the pattern slots written this sync ──────────
+    // One GET /presets.json after the pattern loop and BEFORE the live-state
+    // restore (owner's order), compared slot by slot with presetSatisfies —
+    // the same predicate the idempotent skip uses, so "landed" here means
+    // exactly "the next sync would not rewrite it". A slot that reads back
+    // different, or a presets.json that cannot be read (one retry after a
+    // short settle), is reported as UNCONVERGED: still armed (option ii),
+    // recorded, shown, and a bounded automatic re-sync is owed.
+    //
+    // Why this catches the Classic Christmas fire: slot 10 held an older
+    // pattern (grp 2 / spc 6 / warm white) while the schedule said Classic
+    // Christmas (grp 1 / spc 0 / fx 84). presetSatisfies compares grp, spc,
+    // pal and the root fields, so that copy reads back as a mismatch. KNOWN
+    // LIMIT: presetSatisfies deliberately does not compare `fx` and `col`
+    // (base_look.dart — the base-look repair owns those on the ladder), so a
+    // slot that differs ONLY in effect or colour reads back as landed. A
+    // hash compare would close that gap; it is not this slice.
+    //
+    // Cost: the read lengthens the window between the last psave and the
+    // restore by one presets.json GET (tens of KB on a busy controller).
+    if (patternWrites.isNotEmpty && activeRepo is WledService) {
+      final svc = activeRepo as WledService;
+      final readBack = await _readBackPatternPresets(svc,
+          settle: readBackSettle, budget: readBackBudget);
+      if (readBack == null) {
+        for (final e in patternWrites.entries) {
+          unconvergedPresetIds.add(e.key);
+          presetErrors.add('"${e.value.name}" was saved to your lights but '
+              'could not be confirmed (the saved patterns could not be read '
+              'back). It is still scheduled; the app will check again.');
+          debugPrint('ScheduleSync: pattern preset ${e.key} WRITTEN, NOT '
+              'VERIFIED (presets.json unreadable on read-back)');
+        }
+      } else {
+        for (final e in patternWrites.entries) {
+          final stored = readBack[e.key];
+          final landed = stored != null &&
+              presetSatisfies(stored, e.value.state,
+                  expectedName: e.value.name, compareSegments: true);
+          if (landed) continue;
+          unconvergedPresetIds.add(e.key);
+          presetErrors.add('"${e.value.name}" did not save to your lights the '
+              'way it was sent. It is still scheduled; the app will try '
+              'again.');
+          debugPrint('ScheduleSync: pattern preset ${e.key} READ-BACK '
+              'MISMATCH (${stored == null ? 'absent' : 'different'})');
+        }
       }
     }
 
@@ -2455,6 +2515,34 @@ class ScheduleSyncService {
           <String, dynamic>{'id': id, 'on': false},
     ];
     return out;
+  }
+
+  /// +126 (d) — the read-back after the pattern psaves. ONE read; if it
+  /// cannot be read, one more after [settle]; the whole thing bounded by
+  /// [budget] (a timeout counts as unreadable). Returns the slot map, or null
+  /// when presets.json could not be read twice — "written, not verified".
+  static Future<Map<int, Map<String, dynamic>>?> _readBackPatternPresets(
+    WledService svc, {
+    required Duration settle,
+    required Duration budget,
+  }) async {
+    Future<Map<int, Map<String, dynamic>>?> attempt() async {
+      var read = await svc.readPresets();
+      if (!read.isKnown) {
+        if (settle > Duration.zero) await Future<void>.delayed(settle);
+        read = await svc.readPresets();
+      }
+      return read.isKnown ? read.presets : null;
+    }
+
+    if (budget <= Duration.zero) return attempt();
+    try {
+      return await attempt().timeout(budget);
+    } on TimeoutException {
+      debugPrint('ScheduleSync: pattern read-back exceeded '
+          '${budget.inMilliseconds} ms — written, not verified');
+      return null;
+    }
   }
 
   /// C2 — the read-back after a design preset write. presets.json is read;
