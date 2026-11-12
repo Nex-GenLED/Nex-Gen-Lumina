@@ -4845,8 +4845,16 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
                     constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                   ),
                   const SizedBox(width: 8),
-                  Text(widget.editing == null ? 'New Schedule' : 'Edit Schedule', style: Theme.of(context).textTheme.titleLarge),
-                  const Spacer(),
+                  // +126 (g): wraps instead of overflowing — at 320 pt and
+                  // 1.6x text the title plus the switch were 41 px too wide.
+                  Expanded(
+                    child: Text(
+                      widget.editing == null ? 'New Schedule' : 'Edit Schedule',
+                      style: Theme.of(context).textTheme.titleLarge,
+                      softWrap: true,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   CupertinoSwitch(value: _enabled, activeColor: NexGenPalette.cyan, onChanged: (v) => setState(() => _enabled = v)),
                 ]),
                 const SizedBox(height: 16),
