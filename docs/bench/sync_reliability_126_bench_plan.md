@@ -1,147 +1,307 @@
-# Spare-bench plan — build 126 sync reliability (slice B with slices A and C)
+# Phone bench plan — build 126 sync reliability (slices A, B and C)
 
-**Written, not run.** Nothing below has contacted a controller. Every step runs
-on the owner's go, on the **spare unit only** (the 0.15.4 spare, `.179`). The
-home controller `.150` is **excluded by name**: it is the owner's house, it has
-the seven bad bytes in its presets file, and nothing here may psave or pdel on
-it. No customer unit is touched.
+**Written, not run.** Nothing below has contacted a controller.
 
-Branch under test: `feat/126-candidate` (slices A, C and B merged; slice D
-`feat/126-sync-readback` is **not** in it). Firmware under test: the spare's
-0.15.4. The behaviours were measured on 0.15.1 (the home unit's version) and
-the app does not branch on version (T-F12); a difference on 0.15.4 is a finding,
-not a pass.
+| | |
+|---|---|
+| **Account** | The owner's home account (the one older notes call "the bench account"). Its uid is deliberately not written here. No customer account, ever. |
+| **Controller** | **The spare only: `.179` on the home LAN, WLED 0.15.4, `ESP32_Ethernet`.** The home unit `.150` is **excluded by name**: nothing in this run may write to it. If at any point the app shows `.150` as the controller it is talking to, the run **stops** (step 0.3). |
+| **Build** | This build, installed from TestFlight on the iPhone (2.5.10+126 on the login screen it reads `v2.5.10`; the TestFlight number is the one the invite named). Branch `feat/126-candidate`; slice D (`feat/126-sync-readback`) is **not** in it. |
+| **Tools** | The iPhone only, plus a browser on the home Wi-Fi for **read-only** looks at the spare: `http://<spare>/json/info`, `http://<spare>/presets.json`, `http://<spare>/json/cfg`. All three are plain GETs that change nothing on the unit. No laptop scripts, no POSTs, no WLED web UI buttons. |
+| **Firmware note** | The behaviours were built against 0.15.1 (the home unit's version) and the app does not branch on version (T-F12). A difference on 0.15.4 is a finding, not a pass. |
 
-What is proven here and nowhere else: the suite proves the app's side with a
-fake controller (`test/features/schedule/schedule_resync_owed_test.dart`,
-`schedule_sync_queue_test.dart`, `schedule_sync_cross_slice_126_test.dart`).
-This plan proves the controller's side: that the owed re-sync actually lands
-timers and a preset on the unit, that the queued follow-up's write is the
-unit's last word, and that the mirror row appears on the account.
+What this run proves that the suite cannot: that the owed re-sync lands real
+timers and a real preset on a real unit, that the queued follow-up's write is
+the unit's last word, and that the row and chip say the right thing on a phone.
+The app's side is proven by the suite
+(`test/features/schedule/schedule_resync_owed_test.dart`,
+`schedule_sync_queue_test.dart`, `schedule_sync_cross_slice_126_test.dart`,
+`schedule_sync_status_widgets_test.dart`).
 
-## Before starting
+## How to read this plan
 
-- Bench account (no customer account). Note its uid once, privately, for the
-  mirror read in section 3; it never goes into this file or any commit.
-- Phone A on the home Wi-Fi with the 126 candidate installed. A way to leave
-  the LAN (mobile data) and come back.
-- Laptop on the LAN for the controller reads. "Laptop:" marks a read that needs
-  it; everything else is seen on the phone.
-- The spare's clock resets when it loses power: set it from the laptop after
-  any unplug before waiting on a timer.
-- The automatic re-sync window is **9:00–15:00 local**. Section 1 must run
-  inside it; the "held outside the window" step must run outside it, or the
-  phone's clock must be moved. Record the phone's local time at each step.
+- Every step is a **phone tap** or a **browser read** of the spare. "Browser:"
+  marks a read; everything else is on the phone.
+- Every step ends with a **Pass:** line. Write the phone's local time next to
+  it in the results table.
+- **If a step fails: stop.** Do not tap Retry again, do not repeat the step,
+  do not try the next section. Note the phone time, what the row and the chip
+  said (word for word), and what the browser reads showed, then stop the run.
+  One failed step is a finding to bring back, not something to work around on
+  the bench. The only exception is written into the step itself.
+- Timing: the automatic re-sync runs only **9:00–15:00 local**. Part 1 must
+  run inside that window; Part 2 must run **after 15:00** (or before 9:00).
+  Do not move the phone's clock (it breaks sign-in and TestFlight); run the
+  two parts at the right times of day instead.
+- Timers fire on the unit's own clock. The spare's clock resets when it loses
+  power; if `/json/info` shows a `time` in 1970 or hours off, the timer-fire
+  checks (1.7, 3.3) will not fire on time and must be marked "not checked",
+  not failed.
 
-## 0. Baseline (reads only)
+## 0. Before starting (reads only)
 
-1. Laptop: `GET /json/info` → `ver`, `vid`, `release`. Expect 0.15.4,
-   `ESP32_Ethernet`.
-2. Laptop: `GET /json/cfg` → save; note `timers.ins` (expect no rows for the
-   bench account) and `hw.led.ins` (bus count and lengths).
-3. Laptop: `GET /presets.json` → save, sha256. Note which of slots 10–41 are
-   occupied.
-4. Phone: My Schedule shows no sync status row and Home shows no chip (the
-   account has never synced). Expect both absent.
+0.1 **Browser:** `/json/info`. *Pass:* `ver` is `0.15.4`, `arch` is `esp32`,
+    `ip` ends in `.179`, `name` is the spare's name. Write the name down; it
+    must match what the phone shows in 0.3.
 
-## 1. Owed flag set off-LAN, then the LAN return re-sync (slice B)
+0.2 **Browser:** `/json/cfg`. Find `timers` → `ins`. *Pass:* you can see the
+    list (it may be empty or hold rows from earlier bench work). Note how many
+    rows there are and their `hour`/`min`. Then `/presets.json`. *Pass:* it
+    loads; note which numbered slots are present (the app uses slots 10–41).
 
-Inside 9:00–15:00 local.
+0.3 Phone: open the app, signed in to the home account, on the home Wi-Fi.
+    System tab → the controller entry → details. *Pass:* exactly one
+    controller, "IP Address" ends in `.179`, and the name matches 0.1.
+    **If it shows `.150`, or more than one controller: STOP. Nothing else in
+    this plan may run.**
 
-1. Phone on mobile data (off the LAN; no bridge configured for the bench
-   account, so the app is off-LAN, not relayed). Schedule → `+` → a pattern
-   from Explore → ON = now + 20 min, OFF = now + 25 min, every day → Save.
-2. Expect on the phone: the status row reads "Your schedule hasn't reached
-   your lights yet. It will the next time you open the app on your home Wi-Fi.
-   You can retry now if you're home. · just now" with **Retry**; the Home chip
-   reads "Your schedule hasn't reached your lights yet." with **Retry**.
-3. Laptop: `GET /json/cfg` → `timers.ins` unchanged from baseline (nothing
-   was written off-LAN). `GET /presets.json` sha256 unchanged.
-4. Kill the app (swipe away). Re-open it still on mobile data. Expect the row
-   and chip as in step 2 (the state survived the restart) and no write on the
-   laptop reads.
-5. Join the home Wi-Fi with the app open. This is the LAN-return trigger.
-   Expect within about 15 s: the row flips through nothing alarming and ends
-   on "Your schedule is on your lights. · just now" (green) with no Retry;
-   the chip reads "Your schedule is on your lights." with no Retry.
-6. Laptop: `GET /json/cfg` → `timers.ins` now holds the ON and OFF rows for
-   the schedule (hour/minute as set, `en:1`, the ON row's `macro` = the
-   schedule's slot). `GET /presets.json` → the slot holds the pattern with
-   every bus (T-D4's shape), sha256 changed. Save both.
-7. Watch the lights for the 20-minute mark: the ON fires and plays the
-   pattern on every channel; at 25 the OFF fires. (Timer fire is the
-   controller's; this only confirms the write was real.)
-8. Log line to capture from the phone (debug build or device log):
-   `SchedulesNotifier: automatic re-sync (lan-return) running — attempt 1 of 6
-   today`.
+0.4 Phone: System tab → Remote Access. *Pass:* no bridge is paired (the screen
+    offers setup, not a paired bridge). If a bridge is paired, the off-LAN
+    steps below would relay through it instead of deferring: **STOP** and
+    say so; the plan needs a change, not a workaround.
 
-**Held outside the window.** Repeat steps 1–5 with the phone's clock outside
-9:00–15:00 (or at 16:30, which was inside the old 8:00–17:00 window). Expect
-the row to stay on "hasn't reached your lights yet" after the LAN return, the
-laptop reads unchanged, and the log line `automatic re-sync (lan-return) held
-— outsideDaytime`. Then tap **Retry** on the row: the sync runs at once at any
-hour; expect step 5's end state and step 6's reads.
+0.5 Phone: Home and My Schedule. *Pass on a fresh install:* no sync status row
+    under the schedule list and no chip on Home (the surfaces render only
+    once this install has synced). If the app was installed earlier and has
+    synced before, the row and chip may already show "Your schedule is on your
+    lights." in green — that is also a pass; write down which.
 
-**Lights ON is not a hold.** With the lights ON (any pattern playing) and a
-re-sync owed, repeat the LAN return inside the window. Expect the re-sync to
-run (not `held — lightsOn`; that verdict no longer exists), a sub-second change
-on the strip that is not visible in daylight from the street, and the lights
-back on the pattern they were playing within a second.
+0.6 Phone: My Schedule. *Pass:* no schedule named for this bench exists yet.
+    If an older bench schedule is there, delete it now (tap it → Delete) and
+    re-check `/json/cfg` `timers.ins` has no row for it before going on.
 
-**Bounds.** Flap the Wi-Fi off and on twice within ten minutes with a re-sync
-owed (make one owed by pulling the controller's Ethernet before a Save, then
-restoring it). Expect one run, then `held — tooSoon`. The six-a-day cap is
-not bench-tested (it would take three hours); the suite proves it.
+## 1. Off-LAN edit, then the LAN-return re-sync (slice B) — inside 9:00–15:00
 
-## 2. Queue-not-drop (slice A)
+1.1 Phone: Settings → Wi-Fi → turn Wi-Fi **off** (the phone is now on mobile
+    data, off the home LAN). Open the app. *Pass:* the app opens and Home
+    renders (it may show the lights as unreachable; that is expected).
 
-1. On the LAN, with the schedule of section 1 enabled and synced, toggle it
-   OFF on My Schedule and, within about four seconds, toggle it ON again.
-2. Expect on the phone: after the OFF, the row reads "Saving your latest
-   change. It goes to your lights next, automatically." (no Retry) while the
-   clearing sync verifies; then, within about 15 s, "Your schedule is on your
-   lights." with no Retry.
-3. Laptop, after the row settles: `GET /json/cfg` → `timers.ins` holds the
-   schedule's ON and OFF rows, enabled; `GET /presets.json` holds its slot.
-   **Before the fix** (build 125 on the same unit): the controller is left
-   with no timers and no slot while the app shows the schedule enabled.
-4. Repeat with three quick toggles (OFF, ON, OFF). Expect the last state (OFF)
-   on the controller: no enabled timer rows for the schedule, and exactly one
-   follow-up write (count the `POST /json/cfg` lines in the app log after the
-   first one clears).
+1.2 Phone: My Schedule → `+` → pick any pattern from Explore → ON time =
+    now + 20 minutes, OFF time = now + 25 minutes, every day → Save.
+    *Pass:* the status row reads, word for word,
+    "Your schedule hasn't reached your lights yet. It will the next time you
+    open the app on your home Wi-Fi. You can retry now if you're home. · just
+    now" with a **Retry** button; Home shows the chip "Your schedule hasn't
+    reached your lights yet." with **Retry**.
 
-## 3. The status mirror (slice B)
+1.3 **Browser** (on the home Wi-Fi, a laptop or the phone after 1.5 — read it
+    before the phone rejoins if you have a second device; otherwise skip to
+    1.4 and read it at 1.6 as "unchanged since 0.2"): `/json/cfg` →
+    `timers.ins` is as in 0.2; `/presets.json` is as in 0.2. *Pass:* nothing
+    was written while off-LAN.
 
-1. After section 1 step 5 and section 2 step 2: on the laptop, read the
-   bench account's user document (Firebase console, or the Firestore REST
-   `documents:get` with the owner's ADC token and the project's
-   `x-goog-user-project` header). Expect a map field `schedule_sync` with
-   `state: "synced"`, `at` (timestamp of the sync), `mirrored_at` (server
-   time), `schedule_count: 1`, `unconverged_preset_ids: []`.
-2. After section 1 step 2 (the off-LAN deferral): the same field with
-   `state: "deferredOffLan"` (the enum's Dart name; the five values are
-   `synced`, `queued`, `deferredOffLan`, `failed`, `writtenNotVerified`).
-   `at` is an ISO-8601 UTC string in the phone's copy and a timestamp in the
-   mirror. The write is non-fatal: if
-   the field is missing, the app must still have shown step 2's row — note
-   the miss as a finding, not a failure of the schedule.
-3. Expect no other field of the user document to change between the two
-   reads (compare the two documents field by field).
+1.4 Phone: swipe the app away (kill it). Re-open it, still with Wi-Fi off.
+    *Pass:* the row and the chip read exactly as in 1.2 (the state survived
+    the restart), each with Retry.
 
-## 4. Restore
+1.5 Phone: with the app open on My Schedule, Settings → Wi-Fi → turn Wi-Fi
+    **on** and join the home network; return to the app. This is the
+    LAN-return trigger. Wait up to 30 seconds. *Pass:* the row ends on
+    "Your schedule is on your lights. · just now" in green with **no** Retry;
+    Home's chip reads "Your schedule is on your lights." with no Retry.
+    *If instead the row still says "hasn't reached your lights yet" after
+    60 seconds:* note the phone time (is it inside 9:00–15:00?), do **not**
+    tap Retry, and stop.
 
-1. Delete the bench schedule on the phone (on the LAN). Expect the row to
-   read "Your schedule is on your lights." and the laptop's `timers.ins` to
-   have no rows for it.
-2. Laptop: `GET /presets.json` → if the schedule's slot is still present,
-   leave it (the app owns slots 10–41 and will reuse it); do not pdel by hand.
-3. Compare `GET /json/cfg` to the baseline except `timers.ins`; nothing else
-   should differ.
+1.6 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* two new rows for the
+    schedule — one at the ON hour/minute and one at the OFF hour/minute, both
+    `en: 1`, the ON row's `macro` pointing at a slot between 10 and 41. Then
+    `/presets.json`. *Pass:* that slot now exists and holds the pattern (its
+    `seg` list has one entry per channel of the spare, not just one).
+
+1.7 Watch the spare at the ON minute. *Pass:* the lights come on with the
+    pattern on every channel; at the OFF minute they go off. (The firing is
+    the controller's own timer; this only confirms the write was real.)
+    If the clock caveat in "How to read this plan" applies, mark "not
+    checked" and go on.
+
+1.8 Phone: Home. *Pass:* the chip still reads "Your schedule is on your
+    lights." (the timer firing does not change the sync state).
+
+## 2. Held outside the window, then manual Retry (slice B) — after 15:00
+
+2.1 Repeat 1.1 and 1.2 (Wi-Fi off; edit the same schedule: move its ON time
+    to now + 20 minutes and save). *Pass:* the row and chip read as in 1.2,
+    with Retry.
+
+2.2 Repeat 1.5 (Wi-Fi back on, app open). Wait 60 seconds. *Pass:* the row
+    **stays** on "Your schedule hasn't reached your lights yet. …" with Retry
+    (the automatic re-sync is held outside 9:00–15:00); the chip likewise.
+    *If it went green by itself:* that is a finding (the window did not
+    hold); note the phone time and stop.
+
+2.3 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* the schedule's ON row
+    still shows the **old** ON time from Part 1 (nothing was written).
+
+2.4 Phone: tap **Retry** on the row (once). Wait up to 30 seconds. *Pass:*
+    the row reads "Your schedule is on your lights. · just now" in green
+    with no Retry; the chip likewise.
+
+2.5 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* the schedule's ON row
+    now shows the **new** ON time.
+
+## 3. Lights ON is not a hold, and the lights-off trigger (slice B) — inside 9:00–15:00
+
+3.1 Phone, on the home Wi-Fi: Home → turn the lights **on** (power button;
+    any pattern). *Pass:* the spare lights up.
+
+3.2 Repeat 1.1 and 1.2 (Wi-Fi off; change the schedule's OFF time to
+    now + 30 minutes; save). *Pass:* the row and chip read as in 1.2.
+
+3.3 Repeat 1.5 (Wi-Fi back on, app open) with the lights still on. Wait up
+    to 30 seconds. *Pass:* the row goes green "Your schedule is on your
+    lights." with no Retry — the lights being on did not hold it. You may see
+    the strip blink for well under a second during the sync and come back to
+    the same pattern; a blink that lasts longer, or the lights ending on a
+    different pattern or off, is a finding: note it and stop.
+
+3.4 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* the OFF row shows the
+    new OFF time.
+
+3.5 The lights-off trigger needs a re-sync owed and the lights on. Repeat
+    1.1 and 1.2 once more (Wi-Fi off; change the OFF time again; save), then
+    **before** rejoining the Wi-Fi, wait until at least 10 minutes have passed
+    since 3.3's green (the automatic attempts are 10 minutes apart). Then
+    rejoin the Wi-Fi with the app open. *Pass:* the row goes green within 30
+    seconds (this is a LAN return again). If it instead stays on "hasn't
+    reached your lights yet", fewer than 10 minutes had passed — wait the
+    remainder, then tap Home → power **off** (the lights-off trigger) and
+    check the row goes green within 30 seconds. Either path is a pass if it
+    ends green with no Retry; stop if neither does.
+
+## 4. Bounds — one attempt, then held (slice B) — inside 9:00–15:00
+
+4.1 Repeat 1.1 and 1.2 (Wi-Fi off; change the ON time; save). *Pass:* row
+    and chip as in 1.2.
+
+4.2 Repeat 1.5 (Wi-Fi back on). *Pass:* green within 30 seconds (attempt 1).
+
+4.3 **Within 10 minutes of 4.2:** repeat 1.1 and 1.2 (Wi-Fi off; change the
+    ON time again; save), then Wi-Fi back on with the app open. Wait 60
+    seconds. *Pass:* the row **stays** on "Your schedule hasn't reached your
+    lights yet. …" with Retry — the second attempt inside ten minutes is
+    held. *If it went green:* finding; note both phone times and stop.
+
+4.4 Phone: tap **Retry** once. *Pass:* green within 30 seconds (a manual
+    Retry is never held).
+
+4.5 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* the ON row shows the
+    time from 4.3.
+
+The six-a-day cap is not tested on the phone (it would take over three
+hours of waiting); the suite proves it.
+
+## 5. Queue-not-drop (slice A) — any time of day, on the home Wi-Fi
+
+5.1 Phone: My Schedule, with the bench schedule enabled and green. Toggle it
+    **OFF**, then within four seconds toggle it **ON** again. *Pass:* after
+    the OFF, the row reads "Saving your latest change. It goes to your
+    lights next, automatically." with **no** Retry (the clearing sync is
+    verifying); within about 20 seconds it reads "Your schedule is on your
+    lights." with no Retry, and the schedule's toggle on the list is **ON**.
+
+5.2 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* the schedule's ON and
+    OFF rows are present with `en: 1`, and `/presets.json` still holds its
+    slot. (On build 125 the same taps left the unit with no rows and no slot
+    while the app showed the schedule ON — that is the bug this proves
+    fixed.)
+
+5.3 Phone: three quick toggles — OFF, ON, OFF — within six seconds. Wait
+    until the row settles (up to 30 seconds). *Pass:* the row reads "Your
+    schedule is on your lights." with no Retry and the list toggle is
+    **OFF**.
+
+5.4 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* no `en: 1` row for the
+    schedule remains (the unit's last word is the last tap, OFF).
+
+5.5 Phone: toggle the schedule **ON** once and wait for green. *Pass:* green;
+    `/json/cfg` shows the rows `en: 1` again.
+
+## 6. The line under the wheels and the 24-hour label (slice C) — any time
+
+6.1 Phone: My Schedule → tap the bench schedule to open the editor. *Pass:*
+    under the time wheels a sentence reads like "Lights on at 5:00 PM, off at
+    7:00 AM the next morning." with the schedule's own times, and it changes
+    as you move the ON wheel.
+
+6.2 Phone: System tab → Edit Profile → set the time format to **24-hour**
+    and save. My Schedule → open the bench schedule → set ON to 17:30 and OFF
+    to 06:00 → Save. Open it again. *Pass:* the wheels open on 17:30 and
+    06:00 (not on the 7:00 PM / 11:00 PM defaults), and the sentence under
+    the wheels shows the same times in 24-hour form with "the next morning".
+    Then set the profile's time format back to **12-hour** and open the
+    schedule once more. *Pass:* the wheels show 5:30 PM and 6:00 AM.
+
+## 7. Restore (phone only)
+
+7.1 Phone: My Schedule → the bench schedule → Delete. Wait for the row.
+    *Pass:* the row reads "Your schedule is on your lights." in green.
+
+7.2 **Browser:** `/json/cfg` → `timers.ins`. *Pass:* no row for the bench
+    schedule; the rows noted in 0.2 are as they were. `/presets.json`: the
+    schedule's slot may still be present — leave it (the app owns slots
+    10–41 and reuses them). Do not delete it by hand.
+
+7.3 Phone: Home → power **off** if the lights are on. *Pass:* the spare is
+    dark; the chip still reads "Your schedule is on your lights."
+
+## Not covered by this run
+
+- **The failed state** ("Your controller didn't answer…") and **the
+  unconfirmed state** ("…one pattern could not be confirmed…"): both need
+  the unit to refuse or drop a write, which is not a phone tap or a browser
+  read. The suite proves both (`schedule_sync_status_widgets_test.dart`,
+  `schedule_sync_option_ii_test.dart`).
+- **The status mirror** (the `schedule_sync` field on the account document):
+  reading it is a Firestore console read, not a phone tap. The write is
+  fire-and-forget and never shown to the customer; the suite proves the
+  payload (`schedule_sync_status_test.dart`).
+- **The six-a-day cap** (see Part 4).
+- **The read-back blind spot** (`fx`/`col` not compared on read-back): slice
+  D's job, not in this build.
 
 ## Results
 
-| Section | Step | Phone time | Expected | Seen | Pass |
-|---|---|---|---|---|---|
-| | | | | | |
+| Step | Phone time | Pass / Fail | Seen (row, chip, browser) |
+|---|---|---|---|
+| 0.1 | | | |
+| 0.2 | | | |
+| 0.3 | | | |
+| 0.4 | | | |
+| 0.5 | | | |
+| 0.6 | | | |
+| 1.1 | | | |
+| 1.2 | | | |
+| 1.3 | | | |
+| 1.4 | | | |
+| 1.5 | | | |
+| 1.6 | | | |
+| 1.7 | | | |
+| 1.8 | | | |
+| 2.1 | | | |
+| 2.2 | | | |
+| 2.3 | | | |
+| 2.4 | | | |
+| 2.5 | | | |
+| 3.1 | | | |
+| 3.2 | | | |
+| 3.3 | | | |
+| 3.4 | | | |
+| 3.5 | | | |
+| 4.1 | | | |
+| 4.2 | | | |
+| 4.3 | | | |
+| 4.4 | | | |
+| 4.5 | | | |
+| 5.1 | | | |
+| 5.2 | | | |
+| 5.3 | | | |
+| 5.4 | | | |
+| 5.5 | | | |
+| 6.1 | | | |
+| 6.2 | | | |
+| 7.1 | | | |
+| 7.2 | | | |
+| 7.3 | | | |
 
 Not run as of 2026-11-12.
