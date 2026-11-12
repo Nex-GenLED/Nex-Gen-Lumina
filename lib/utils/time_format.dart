@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/features/schedule/cfg_payload_builder.dart'
+    show isSolarLabel, parseTimeLabel;
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 
 /// Valid values for [UserModel.timeFormat].
@@ -41,6 +43,22 @@ String formatTimeOfDay(TimeOfDay t, {String timeFormat = kTimeFormatDefault}) {
   final h = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
   final period = t.period == DayPeriod.am ? 'AM' : 'PM';
   return '$h:$minute $period';
+}
+
+/// The clock time a stored schedule label names, as a [TimeOfDay], or null.
+///
+/// Reads both label forms the app writes — `"5:30 PM"` (12-hour accounts) and
+/// `"17:30"` (24-hour accounts) — through [parseTimeLabel], the parser the
+/// firing side uses, so the editor re-opens on the saved time whatever the
+/// account's time format. A solar label (`Sunrise` / `Sunset`) is NOT a clock
+/// time and returns null; so does anything unparseable. +126 (f).
+TimeOfDay? timeOfDayFromLabel(String? label) {
+  if (label == null) return null;
+  final trimmed = label.trim();
+  if (trimmed.isEmpty || isSolarLabel(trimmed)) return null;
+  final parsed = parseTimeLabel(trimmed);
+  if (parsed == null) return null;
+  return TimeOfDay(hour: parsed.hour, minute: parsed.minute);
 }
 
 /// Format a heterogeneous time label string in the user's preferred format.

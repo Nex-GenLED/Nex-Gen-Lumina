@@ -273,9 +273,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   .runSyncNow();
               if (!context.mounted) return;
               final messenger = ScaffoldMessenger.of(context);
-              if (result.verifying) {
+              if (result.verifying || result.queuedBehindInFlight) {
                 // A sync is already in flight (verifying through the controller
-                // stall) and this re-press was dropped — do NOT start a second
+                // stall) and this re-press was QUEUED behind it (+126 (e)) — it
+                // runs by itself when the lock clears, so do NOT start a second
                 // cfg write. Reassure, don't alarm; the in-flight one owns the
                 // status row.
                 messenger.showSnackBar(SnackBar(
@@ -4550,16 +4551,12 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
         _onSolar = tl == 'sunrise' ? 'Sunrise' : 'Sunset';
       } else {
         _onTrigger = _TriggerType.specificTime;
-        final reg = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false);
-        final m = reg.firstMatch(editing.timeLabel.trim());
-        if (m != null) {
-          var hh = int.tryParse(m.group(1)!) ?? 7;
-          final mm = int.tryParse(m.group(2)!) ?? 0;
-          final ap = m.group(3)!.toLowerCase();
-          if (ap == 'pm' && hh != 12) hh += 12;
-          if (ap == 'am' && hh == 12) hh = 0;
-          _onTime = TimeOfDay(hour: hh.clamp(0, 23), minute: mm.clamp(0, 59));
-        }
+        // +126 (f): the label is saved in the user's time format, so a
+        // 24-hour account stores "17:30" — which the old AM/PM-only regex
+        // never matched, and the editor re-opened on the 7:00 PM default.
+        // parseTimeLabel reads both forms (the same parser the firing side
+        // uses), so the wheel opens on the saved time either way.
+        _onTime = timeOfDayFromLabel(editing.timeLabel) ?? _onTime;
       }
       // OFF Trigger
       _hasOffTime = editing.hasOffTime;
@@ -4570,16 +4567,8 @@ class _ScheduleEditorState extends ConsumerState<_ScheduleEditor> {
           _offSolar = otl == 'sunrise' ? 'Sunrise' : 'Sunset';
         } else {
           _offTrigger = _TriggerType.specificTime;
-          final reg = RegExp(r'^(\d{1,2}):(\d{2})\s*([ap]m)$', caseSensitive: false);
-          final m = reg.firstMatch(editing.offTimeLabel!.trim());
-          if (m != null) {
-            var hh = int.tryParse(m.group(1)!) ?? 23;
-            final mm = int.tryParse(m.group(2)!) ?? 0;
-            final ap = m.group(3)!.toLowerCase();
-            if (ap == 'pm' && hh != 12) hh += 12;
-            if (ap == 'am' && hh == 12) hh = 0;
-            _offTime = TimeOfDay(hour: hh.clamp(0, 23), minute: mm.clamp(0, 59));
-          }
+          // +126 (f): same 24-hour re-open fix as the ON time above.
+          _offTime = timeOfDayFromLabel(editing.offTimeLabel) ?? _offTime;
         }
       }
       // Action
