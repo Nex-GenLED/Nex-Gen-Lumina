@@ -2561,6 +2561,15 @@ class ScheduleSyncResult {
   /// replaces it when verification resolves. Never the awaited return of a sync.
   final bool verifying;
 
+  /// +126 (e) — this request arrived while another sync held the in-flight
+  /// lock and was QUEUED behind it: [SchedulesNotifier] runs one follow-up
+  /// sync the moment the lock clears, so the newest edit still reaches the
+  /// controller. Neither success nor failure — nothing was written by THIS
+  /// request, and nothing was lost. Never pushed to
+  /// [lastScheduleSyncResultProvider] (the in-flight sync owns the status
+  /// row); only ever the awaited return of [SchedulesNotifier.runSyncNow].
+  final bool queuedBehindInFlight;
+
   ScheduleSyncResult({
     required this.success,
     this.error,
@@ -2570,6 +2579,7 @@ class ScheduleSyncResult {
     this.deferredNotLoaded = false,
     this.deferredLeaseLedger = false,
     this.verifying = false,
+    this.queuedBehindInFlight = false,
     DateTime? syncedAt,
   }) : syncedAt = syncedAt ?? DateTime.now();
 
@@ -2616,12 +2626,20 @@ class ScheduleSyncResult {
         verifying: true,
       );
 
+  /// Queued behind a sync that is still verifying (see
+  /// [queuedBehindInFlight]). One follow-up sync is owed and will run.
+  factory ScheduleSyncResult.queued() => ScheduleSyncResult(
+        success: false,
+        queuedBehindInFlight: true,
+      );
+
   /// Returns true if there were any preset-related errors.
   bool get hasPresetErrors => presetErrors.isNotEmpty;
 
   /// Returns a summary message suitable for user display.
   String get summaryMessage {
     if (verifying) return kScheduleCfgVerifying;
+    if (queuedBehindInFlight) return kScheduleSyncQueued;
     if (deferredOffLan) return kScheduleOffLanNotice;
     if (deferredNotLoaded) return 'Loading your schedules…';
     if (deferredLeaseLedger) return kScheduleLeaseLedgerNotice;
@@ -2646,6 +2664,12 @@ const String kScheduleOffLanNotice =
 /// will answer once it recovers (the LEDs keep running meanwhile).
 const String kScheduleCfgVerifying =
     'Saving to controller — this can take a few minutes. Your lights keep working.';
+
+/// +126 (e) — copy for a request queued behind a sync still verifying. Not an
+/// error and not a drop: the follow-up runs by itself, so the customer has
+/// nothing to do.
+const String kScheduleSyncQueued =
+    'Still saving your last change — this one goes next, automatically.';
 
 /// User-facing copy for a lease-ledger deferral (P0-9 part a). Deliberately not
 /// phrased as a failure and deliberately not mentioning "leases" — nothing broke

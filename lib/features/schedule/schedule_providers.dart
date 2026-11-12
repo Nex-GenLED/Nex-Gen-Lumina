@@ -104,10 +104,23 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// Lock: a cfg sync (including the up-to-5-minute post-commit verification
   /// poll) is in flight. Re-pressing Sync, or a mutation-triggered auto-sync,
   /// during the controller's stall must NOT start a second cfg write — a
-  /// duplicate write on recovery re-triggers the stall. Requests that arrive
-  /// while this is set are dropped (returning the interim "verifying" state);
-  /// the user can Sync again once verification resolves.
+  /// duplicate write on recovery re-triggers the stall. A request that arrives
+  /// while this is set is QUEUED, not dropped: see [_syncOwedAfterInFlight].
   bool _syncInFlight = false;
+
+  /// +126 (e) — a sync was requested while [_syncInFlight] was held. The
+  /// request is owed, and the in-flight sync's `finally` fires exactly ONE
+  /// debounced follow-up once the lock clears.
+  ///
+  /// WHY (Classic Christmas audit, 2026-11-11): the old branch returned the
+  /// interim "verifying" result and DROPPED the request. A customer toggled a
+  /// schedule OFF and then ON four seconds later; the clearing sync held the
+  /// lock for about eleven seconds, the ON edit's sync was dropped, and the
+  /// controller was left with no timers and no slot 10 — the schedule showed
+  /// as enabled in the app while nothing on the device would ever fire it.
+  /// The state the follow-up pushes is the notifier's CURRENT state, so a burst
+  /// of edits during one verification collapses into one correct push.
+  bool _syncOwedAfterInFlight = false;
 
   /// Debounces WLED sync after schedule mutations. A burst of writes
   /// (autopilot 7-day fan-out, batched manual edits) coalesces into a
@@ -248,11 +261,15 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       return ScheduleSyncResult.notLoaded();
     }
     // In-flight lock: a cfg write / post-commit verification is already running.
-    // Do NOT start a second cfg write into the controller's stall.
+    // Do NOT start a second cfg write into the controller's stall — but do not
+    // drop the request either (+126 (e)). Record that a sync is owed; the
+    // in-flight sync's `finally` runs ONE debounced follow-up with the state
+    // as it stands then, so the newest edit always reaches the controller.
     if (_syncInFlight) {
+      _syncOwedAfterInFlight = true;
       debugPrint('SchedulesNotifier: sync already in flight (verifying through '
-          'controller stall) — dropping this request');
-      return ScheduleSyncResult.verifying();
+          'controller stall) — queued; one follow-up runs when it clears');
+      return ScheduleSyncResult.queued();
     }
     _syncInFlight = true;
     try {
@@ -287,8 +304,25 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       );
     } finally {
       _syncInFlight = false;
+      // +126 (e): exactly one follow-up for however many requests were queued
+      // behind this sync. Through the debounce (not a direct re-entry) so it
+      // coalesces with any edit landing right now, and through
+      // [_triggerWledSync] so an open batch still owns it (the batch-depth
+      // rule: a queued request inside a batch fires when the batch closes).
+      if (_syncOwedAfterInFlight) {
+        _syncOwedAfterInFlight = false;
+        debugPrint('SchedulesNotifier: running the sync queued behind the one '
+            'that just finished');
+        _triggerWledSync();
+      }
     }
   }
+
+  @visibleForTesting
+  bool get debugSyncOwedAfterInFlight => _syncOwedAfterInFlight;
+
+  @visibleForTesting
+  bool get debugSyncInFlight => _syncInFlight;
 
   /// Arms the next lease-ledger retry (P0-9 part a), or gives up once
   /// [_kLeaseLedgerRetryDelays] is exhausted.

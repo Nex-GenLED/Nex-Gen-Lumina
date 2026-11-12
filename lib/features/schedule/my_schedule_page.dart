@@ -273,9 +273,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
                   .runSyncNow();
               if (!context.mounted) return;
               final messenger = ScaffoldMessenger.of(context);
-              if (result.verifying) {
+              if (result.verifying || result.queuedBehindInFlight) {
                 // A sync is already in flight (verifying through the controller
-                // stall) and this re-press was dropped — do NOT start a second
+                // stall) and this re-press was QUEUED behind it (+126 (e)) — it
+                // runs by itself when the lock clears, so do NOT start a second
                 // cfg write. Reassure, don't alarm; the in-flight one owns the
                 // status row.
                 messenger.showSnackBar(SnackBar(
