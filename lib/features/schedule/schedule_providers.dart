@@ -15,11 +15,13 @@ import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync_status.dart';
 import 'package:nexgen_command/features/schedule/schedules_subcollection_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/solar_schedule_cleanup.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
+import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
@@ -122,6 +124,31 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// of edits during one verification collapses into one correct push.
   bool _syncOwedAfterInFlight = false;
 
+  /// +126 (a) — a RE-SYNC is owed: the last sync was deferred off-LAN,
+  /// failed, was queued, or armed a slot without a converged write. Held in
+  /// memory and persisted per account ([ScheduleSyncStatusStore.writeOwed]),
+  /// so it survives a restart. Set by [_recordSyncOutcome]; cleared ONLY by a
+  /// verified, converged sync. A launch or LAN return with it set runs the
+  /// bounded automatic re-sync ([_maybeAutoResync]).
+  bool _resyncOwed = false;
+
+  /// Whether the persisted owed flag has been read for this account yet.
+  bool _resyncOwedLoaded = false;
+
+  /// The lights-off trigger: subscribed only while a re-sync is owed, so an
+  /// account with nothing owed never touches the controller state provider
+  /// from here.
+  ProviderSubscription<WledStateModel>? _lightsSub;
+
+  /// What the last automatic re-sync decision was (tests, diagnostics).
+  @visibleForTesting
+  AutoResyncVerdict? lastAutoResyncVerdict;
+
+  /// The clock the daytime gate and the attempt ledger read. Tests pin it so
+  /// the suite is not red outside 8:00-17:00.
+  @visibleForTesting
+  DateTime Function() autoResyncClock = DateTime.now;
+
   /// Debounces WLED sync after schedule mutations. A burst of writes
   /// (autopilot 7-day fan-out, batched manual edits) coalesces into a
   /// single /json/cfg push.
@@ -163,6 +190,7 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   void dispose() {
     _syncDebounceTimer?.cancel();
     _leaseLedgerRetryTimer?.cancel();
+    _lightsSub?.close();
     super.dispose();
   }
 
@@ -283,6 +311,8 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
         debugPrint(
             'SchedulesNotifier: WLED sync failed — ${result.error ?? "unknown"}');
       }
+      // +126 (a)(c): persist the outcome, mirror it, and settle the owed flag.
+      await _recordSyncOutcome(result);
       // P0-9 (part a): the cfg write was refused because the lease ledger was
       // still loading. Nothing reached the controller, so re-attempt ONCE after
       // a short delay — by then the prefs load and flag-doc bootstrap have
@@ -298,10 +328,12 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       return result;
     } catch (e) {
       debugPrint('SchedulesNotifier: WLED sync threw — $e');
-      return ScheduleSyncResult(
+      final failed = ScheduleSyncResult(
         success: false,
         error: 'Sync exception: $e',
       );
+      await _recordSyncOutcome(failed);
+      return failed;
     } finally {
       _syncInFlight = false;
       // +126 (e): exactly one follow-up for however many requests were queued
@@ -323,6 +355,138 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
 
   @visibleForTesting
   bool get debugSyncInFlight => _syncInFlight;
+
+  // ─── +126 (a)(b)(c): persisted outcome, owed flag, bounded re-sync ────────
+
+  /// Record one sync's outcome: the persisted status (and its Firestore
+  /// mirror, non-fatal), then the owed flag — set on anything but a clean,
+  /// converged sync; cleared only by one. The interim `verifying` result is
+  /// never recorded (the in-flight sync owns the row until it resolves).
+  Future<void> _recordSyncOutcome(ScheduleSyncResult result) async {
+    final status = ScheduleSyncStatus.fromResult(result);
+    if (status == null) return;
+    final uid = _ref.read(effectiveUserUidProvider);
+    try {
+      await _ref.read(scheduleSyncStatusProvider.notifier).record(status);
+    } catch (e) {
+      debugPrint('SchedulesNotifier: status record failed — $e');
+    }
+    if (uid != null) {
+      // Fire-and-forget by contract: a rules rejection or no network must
+      // never hold the sync's caller or surface to the customer.
+      unawaited(_ref
+          .read(scheduleSyncMirrorProvider)
+          .write(uid, status)
+          .catchError((Object e) =>
+              debugPrint('SchedulesNotifier: mirror write dropped — $e')));
+    }
+    await _setResyncOwed(status.owesResync, uid: uid);
+  }
+
+  Future<void> _setResyncOwed(bool owed, {String? uid}) async {
+    _resyncOwed = owed;
+    _resyncOwedLoaded = true;
+    if (uid != null) {
+      try {
+        await _ref.read(scheduleSyncStatusStoreProvider).writeOwed(uid, owed);
+      } catch (e) {
+        debugPrint('SchedulesNotifier: owed flag persist failed — $e');
+      }
+    }
+    _syncLightsTrigger();
+  }
+
+  /// Subscribe to the controller's live state only while a re-sync is owed:
+  /// the lights going OFF on the home Wi-Fi is the moment an automatic
+  /// re-sync is least visible, so it is one of the three triggers.
+  void _syncLightsTrigger() {
+    if (!_resyncOwed) {
+      _lightsSub?.close();
+      _lightsSub = null;
+      return;
+    }
+    if (_lightsSub != null) return;
+    try {
+      _lightsSub = _ref.listen<WledStateModel>(wledStateProvider, (prev, next) {
+        if (prev != null && prev.isOn && !next.isOn && next.connected) {
+          unawaited(_maybeAutoResync(trigger: 'lights-off'));
+        }
+      });
+    } catch (e) {
+      debugPrint('SchedulesNotifier: lights-off trigger unavailable — $e');
+    }
+  }
+
+  /// Load the persisted owed flag for this account once.
+  Future<void> _loadResyncOwed() async {
+    if (_resyncOwedLoaded) return;
+    final uid = _ref.read(effectiveUserUidProvider);
+    if (uid == null) return;
+    try {
+      _resyncOwed = await _ref.read(scheduleSyncStatusStoreProvider).readOwed(uid);
+    } catch (e) {
+      debugPrint('SchedulesNotifier: owed flag read failed — $e');
+      _resyncOwed = false;
+    }
+    _resyncOwedLoaded = true;
+    _syncLightsTrigger();
+  }
+
+  /// True when a re-sync is owed (tests).
+  @visibleForTesting
+  bool get debugResyncOwed => _resyncOwed;
+
+  /// The bounded automatic re-sync. Called on launch (first hydration), on a
+  /// LAN return (the repository turning cfg-capable) and on the lights going
+  /// off while one is owed. Runs at most one sync per call, and only when
+  /// [autoResyncDecision] allows: something owed, on the home Wi-Fi, lights
+  /// OFF, daytime, ten minutes since the last automatic attempt, fewer than
+  /// six today. A manual Retry (runSyncNow) bypasses all of this.
+  Future<AutoResyncVerdict> _maybeAutoResync({required String trigger}) async {
+    if (!_initialized) return AutoResyncVerdict.nothingOwed;
+    await _loadResyncOwed();
+    final repo = _ref.read(wledRepositoryProvider);
+    final onLan = repo != null && repoCanWriteCfg(repo);
+    final uid = _ref.read(effectiveUserUidProvider);
+    bool lightsOn = true;
+    if (_resyncOwed && onLan) {
+      try {
+        final live = _ref.read(wledStateProvider);
+        lightsOn = !live.connected || live.isOn;
+      } catch (_) {
+        lightsOn = true; // unknown = assume visible
+      }
+    }
+    final store = _ref.read(scheduleSyncStatusStoreProvider);
+    final ledger = uid == null ? AutoResyncLedger.empty : await store.readLedger(uid);
+    final now = autoResyncClock();
+    final verdict = autoResyncDecision(
+      owed: _resyncOwed,
+      onLan: onLan,
+      lightsOn: lightsOn,
+      now: now,
+      ledger: ledger,
+    );
+    lastAutoResyncVerdict = verdict;
+    if (verdict != AutoResyncVerdict.run) {
+      if (_resyncOwed) {
+        debugPrint('SchedulesNotifier: automatic re-sync ($trigger) held — '
+            '${verdict.name}');
+      }
+      return verdict;
+    }
+    if (uid != null) {
+      try {
+        await store.writeLedger(uid, ledger.recordAttempt(now));
+      } catch (e) {
+        debugPrint('SchedulesNotifier: auto-resync ledger write failed — $e');
+      }
+    }
+    debugPrint('SchedulesNotifier: automatic re-sync ($trigger) running — '
+        'attempt ${ledger.countOn(now) + 1} of $kAutoResyncMaxPerDay today');
+    unawaited(runSyncNow());
+    return verdict;
+  }
 
   /// Arms the next lease-ledger retry (P0-9 part a), or gives up once
   /// [_kLeaseLedgerRetryDelays] is exhausted.
@@ -379,6 +543,11 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
             debugPrint('SchedulesNotifier: hydration complete — running deferred '
                 'WLED sync with loaded schedules');
             _triggerWledSync();
+          } else if (!wasInitialized && _initialized) {
+            // +126 (a): LAUNCH trigger — the schedules are real now; if the
+            // last session left a re-sync owed and we are on the home Wi-Fi,
+            // the bounded automatic re-sync may run.
+            unawaited(_maybeAutoResync(trigger: 'launch'));
           }
         });
       },
@@ -390,8 +559,16 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
     // controller connected) gets remediated the moment they're home. Idempotent
     // and session-guarded, so this is safe on every connect.
     _ref.listen<WledRepository?>(wledRepositoryProvider, (prev, next) {
-      if (next != null && repoCanWriteCfg(next)) {
+      final wasLan = prev != null && repoCanWriteCfg(prev);
+      final isLan = next != null && repoCanWriteCfg(next);
+      if (isLan) {
         unawaited(maybeRunSolarCleanup());
+      }
+      // +126 (a): LAN-RETURN trigger — off-LAN (or no controller, or a
+      // bridge/relay session) to a cfg-capable LAN repository. One automatic
+      // attempt per such event, under the bounds in _maybeAutoResync.
+      if (isLan && !wasLan) {
+        unawaited(_maybeAutoResync(trigger: 'lan-return'));
       }
     });
   }
