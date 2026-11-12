@@ -21,6 +21,7 @@ import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
 import 'package:nexgen_command/features/game_day/served_game_day.dart'
     show gameDayRunTagProvider;
 import 'package:nexgen_command/features/schedule/widgets/ladder_repair_banner.dart';
+import 'package:nexgen_command/features/schedule/widgets/schedule_sync_status_row.dart';
 import 'package:nexgen_command/features/schedule/widgets/channel_scope_picker.dart';
 import 'package:nexgen_command/features/schedule/widgets/timer_slot_meter.dart';
 import 'package:nexgen_command/features/schedule/timer_table.dart'
@@ -381,6 +382,10 @@ class _MySchedulePageState extends ConsumerState<MySchedulePage> {
             _PendingChangesBanner(pending: pending),
 
           // ── Last sync status ────────────────────────────────────────────
+          // +126 (c): the persisted, homeowner-worded outcome with Retry
+          // (survives a restart), then the session detail row below it for
+          // the interim "verifying" state and per-schedule warnings.
+          const ScheduleSyncStatusRow(),
           const _SyncStatusRow(),
 
           // ── +114: what the on-connect ladder repair did (renders nothing
@@ -918,6 +923,10 @@ class _SyncStatusRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final last = ref.watch(lastScheduleSyncResultProvider);
     if (last == null) return const SizedBox.shrink();
+    // +126 (c): the plain "synced" / "failed" / "deferred" line now comes
+    // from ScheduleSyncStatusRow (persisted). This row keeps what that one
+    // cannot say: the interim verifying state and the per-schedule warnings.
+    if (!last.verifying && !last.hasPresetErrors) return const SizedBox.shrink();
 
     final IconData icon;
     final Color color;

@@ -33,6 +33,7 @@ import 'package:nexgen_command/features/wled/display_pattern_providers.dart';
 import 'package:nexgen_command/features/wled/save_custom_pattern_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_off_warning.dart';
 import 'package:nexgen_command/features/dashboard/tonight_label.dart';
+import 'package:nexgen_command/features/schedule/widgets/schedule_sync_status_row.dart';
 import 'package:nexgen_command/features/schedule/day_timeline_providers.dart';
 import 'package:nexgen_command/features/schedule/widgets/timeline_row.dart';
 import 'package:nexgen_command/features/schedule/calendar_providers.dart';
@@ -536,6 +537,9 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
             ],
             const SizedBox(height: 16),
             _buildTonightCard(context, ref),
+            // +126 (c): whether that schedule has reached the lights.
+            const SizedBox(height: 10),
+            const ScheduleSyncHomeChip(),
           ]),
         ),
       ]),

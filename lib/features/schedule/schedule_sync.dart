@@ -1046,6 +1046,10 @@ class ScheduleSyncService {
     // Step 1: Assign preset IDs and save presets to device
     final List<ScheduleItem> updatedSchedules = [];
     final List<String> presetErrors = [];
+    // +126 (b) — option (ii): slots this sync ARMED without a converged
+    // write (a non-convergence refusal, a failed save). Reported on the
+    // result so the app records and shows it; never a reason to disarm.
+    final List<int> unconvergedPresetIds = [];
 
     // PACING STATE (audit/SYNC_PACING_FIX_STATUS.md §1(a)). Flipped by the
     // first REAL write this sync; every later real write waits [paceDelay]
@@ -1297,6 +1301,7 @@ class ScheduleSyncService {
           presetErrors.add(decision.refusal!);
           debugPrint('ScheduleSync: ${decision.refusal}');
           savedPresetIds.add(id); // left alone deliberately, not lost
+          unconvergedPresetIds.add(id); // +126 (b): armed, recorded, shown
           return;
         }
         if (!deferAttempt) await repairAttempts.recordAttempt(id);
@@ -1346,6 +1351,13 @@ class ScheduleSyncService {
         savedPresetIds.add(id);
       } else {
         presetErrors.add('Failed to save preset $id ($name)');
+        // +126 (b) — option (ii), owner decision: a slot whose write did not
+        // land is STILL ARMED (the controller keeps whatever the slot held,
+        // which is usually the last good copy) and the failure is recorded
+        // and shown, with a bounded automatic re-sync owed. Disarming would
+        // turn "one stale night" into "no lights until someone notices".
+        savedPresetIds.add(id);
+        unconvergedPresetIds.add(id);
       }
     }
 
@@ -2002,6 +2014,7 @@ class ScheduleSyncService {
             'controller. Try syncing again — if this keeps happening, '
             'contact support.',
         presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
         schedulesWithPresets: updatedSchedules,
       ));
     }
@@ -2017,6 +2030,7 @@ class ScheduleSyncService {
           'write /json/cfg); schedule saved, will arm on next LAN sync');
       return finish(ScheduleSyncResult.deferredOffLan(
         presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
         schedulesWithPresets: updatedSchedules,
       ));
     }
@@ -2055,6 +2069,7 @@ class ScheduleSyncService {
           're-runs once the ledger is warm.');
       return finish(ScheduleSyncResult.deferredLeaseLedger(
         presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
         schedulesWithPresets: updatedSchedules,
       ));
     }
@@ -2088,6 +2103,7 @@ class ScheduleSyncService {
         error: 'None of your schedules could be armed, so your controller was '
             'left unchanged. Check the warnings for what to fix.',
         presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
         schedulesWithPresets: updatedSchedules,
       ));
     }
@@ -2109,6 +2125,7 @@ class ScheduleSyncService {
           return finish(ScheduleSyncResult(
             success: true,
             presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
             // Count only schedules that actually armed — never overcount a
             // schedule dropped for a full table / dow:0 / bad time.
             schedulesWithPresets: armedSchedules,
@@ -2120,6 +2137,7 @@ class ScheduleSyncService {
             success: false,
             error: kScheduleCfgFirmwareMismatch,
             presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
             schedulesWithPresets: updatedSchedules,
           ));
         case CfgPushOutcome.solarMismatch:
@@ -2129,6 +2147,7 @@ class ScheduleSyncService {
             success: false,
             error: kScheduleSolarMismatch,
             presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
             schedulesWithPresets: updatedSchedules,
           ));
         case CfgPushOutcome.notConfirmed:
@@ -2136,6 +2155,7 @@ class ScheduleSyncService {
             success: false,
             error: kScheduleCfgWriteFailed,
             presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
             schedulesWithPresets: updatedSchedules,
           ));
       }
@@ -2146,6 +2166,7 @@ class ScheduleSyncService {
       debugPrint('ScheduleSync: cfg writes unsupported on this transport: $e');
       return finish(ScheduleSyncResult.deferredOffLan(
         presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
         schedulesWithPresets: updatedSchedules,
       ));
     } catch (e) {
@@ -2154,6 +2175,7 @@ class ScheduleSyncService {
         success: false,
         error: 'Exception: $e',
         presetErrors: presetErrors,
+        unconvergedPresetIds: unconvergedPresetIds,
         schedulesWithPresets: updatedSchedules,
       ));
     }
@@ -2570,6 +2592,12 @@ class ScheduleSyncResult {
   /// row); only ever the awaited return of [SchedulesNotifier.runSyncNow].
   final bool queuedBehindInFlight;
 
+  /// +126 (b) — option (ii): preset slots this sync ARMED without a
+  /// converged write. The timers fire them (the slot usually still holds the
+  /// last good copy); the app records the failure, shows it, and owes a
+  /// bounded automatic re-sync. Empty on a clean sync.
+  final List<int> unconvergedPresetIds;
+
   ScheduleSyncResult({
     required this.success,
     this.error,
@@ -2580,6 +2608,7 @@ class ScheduleSyncResult {
     this.deferredLeaseLedger = false,
     this.verifying = false,
     this.queuedBehindInFlight = false,
+    this.unconvergedPresetIds = const [],
     DateTime? syncedAt,
   }) : syncedAt = syncedAt ?? DateTime.now();
 
@@ -2587,6 +2616,7 @@ class ScheduleSyncResult {
   factory ScheduleSyncResult.deferredOffLan({
     List<ScheduleItem> schedulesWithPresets = const [],
     List<String> presetErrors = const [],
+    List<int> unconvergedPresetIds = const [],
   }) =>
       ScheduleSyncResult(
         success: false,
@@ -2594,6 +2624,7 @@ class ScheduleSyncResult {
         error: kScheduleOffLanNotice,
         presetErrors: presetErrors,
         schedulesWithPresets: schedulesWithPresets,
+        unconvergedPresetIds: unconvergedPresetIds,
       );
 
   /// Deferred because the schedule stream had not yet hydrated. No device write
@@ -2610,6 +2641,7 @@ class ScheduleSyncResult {
   factory ScheduleSyncResult.deferredLeaseLedger({
     List<ScheduleItem> schedulesWithPresets = const [],
     List<String> presetErrors = const [],
+    List<int> unconvergedPresetIds = const [],
   }) =>
       ScheduleSyncResult(
         success: false,
@@ -2617,6 +2649,7 @@ class ScheduleSyncResult {
         error: kScheduleLeaseLedgerNotice,
         presetErrors: presetErrors,
         schedulesWithPresets: schedulesWithPresets,
+        unconvergedPresetIds: unconvergedPresetIds,
       );
 
   /// Interim "verifying the write through the controller's stall" state (see
