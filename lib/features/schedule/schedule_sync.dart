@@ -1806,8 +1806,7 @@ class ScheduleSyncService {
     // Cost: the read lengthens the window between the last psave and the
     // restore by one presets.json GET (tens of KB on a busy controller).
     if (patternWrites.isNotEmpty && activeRepo is WledService) {
-      final svc = activeRepo as WledService;
-      final readBack = await _readBackPatternPresets(svc,
+      final readBack = await _readBackPatternPresets(activeRepo,
           settle: readBackSettle, budget: readBackBudget);
       if (readBack == null) {
         for (final e in patternWrites.entries) {
