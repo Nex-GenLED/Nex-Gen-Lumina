@@ -112,6 +112,19 @@ void main() {
       }
     });
 
+    test('the unconfirmed state promises only what the app does while open', () {
+      // Nothing retries with the app closed: the automatic re-sync runs on
+      // launch, LAN return and lights off, all inside the running app.
+      final c = ScheduleSyncCopy.forState(ScheduleSyncState.writtenNotVerified);
+      expect(c.headline,
+          'Your schedule is set, but one pattern could not be confirmed on '
+          'your lights.');
+      expect(c.detail,
+          "We'll try again the next time you open the app at home. "
+          'You can retry now.');
+      expect(c.showsRetry, isTrue);
+    });
+
     test('the not-reached states say so in the headline', () {
       for (final s in [
         ScheduleSyncState.deferredOffLan,

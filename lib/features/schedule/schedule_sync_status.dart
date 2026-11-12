@@ -212,7 +212,11 @@ class ScheduleSyncCopy {
         return const ScheduleSyncCopy(
           headline: 'Your schedule is set, but one pattern could not be '
               'confirmed on your lights.',
-          detail: "We'll keep trying on our own. You can retry now.",
+          // The automatic re-sync only runs while the app is open (launch, LAN
+          // return, lights off — all in-process listeners); nothing retries
+          // with the app closed, so the promise is worded to match.
+          detail: "We'll try again the next time you open the app at home. "
+              'You can retry now.',
           showsRetry: true,
         );
     }

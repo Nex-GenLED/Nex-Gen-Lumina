@@ -84,7 +84,7 @@ reads the first line only. `<when>` is `just now`, `5m ago`, `2h ago` or `3d ago
 | queued | Saving your latest change. | It goes to your lights next, automatically. | no | cyan |
 | deferredOffLan | Your schedule hasn't reached your lights yet. | It will the next time you open the app on your home Wi-Fi. You can retry now if you're home. | yes | cyan |
 | failed | Your schedule hasn't reached your lights yet. | Your controller didn't answer. Check that it's powered and on Wi-Fi, then retry. | yes | red |
-| writtenNotVerified | Your schedule is set, but one pattern could not be confirmed on your lights. | We'll keep trying on our own. You can retry now. | yes | amber |
+| writtenNotVerified | Your schedule is set, but one pattern could not be confirmed on your lights. | We'll try again the next time you open the app at home. You can retry now. | yes | amber |
 
 Neither surface renders until the account has ever synced. "Chip cleared" in
 this build means the chip shows the synced line in green with no Retry; the
@@ -177,8 +177,8 @@ check that needs the controller's own pages or the app log.
    example, fill the controller's preset file so the psave is refused, or pull
    Ethernet during the save and restore it before the verify). Save the
    schedule. *Expect:* the row reads "Your schedule is set, but one pattern
-   could not be confirmed on your lights. We'll keep trying on our own. You can
-   retry now. · just now" in amber with Retry; the schedule's toggle on My
+   could not be confirmed on your lights. We'll try again the next time you
+   open the app at home. You can retry now. · just now" in amber with Retry; the schedule's toggle on My
    Schedule is still ON (not switched off).
 10. Tap Retry. *Expect:* green "Your schedule is on your lights."
 
