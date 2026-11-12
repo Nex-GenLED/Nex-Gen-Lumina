@@ -206,6 +206,18 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 
 ## Operational flags
 
+### +125 — build-125 tagged 2026-11-11 on `b9a53da` — PASSED Codemagic's gate on the pinned Flutter 3.47.9; iOS 360 uploaded to TestFlight the night of 2026-11-11 (CST); Android not built
+
+| item | value |
+|---|---|
+| Tag | `build-125` = `b9a53da` (the bump to 2.5.10+125 on `feat/124-colour`, same app changes as build-124 plus the SDK pin in `codemagic.yaml`). |
+| Outcome | Codemagic's "iOS Release" run for the tag passed "Test and analyze (build gate)" and uploaded the IPA: TestFlight shows Lumina 2.5.10 (360). Whether Apple's beta review has cleared it for external testers is not verified; this row says "uploaded to TestFlight", not "available to testers". |
+| SDK | Pinned 3.47.9 (`flutter: 3.47.9` in `codemagic.yaml`), inferred from the gate passing: Flutter 3.50.0 fails the gate with the 22 known text-scale failures (the +124 entry), so a pass means the pin was honoured. The run's "Installing SDKs" line was not read. |
+| iOS build number | 360. 359 was presumably consumed by the failed build-124 run, which produced nothing; inferred from the gap, not read from Codemagic. |
+| Android | Not built, not shipped. No bundle, APK or Play upload is known from this run; versionCode 125 is unused. |
+| Docs guard | `docs_guard: 44 files checked, 129 facts, 0 failure(s), 0 warning(s)` on the ledger-flip commit. |
+| Open items | (1) Fix `loadAppFontsForTest` (`test/helpers/text_scale_harness.dart`) for Flutter 3.50.0 as its own change. (2) The pin moves only after the exact tagged commit passes the gates on the new SDK (convention 5). (3) Xcode (latest) and CocoaPods (default) still float in `codemagic.yaml`. |
+
 ### +124 — build-124 tagged 2026-11-11 20:45:53Z (14:45:53 CST) — FAILED Codemagic's gate on Flutter 3.50.0; produced nothing
 
 | item | value |
