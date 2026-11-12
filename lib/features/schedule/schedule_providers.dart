@@ -299,7 +299,12 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
       _syncOwedAfterInFlight = true;
       debugPrint('SchedulesNotifier: sync already in flight (verifying through '
           'controller stall) — queued; one follow-up runs when it clears');
-      return ScheduleSyncResult.queued();
+      // +126 cross-slice: the row and the chip say "Saving your latest
+      // change" from this moment, and the owed flag is set, so a crash or a
+      // kill before the follow-up runs still leaves the re-sync owed.
+      final queued = ScheduleSyncResult.queued();
+      await _recordSyncOutcome(queued);
+      return queued;
     }
     _syncInFlight = true;
     try {
@@ -314,7 +319,13 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
             'SchedulesNotifier: WLED sync failed — ${result.error ?? "unknown"}');
       }
       // +126 (a)(c): persist the outcome, mirror it, and settle the owed flag.
-      await _recordSyncOutcome(result);
+      // Cross-slice: if an edit was queued behind this sync, the controller's
+      // last word is NOT yet the newest edit — keep the status at "queued"
+      // (owed) and let the follow-up record its own outcome, rather than
+      // flashing "synced" and clearing the owed flag for the 800 ms until it
+      // runs.
+      await _recordSyncOutcome(
+          _syncOwedAfterInFlight ? ScheduleSyncResult.queued() : result);
       // P0-9 (part a): the cfg write was refused because the lease ledger was
       // still loading. Nothing reached the controller, so re-attempt ONCE after
       // a short delay — by then the prefs load and flag-doc bootstrap have
