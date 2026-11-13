@@ -46,6 +46,7 @@ import 'package:nexgen_command/features/schedule/sunrise_off_service.dart'
 // internal use AND re-exported so existing importers of schedule_sync.dart still
 // resolve timersInsLanded / isRealEnabledTimer.
 import 'package:nexgen_command/features/schedule/timer_table.dart';
+import 'package:nexgen_command/features/schedule/timer_table_ownership.dart';
 import 'package:nexgen_command/features/schedule/timer_landing.dart';
 export 'package:nexgen_command/features/schedule/timer_landing.dart'
     show
@@ -1865,8 +1866,15 @@ class ScheduleSyncService {
     // for a user who has switched everything off. Soft-evicted items are
     // skipped below before any check, so the eviction test here is a belt.
     var refusedCount = 0;
+    // Build 127 — the enabled schedules refused this sync, in order: their
+    // rows on the controller are KEPT in their place (see below) instead of
+    // being left out of the table.
+    final refusedEnabled = <ScheduleItem>[];
     void countRefusal(ScheduleItem s) {
-      if (s.enabled && !s.isCurrentlyEvicted) refusedCount++;
+      if (s.enabled && !s.isCurrentlyEvicted) {
+        refusedCount++;
+        refusedEnabled.add(s);
+      }
     }
     final tableContext = TimerTableContext(
       solarFlagOn: solarFlagOn,
@@ -1948,17 +1956,61 @@ class ScheduleSyncService {
     }
     final leaseTimers = leaseState.timers;
 
+    // ── Build 127 — OWNERSHIP: keep what the controller holds for a schedule
+    // this sync could not rebuild ──────────────────────────────────────────
+    // Schedule sync owns the schedule rows. Until 126 a schedule it refused
+    // (a design whose read-back mismatched or could not be read, a preset
+    // not saved, an arm check) simply had no rows in the table — and the
+    // POST still went out, because the always-enabled sunrise-off row kept
+    // the clobber guard below from seeing an empty table. So one bad
+    // read-back erased a working schedule from the controller. Now the
+    // controller's own ON and OFF rows for that schedule (matched by on
+    // time, weekday mask and macro role — timer_table_ownership.dart) are
+    // kept byte for byte, and a table that would still remove an enabled
+    // schedule's row is not sent at all (the guard after the clobber guard).
+    List<Map<String, dynamic>>? deviceRows;
+    if (activeRepo is WledService) {
+      try {
+        deviceRows = await activeRepo.fetchTimerInstances();
+      } catch (e) {
+        debugPrint('ScheduleSync: timer table read threw — $e');
+        deviceRows = null;
+      }
+    }
+    final preservedRows = <Map<String, dynamic>>[];
+    if (deviceRows == null) {
+      if (refusedEnabled.isNotEmpty) {
+        debugPrint('ScheduleSync: the controller\'s timer table could not be '
+            'read — nothing can be kept for the ${refusedEnabled.length} '
+            'refused schedule(s)');
+      }
+    } else {
+      for (final s in refusedEnabled) {
+        final rows = deviceRowsFor(s, deviceRows);
+        if (rows.isEmpty) {
+          debugPrint('ScheduleSync: "${s.actionLabel}" refused and the '
+              'controller holds no row for it — nothing to keep');
+          continue;
+        }
+        preservedRows.addAll(rows);
+        debugPrint('ScheduleSync: "${s.actionLabel}" refused this sync — '
+            'keeping its ${rows.length} row(s) as the controller holds them');
+      }
+    }
+
     // ── The timer table: one builder for every controller write ────────────
     // Clock rows for the schedules that fit (the budget is reduced by the
-    // active lease rows, lease priority P0-3.2), the lease rows merged after
-    // them, then slot 8 (the global sunrise-off, a schedule's sunrise, or the
-    // disabled placeholder) and slot 9 (a schedule's sunset at hour 254, or a
-    // stub). Always all 10 rows — see timer_table.dart for why each firmware
-    // needs exactly that. `scheduleIns` is the same table without leases or
-    // the global sunrise-off, for the empty-armed guard below.
+    // active lease rows, lease priority P0-3.2, and by the kept rows), the
+    // kept rows, the lease rows merged after them, then slot 8 (the global
+    // sunrise-off, a schedule's sunrise, or the disabled placeholder) and
+    // slot 9 (a schedule's sunset at hour 254, or a stub). Always all 10
+    // rows — see timer_table.dart for why each firmware needs exactly that.
+    // `scheduleIns` is the same table without leases or the global
+    // sunrise-off, for the empty-armed guard below.
     final table = buildTimerTable(
       armable: armable,
       leaseRows: leaseTimers,
+      preservedRows: preservedRows,
       globalSunriseOff: globalSunriseOff,
       solarEnabled: solarEnabled,
       debug: debugPrint,
@@ -2106,6 +2158,37 @@ class ScheduleSyncService {
         unconvergedPresetIds: unconvergedPresetIds,
         schedulesWithPresets: updatedSchedules,
       ));
+    }
+
+    // ── Build 127 — never remove an enabled schedule's row the controller
+    // holds ───────────────────────────────────────────────────────────────
+    // The keep above covers the schedules this sync refused. This is the
+    // backstop for every other way a row can go missing (a kept row that
+    // did not fit the table, a path nobody foresaw): if the controller
+    // holds a schedule-role ON row for a schedule that is still enabled and
+    // the table about to be sent has none at that on time and weekday mask,
+    // the write is skipped and the sync fails with Retry. A schedule whose
+    // time or days changed matches no device row, so its old row is
+    // replaced as intended. Unreadable table: nothing to compare against.
+    if (deviceRows != null) {
+      final dropped = scheduleRowsDropped(
+        enabled: updatedSchedules,
+        readback: deviceRows,
+        outgoing: ins,
+      );
+      if (dropped.isNotEmpty) {
+        final names = dropped.map((s) => '"${s.actionLabel}"').join(', ');
+        debugPrint('ScheduleSync: SKIPPED cfg write — it would remove the '
+            'row(s) the controller holds for $names, which this sync did not '
+            'mean to change. Controller left unchanged.');
+        return finish(ScheduleSyncResult(
+          success: false,
+          error: kScheduleKeepRowsRefused,
+          presetErrors: presetErrors,
+          unconvergedPresetIds: unconvergedPresetIds,
+          schedulesWithPresets: updatedSchedules,
+        ));
+      }
     }
 
     // Settle (point 1): the preset psaves above are flash writes. Give the
@@ -2710,6 +2793,15 @@ const String kScheduleSyncQueued =
 /// armed yet, resolving itself. The retry usually lands before this is read.
 const String kScheduleLeaseLedgerNotice =
     'Saved — finishing up on your controller. This clears in a moment.';
+
+/// Build 127 — the table this sync built would have removed a row the
+/// controller holds for a schedule that is still enabled (the sync could not
+/// rebuild it and could not keep it either), so nothing was written. The
+/// status row shows the Failed state with Retry.
+const String kScheduleKeepRowsRefused =
+    "Your controller still has a schedule the app couldn't rebuild this time, "
+    'so nothing was changed. Tap Retry; if this keeps happening, contact '
+    'support.';
 
 /// Terminal failure copy for the case where the controller never answered
 /// within the verification window (didn't recover). Actionable and distinct

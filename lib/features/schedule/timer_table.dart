@@ -265,20 +265,37 @@ class TimerTable {
 /// [armable] = schedules that passed every arm check. [leaseRows] = active
 /// one-night / Game Day rows (clock rows). [globalSunriseOff] = the daily
 /// sunrise-off row when the setting is on; it outranks a schedule's sunrise.
+/// [preservedRows] (build 127) = the controller's own rows for enabled
+/// schedules this sync could not rebuild, kept byte for byte in their place
+/// (timer_table_ownership.dart); they rank with the schedules' rows, ahead of
+/// the lease rows, and reduce the budget like the lease rows do.
 TimerTable buildTimerTable({
   required List<ScheduleItem> armable,
   List<Map<String, dynamic>> leaseRows = const [],
+  List<Map<String, dynamic>> preservedRows = const [],
   Map<String, dynamic>? globalSunriseOff,
   required bool solarEnabled,
   void Function(String)? debug,
 }) {
   final warnings = <String>[];
+  // Kept rows rank with the schedules' rows, after the lease rows (P0-3.2):
+  // if the lease rows leave no room for a kept row it is dropped HERE, and
+  // schedule sync's keep guard then refuses the whole write rather than send
+  // a table missing an enabled schedule's row.
+  final room = (kTableGeneralSlots - leaseRows.length).clamp(0, kTableGeneralSlots);
+  final kept = preservedRows.length > room
+      ? preservedRows.sublist(0, room)
+      : preservedRows;
+  if (kept.length < preservedRows.length) {
+    debug?.call('TimerTable: ${preservedRows.length - kept.length} kept '
+        'row(s) do not fit beside ${leaseRows.length} lease row(s)');
+  }
+  final heldRows = leaseRows.length + kept.length;
   final capacity = splitByCapacity(armable,
-      solarEnabled: solarEnabled,
-      maxSlots: kTableGeneralSlots - leaseRows.length);
+      solarEnabled: solarEnabled, maxSlots: kTableGeneralSlots - heldRows);
   final armed = capacity.armed;
   if (capacity.overflowed) {
-    final budget = kTableGeneralSlots - leaseRows.length;
+    final budget = kTableGeneralSlots - heldRows;
     final used = armed.fold<int>(
         0, (n, s) => n + generalRowsFor(s, solarEnabled: solarEnabled));
     final free = (budget - used).clamp(0, kTableGeneralSlots);
@@ -317,7 +334,7 @@ TimerTable buildTimerTable({
   }
 
   return TimerTable(
-    ins: assembleTable([...clock, ...leaseRows],
+    ins: assembleTable([...clock, ...kept, ...leaseRows],
         sunrise: globalSunriseOff ?? sun.sunrise, sunset: sun.sunset),
     scheduleIns:
         assembleTable(clock, sunrise: sun.sunrise, sunset: sun.sunset),
