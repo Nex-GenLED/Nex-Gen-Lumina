@@ -18,6 +18,8 @@ import 'package:nexgen_command/features/game_day/served_game_day.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry.dart';
 import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart';
 import 'package:nexgen_command/features/schedule/calendar_lease_feature_flag.dart';
+import 'package:nexgen_command/features/schedule/schedule_sync.dart'
+    show CfgPushOutcome;
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_repository.dart';
@@ -218,9 +220,12 @@ void main() {
 
   test('D4: a failed zero write keeps the records', () async {
     final h = harness(entries: [_gameDay()]);
-    final svc = lan(h.c);
+    lan(h.c);
     await h.m.initialize();
-    svc.simulateApplyConfigReturns = false;
+    // Build 127 — the zero write goes through the verified push, and the
+    // records go only once the verify read confirms it. An unconfirmed
+    // write keeps them for the next sweep.
+    h.m.cfgPushFn = (_, __, ___) async => CfgPushOutcome.notConfirmed;
     h.c.read(_served.notifier).state = ServedVerdict.served;
     await h.m.sweepExpiredLeases();
     expect(h.m.activeLeases, hasLength(1));

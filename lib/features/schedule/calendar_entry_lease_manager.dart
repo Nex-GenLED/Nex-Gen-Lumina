@@ -52,8 +52,9 @@ import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_providers.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
-import 'package:nexgen_command/features/schedule/timer_table.dart';
-import 'package:nexgen_command/features/schedule/timer_table_context.dart';
+import 'package:nexgen_command/features/schedule/timer_table.dart'
+    show generalRowsFor;
+import 'package:nexgen_command/features/schedule/timer_table_ownership.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
     show deviceChannelsFromConfig;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
@@ -521,8 +522,11 @@ class LeaseResult {
       LeaseResult(outcome: LeaseOutcome.leased, lease: lease);
   factory LeaseResult.updated(CalendarEntryLease lease) =>
       LeaseResult(outcome: LeaseOutcome.updated, lease: lease);
-  factory LeaseResult.noFreeSlots() =>
-      const LeaseResult(outcome: LeaseOutcome.noFreeSlots);
+  /// [reason] (build 127): why the write-time composition found no free
+  /// slot — the rows the controller holds that are not lease rows, which
+  /// this writer never evicts.
+  factory LeaseResult.noFreeSlots({String? reason}) =>
+      LeaseResult(outcome: LeaseOutcome.noFreeSlots, errorMessage: reason);
   factory LeaseResult.invalidEntry(String reason) =>
       LeaseResult(outcome: LeaseOutcome.invalidEntry, errorMessage: reason);
   factory LeaseResult.alreadyExpired() =>
@@ -597,6 +601,16 @@ class CalendarEntryLeaseManager {
     List<Map<String, dynamic>> ins,
   ) cfgPushFn = (repo, payload, ins) =>
       pushCfgWithVerify(repo: repo, payload: payload, ins: ins);
+
+  /// Test seam over the controller's timer-table read (build 127). Every
+  /// lease write starts by reading what the controller holds, so it keeps
+  /// every row it does not own. Production reads `/json/cfg` through the
+  /// direct-LAN service; any other transport cannot read it (null = unknown,
+  /// and an unknown table is never written over).
+  @visibleForTesting
+  Future<List<Map<String, dynamic>>?> Function(WledRepository repo)
+      readTimerRowsFn = (repo) async =>
+          repo is WledService ? repo.fetchTimerInstances() : null;
 
   /// Test seam over the #3 gate-then-save chokepoint. Production delegates to
   /// the shared [gatedPresetSave] — the SAME function ScheduleSyncService, the
@@ -824,17 +838,32 @@ class CalendarEntryLeaseManager {
             lease: updated,
           );
 
+        case _WriteAttempt.noFreeSlot:
+          // Build 127 — the controller's own rows leave no room; nothing is
+          // evicted (nightly schedules win over Game Day nights). The
+          // previous lease is still armed as it was, so the record goes
+          // back to describing it.
+          _activeLeases[entry.dateKey] = existing;
+          await _saveToPrefs();
+          debugPrint('$_kLogPrefix update SKIPPED for ${entry.dateKey} — '
+              '${write.gateSummary}; previous lease kept as armed');
+          return LeaseResult.noFreeSlots(reason: write.gateSummary);
+
         case _WriteAttempt.noRepo:
         case _WriteAttempt.cfgUnsupported:
+        case _WriteAttempt.tableUnreadable:
           // +112 (#123) — DEFERRED, and said so. The controller still holds
           // the PREVIOUS lease (preset + timer), so the registry must keep
           // describing that, not the edit that never reached it. Restore
           // `existing`; the entry is re-applied on the next calendar write,
-          // which re-attempts the update on the LAN.
+          // which re-attempts the update on the LAN. Build 127: the same
+          // when the controller's table could not be read — nothing was
+          // written, so nothing changed.
           _activeLeases[entry.dateKey] = existing;
           await _saveToPrefs();
           debugPrint('$_kLogPrefix update DEFERRED for ${entry.dateKey} — '
-              'off-LAN or no controller; previous lease kept as armed');
+              'off-LAN, no controller or table unreadable; previous lease '
+              'kept as armed');
           return LeaseResult.deferred(
             "Saved. This night will update on your controller the next time "
             "you're on your home Wi-Fi.",
@@ -913,8 +942,21 @@ class CalendarEntryLeaseManager {
           lease: lease,
         );
 
+      case _WriteAttempt.noFreeSlot:
+        // Build 127 — the controller's own rows (schedules, anything else
+        // that is not a lease) leave no slot for this night. Nothing is
+        // evicted: the night stays unarmed and unregistered, the entry stays
+        // on the calendar, and the next sweep inside the window tries again
+        // (a row may have gone by then). The reason rides on the result.
+        _activeLeases.remove(entry.dateKey);
+        await _saveToPrefs();
+        debugPrint('$_kLogPrefix lease SKIPPED for ${entry.dateKey} — '
+            '${write.gateSummary}');
+        return LeaseResult.noFreeSlots(reason: write.gateSummary);
+
       case _WriteAttempt.noRepo:
       case _WriteAttempt.cfgUnsupported:
+      case _WriteAttempt.tableUnreadable:
         // +112 (#123) — DEFERRED means UNREGISTERED. This used to keep the
         // record "for a later on-LAN retry", but the sweep's promotion loop
         // skips every registered dateKey, so a lease registered off the LAN
@@ -922,11 +964,12 @@ class CalendarEntryLeaseManager {
         // schedule sync still merged its timer (macro → an empty or stale
         // slot). Drop the record; the entry stays on the calendar, it is
         // inside its window, and the next on-LAN sweep promotes it afresh.
+        // Build 127: the same when the controller's table could not be read.
         _activeLeases.remove(entry.dateKey);
         await _saveToPrefs();
         debugPrint('$_kLogPrefix lease DEFERRED for ${entry.dateKey} — '
-            'off-LAN or no controller; not registered, next on-LAN sweep '
-            'arms it');
+            'off-LAN, no controller or table unreadable; not registered, '
+            'next on-LAN sweep arms it');
         return LeaseResult.deferred(
           "Saved. This night will arm on your controller the next time "
           "you're on your home Wi-Fi.",
@@ -996,11 +1039,26 @@ class CalendarEntryLeaseManager {
   }
 
   /// Release any active lease for [dateKey].
+  ///
+  /// Build 127 — the record goes only once the zero-write is CONFIRMED by
+  /// the verify read. If the write could not happen (off the LAN, no
+  /// controller, live writes off, the controller's table unreadable or the
+  /// write unconfirmed) the record stays: the row is still armed on the
+  /// device, and the sweep clears both together once the night is over and
+  /// the write can land.
   Future<void> handleEntryDeleted(String dateKey) async {
-    final lease = _activeLeases.remove(dateKey);
+    final lease = _activeLeases[dateKey];
     if (lease == null) return;
+    final ok = await _writeZeroedRows(
+        excluding: {dateKey}, what: 'release of $dateKey');
+    if (!ok) {
+      debugPrint('$_kLogPrefix release of $dateKey NOT written — record kept '
+          '(slot=${lease.slotIndex}); the sweep clears it once the write can '
+          'land');
+      return;
+    }
+    _activeLeases.remove(dateKey);
     await _saveToPrefs();
-    await _writeZeroedSlot(lease.slotIndex);
     debugPrint('$_kLogPrefix released $dateKey (slot=${lease.slotIndex})');
   }
 
@@ -1018,20 +1076,29 @@ class CalendarEntryLeaseManager {
       }
     }
 
-    for (final key in expiredKeys) {
-      final lease = _activeLeases.remove(key);
-      if (lease != null) {
-        // `_writeZeroedSlot` checks the feature flag internally and
-        // short-circuits when off. The registry mutation above runs
-        // regardless so the manager's view stays consistent across
-        // app sessions even when live writes are disabled.
-        await _writeZeroedSlot(lease.slotIndex);
-        debugPrint('$_kLogPrefix swept-expired $key (slot=${lease.slotIndex})');
-      }
-    }
-
+    // Build 127 — ONE zero-write for every expired night, and the records go
+    // ONLY once that write is confirmed by the verify read. This used to
+    // remove the record first and then call a zero-write that returned
+    // silently off the LAN, with no controller, with live writes off, or
+    // with the schedules not loaded — so the row stayed armed on the device
+    // with nothing left in the app remembering it, and the "next sweep
+    // retries" comments were wrong because there was no record to retry. A
+    // write that cannot happen now leaves the records for the next sweep.
     if (expiredKeys.isNotEmpty) {
-      await _saveToPrefs();
+      final ok = await _writeZeroedRows(
+          excluding: expiredKeys.toSet(),
+          what: 'expired lease(s) ${expiredKeys.join(', ')}');
+      if (ok) {
+        for (final key in expiredKeys) {
+          final lease = _activeLeases.remove(key);
+          debugPrint('$_kLogPrefix swept-expired $key '
+              '(slot=${lease?.slotIndex})');
+        }
+        await _saveToPrefs();
+      } else {
+        debugPrint('$_kLogPrefix expired lease(s) ${expiredKeys.join(', ')} '
+            'NOT cleared — records kept; the next sweep retries');
+      }
     }
 
     // +114 (D4) — retract every still-armed lease whose night is now a
@@ -1180,38 +1247,29 @@ class CalendarEntryLeaseManager {
     return _retractLeases(served);
   }
 
-  /// Drop [leases] from the registry and zero their timer rows in ONE merged
-  /// cfg write.
+  /// Zero [leases]' timer rows in ONE merged cfg write, then drop them from
+  /// the registry.
   ///
-  /// LAN ONLY, and the registry follows the device: off the LAN the zero write
-  /// cannot land, and dropping the records anyway would leave the timer rows
-  /// armed with nothing in the app remembering them (the next schedule sync
-  /// would merge them back in, or not, by accident). So off the LAN nothing
-  /// changes and the next on-LAN sweep retracts. A failed write restores the
-  /// records for the same reason. With live writes off by flag the manager
-  /// never armed anything, so the records simply go.
+  /// LAN ONLY, and the registry follows the device: off the LAN the zero
+  /// write cannot land, and dropping the records anyway would leave the
+  /// timer rows armed with nothing in the app remembering them. So off the
+  /// LAN nothing changes and the next on-LAN sweep retracts; an unconfirmed
+  /// write keeps the records for the same reason (build 127: the write is
+  /// verified by read-back, and the records go only after it is confirmed).
   Future<int> _retractLeases(Map<String, CalendarEntryLease> leases) async {
     if (leases.isEmpty) return 0;
-    if (_readLiveWritesEnabled()) {
-      final repo = _readRepo();
-      if (repo == null || !repoCanWriteCfg(repo)) {
-        debugPrint('$_kLogPrefix served-lease retraction deferred — off-LAN '
-            '(${leases.keys.join(', ')})');
-        return 0;
-      }
+    final ok = await _writeZeroedRows(
+        excluding: leases.keys.toSet(),
+        what: 'served Game Day lease(s) ${leases.keys.join(', ')}');
+    if (!ok) {
+      debugPrint('$_kLogPrefix served-lease retraction NOT written — records '
+          'kept (${leases.keys.join(', ')}); the next on-LAN sweep retries');
+      return 0;
     }
     for (final k in leases.keys) {
       _activeLeases.remove(k);
     }
     await _saveToPrefs();
-    final ok = await _writeZeroedSlot(leases.values.first.slotIndex);
-    if (!ok) {
-      _activeLeases.addAll(leases);
-      await _saveToPrefs();
-      debugPrint('$_kLogPrefix served-lease retraction FAILED — records kept '
-          '(${leases.keys.join(', ')})');
-      return 0;
-    }
     debugPrint('$_kLogPrefix retracted server-run Game Day lease(s) '
         '${leases.keys.join(', ')}');
     return leases.length;
@@ -1480,7 +1538,7 @@ class CalendarEntryLeaseManager {
   /// Gated by the [calendarLeaseLiveWritesEnabledProvider] feature
   /// flag — when off, returns [_WriteAttempt.flagOff] without
   /// touching the controller. Serialized through [_wledWriteLock]
-  /// against [_writeZeroedSlot] and [sweepExpiredLeases].
+  /// against [_writeZeroedRows] and [sweepExpiredLeases].
   Future<_LeaseWrite> _writeLeaseToWled(CalendarEntryLease lease) async {
     final liveEnabled = _readLiveWritesEnabled();
     if (!liveEnabled) {
@@ -1511,13 +1569,30 @@ class CalendarEntryLeaseManager {
         );
         return (attempt: _WriteAttempt.cfgUnsupported, gateSummary: null);
       }
-      // The write sends the WHOLE table (schedules, leases, sunrise-off), so
-      // resolve what it depends on before anything is saved. Unknown → no
-      // preset, no timer; the record is dropped and the next sweep re-arms.
-      final table = await _composeTable(repo);
-      if (table == null) {
-        return (attempt: _WriteAttempt.cfgWriteFailed, gateSummary: null);
+      // Build 127 — OWNERSHIP. Read what the controller holds and keep every
+      // row that is not a lease row, byte for byte; the lease rows become
+      // the registry's. Nothing here depends on the stored schedules any
+      // more (timer_table_ownership.dart). Resolved before anything is
+      // saved: an unreadable table means no preset and no timer, and a full
+      // table means this night is skipped — nothing is evicted.
+      final composed = await _composeOwnedTable(repo);
+      if (composed.ins == null) {
+        if (composed.noFreeSlot) {
+          debugPrint('$_kLogPrefix lease ${lease.dateKey} SKIPPED — '
+              '${composed.refusal}');
+          return (
+            attempt: _WriteAttempt.noFreeSlot,
+            gateSummary: composed.refusal,
+          );
+        }
+        debugPrint('$_kLogPrefix lease ${lease.dateKey} not written — '
+            '${composed.refusal}');
+        return (
+          attempt: _WriteAttempt.tableUnreadable,
+          gateSummary: composed.refusal,
+        );
       }
+      final ins = composed.ins!;
       try {
         // #3 — THE LAST UNGATED SAVE PATH JOINS THE GATE.
         //
@@ -1575,9 +1650,9 @@ class CalendarEntryLeaseManager {
         final outcome = await cfgPushFn(
           repo,
           <String, dynamic>{
-            'timers': {'ins': table.ins},
+            'timers': {'ins': ins},
           },
-          table.ins,
+          ins,
         );
         // Diagnostic: dump the lease's own timer slot exactly as the controller
         // stored it (or ABSENT) on BOTH outcomes, so the next bench run tells us
@@ -1712,51 +1787,66 @@ class CalendarEntryLeaseManager {
     }
   }
 
-  /// Defensive zero-write on lease expiry / deletion. Re-sends the
-  /// whole timer table ([_composeTable]) WITHOUT the removed lease so any
-  /// stale entry the firmware retained gets cleared.
+  /// The zero-write on lease expiry, deletion and retraction (build 127).
   ///
-  /// Gated by the [calendarLeaseLiveWritesEnabledProvider] feature
-  /// flag — when off, returns true without touching the controller.
-  /// Serialized through [_wledWriteLock].
-  Future<bool> _writeZeroedSlot(int slotIndex) async {
+  /// Sends the controller's own table with the lease rows replaced by the
+  /// registry's MINUS [excluding] — every row this writer does not own is
+  /// kept byte for byte — through the verified push, and returns true ONLY
+  /// when the verify read confirmed it. Every caller keeps its registry
+  /// record until then: a write that could not happen (live writes off, no
+  /// controller, off the LAN, the table unreadable) or was not confirmed
+  /// returns false and leaves the record for the next sweep. Serialized
+  /// through [_wledWriteLock].
+  Future<bool> _writeZeroedRows({
+    required Set<String> excluding,
+    required String what,
+  }) async {
     final liveEnabled = _readLiveWritesEnabled();
     if (!liveEnabled) {
       debugPrint(
         '$_kLogPrefix live writes DISABLED via feature flag — would '
-        'zero-write slot $slotIndex but skipping actual /json/cfg',
+        'zero-write $what but skipping /json/cfg; the record stays',
       );
-      return true;
+      return false;
     }
     return _wledWriteLock.synchronized(() async {
       final repo = _readRepo();
       if (repo == null) {
-        debugPrint(
-          '$_kLogPrefix _writeZeroedSlot: no repo — slot $slotIndex '
-          'not cleared. Next sweep retries.',
-        );
+        debugPrint('$_kLogPrefix zero-write for $what: no repo — not written; '
+            'the record stays for the next sweep');
         return false;
       }
       if (!repoCanWriteCfg(repo)) {
-        debugPrint(
-          '$_kLogPrefix _writeZeroedSlot: off-LAN — slot $slotIndex not '
-          'cleared (bridge cannot write /json/cfg). Next on-LAN sweep clears it.',
-        );
+        debugPrint('$_kLogPrefix zero-write for $what: off-LAN (bridge cannot '
+            'write /json/cfg) — not written; the record stays for the next '
+            'on-LAN sweep');
         return false;
       }
-      final table = await _composeTable(repo);
-      if (table == null) return false;
+      final composed = await _composeOwnedTable(repo,
+          excluding: excluding, truncateLeases: true);
+      final ins = composed.ins;
+      if (ins == null) {
+        debugPrint('$_kLogPrefix zero-write for $what: ${composed.refusal} — '
+            'not written; the record stays for the next sweep');
+        return false;
+      }
       try {
-        final ok = await repo.applyConfig(<String, dynamic>{
-          'timers': {'ins': table.ins},
-        });
-        if (!ok) {
-          debugPrint('$_kLogPrefix _writeZeroedSlot: applyConfig failed '
-              'for slot $slotIndex');
+        final outcome = await cfgPushFn(
+          repo,
+          <String, dynamic>{
+            'timers': {'ins': ins},
+          },
+          ins,
+        );
+        if (outcome != CfgPushOutcome.confirmed) {
+          debugPrint('$_kLogPrefix zero-write for $what NOT CONFIRMED '
+              '($outcome) — the record stays for the next sweep');
+          return false;
         }
-        return ok;
+        return true;
       } catch (e) {
-        debugPrint('$_kLogPrefix _writeZeroedSlot exception: $e');
+        debugPrint('$_kLogPrefix zero-write for $what threw: $e — the record '
+            'stays for the next sweep');
         return false;
       }
     });
@@ -1769,10 +1859,13 @@ class CalendarEntryLeaseManager {
   /// race.
   ///
   /// IMPORTANT: this returns ONLY the lease-derived timers. What is pushed
-  /// to the controller is the whole table from [_composeTable].
-  Map<String, dynamic> _buildLeaseTimersPayload() {
+  /// to the controller is the owned table from [_composeOwnedTable].
+  Map<String, dynamic> _buildLeaseTimersPayload({
+    Set<String> excluding = const {},
+  }) {
     final List<Map<String, dynamic>> ins = [];
     for (final lease in _activeLeases.values) {
+      if (excluding.contains(lease.dateKey)) continue;
       // Defense in depth: a dowMask of 0 (unparseable dateKey) would arm a
       // timer that never fires. Skip it — never write a dead dow:0 lease timer.
       if (lease.dowMask == 0) {
@@ -1825,49 +1918,57 @@ class CalendarEntryLeaseManager {
     return ins.isEmpty ? const LeaseLedgerEmpty() : LeaseLedgerReady(ins);
   }
 
-  /// The table this manager writes: every enabled schedule (sunrise/sunset
-  /// ones included), every active lease, and the daily sunrise-off — built by
-  /// the SAME [composeTimerTable] the sunrise-off toggle uses, over the same
-  /// builder schedule sync uses (timer_table.dart).
+  /// The table this manager writes (build 127, OWNERSHIP): the controller's
+  /// own rows, read back now, with every row that is not a lease row kept
+  /// byte for byte, and the lease rows replaced by the registry's (minus
+  /// [excluding]). The sun slots are sent exactly as read. Nothing here
+  /// resolves a stored schedule: this writer does not own schedule rows and
+  /// cannot rebuild them (it never held their presets), so it keeps them.
   ///
-  /// This used to call `buildCfgPayload(schedules)` with solar left OFF, which
-  /// skips every schedule that has a sunrise or sunset boundary — so arming or
-  /// releasing any night erased those schedules' clock rows ("Sunset → 11 PM"
-  /// never turned off again). It also sent 8 rows, which 16.x treats as the
-  /// whole list and so deleted the sun rows outright.
+  /// Before 127 this composed the whole table from the stored schedules
+  /// through `composeTimerTable`, resolving each schedule's macro as
+  /// `presetId ?? presetForAction(label)`; no stored schedule carries a
+  /// presetId and the label map knows only Turn On, Turn Off and Brightness,
+  /// so every "Pattern: …", Lumina-chat and Autopilot schedule was refused
+  /// silently and the table went out without it. Before +122 it was worse
+  /// still (solar left off, eight rows).
   ///
-  /// Null when an input is still unknown (see timer_table_context.dart); the
-  /// caller then writes nothing.
-  Future<TimerTable?> _composeTable(WledRepository repo) async {
-    List<ScheduleItem> schedules;
+  /// [LeaseWriteComposition.ins] is null when the table could not be read
+  /// or re-assembled (the caller writes nothing and says so), or — arming
+  /// only — when the kept rows leave no free slot ([noFreeSlot]: the night
+  /// is skipped, nothing is evicted).
+  Future<LeaseWriteComposition> _composeOwnedTable(
+    WledRepository repo, {
+    Set<String> excluding = const {},
+    bool truncateLeases = false,
+  }) async {
+    List<Map<String, dynamic>>? readback;
     try {
-      if (!_ref.read(calendarLeaseSchedulesHydratedProvider)) {
-        debugPrint('$_kLogPrefix timer table: schedules not loaded yet — not '
-            'writing; the next sweep retries');
-        return null;
-      }
-      schedules = _ref.read(calendarLeaseSchedulesProvider);
+      readback = await readTimerRowsFn(repo);
     } catch (e) {
-      debugPrint('$_kLogPrefix timer table: schedules unreadable — $e; '
-          'not writing');
-      return null;
+      debugPrint('$_kLogPrefix timer table read threw — $e');
+      readback = null;
     }
-    final read = await resolveTimerTableContext(_ref, repo);
-    final ctx = read.context;
-    if (ctx == null) {
-      debugPrint('$_kLogPrefix timer table: ${read.unknown} — not writing; '
-          'the next sweep retries');
-      return null;
+    if (readback == null) {
+      return const LeaseWriteComposition(
+        ins: null,
+        refusal: "the controller's timer table could not be read",
+        keptRows: 0,
+      );
     }
-    final leaseRows =
-        ((_buildLeaseTimersPayload()['timers'] as Map)['ins'] as List)
-            .cast<Map<String, dynamic>>();
-    return composeTimerTable(
-      schedules: schedules,
+    final leaseRows = ((_buildLeaseTimersPayload(excluding: excluding)['timers']
+            as Map)['ins'] as List)
+        .cast<Map<String, dynamic>>();
+    final composed = composeLeaseWrite(
+      readback: readback,
       leaseRows: leaseRows,
-      ctx: ctx,
-      debug: debugPrint,
+      truncateLeases: truncateLeases,
     );
+    debugPrint('$_kLogPrefix timer table: kept ${composed.keptRows} '
+        'non-lease row(s) from the controller, ${leaseRows.length} lease '
+        'row(s) from the registry'
+        '${composed.refusal == null ? '' : ' — ${composed.refusal}'}');
+    return composed;
   }
 
   WledRepository? _readRepo() {
@@ -2048,6 +2149,18 @@ enum _WriteAttempt {
   /// Feature flag is off — no controller traffic occurred. Caller
   /// keeps the lease in registry for when the flag flips.
   flagOff,
+
+  /// Build 127 — the controller's timer table could not be read (or could
+  /// not be re-assembled from the readback), so the writer could not know
+  /// which rows to keep and wrote NOTHING. Same disposition as [noRepo] /
+  /// [cfgUnsupported]: nothing to roll back, the night is deferred.
+  tableUnreadable,
+
+  /// Build 127 — the rows the controller holds that are not lease rows leave
+  /// no slot for this night. NOTHING is evicted and nothing was written: the
+  /// night stays unarmed (nightly schedules win over Game Day nights), the
+  /// reason rides on the result as [_LeaseWrite.gateSummary].
+  noFreeSlot,
 
   /// #3 — the geometry gate refused BEFORE savePreset ran. THE SAVE WAS NEVER
   /// ATTEMPTED, which is why this is not [savePresetFailed]: rolling back

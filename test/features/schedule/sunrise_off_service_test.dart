@@ -11,26 +11,28 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
-    show
-        calendarLeaseActiveTimersProvider,
-        calendarLeaseSchedulesHydratedProvider,
-        calendarLeaseSchedulesProvider,
-        LeaseLedgerEmpty,
-        LeaseLedgerLoading,
-        LeaseLedgerReady,
-        LeaseLedgerState;
-import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
-import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/sunrise_off_service.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart';
 
 class _FakeService extends WledService {
-  _FakeService() : super('http://mock');
+  _FakeService({this.held = const [], this.readable = true})
+      : super('http://mock');
+
+  /// Build 127 — what the controller reads back (compacted). The toggle
+  /// keeps every row it does not own, so the fake holds the table.
+  final List<Map<String, dynamic>> held;
+
+  /// False models a failed /json/cfg read (null = unknown).
+  final bool readable;
 
   Map<String, dynamic>? lastCfg;
+
+  @override
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async => readable
+      ? [for (final t in held) Map<String, dynamic>.from(t)]
+      : null;
 
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
@@ -39,39 +41,48 @@ class _FakeService extends WledService {
   }
 }
 
-/// A clock schedule as the app holds it once synced (preset assigned).
-ScheduleItem _clockSchedule(int presetId, String on) => ScheduleItem(
-      id: 'sched-$presetId',
-      timeLabel: on,
-      repeatDays: const ['Daily'],
-      actionLabel: 'Pattern: look $presetId',
-      enabled: true,
-      presetId: presetId,
-    );
+/// A clock schedule's ON row as the controller reads it back once a schedule
+/// sync has written it (slot 10 = the first pattern preset).
+Map<String, dynamic> _scheduleRow(int presetId, int hour) => {
+      'en': 1,
+      'hour': hour,
+      'min': 0,
+      'macro': presetId,
+      'dow': 127,
+      'start': {'mon': 1, 'day': 1},
+      'end': {'mon': 12, 'day': 31},
+    };
 
-/// A one-night lease row as the ledger reports it.
+/// A one-night lease row as the controller reads it back.
 const Map<String, dynamic> _leaseRow = {
   'en': 1,
   'hour': 18,
   'min': 0,
   'macro': 30,
   'dow': 32,
+  'start': {'mon': 1, 'day': 1},
+  'end': {'mon': 12, 'day': 31},
 };
 
-/// The toggle builds the whole table from STATE — hydrated schedules, the
-/// lease ledger, the setting it is writing — not from a controller readback.
+/// The daily sunrise-off as the controller reads it back (slot 8).
+const Map<String, dynamic> _heldSunriseOff = {
+  'en': 1,
+  'hour': 255,
+  'min': 0,
+  'macro': 2,
+  'dow': 127,
+};
+
+/// The toggle writes the table the controller HOLDS with slot 8 as the only
+/// change (build 127, ownership): nothing is built from stored schedules or
+/// the lease ledger any more.
 ({ProviderContainer container, _FakeService repo}) _harness({
-  List<ScheduleItem> schedules = const [],
-  LeaseLedgerState leases = const LeaseLedgerEmpty(),
-  bool hydrated = true,
+  List<Map<String, dynamic>> held = const [],
+  bool readable = true,
 }) {
-  final repo = _FakeService();
+  final repo = _FakeService(held: held, readable: readable);
   final container = ProviderContainer(overrides: [
     wledRepositoryProvider.overrideWithValue(repo),
-    calendarLeaseSchedulesHydratedProvider.overrideWithValue(hydrated),
-    calendarLeaseSchedulesProvider.overrideWithValue(schedules),
-    calendarLeaseActiveTimersProvider.overrideWithValue(leases),
-    solarSchedulingEnabledProvider.overrideWith((_) => Stream.value(false)),
   ]);
   addTearDown(container.dispose);
   return (container: container, repo: repo);
@@ -138,10 +149,7 @@ void main() {
   group('arm / disarm', () {
     test('arm writes the sunrise-off into slot 8 and keeps every schedule and '
         'lease row', () async {
-      final h = _harness(
-        schedules: [_clockSchedule(10, '7:00 PM')],
-        leases: const LeaseLedgerReady([_leaseRow]),
-      );
+      final h = _harness(held: [_scheduleRow(10, 19), _leaseRow]);
       final ref = h.container.read(_refProvider);
 
       final result = await const SunriseOffService().arm(ref);
@@ -151,9 +159,9 @@ void main() {
       expect(_pushedPayload!['timers'], isNotNull,
           reason: 'must be a /json/cfg timers write');
       expect(ins.length, ScheduleSyncService.kWledTotalTimerSlots);
-      expect(ins[0]['macro'], 10, reason: 'schedule row kept');
-      expect(ins[0]['hour'], 19);
-      expect(ins[1]['macro'], 30, reason: 'lease row kept');
+      expect(ins[0], _scheduleRow(10, 19),
+          reason: 'schedule row kept byte for byte');
+      expect(ins[1], _leaseRow, reason: 'lease row kept byte for byte');
       expect(ins[ScheduleSyncService.kWledSunriseSlot]['en'], 1);
       expect(ins[ScheduleSyncService.kWledSunriseSlot]['macro'], 2);
       expect(ins[ScheduleSyncService.kWledSunriseSlot]['hour'], 255);
@@ -161,7 +169,7 @@ void main() {
 
     test('disarm leaves slot 8 as the disabled placeholder and keeps the '
         'schedule row', () async {
-      final h = _harness(schedules: [_clockSchedule(10, '7:00 PM')]);
+      final h = _harness(held: [_scheduleRow(10, 19), _heldSunriseOff]);
       final ref = h.container.read(_refProvider);
 
       final result = await const SunriseOffService().disarm(ref);
@@ -171,12 +179,32 @@ void main() {
       expect(ins[ScheduleSyncService.kWledSunriseSlot],
           {'en': 0, 'hour': 255, 'min': 0, 'macro': 0, 'dow': 0},
           reason: 'the timer stops firing; slot 8 stays in cfg.json');
-      expect(ins[0]['macro'], 10, reason: 'schedule row kept');
+      expect(ins[0], _scheduleRow(10, 19), reason: 'schedule row kept');
+    });
+
+    test("disarm leaves a schedule's own sunrise row alone — it is not this "
+        'toggle\'s row to clear', () async {
+      const scheduleSunriseOff = {
+        'en': 1,
+        'hour': 255,
+        'min': 0,
+        'macro': 2,
+        'dow': 62, // Tue–Sat: the OFF days of a Mon–Fri overnight schedule
+      };
+      final h = _harness(held: [_scheduleRow(10, 19), scheduleSunriseOff]);
+      final ref = h.container.read(_refProvider);
+
+      final result = await const SunriseOffService().disarm(ref);
+
+      expect(result, SunriseOffWriteResult.confirmed);
+      expect(_pushedIns![ScheduleSyncService.kWledSunriseSlot],
+          scheduleSunriseOff,
+          reason: 'only the daily sunrise-off (dow 127) is the toggle\'s');
     });
 
     test('re-arming is idempotent — the same table, one sunrise-off row',
         () async {
-      final h = _harness(schedules: [_clockSchedule(10, '7:00 PM')]);
+      final h = _harness(held: [_scheduleRow(10, 19)]);
       final ref = h.container.read(_refProvider);
 
       await const SunriseOffService().arm(ref);
@@ -221,29 +249,32 @@ void main() {
           SunriseOffWriteResult.noController);
     });
 
-    test('lease ledger not loaded → nothing written, reported as not done',
-        () async {
-      final h = _harness(
-        schedules: [_clockSchedule(10, '7:00 PM')],
-        leases: const LeaseLedgerLoading(),
-      );
+    test("the controller's table unreadable → nothing written, reported as "
+        'not done', () async {
+      final h = _harness(held: [_scheduleRow(10, 19)], readable: false);
       final ref = h.container.read(_refProvider);
 
       expect(await const SunriseOffService().arm(ref),
           SunriseOffWriteResult.failed);
       expect(_pushedIns, isNull,
-          reason: 'a table without the live leases would erase them');
+          reason: 'a table built without knowing what the controller holds '
+              'could erase rows this toggle does not own');
     });
 
-    test('schedules not loaded yet → nothing written, reported as not done',
-        () async {
-      final h = _harness(hydrated: false);
+    test('a lone sun row with an ON macro cannot be placed → nothing written, '
+        'reported as not done', () async {
+      // A table written before the sunset marker: one 255 row, an ON macro —
+      // a legacy "Sunset → 11 PM" or a current "Sunrise → 8 AM"; the wire
+      // cannot say which, and guessing is how a sunset once became a sunrise.
+      final h = _harness(held: [
+        _scheduleRow(2, 23),
+        {'en': 1, 'hour': 255, 'min': 0, 'macro': 10, 'dow': 127},
+      ]);
       final ref = h.container.read(_refProvider);
 
       expect(await const SunriseOffService().arm(ref),
           SunriseOffWriteResult.failed);
-      expect(_pushedIns, isNull,
-          reason: 'the empty pre-load list would erase every schedule row');
+      expect(_pushedIns, isNull);
     });
   });
 }

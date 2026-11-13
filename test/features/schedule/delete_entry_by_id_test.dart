@@ -64,6 +64,19 @@ class _FakeWledRepository extends WledRepository {
   final List<_SavePresetCall> savePresetCalls = [];
   final List<Map<String, dynamic>> applyConfigCalls = [];
 
+  /// Build 127 — the controller's timer table as it reads back: every row
+  /// that is not all-zero, in order (WLED drops the padding stubs). The
+  /// writers keep every row they do not own, so the fake must hold one.
+  List<Map<String, dynamic>> table = [];
+
+  static List<Map<String, dynamic>> _compact(List<dynamic> ins) => [
+        for (final t in ins.whereType<Map>())
+          if (!((t['macro'] ?? 0) == 0 &&
+              (t['hour'] ?? 0) == 0 &&
+              (t['min'] ?? 0) == 0))
+            Map<String, dynamic>.from(t),
+      ];
+
   @override
   Future<bool> savePreset({
     required int presetId,
@@ -77,6 +90,8 @@ class _FakeWledRepository extends WledRepository {
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
     applyConfigCalls.add(Map<String, dynamic>.from(cfg));
+    final ins = (cfg['timers'] as Map?)?['ins'];
+    if (ins is List) table = _compact(ins);
     return true;
   }
 
@@ -171,6 +186,9 @@ Future<_Harness> _harness() async {
   await c.read(authStateProvider.future);
   final leases = c.read(calendarEntryLeaseManagerProvider);
   leases.nowProvider = () => _fixedNow;
+  // Build 127 — the fake is not a WledService; the manager reads its table.
+  leases.readTimerRowsFn = (_) async =>
+      [for (final t in repo.table) Map<String, dynamic>.from(t)];
   await leases.initialize();
   final calendar = c.read(calendarScheduleProvider.notifier);
   await Future<void>.delayed(Duration.zero);

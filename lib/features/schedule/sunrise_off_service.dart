@@ -51,16 +51,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart'
     show CfgPushOutcome, ScheduleSyncService, pushCfgWithVerify;
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
-import 'package:nexgen_command/features/schedule/calendar_entry_lease_manager.dart'
-    show
-        calendarLeaseActiveTimersProvider,
-        calendarLeaseSchedulesHydratedProvider,
-        calendarLeaseSchedulesProvider,
-        LeaseLedgerLoading,
-        LeaseLedgerState;
-import 'package:nexgen_command/features/schedule/schedule_models.dart';
-import 'package:nexgen_command/features/schedule/timer_table.dart';
-import 'package:nexgen_command/features/schedule/timer_table_context.dart';
+import 'package:nexgen_command/features/schedule/timer_table_ownership.dart';
 import 'package:nexgen_command/features/wled/cloud_relay_repository.dart'
     show repoCanWriteCfg;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
@@ -133,15 +124,23 @@ enum SunriseOffWriteResult {
 
 /// Arms / disarms the reserved sunrise slot on the controller.
 ///
-/// The write is the WHOLE timer table, built by the same [composeTimerTable]
-/// the lease writer uses (timer_table.dart): every schedule row, every lease,
-/// the sunset row, and slot 8 = the sunrise-off (arm) or what the schedules
-/// put there (disarm). It used to read the controller's table back and swap
-/// index 8, and that read classified the FIRST hour-255 row as sunrise — so a
-/// lone sunset row ("Sunset → 11 PM") was taken for the sunrise slot and
-/// overwritten, and slot 9 was stubbed. Building from state has no readback to
-/// misread. The write goes through the shared hardened [pushCfgWithVerify].
-/// Never fire-and-forget.
+/// Build 127 — OWNERSHIP (timer_table_ownership.dart). This toggle owns ONE
+/// row: the system_off row in the sunrise slot. The write reads the
+/// controller's table back, keeps every general row and the sunset row byte
+/// for byte, and sets slot 8 to the sunrise-off (arm) or — when the slot held
+/// the toggle's own row — the disabled placeholder (disarm). It no longer
+/// resolves the stored schedules: between +122 and 126 it rebuilt the whole
+/// table from them through `composeTimerTable`, and a "Pattern: …" schedule
+/// (no stored presetId, a label the action map does not know) resolved to no
+/// macro and was silently left out, so flipping this setting wiped the
+/// customer's schedule rows.
+///
+/// The readback is classified by CONTENT, never by position: 254 is a
+/// sunset, 255 a sunrise, a disabled 255 the placeholder; a lone 255 row with
+/// neither (a table written before the sunset marker) is undecidable and the
+/// write is refused rather than guessed — the misread that once overwrote a
+/// lone sunset row cannot recur. The write goes through the shared hardened
+/// [pushCfgWithVerify]. Never fire-and-forget.
 class SunriseOffService {
   const SunriseOffService();
 
@@ -162,6 +161,15 @@ class SunriseOffService {
     List<Map<String, dynamic>> ins,
   ) cfgPushFn = (repo, payload, ins) =>
       pushCfgWithVerify(repo: repo, payload: payload, ins: ins);
+
+  /// Test seam over the controller's timer-table read (build 127): the write
+  /// keeps every row it does not own, so it starts by reading them. Only the
+  /// direct-LAN service can read `/json/cfg`; null = unknown, never written
+  /// over.
+  @visibleForTesting
+  static Future<List<Map<String, dynamic>>?> Function(WledRepository repo)
+      readTimerRowsFn = (repo) async =>
+          repo is WledService ? repo.fetchTimerInstances() : null;
 
   Future<SunriseOffWriteResult> _write(Ref ref, {required bool enabled}) async {
     final repo = ref.read(wledRepositoryProvider);
@@ -190,14 +198,14 @@ class SunriseOffService {
       return SunriseOffWriteResult.presetSaveFailed;
     }
 
-    final table = await _composeTable(ref, repo, enabled: enabled);
-    if (table == null) return SunriseOffWriteResult.failed;
+    final ins = await _composeOwnedTable(repo, enabled: enabled);
+    if (ins == null) return SunriseOffWriteResult.failed;
     final outcome = await cfgPushFn(
       repo,
       <String, dynamic>{
-        'timers': {'ins': table.ins}
+        'timers': {'ins': ins}
       },
-      table.ins,
+      ins,
     );
     switch (outcome) {
       case CfgPushOutcome.confirmed:
@@ -305,49 +313,36 @@ class SunriseOffService {
     return ok;
   }
 
-  /// The table to write, from state: hydrated schedules, the loaded lease
-  /// ledger, and the setting being written. Null when any of them is not known
-  /// yet — writing then could erase rows this toggle does not own.
-  Future<TimerTable?> _composeTable(Ref ref, WledRepository repo,
+  /// The table to write (build 127): the controller's own rows, read back
+  /// now, with slot 8 the only change. Null when the table could not be read
+  /// or re-assembled — writing then could erase rows this toggle does not
+  /// own, so it reports `failed` and writes nothing.
+  Future<List<Map<String, dynamic>>?> _composeOwnedTable(WledRepository repo,
       {required bool enabled}) async {
-    LeaseLedgerState leases;
+    List<Map<String, dynamic>>? readback;
     try {
-      leases = ref.read(calendarLeaseActiveTimersProvider);
-    } catch (_) {
-      leases = const LeaseLedgerLoading();
-    }
-    if (leases is LeaseLedgerLoading) {
-      debugPrint('SunriseOff: lease ledger not loaded — not writing');
-      return null;
-    }
-    final List<ScheduleItem> schedules;
-    try {
-      if (!ref.read(calendarLeaseSchedulesHydratedProvider)) {
-        debugPrint('SunriseOff: schedules not loaded — not writing');
-        return null;
-      }
-      schedules = ref.read(calendarLeaseSchedulesProvider);
+      readback = await readTimerRowsFn(repo);
     } catch (e) {
-      debugPrint('SunriseOff: schedules unreadable — $e; not writing');
+      debugPrint('SunriseOff: timer table read threw — $e');
+      readback = null;
+    }
+    if (readback == null) {
+      debugPrint("SunriseOff: the controller's timer table could not be read "
+          '— not writing');
       return null;
     }
-    final read = await resolveTimerTableContext(
-      ref,
-      repo,
-      sunriseOffGiven: true,
-      sunriseOff: enabled ? buildSunriseOffTimerEntry() : null,
+    final composed = composeSunriseOffWrite(
+      readback: readback,
+      enabled: enabled,
+      sunriseOffRow: buildSunriseOffTimerEntry(),
     );
-    final ctx = read.context;
-    if (ctx == null) {
-      debugPrint('SunriseOff: ${read.unknown} — not writing');
+    if (composed.ins == null) {
+      debugPrint('SunriseOff: ${composed.refusal} — not writing');
       return null;
     }
-    return composeTimerTable(
-      schedules: schedules,
-      leaseRows: leases.timers,
-      ctx: ctx,
-      debug: debugPrint,
-    );
+    debugPrint('SunriseOff: kept ${readback.length} row(s) from the '
+        'controller; slot 8 ${enabled ? 'armed' : 'cleared'}');
+    return composed.ins;
   }
 }
 

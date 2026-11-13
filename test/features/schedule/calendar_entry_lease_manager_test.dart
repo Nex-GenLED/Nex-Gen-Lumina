@@ -87,6 +87,11 @@ void main() {
     if (now != null) {
       manager.nowProvider = () => now;
     }
+    // Build 127 — the fake is not a WledService, so the manager's default
+    // table read (a /json/cfg GET on the LAN service) cannot see it; read the
+    // fake's own table instead.
+    manager.readTimerRowsFn = (_) async =>
+        [for (final t in repo.table) Map<String, dynamic>.from(t)];
     return (repo: repo, container: container, manager: manager);
   }
 
@@ -1760,6 +1765,19 @@ class _FakeWledRepository extends WledRepository {
   bool savePresetReturns = true;
   bool applyConfigReturns = true;
 
+  /// Build 127 — the controller's timer table as it reads back: every row
+  /// that is not all-zero, in order (WLED drops the padding stubs). The
+  /// writers keep every row they do not own, so the fake must hold one.
+  List<Map<String, dynamic>> table = [];
+
+  static List<Map<String, dynamic>> _compact(List<dynamic> ins) => [
+        for (final t in ins.whereType<Map>())
+          if (!((t['macro'] ?? 0) == 0 &&
+              (t['hour'] ?? 0) == 0 &&
+              (t['min'] ?? 0) == 0))
+            Map<String, dynamic>.from(t),
+      ];
+
   @override
   Future<bool> savePreset({
     required int presetId,
@@ -1775,6 +1793,8 @@ class _FakeWledRepository extends WledRepository {
   @override
   Future<bool> applyConfig(Map<String, dynamic> cfg) async {
     applyConfigCalls.add(Map<String, dynamic>.from(cfg));
+    final ins = (cfg['timers'] as Map?)?['ins'];
+    if (applyConfigReturns && ins is List) table = _compact(ins);
     return applyConfigReturns;
   }
 

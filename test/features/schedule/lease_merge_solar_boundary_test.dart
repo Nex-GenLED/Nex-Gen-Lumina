@@ -16,29 +16,17 @@
 // fixture here. Timer tables carry no segment geometry, so the two-channel and
 // one-segment-after-restart fixtures of the other +122 items do not apply.
 //
-// release/122-candidate follow-up: the merged lease manager now builds the
-// SHARED 10-row table (timer_table.dart) through `resolveTimerTableContext`,
-// which reads the STREAM solar flag and the controller's coordinates. The
-// harness is set up the way the lease harness of
-// timer_table_shared_builder_test.dart is — stream flag on, sync flag on, no
-// global sunrise-off, a controller that reports coordinates — and every case
-// asserts on rows (slot, hour, minute, days, macro, enabled), never on a
-// length. Expected rows follow the builder's documented rules:
-//   * slots 0–7 hold the schedules' clock rows, then the lease rows, then
-//     all-zero stubs (assembleTable);
-//   * a sunrise OFF of an armed schedule lives in slot 8 as
-//     {en:1, hour:255, min:0, macro:2 (master off), dow}, where the OFF days
-//     of an overnight night are shifted one day forward (offDowFor) and daily
-//     (127) maps to itself;
-//   * slot 9 is an all-zero stub when nothing owns sunset;
-//   * with solar off the sun-bounded schedule is refused (timerArmRefusal) and
-//     slot 8 is the DISABLED placeholder {en:0, hour:255, min:0, macro:0,
-//     dow:0}.
-// The last groups record what the manager does while the stream flag is still
-// loading, and what the sync provider (schedule sync's own read) answers while
-// loading and after an error. The error case for the manager is NOT here: against
-// the current builder an erroring flag reads as off and a table is written (see
-// the +122 candidate report); it is recorded there, not committed.
+// Build 127 — OWNERSHIP (timer_table_ownership.dart). The lease writer no
+// longer builds the schedules' rows from state at all: it reads the table the
+// controller holds, keeps every row that is not a lease row byte for byte,
+// and replaces only the lease rows. So the controller here HOLDS the table a
+// schedule sync wrote for the customer's schedule (the 5:30 PM ON row in a
+// general slot; the sunrise OFF as {en:1, hour:255, min:0, macro:2, dow:127}
+// in slot 8; slot 9 an all-zero stub the readback drops), and every case
+// asserts that the lease write sends those rows back unchanged with the lease
+// row after them. The solar flag — loading, on or off — is irrelevant to this
+// writer and the cases say so. The last group records what the sync provider
+// (schedule sync's own read) answers while loading and after an error.
 
 import 'dart:async';
 
@@ -81,16 +69,60 @@ const clockOnlySchedule = ScheduleItem(
   presetId: 3,
 );
 
-/// One controller that reports coordinates: the `fetchClockInfo` form of the
-/// lease controller in timer_table_shared_builder_test.dart. Timer tables
-/// carry no segment geometry, so nothing else is overridden.
+/// One controller that reports coordinates and HOLDS a timer table. Timer
+/// tables carry no segment geometry, so nothing else is overridden.
 class _Controller extends WledService {
-  _Controller() : super('http://mock');
+  _Controller(this.held) : super('http://mock');
+
+  /// What the controller reads back (compacted: no all-zero stubs).
+  final List<Map<String, dynamic>> held;
+
+  @override
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async =>
+      [for (final t in held) Map<String, dynamic>.from(t)];
 
   @override
   Future<ControllerClockInfo?> fetchClockInfo() async =>
       const ControllerClockInfo(latitude: 40.0, longitude: -95.0);
 }
+
+/// A general row as a 0.15.x controller reads it back.
+Map<String, dynamic> heldRow({
+  required int hour,
+  required int min,
+  required int macro,
+  required int dow,
+}) =>
+    {
+      'en': 1,
+      'hour': hour,
+      'min': min,
+      'macro': macro,
+      'dow': dow,
+      'start': {'mon': 1, 'day': 1},
+      'end': {'mon': 12, 'day': 31},
+    };
+
+/// The sunrise OFF a schedule sync wrote for [customerSchedule] (slot 8).
+const Map<String, dynamic> heldSunriseOff = {
+  'en': 1,
+  'hour': 255,
+  'min': 0,
+  'macro': 2,
+  'dow': 127,
+};
+
+/// What a schedule sync left on the controller for [customerSchedule].
+List<Map<String, dynamic>> customerTable() => [
+      heldRow(hour: 17, min: 30, macro: 3, dow: 127),
+      Map<String, dynamic>.from(heldSunriseOff),
+    ];
+
+/// What a schedule sync left on the controller for [clockOnlySchedule].
+List<Map<String, dynamic>> clockOnlyTable() => [
+      heldRow(hour: 18, min: 0, macro: 3, dow: 127),
+      heldRow(hour: 23, min: 0, macro: 2, dow: 127),
+    ];
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -126,9 +158,10 @@ void main() {
     required List<ScheduleItem> schedules,
     required bool solarFlag,
     Stream<bool>? solarFlagStream,
+    List<Map<String, dynamic>> held = const [],
   }) {
     final container = ProviderContainer(overrides: [
-      wledRepositoryProvider.overrideWithValue(_Controller()),
+      wledRepositoryProvider.overrideWithValue(_Controller(held)),
       calendarLeaseLiveWritesEnabledSyncProvider.overrideWithValue(true),
       calendarLeaseLiveWritesEnabledProvider
           .overrideWith((_) => Stream.value(true)),
@@ -195,16 +228,20 @@ void main() {
   test(
       'arming a lease keeps the 5:30 PM clock row of a sunrise-bounded '
       'repeating schedule', () async {
-    final h = harness(schedules: const [customerSchedule], solarFlag: true);
+    final h = harness(
+        schedules: const [customerSchedule],
+        solarFlag: true,
+        held: customerTable());
     await h.manager.initialize();
     final result = await h.manager.handleEntryCreated(gameDayEntry());
     expect(result.outcome, LeaseOutcome.leased);
     expect(h.writes, hasLength(1), reason: 'one merged timer write');
     final ins = insOf(h.writes.single);
 
-    // Slot 0: the schedule's clock ON — 5:30 PM, preset 3, every day. The
-    // general slots hold the schedules' clock rows first, then the leases.
-    expect(ins[0], row(en: 1, hour: 17, min: 30, macro: 3, dow: 127),
+    // Slot 0: the schedule's clock ON — 5:30 PM, preset 3, every day — sent
+    // back exactly as the controller held it (the date range included). The
+    // general slots hold the kept rows first, then the leases.
+    expect(ins[0], heldRow(hour: 17, min: 30, macro: 3, dow: 127),
         reason: "the customer's 5:30 PM ON row survives the lease write");
     // Slot 1: the lease row, after the schedule rows — 12:30 on the entry's
     // own day, firing the lease's preset.
@@ -222,9 +259,8 @@ void main() {
       expect(ins[slot], stub, reason: 'slot $slot is an all-zero stub');
     }
     // Slot 8: the schedule's sunrise OFF — enabled, hour 255, the master-off
-    // preset 2; an evening ON ending at sunrise is an overnight night, so the
-    // OFF days shift one day forward, and daily stays daily.
-    expect(ins[8], row(en: 1, hour: 255, min: 0, macro: 2, dow: 127),
+    // preset 2, every day — exactly as the controller held it.
+    expect(ins[8], heldSunriseOff,
         reason: 'the sunrise OFF lives in slot 8, enabled');
     // Slot 9: nothing owns sunset.
     expect(ins[9], stub, reason: 'slot 9 is an all-zero stub');
@@ -232,8 +268,10 @@ void main() {
 
   test('the sunrise OFF boundary is never rendered into the general slots',
       () async {
-    // The flag is explicitly ON: the schedule arms and its OFF has a home.
-    final h = harness(schedules: const [customerSchedule], solarFlag: true);
+    final h = harness(
+        schedules: const [customerSchedule],
+        solarFlag: true,
+        held: customerTable());
     await h.manager.initialize();
     final result = await h.manager.handleEntryCreated(gameDayEntry());
     expect(result.outcome, LeaseOutcome.leased);
@@ -244,27 +282,48 @@ void main() {
         reason: 'sun rows never sit in slots 0–7');
     expect(general.where((r) => r['hour'] == 24 || r['hour'] == 25), isEmpty,
         reason: 'nor does the old 24/25 encoding');
-    expect(ins[8], row(en: 1, hour: 255, min: 0, macro: 2, dow: 127),
-        reason: 'slot 8 holds the sunrise OFF');
+    expect(ins[8], heldSunriseOff, reason: 'slot 8 holds the sunrise OFF');
   });
 
   test(
-      'with the solar flag OFF the schedule is left out, exactly as the '
-      'schedule sync leaves it out', () async {
-    // The flag is explicitly OFF: stream false, sync false.
+      'the lease writer does not consult the solar flag: with it OFF the rows '
+      'the controller holds are still kept', () async {
+    // Build 127 — before, the writer rebuilt the schedules from state and
+    // refused the sun-bounded one while the flag was off, so the lease write
+    // erased its 5:30 PM row. The rows on the controller are not this
+    // writer's to judge.
+    final h = harness(
+        schedules: const [customerSchedule],
+        solarFlag: false,
+        held: customerTable());
+    await h.manager.initialize();
+    final result = await h.manager.handleEntryCreated(gameDayEntry());
+    expect(result.outcome, LeaseOutcome.leased);
+    final ins = insOf(h.writes.single);
+    expect(ins[0], heldRow(hour: 17, min: 30, macro: 3, dow: 127),
+        reason: 'the 5:30 PM row is kept, flag or no flag');
+    expect(ins[8], heldSunriseOff,
+        reason: 'the sunrise OFF is kept, flag or no flag');
+  });
+
+  test('nothing on the controller: slot 8 is the disabled placeholder',
+      () async {
     final h = harness(schedules: const [customerSchedule], solarFlag: false);
     await h.manager.initialize();
     final result = await h.manager.handleEntryCreated(gameDayEntry());
     expect(result.outcome, LeaseOutcome.leased);
     final ins = insOf(h.writes.single);
     expect(ins.where((r) => isRow(r, hour: 17, min: 30)), isEmpty,
-        reason: 'a sun-bounded schedule is refused while solar is off');
+        reason: 'the writer invents no schedule row');
     expect(ins[8], sunrisePlaceholder,
         reason: 'nothing owns sunrise: slot 8 is the disabled placeholder');
   });
 
   test('a clock-only schedule keeps both rows (regression guard)', () async {
-    final h = harness(schedules: const [clockOnlySchedule], solarFlag: true);
+    final h = harness(
+        schedules: const [clockOnlySchedule],
+        solarFlag: true,
+        held: clockOnlyTable());
     await h.manager.initialize();
     await h.manager.handleEntryCreated(gameDayEntry());
     final ins = insOf(h.writes.single);
@@ -272,29 +331,34 @@ void main() {
     expect(ins.where((r) => isRow(r, hour: 23, min: 0)), hasLength(1));
   });
 
-  group('the stream solar flag while loading and while in error', () {
-    // While the stream has not answered, the sync provider reads false (its
-    // own contract). A table built on that guess would write the sunrise
-    // placeholder over a live sunrise row and drop a sun-bounded schedule's
-    // clock row, so the manager must defer: write nothing and leave the
-    // controller's table as it was.
+  group('the stream solar flag while loading', () {
+    // Build 127 — nothing in the lease write is built from the flag any
+    // more, so a flag that has not answered holds nothing up: the write goes
+    // out and keeps the rows the controller holds. (Before 127 the writer
+    // deferred here, because a table built on a guessed flag would have
+    // dropped a sun-bounded schedule's clock row.)
 
-    test('LOADING: the manager defers — writes nothing, table left as it was',
+    test('LOADING: the write still goes out and keeps every held row',
         () async {
       final pending = StreamController<bool>(); // never answers
-      addTearDown(pending.close);
+      // Nothing subscribes to it any more, so its close is not awaited (a
+      // single-subscription controller nobody listened to never reports done).
+      addTearDown(() {
+        pending.close();
+      });
       final h = harness(
         schedules: const [customerSchedule],
         solarFlag: false,
         solarFlagStream: pending.stream,
+        held: customerTable(),
       );
       await h.manager.initialize();
       final result = await h.manager.handleEntryCreated(gameDayEntry());
-      expect(h.writes, isEmpty,
-          reason: 'outcome ${result.outcome}; table written: '
-              '${tableOf(h.writes)}');
-      expect(result.outcome, isNot(LeaseOutcome.leased),
-          reason: 'no lease is recorded without its timer write');
+      expect(result.outcome, LeaseOutcome.leased,
+          reason: 'table written: ${tableOf(h.writes)}');
+      final ins = insOf(h.writes.single);
+      expect(ins[0], heldRow(hour: 17, min: 30, macro: 3, dow: 127));
+      expect(ins[8], heldSunriseOff);
     });
   });
 

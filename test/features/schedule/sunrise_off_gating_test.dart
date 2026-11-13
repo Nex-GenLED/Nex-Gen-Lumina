@@ -14,8 +14,10 @@
 //   WLED COMPACTS that readback (omits fully-empty timers), so the fix
 //   classified rows by the 255 marker: first = sunrise. A LONE sunset row
 //   ("Sunset → 11 PM") then read as the sunrise and was overwritten, and slot
-//   9 was stubbed. The toggle now builds the table from state through the shared
-//   builder (timer_table.dart) and never reads the table back at all.
+//   9 was stubbed. Build 127 (ownership) reads the table back again — it is
+//   the only way to keep the rows this toggle does not own — but classifies
+//   every row by CONTENT: 254 is a sunset, 255 a sunrise, and a lone 255 row
+//   with an ON macro is refused rather than guessed (timer_table_ownership.dart).
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,12 +46,15 @@ class _FakeService extends WledService {
   bool savePresetSucceeds;
   int timerReads = 0;
 
+  /// Build 127 — what the controller reads back (compacted).
+  List<Map<String, dynamic>> table = [];
+
   final List<({int id, Map<String, dynamic> state, String? name})> saved = [];
 
   @override
   Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
     timerReads++;
-    return null;
+    return [for (final t in table) Map<String, dynamic>.from(t)];
   }
 
   @override
@@ -238,29 +243,40 @@ void main() {
     });
   });
 
-  group('BUG 2 — the toggle builds from state, never from a readback', () {
-    ScheduleItem sunsetToEleven() => ScheduleItem(
-          id: 'sunset-11',
-          timeLabel: 'Sunset',
-          offTimeLabel: '11:00 PM',
-          repeatDays: const ['Daily'],
-          actionLabel: 'Pattern: evening',
-          enabled: true,
-          presetId: 10,
-        );
+  group('BUG 2 — the readback is classified by content, never by position',
+      () {
+    /// "Sunset → 11 PM" as a schedule sync wrote it and the controller reads
+    /// it back: the 11 PM OFF in a general slot, the sunset ON as a TH_SUNSET
+    /// (254) row; slot 8's placeholder, when nothing owns sunrise.
+    List<Map<String, dynamic>> sunsetToElevenTable({bool sunriseOff = false}) =>
+        [
+          {
+            'en': 1,
+            'hour': 23,
+            'min': 0,
+            'macro': 2,
+            'dow': 127,
+            'start': {'mon': 1, 'day': 1},
+            'end': {'mon': 12, 'day': 31},
+          },
+          sunriseOff
+              ? {'en': 1, 'hour': 255, 'min': 0, 'macro': 2, 'dow': 127}
+              : {'en': 0, 'hour': 255, 'min': 0, 'macro': 0, 'dow': 0},
+          {'en': 1, 'hour': 254, 'min': 0, 'macro': 10, 'dow': 127},
+        ];
 
     test('a lone sunset schedule keeps its sunset row when the sunrise-off is '
         'switched ON (the readback used to take it for the sunrise)', () async {
       final h = _harness(
-        _FakeService(presets: {2: _goodOffPresetDef()}),
-        schedules: [sunsetToEleven()],
+        _FakeService(presets: {2: _goodOffPresetDef()})
+          ..table = sunsetToElevenTable(),
         solarFlag: true,
       );
 
       await const SunriseOffService().arm(h.container.read(_refProvider));
 
       final ins = _pushedIns!;
-      expect(h.repo.timerReads, 0, reason: 'no readback to misread');
+      expect(h.repo.timerReads, 1, reason: 'one read, to keep what is held');
       expect(ins[ScheduleSyncService.kWledSunriseSlot]['macro'],
           kSunriseOffMacro);
       expect(ins[ScheduleSyncService.kWledSunsetSlot],
@@ -272,8 +288,8 @@ void main() {
 
     test('... and when it is switched OFF', () async {
       final h = _harness(
-        _FakeService(presets: {2: _goodOffPresetDef()}),
-        schedules: [sunsetToEleven()],
+        _FakeService(presets: {2: _goodOffPresetDef()})
+          ..table = sunsetToElevenTable(sunriseOff: true),
         solarFlag: true,
       );
 
@@ -283,12 +299,14 @@ void main() {
       expect(ins[ScheduleSyncService.kWledSunriseSlot]['en'], 0);
       expect(ins[ScheduleSyncService.kWledSunsetSlot]['macro'], 10);
       expect(ins[ScheduleSyncService.kWledSunsetSlot]['hour'], 254);
+      expect(ins.take(8).where((t) => t['macro'] == 2 && t['hour'] == 23),
+          hasLength(1), reason: 'its 11 PM OFF survives');
     });
 
     test('general slots never hold a sun row', () async {
       final h = _harness(
-        _FakeService(presets: {2: _goodOffPresetDef()}),
-        schedules: [sunsetToEleven()],
+        _FakeService(presets: {2: _goodOffPresetDef()})
+          ..table = sunsetToElevenTable(),
         solarFlag: true,
       );
 

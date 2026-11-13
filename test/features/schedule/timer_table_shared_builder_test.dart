@@ -77,8 +77,30 @@ Future<List<Map<String, dynamic>>> syncTable(
   return repo.lastIns;
 }
 
+/// What a 0.15.x controller reads back for a sent table: every row that is
+/// not all-zero, with the date range on slots 0–7.
+List<Map<String, dynamic>> _readbackOf(List<Map<String, dynamic>> sent) => [
+      for (final (i, t) in sent.indexed)
+        if (!((t['macro'] ?? 0) == 0 &&
+            (t['hour'] ?? 0) == 0 &&
+            (t['min'] ?? 0) == 0))
+          {
+            ...t,
+            if (i < 8) 'start': {'mon': 1, 'day': 1},
+            if (i < 8) 'end': {'mon': 12, 'day': 31},
+          },
+    ];
+
 class _TwoChannelController extends WledService {
-  _TwoChannelController() : super('http://mock');
+  _TwoChannelController({this.held = const []}) : super('http://mock');
+
+  /// Build 127 — the table the controller holds (the lease writer keeps every
+  /// row it does not own, so it reads this first).
+  final List<Map<String, dynamic>> held;
+
+  @override
+  Future<List<Map<String, dynamic>>?> fetchTimerInstances() async =>
+      [for (final t in held) Map<String, dynamic>.from(t)];
 
   @override
   Future<WledHardwareConfig?> getConfig() async => WledHardwareConfig(
@@ -146,12 +168,16 @@ int get tomorrowWeekday =>
     DateTime.now().add(const Duration(days: 1)).weekday; // Dart: Mon = 1
 
 /// The table the lease manager writes when it arms [tomorrowNight] on a
-/// two-channel controller holding [schedules].
+/// two-channel controller that HOLDS the table the schedule sync wrote for
+/// [schedules] (build 127: the lease writer keeps those rows; it no longer
+/// rebuilds them from the account's schedules).
 Future<({List<Map<String, dynamic>> ins, int leasePreset})> leaseTable(
     List<ScheduleItem> schedules) async {
+  final held = _readbackOf(await syncTable(schedules));
   List<Map<String, dynamic>>? captured;
   final container = ProviderContainer(overrides: [
-    wledRepositoryProvider.overrideWithValue(_TwoChannelController()),
+    wledRepositoryProvider
+        .overrideWithValue(_TwoChannelController(held: held)),
     calendarLeaseLiveWritesEnabledSyncProvider.overrideWithValue(true),
     calendarLeaseLiveWritesEnabledProvider
         .overrideWith((_) => Stream.value(true)),
@@ -288,9 +314,10 @@ void main() {
       final lease = await leaseTable([sunsetToEleven()]);
       expect(lease.ins, hasLength(10));
       expect(lease.ins[8], {'en': 0, 'hour': 255, 'min': 0, 'macro': 0, 'dow': 0},
-          reason: 'nothing owns sunrise → the disabled placeholder');
+          reason: 'nothing owns sunrise → the disabled placeholder, as held');
       expect(lease.ins[9],
-          {'en': 1, 'hour': 254, 'min': 0, 'macro': kEveningLook, 'dow': 127});
+          {'en': 1, 'hour': 254, 'min': 0, 'macro': kEveningLook, 'dow': 127},
+          reason: 'the sunset row is sent back exactly as held');
     });
   });
 

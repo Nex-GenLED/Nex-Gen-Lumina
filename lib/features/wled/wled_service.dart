@@ -1310,8 +1310,13 @@ class WledService
   /// wled_config_pusher's gamma verify.
   Future<List<Map<String, dynamic>>?> fetchTimerInstances() async {
     if (_simulate) {
-      // Echo back the last simulated cfg payload's timers so tests can verify.
-      return timerInstancesFromCfg(lastSimulatedConfigPayload);
+      // Echo back the last simulated cfg payload's timers so tests can
+      // verify. A simulated controller that has not been handed a timer
+      // table yet holds NO timers — `[]`, read-and-empty — which is what a
+      // fresh unit reports; null would mean the read failed (build 127: the
+      // table writers keep every row they do not own, so they must be able
+      // to read an empty one).
+      return timerInstancesFromCfg(lastSimulatedConfigPayload) ?? const [];
     }
     try {
       // Short timeouts (10s) keep verification polling responsive — a stalled
