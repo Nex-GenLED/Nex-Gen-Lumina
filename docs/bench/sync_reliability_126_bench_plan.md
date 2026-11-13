@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Account** | The owner's home account (the one older notes call "the bench account"). Its uid is deliberately not written here. No customer account, ever. |
+| **Account** | **A test account whose only controller is the spare `.179`.** The owner's home account, whose controller is the `.150`, **must not be used for this run**: an automatic re-sync could psave or pdel the `.150`'s corrupted presets. No customer account, ever. Step 0.3 checks the controller the app is talking to and stops the run if it is not the spare. |
 | **Controller** | **The spare only: `.179` on the home LAN, WLED 0.15.4, `ESP32_Ethernet`.** The home unit `.150` is **excluded by name**: nothing in this run may write to it. If at any point the app shows `.150` as the controller it is talking to, the run **stops** (step 0.3). |
 | **Build** | This build, installed from TestFlight on the iPhone (2.5.10+126 on the login screen it reads `v2.5.10`; the TestFlight number is the one the invite named). Branch `feat/126-candidate`; slice D (`feat/126-sync-readback`) is **not** in it. |
 | **Tools** | The iPhone only, plus a browser on the home Wi-Fi for **read-only** looks at the spare: `http://<spare>/json/info`, `http://<spare>/presets.json`, `http://<spare>/json/cfg`. All three are plain GETs that change nothing on the unit. No laptop scripts, no POSTs, no WLED web UI buttons. |
