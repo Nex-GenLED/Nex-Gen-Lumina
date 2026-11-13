@@ -135,7 +135,7 @@ void main() {
       expect(c.showsRetry, isTrue);
     });
 
-    test('the hours in the two window lines are the code's window', () {
+    test("the hours in the two window lines are the code's window", () {
       // If the window moves, these lines must move with it.
       String h(int hour24) {
         final h12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
