@@ -20,7 +20,7 @@ import 'package:nexgen_command/features/installer/installer_access_providers.dar
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// The five states a customer can be in, as the status row and the Home chip
+/// The six states a customer can be in, as the status row and the Home chip
 /// name them.
 enum ScheduleSyncState {
   /// The last sync was confirmed on the controller and every preset it wrote
@@ -43,6 +43,12 @@ enum ScheduleSyncState {
   /// preset could not be confirmed as written: its id is in
   /// [ScheduleSyncStatus.unconvergedPresetIds].
   writtenNotVerified,
+
+  /// Build 127 — the controller's own timer table, read at a LAN launch, does
+  /// not hold the ON row of at least one enabled schedule (schedule_drift.dart):
+  /// something changed on the controller since the last sync. A re-sync is
+  /// owed; the bounded automatic re-sync repairs it in its daytime window.
+  drifted,
 }
 
 /// The persisted outcome of the last sync for one account.
@@ -221,6 +227,16 @@ class ScheduleSyncCopy {
           // daytime window, so the promise names the hours.
           detail: "We'll try again when you open the app at home between "
               '9 am and 3 pm. You can retry now.',
+          showsRetry: true,
+        );
+      case ScheduleSyncState.drifted:
+        return const ScheduleSyncCopy(
+          headline: "Your schedule isn't on your lights.",
+          // Same automatic re-sync, same window
+          // ([kAutoResyncDayStartHour]–[kAutoResyncDayEndHour] local).
+          detail: 'Something changed on your controller. It sends again when '
+              'you open the app at home between 9 am and 3 pm, or tap Retry '
+              'now.',
           showsRetry: true,
         );
     }

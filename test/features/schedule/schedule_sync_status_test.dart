@@ -107,9 +107,32 @@ void main() {
         ScheduleSyncState.deferredOffLan,
         ScheduleSyncState.failed,
         ScheduleSyncState.writtenNotVerified,
+        ScheduleSyncState.drifted,
       ]) {
         expect(ScheduleSyncCopy.forState(s).showsRetry, isTrue, reason: s.name);
       }
+    });
+
+    test('the drifted state (build 127) says the schedule is not on the '
+        'lights, that something changed on the controller, names the window '
+        'and offers Retry', () {
+      final c = ScheduleSyncCopy.forState(ScheduleSyncState.drifted);
+      expect(c.headline, "Your schedule isn't on your lights.");
+      expect(c.detail,
+          'Something changed on your controller. It sends again when you '
+          'open the app at home between 9 am and 3 pm, or tap Retry now.');
+      expect(c.showsRetry, isTrue);
+    });
+
+    test('a drifted status owes a re-sync and round-trips through json', () {
+      final at = DateTime(2026, 11, 16, 10, 0);
+      final s = ScheduleSyncStatus(
+          state: ScheduleSyncState.drifted,
+          at: at,
+          message: 'Not on the controller: "Pattern: Classic Christmas 2"',
+          scheduleCount: 1);
+      expect(s.owesResync, isTrue);
+      expect(ScheduleSyncStatus.fromJson(s.toJson()), s);
     });
 
     test('the unconfirmed state promises only what the app does while open', () {
@@ -135,7 +158,7 @@ void main() {
       expect(c.showsRetry, isTrue);
     });
 
-    test("the hours in the two window lines are the code's window", () {
+    test("the hours in the three window lines are the code's window", () {
       // If the window moves, these lines must move with it.
       String h(int hour24) {
         final h12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
@@ -147,6 +170,7 @@ void main() {
       for (final s in [
         ScheduleSyncState.deferredOffLan,
         ScheduleSyncState.writtenNotVerified,
+        ScheduleSyncState.drifted,
       ]) {
         expect(ScheduleSyncCopy.forState(s).detail, contains(window),
             reason: s.name);

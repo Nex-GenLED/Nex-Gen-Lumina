@@ -15,6 +15,7 @@ import 'package:nexgen_command/features/schedule/schedule_conflict_dialog.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart';
 import 'package:nexgen_command/features/schedule/design_api_preset.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync.dart';
+import 'package:nexgen_command/features/schedule/schedule_drift.dart';
 import 'package:nexgen_command/features/schedule/schedule_sync_status.dart';
 import 'package:nexgen_command/features/schedule/schedules_subcollection_feature_flag.dart';
 import 'package:nexgen_command/features/schedule/solar_schedule_cleanup.dart';
@@ -145,6 +146,11 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// What the last automatic re-sync decision was (tests, diagnostics).
   @visibleForTesting
   AutoResyncVerdict? lastAutoResyncVerdict;
+
+  /// Build 127 — the schedules the last drift evaluation found missing on
+  /// the controller (tests, diagnostics). Empty after a read that matched.
+  @visibleForTesting
+  List<ScheduleItem> lastDriftedSchedules = const [];
 
   /// The clock the daytime gate and the attempt ledger read. Tests pin it so
   /// the suite is not red outside 9:00-15:00.
@@ -377,7 +383,13 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// never recorded (the in-flight sync owns the row until it resolves).
   Future<void> _recordSyncOutcome(ScheduleSyncResult result) async {
     final status = ScheduleSyncStatus.fromResult(result);
-    if (status == null || !mounted) return;
+    if (status == null) return;
+    await _recordStatus(status);
+  }
+
+  /// Persist [status], mirror it (non-fatal) and settle the owed flag.
+  Future<void> _recordStatus(ScheduleSyncStatus status) async {
+    if (!mounted) return;
     final uid = _ref.read(effectiveUserUidProvider);
     try {
       await _ref.read(scheduleSyncStatusProvider.notifier).record(status);
@@ -456,6 +468,43 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
   /// True when a re-sync is owed (tests).
   @visibleForTesting
   bool get debugResyncOwed => _resyncOwed;
+
+  // ─── Build 127: drift — is every enabled schedule still on the lights? ───
+
+  /// Compare the healer's latest timer read with the enabled schedules. A
+  /// schedule whose ON row the controller does not hold (time, days, macro
+  /// role — schedule_drift.dart) is DRIFTED: the `drifted` status is recorded
+  /// (row + chip, Retry), a re-sync is owed, and the bounded automatic
+  /// re-sync gets one attempt now under its usual window and bounds.
+  ///
+  /// Skipped when nothing is hydrated, the read is older than 36 hours or
+  /// older than the last recorded sync (the sync rewrote the table after the
+  /// read), or a sync is in flight (the table is mid-change).
+  Future<void> _evaluateDrift(DeviceTimerRead? read) async {
+    if (read == null || !_initialized || !mounted) return;
+    if (_syncInFlight) return;
+    final now = autoResyncClock();
+    final last = _ref.read(scheduleSyncStatusProvider);
+    if (!driftReadUsable(read, now: now, lastSyncAt: last?.at)) {
+      debugPrint('SchedulesNotifier: drift read ignored — older than '
+          '${kDriftReadMaxAge.inHours} h or than the last sync');
+      return;
+    }
+    final drifted = driftedSchedules(schedules: state, rows: read.rows);
+    lastDriftedSchedules = drifted;
+    if (drifted.isEmpty) return;
+    final names = drifted.map((s) => '"${s.actionLabel}"').join(', ');
+    debugPrint('SchedulesNotifier: DRIFT — the controller does not hold the '
+        'ON row of $names; recording and owing a re-sync');
+    await _recordStatus(ScheduleSyncStatus(
+      state: ScheduleSyncState.drifted,
+      at: now,
+      message: 'Not on the controller: $names',
+      scheduleCount: drifted.length,
+    ));
+    if (!mounted) return;
+    unawaited(_maybeAutoResync(trigger: 'drift'));
+  }
 
   /// The bounded automatic re-sync. Called on launch (first hydration), on a
   /// LAN return (the repository turning cfg-capable) and on the lights going
@@ -566,11 +615,20 @@ class SchedulesNotifier extends StateNotifier<List<ScheduleItem>> {
             // last session left a re-sync owed and we are on the home Wi-Fi,
             // the bounded automatic re-sync may run.
             unawaited(_maybeAutoResync(trigger: 'launch'));
+            // Build 127 — the healer's read may have landed before the
+            // schedules did; compare now that both are known.
+            unawaited(_evaluateDrift(_ref.read(deviceTimerReadProvider)));
           }
         });
       },
       fireImmediately: true,
     );
+
+    // Build 127 — DRIFT: every LAN launch's timer read is compared with the
+    // enabled schedules once both are known.
+    _ref.listen<DeviceTimerRead?>(deviceTimerReadProvider, (prev, next) {
+      unawaited(_evaluateDrift(next));
+    });
 
     // Also fire the cleanup when a LAN controller becomes reachable — cfg
     // writes only land on LAN, so a user who launched off-LAN (or before the

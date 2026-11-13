@@ -96,6 +96,8 @@ import 'package:nexgen_command/features/wled/base_ladder_repair_providers.dart'
     show ladderRepairCoordinatorProvider;
 import 'package:nexgen_command/features/wled/base_ladder_restore.dart';
 import 'package:nexgen_command/features/wled/controller_facts_publisher.dart';
+import 'package:nexgen_command/features/schedule/schedule_drift.dart'
+    show DeviceTimerRead, deviceTimerReadProvider;
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
@@ -499,6 +501,13 @@ class ControllerDefaultsHealer {
   /// dedicated frame-rate write and no backoff.
   final HealMarkerStore? markers;
 
+  /// Build 127 — receives the controller's timer rows from this connect's
+  /// one `/json/cfg` read (the same rows the base-boundary publisher gets),
+  /// so drift detection (schedule_drift.dart) can compare them with the
+  /// account's schedules without a second LAN round-trip. Called once per
+  /// successful read, before any heal; never when the table was unreadable.
+  final void Function(List<Map<String, dynamic>> rows)? onTimerRowsRead;
+
   const ControllerDefaultsHealer({
     required this.repo,
     required this.isLan,
@@ -509,6 +518,7 @@ class ControllerDefaultsHealer {
     this.rooflineSegments,
     this.publisher = const FirestoreControllerFactsPublisher(),
     this.markers,
+    this.onTimerRowsRead,
   });
 
   Future<ControllerHealReport> run() async {
@@ -554,6 +564,17 @@ class ControllerDefaultsHealer {
     // heal, and the publisher swallows its own errors (the memo stays
     // uncommitted, so the next connect retries).
     _dispatchFactsPublish(info, report);
+
+    // Build 127 — the same read, handed to drift detection. Guarded like the
+    // publish: a listener's throw must never abort the heals.
+    final rowsRead = info.timerRows;
+    if (rowsRead != null && onTimerRowsRead != null) {
+      try {
+        onTimerRowsRead!(rowsRead);
+      } catch (e) {
+        report.log.add('timer-rows listener failed: $e');
+      }
+    }
 
     final now = ctx.now();
     final health = evaluateClockHealth(
@@ -1467,6 +1488,18 @@ final controllerDefaultsHealerProvider =
       rooflineSegments: rooflineSegments,
       publisher: ref.read(controllerFactsPublisherProvider),
       markers: ref.read(healMarkerStoreProvider),
+      // Build 127 — the LAN launch's timer read, for drift detection.
+      onTimerRowsRead: (rows) {
+        try {
+          ref.read(deviceTimerReadProvider.notifier).state = DeviceTimerRead(
+            rows: rows,
+            at: nowFn(),
+            controllerId: ref.read(selectedControllerIdProvider),
+          );
+        } catch (e) {
+          debugPrint('[Healer] timer read not published for drift — $e');
+        }
+      },
     );
 
     final report = await healer.run();

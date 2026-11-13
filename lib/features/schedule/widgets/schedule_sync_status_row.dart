@@ -25,6 +25,10 @@ import 'package:nexgen_command/theme.dart';
         icon: Icons.warning_amber_rounded,
         color: Colors.orange.shade400
       );
+    case ScheduleSyncState.drifted:
+      // Something changed on the controller: amber, like an unconfirmed
+      // pattern — the lights still work, the schedule is what is off.
+      return (icon: Icons.sync_problem_rounded, color: Colors.orange.shade400);
   }
 }
 
