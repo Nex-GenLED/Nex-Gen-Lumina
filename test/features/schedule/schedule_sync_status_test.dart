@@ -114,15 +114,43 @@ void main() {
 
     test('the unconfirmed state promises only what the app does while open', () {
       // Nothing retries with the app closed: the automatic re-sync runs on
-      // launch, LAN return and lights off, all inside the running app.
+      // launch, LAN return and lights off, all inside the running app — and
+      // only inside the daytime window, which the line names.
       final c = ScheduleSyncCopy.forState(ScheduleSyncState.writtenNotVerified);
       expect(c.headline,
           'Your schedule is set, but one pattern could not be confirmed on '
           'your lights.');
       expect(c.detail,
-          "We'll try again the next time you open the app at home. "
-          'You can retry now.');
+          "We'll try again when you open the app at home between 9 am and "
+          '3 pm. You can retry now.');
       expect(c.showsRetry, isTrue);
+    });
+
+    test('the off-home-Wi-Fi state names the window and the Retry fallback', () {
+      final c = ScheduleSyncCopy.forState(ScheduleSyncState.deferredOffLan);
+      expect(c.headline, "Your schedule hasn't reached your lights yet.");
+      expect(c.detail,
+          'It sends when you open the app on your home Wi-Fi between 9 am '
+          "and 3 pm. At other times, tap Retry once you're home.");
+      expect(c.showsRetry, isTrue);
+    });
+
+    test('the hours in the two window lines are the code's window', () {
+      // If the window moves, these lines must move with it.
+      String h(int hour24) {
+        final h12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+        return '$h12 ${hour24 < 12 ? 'am' : 'pm'}';
+      }
+      final window =
+          'between ${h(kAutoResyncDayStartHour)} and ${h(kAutoResyncDayEndHour)}';
+      expect(window, 'between 9 am and 3 pm');
+      for (final s in [
+        ScheduleSyncState.deferredOffLan,
+        ScheduleSyncState.writtenNotVerified,
+      ]) {
+        expect(ScheduleSyncCopy.forState(s).detail, contains(window),
+            reason: s.name);
+      }
     });
 
     test('the not-reached states say so in the headline', () {

@@ -197,8 +197,12 @@ class ScheduleSyncCopy {
       case ScheduleSyncState.deferredOffLan:
         return const ScheduleSyncCopy(
           headline: "Your schedule hasn't reached your lights yet.",
-          detail: "It will the next time you open the app on your home "
-              "Wi-Fi. You can retry now if you're home.",
+          // The automatic re-sync runs only inside the daytime window
+          // ([kAutoResyncDayStartHour]–[kAutoResyncDayEndHour] local) and
+          // under its bounds, so the promise names the hours; outside them
+          // the customer's Retry is the way.
+          detail: 'It sends when you open the app on your home Wi-Fi between '
+              "9 am and 3 pm. At other times, tap Retry once you're home.",
           showsRetry: true,
         );
       case ScheduleSyncState.failed:
@@ -213,10 +217,10 @@ class ScheduleSyncCopy {
           headline: 'Your schedule is set, but one pattern could not be '
               'confirmed on your lights.',
           // The automatic re-sync only runs while the app is open (launch, LAN
-          // return, lights off — all in-process listeners); nothing retries
-          // with the app closed, so the promise is worded to match.
-          detail: "We'll try again the next time you open the app at home. "
-              'You can retry now.',
+          // return, lights off — all in-process listeners) and only inside the
+          // daytime window, so the promise names the hours.
+          detail: "We'll try again when you open the app at home between "
+              '9 am and 3 pm. You can retry now.',
           showsRetry: true,
         );
     }

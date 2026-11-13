@@ -79,9 +79,9 @@ The app's side is proven by the suite
 1.2 Phone: My Schedule → `+` → pick any pattern from Explore → ON time =
     now + 20 minutes, OFF time = now + 25 minutes, every day → Save.
     *Pass:* the status row reads, word for word,
-    "Your schedule hasn't reached your lights yet. It will the next time you
-    open the app on your home Wi-Fi. You can retry now if you're home. · just
-    now" with a **Retry** button; Home shows the chip "Your schedule hasn't
+    "Your schedule hasn't reached your lights yet. It sends when you open the
+    app on your home Wi-Fi between 9 am and 3 pm. At other times, tap Retry
+    once you're home. · just now" with a **Retry** button; Home shows the chip "Your schedule hasn't
     reached your lights yet." with **Retry**.
 
 1.3 **Browser** (on the home Wi-Fi, a laptop or the phone after 1.5 — read it
