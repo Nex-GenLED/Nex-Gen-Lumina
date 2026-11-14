@@ -5,7 +5,6 @@
 // What reaches the lights is the LIT colour — the colour scaled so the light
 // output is bri/255 of full, through the inverse of the controller's gamma
 // 2.8 — and every design saved before build 129 reads back unchanged.
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/manual_editor/design_frame.dart';
