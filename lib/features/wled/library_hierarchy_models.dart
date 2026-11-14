@@ -182,7 +182,6 @@ class LibraryCategoryIds {
   static const String seasonal = 'cat_season';
   static const String parties = 'cat_party';
   static const String architectural = 'cat_arch';
-  static const String brightness = 'cat_brightness';
   static const String security = 'cat_security';
   static const String movies = 'cat_movies';
   static const String nature = 'cat_nature';

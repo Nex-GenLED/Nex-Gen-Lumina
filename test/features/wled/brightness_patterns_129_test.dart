@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
+import 'package:nexgen_command/features/wled/brightness_tile.dart';
 import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
@@ -112,18 +113,23 @@ Object? _copy(Object? v) {
   return v;
 }
 
-/// Every catalog node that carries brightness preset [preset]: the card in
-/// each Kelvin folder's gradients folder (the six shipped presets) and the
-/// card in the Brightness Patterns root (every preset, warm white).
-Future<List<LibraryNode>> _nodesForPreset(
-    PatternRepository repo, String preset) async {
-  final out = <LibraryNode>[];
-  for (final style in ['k2000', 'k2700', 'k3000', 'k3500', 'k4000', 'k4500', 'k5000', 'k5500', 'k6500']) {
-    final n = await repo.getNodeById('arch_${style}_gradients_$preset');
-    if (n != null) out.add(n);
+/// Every card that carries brightness preset [preset]: the card in each
+/// Kelvin folder's folder (the six shipped presets), or — for a preset with no
+/// node of its own (Wave 6 / Wave 18, which the Adjust sheet offers) — the
+/// card the repository builds for it in each Kelvin white.
+Future<List<PatternItem>> _cardsForPreset(
+    PatternRepository repo, String presetId) async {
+  final out = <PatternItem>[];
+  for (final style in PatternRepository.archWhiteStyles) {
+    final n = await repo.getNodeById('arch_${style.id}_gradients_$presetId');
+    if (n != null) {
+      out.add(await _cardOf(repo, n));
+    } else {
+      out.add(PatternRepository.brightnessPatternCard(
+          brightnessPatternPresetById(presetId)!,
+          white: style.colors[0]));
+    }
   }
-  final rootNode = await repo.getNodeById('bright_$preset');
-  if (rootNode != null) out.add(rootNode);
   return out;
 }
 
@@ -233,15 +239,14 @@ void main() {
   group('shipped Brightness Gradients cards — the strip shows the per-bulb cycle the card promises', () {
     for (final preset in PatternRepository.brightnessGradientPresets) {
       testWidgets('${preset.name} (${preset.id}) on every card that carries it', (tester) async {
-        final nodes = await _nodesForPreset(repo, preset.id);
-        expect(nodes, isNotEmpty, reason: 'no catalog card carries ${preset.id}');
-        for (final node in nodes) {
-          final card = await _cardOf(repo, node);
+        final cards = await _cardsForPreset(repo, preset.id);
+        expect(cards, hasLength(9), reason: 'one card per Kelvin white for ${preset.id}');
+        for (final card in cards) {
           final strips = await _stripAfterTap(tester, card);
           for (final ch in kHomeLengths.keys) {
             final levels = lightLevels(strips[ch]!);
             _expectWithin(levels, intendedBulbLevels(_steps(preset.id), 1, levels.length),
-                '${preset.name} / ${node.id} / channel $ch');
+                '${preset.name} / ${card.id} / channel $ch');
           }
         }
       });

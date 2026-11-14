@@ -810,7 +810,6 @@ class PatternRepository {
     try {
       // Architectural & Security: direct palettes
       nodes.addAll(_buildArchitecturalPalettes());
-      nodes.addAll(_buildBrightnessPatternPalettes());
       nodes.addAll(_buildSecurityPalettes());
     } catch (e) {
       debugPrint('[PatternRepository] Architectural/Security failed: $e');
@@ -867,16 +866,6 @@ class PatternRepository {
       LibraryNode(
         id: 'cat_arch',
         name: 'Architectural Downlighting (White)',
-        nodeType: LibraryNodeType.category,
-        sortOrder: 0,
-        imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
-      ),
-      // Build 129 — the brightness patterns (light-by-light brightness along
-      // every run) in warm white, one tap from Explore. Each Kelvin folder
-      // under Architectural keeps its own six.
-      LibraryNode(
-        id: LibraryCategoryIds.brightness,
-        name: 'Brightness Patterns (White)',
         nodeType: LibraryNodeType.category,
         sortOrder: 0,
         imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
@@ -940,15 +929,14 @@ class PatternRepository {
       kBrightnessPatternPresets;
 
   /// The six presets that have shipped inside every Kelvin folder since
-  /// 2026-03-17 (the folder's node count is pinned by the tree test). The
-  /// two Wave presets live in the Brightness Patterns root alongside them.
+  /// 2026-03-17. The folder's node count (6), each Kelvin folder's (18) and
+  /// the Explore root list (eight) are pinned by tests, so the two Wave
+  /// presets are not catalog nodes: every brightness card's Adjust sheet
+  /// offers all eight presets, and [brightnessPatternCard] builds the card
+  /// for any preset in any white.
   static const List<String> kKelvinFolderPresetIds = [
     'gentle', 'medium', 'deep', 'stair', 'duo', 'pulse', //
   ];
-
-  /// The white the Brightness Patterns root paints with by default (3000K);
-  /// the adjustment panel offers every Kelvin step.
-  static const String kBrightnessRootWhiteId = 'k3000';
 
   /// Public: the adjustment panel offers these whites for a brightness pattern.
   static List<({String id, String name, String desc, List<Color> colors})>
@@ -967,9 +955,9 @@ class PatternRepository {
       for (final level in tile.levels.take(3))
         Color.fromARGB(
           255,
-          (baseColor.red * level / 100).round(),
-          (baseColor.green * level / 100).round(),
-          (baseColor.blue * level / 100).round(),
+          (baseColor.r * 255.0 * level / 100).round().clamp(0, 255),
+          (baseColor.g * 255.0 * level / 100).round().clamp(0, 255),
+          (baseColor.b * 255.0 * level / 100).round().clamp(0, 255),
         ),
     ];
     return LibraryNode(
@@ -984,7 +972,7 @@ class PatternRepository {
         'type': 'brightness_gradient',
         'presetId': preset.id,
         'brightnessTile': tile.toJson(),
-        'baseColorValue': baseColor.value,
+        'baseColorValue': baseColor.toARGB32(),
         'gradientColors': displayColors,
         'bandWidth': tile.bandWidth,
         'suggestedEffects': [0],
@@ -992,20 +980,44 @@ class PatternRepository {
     );
   }
 
-  /// The Brightness Patterns root: every preset in warm white, one tap from
-  /// Explore (the brief's "easily accessible white design").
-  List<LibraryNode> _buildBrightnessPatternPalettes() {
-    final style = _archWhiteStyles.firstWhere((s) => s.id == kBrightnessRootWhiteId);
-    return [
-      for (var i = 0; i < kBrightnessPatternPresets.length; i++)
-        _brightnessPatternNode(
-          id: 'bright_${kBrightnessPatternPresets[i].id}',
-          parentId: LibraryCategoryIds.brightness,
-          preset: kBrightnessPatternPresets[i],
-          baseColor: style.colors[0],
-          sortOrder: i,
-        ),
-    ];
+  /// The card for [preset] painted in [white] — what a catalog node
+  /// generates, and what the adjustment sheet or a test can build for a
+  /// preset that has no node of its own (Wave 6 / Wave 18).
+  static PatternItem brightnessPatternCard(
+    BrightnessPatternPreset preset, {
+    required Color white,
+    String categoryId = LibraryCategoryIds.architectural,
+    String? id,
+    String? name,
+  }) {
+    final base = colorsToWledCol([white]).first;
+    return PatternItem(
+      id: id ?? 'gen_bright_${preset.id}_static',
+      name: name ?? preset.name,
+      imageUrl: '',
+      categoryId: categoryId,
+      wledPayload: {
+        'on': true,
+        'bri': 200,
+        '_gradientMeta': {
+          'isGradient': true,
+          'presetId': preset.id,
+          'baseColorValue': white.toARGB32(),
+        },
+        kBrightnessTilePayloadKey: preset.tile.toJson(),
+        'seg': [
+          {
+            'fx': 0,
+            'sx': 0,
+            'ix': 128,
+            'pal': 0,
+            'grp': 1,
+            'spc': 0,
+            'col': [base],
+          }
+        ],
+      },
+    );
   }
 
   /// Build architectural downlighting folders and spacing pattern palettes
@@ -1326,39 +1338,20 @@ class PatternRepository {
   List<PatternItem> _generateBrightnessGradientPatterns(LibraryNode node) {
     final presetId = (node.metadata?['presetId'] as String?) ??
         (node.id.contains('_gradients_') ? node.id.split('_gradients_').last : 'gentle');
-    final tile = BrightnessTile.fromJson(node.metadata?['brightnessTile']) ??
-        brightnessPatternPresetById(presetId)?.tile ??
-        kBrightnessPatternPresets.first.tile;
+    final preset = brightnessPatternPresetById(presetId) ?? kBrightnessPatternPresets.first;
+    final stored = BrightnessTile.fromJson(node.metadata?['brightnessTile']);
     final baseColor = Color(
-        (node.metadata?['baseColorValue'] as int?) ?? node.themeColors!.first.value);
-    final base = colorsToWledCol([baseColor]).first;
+        (node.metadata?['baseColorValue'] as int?) ?? node.themeColors!.first.toARGB32());
     return [
-      PatternItem(
+      brightnessPatternCard(
+        stored == null
+            ? preset
+            : BrightnessPatternPreset(
+                id: preset.id, name: preset.name, description: preset.description, tile: stored),
+        white: baseColor,
+        categoryId: _findRootCategoryId(node.id),
         id: 'gen_${node.id}_static',
         name: node.name,
-        imageUrl: '',
-        categoryId: _findRootCategoryId(node.id),
-        wledPayload: {
-          'on': true,
-          'bri': 200,
-          '_gradientMeta': {
-            'isGradient': true,
-            'presetId': presetId,
-            'baseColorValue': baseColor.value,
-          },
-          kBrightnessTilePayloadKey: tile.toJson(),
-          'seg': [
-            {
-              'fx': 0,
-              'sx': 0,
-              'ix': 128,
-              'pal': 0,
-              'grp': 1,
-              'spc': 0,
-              'col': [base],
-            }
-          ],
-        },
       ),
     ];
   }
