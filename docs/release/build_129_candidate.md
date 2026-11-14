@@ -30,10 +30,15 @@ every bus). **Decision per the brief's rule: per-pixel data.**
    lights at 40 %), painted through the Design Studio spine (solid base + `i` chunks) to every
    channel. The six shipped presets now render as their cards always previewed. Two new presets:
    **Wave · 6 lights** (100/80/60/40/60/80 — T1) and **Wave · 18 lights** (T2).
-2. **Where they live.** A new Explore root **Brightness Patterns (White)** holds all eight in warm
-   white (3000K), one tap from Explore. Each Kelvin folder keeps its six-card folder (renamed
-   "Brightness Patterns"; its node count is pinned by `library_tree_coherence_test`, so the Wave
-   cards are not added there). No Breathing variant: a per-pixel frame freezes the segment.
+2. **Where they live.** Each Kelvin folder under Architectural keeps its six-card folder (renamed
+   "Brightness Patterns", first in the folder). The Wave 6 / Wave 18 presets are NOT catalog cards:
+   the Explore root list (eight + My Designs), each Kelvin folder (18) and the brightness folder (6)
+   are pinned by `my_designs_category_injection_test`, `rainbow_scope_test` and
+   `library_tree_coherence_test`, and a new root tried in this branch broke the first two. Every
+   brightness card's **Adjust** sheet offers all eight presets, so a Wave is two taps from any
+   brightness card; `PatternRepository.brightnessPatternCard` builds the card for any preset in any
+   white. Putting the Waves on cards means loosening one of those pins — Tyler's call. No Breathing
+   variant: a per-pixel frame freezes the segment.
 3. **Adjustable (T3).** Every brightness card shows an **Adjust** link (and the post-apply snackbar
    action) opening the adjustment sheet with `BrightnessTileControls`: presets, shape (Wave / Ramp /
    Steps / Custom), brightest, dimmest, lights per cycle, lights per step, start offset, a custom
