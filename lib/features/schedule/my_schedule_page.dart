@@ -2014,132 +2014,190 @@ void showScheduleDetailSheetForEntry(
   final canDelete =
       ref != null && (calEntry != null || recurringItem != null);
 
+  // Build 128 — the sheet goes on the ROOT navigator so it renders above
+  // MainScaffold's GlassDockNavBar: the branch navigator is a SIBLING of the
+  // dock in NavBarInsetShell's Stack, beneath it, so a sheet pushed there is
+  // covered by the dock (showIpEntrySheet documents the same fix).
+  // isScrollControlled lifts the 9/16 height cap that clipped this Column: the
+  // details scroll when they outgrow the screen, and Edit / Delete sit in a
+  // footer that never scrolls away and is never covered.
+  //
+  // The CALLER's context is beneath the dock, so its bottom inset is the whole
+  // dock (its content plus the safe area it pads itself by); the root sheet's
+  // own context reports the safe area alone. When the caller's inset exceeds
+  // the safe area a dock is there, and the sheet stops at its top edge: the
+  // dock stays visible under the barrier and no part of the sheet shares a
+  // pixel with it. Opened from a surface with no dock the band is 0 and the
+  // footer pads past the safe area instead.
+  // Pinned by test/features/schedule/entry_detail_sheet_nav_bar_test.dart.
+  final callerInset = navBarTotalHeight(context);
+
   showModalBottomSheet(
     context: context,
+    useRootNavigator: true,
+    isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (ctx) => Container(
-      // Bottom padding clears the glass dock nav bar overlay so the
-      // last detail row isn't hidden behind the dock.
-      padding: EdgeInsets.fromLTRB(20, 12, 20, 32 + navBarTotalHeight(ctx)),
-      decoration: BoxDecoration(
-        color: NexGenPalette.matteBlack,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border.all(color: NexGenPalette.line),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Drag handle
-          Center(
-            child: Container(
-              width: 40, height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: NexGenPalette.textMedium.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
+    builder: (ctx) {
+      final mq = MediaQuery.of(ctx);
+      final hasDock = callerInset > mq.padding.bottom + 0.5;
+      final dockBand = hasDock ? callerInset : 0.0;
+      final bottomInset = hasDock ? 0.0 : mq.padding.bottom;
+      return Padding(
+        padding: EdgeInsets.only(bottom: dockBand),
+        child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: mq.size.height - mq.padding.top - 24 - dockBand,
+        ),
+        child: Container(
+          padding: const EdgeInsets.only(top: 12),
+          decoration: BoxDecoration(
+            color: NexGenPalette.matteBlack,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.all(color: NexGenPalette.line),
           ),
-
-          // Full-width pixel strip
-          if (colors.isNotEmpty)
-            PixelStripPreview(
-              colors: colors,
-              effectType: effectType,
-              speed: speed,
-              brightness: brightness,
-              pixelCount: 32,
-              height: 48,
-              borderRadius: 10,
-            ),
-
-          const SizedBox(height: 16),
-
-          // Pattern name
-          Text(
-            patternName,
-            style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                  color: NexGenPalette.textHigh,
-                  fontWeight: FontWeight.w800,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: NexGenPalette.textMedium.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-          ),
-          const SizedBox(height: 4),
+              ),
 
-          // Effect name
-          Text(
-            effectName,
-            style: TextStyle(
-              color: NexGenPalette.cyan,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+              // The details. Loose-fit Flexible: as tall as the content when
+              // it fits, scrolling when it does not — the footer below keeps
+              // its own height either way.
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                      20, 0, 20, canDelete ? 8 : 24 + bottomInset),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Full-width pixel strip
+                      if (colors.isNotEmpty)
+                        PixelStripPreview(
+                          colors: colors,
+                          effectType: effectType,
+                          speed: speed,
+                          brightness: brightness,
+                          pixelCount: 32,
+                          height: 48,
+                          borderRadius: 10,
+                        ),
 
-          const SizedBox(height: 16),
+                      const SizedBox(height: 16),
 
-          // Detail rows
-          _DetailRow(
-            icon: Icons.wb_sunny_rounded,
-            label: 'On',
-            value: onTime != null
-                ? formatTimeLabel(onTime, timeFormat: timeFormat)
-                : '—',
-            color: NexGenPalette.cyan,
+                      // Pattern name
+                      Text(
+                        patternName,
+                        style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                              color: NexGenPalette.textHigh,
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+
+                      // Effect name
+                      Text(
+                        effectName,
+                        style: TextStyle(
+                          color: NexGenPalette.cyan,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Detail rows
+                      _DetailRow(
+                        icon: Icons.wb_sunny_rounded,
+                        label: 'On',
+                        value: onTime != null
+                            ? formatTimeLabel(onTime, timeFormat: timeFormat)
+                            : '—',
+                        color: NexGenPalette.cyan,
+                      ),
+                      const SizedBox(height: 8),
+                      _DetailRow(
+                        icon: Icons.nightlight_round,
+                        label: 'Off',
+                        value: offTime != null
+                            ? formatTimeLabel(offTime, timeFormat: timeFormat)
+                            : '—',
+                        color: NexGenPalette.violet,
+                      ),
+                      const SizedBox(height: 8),
+                      _DetailRow(
+                        icon: Icons.brightness_6_rounded,
+                        label: 'Brightness',
+                        value: brightnessPercent != null ? '$brightnessPercent%' : '—',
+                        color: NexGenPalette.amber,
+                      ),
+                      const SizedBox(height: 8),
+                      _DetailRow(
+                        icon: Icons.source_rounded,
+                        label: 'Source',
+                        value: source,
+                        color: NexGenPalette.textMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Build 128 — the footer: Edit and Delete, pinned below the
+              // scrolling details, padded past the device's bottom inset.
+              if (canDelete)
+                Padding(
+                  padding: EdgeInsets.fromLTRB(20, 8, 20, 24 + bottomInset),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Divider(color: NexGenPalette.line, height: 1),
+                      const SizedBox(height: 8),
+                      // Phase B1 — THE EDIT AFFORDANCE.
+                      //
+                      // This sheet was read-only: four detail rows and a
+                      // delete, with no route to any editor
+                      // (audit/SCHEDULING_V3_AUDIT.md §6.2, F3-2). A dated
+                      // entry had no reachable editor AT ALL — the only caller
+                      // of showCalendarEntryEditor was a detail sheet that
+                      // itself had zero call sites (F3-3), and which was
+                      // deleted in that change. Both entry kinds edit.
+                      _EditEntryButton(
+                        ref: ref,
+                        calEntry: calEntry,
+                        recurringItem: recurringItem,
+                        sheetContext: ctx,
+                      ),
+                      const SizedBox(height: 4),
+                      _DeleteEntryButton(
+                        ref: ref,
+                        calEntry: calEntry,
+                        recurringItem: recurringItem,
+                        dateKey: dateKey,
+                        sheetContext: ctx,
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(height: 8),
-          _DetailRow(
-            icon: Icons.nightlight_round,
-            label: 'Off',
-            value: offTime != null
-                ? formatTimeLabel(offTime, timeFormat: timeFormat)
-                : '—',
-            color: NexGenPalette.violet,
-          ),
-          const SizedBox(height: 8),
-          _DetailRow(
-            icon: Icons.brightness_6_rounded,
-            label: 'Brightness',
-            value: brightnessPercent != null ? '$brightnessPercent%' : '—',
-            color: NexGenPalette.amber,
-          ),
-          const SizedBox(height: 8),
-          _DetailRow(
-            icon: Icons.source_rounded,
-            label: 'Source',
-            value: source,
-            color: NexGenPalette.textMedium,
-          ),
-          if (canDelete) ...[
-            const SizedBox(height: 16),
-            Divider(color: NexGenPalette.line, height: 1),
-            const SizedBox(height: 8),
-            // Phase B1 — THE EDIT AFFORDANCE.
-            //
-            // This sheet was read-only: four detail rows and a delete, with no
-            // route to any editor (audit/SCHEDULING_V3_AUDIT.md §6.2, F3-2).
-            // A dated entry had no reachable editor AT ALL — the only caller
-            // of showCalendarEntryEditor was a detail sheet that itself had
-            // zero call sites (F3-3), and which is deleted in this change.
-            // Both entry kinds now edit.
-            _EditEntryButton(
-              ref: ref,
-              calEntry: calEntry,
-              recurringItem: recurringItem,
-              sheetContext: ctx,
-            ),
-            const SizedBox(height: 4),
-            _DeleteEntryButton(
-              ref: ref,
-              calEntry: calEntry,
-              recurringItem: recurringItem,
-              dateKey: dateKey,
-              sheetContext: ctx,
-            ),
-          ],
-        ],
-      ),
-    ),
+        ),
+        ),
+      );
+    },
   );
 }
 
@@ -2349,13 +2407,20 @@ class _DetailRow extends StatelessWidget {
             fontSize: 12,
           ),
         ),
-        const Spacer(),
-        Text(
-          value,
-          style: TextStyle(
-            color: NexGenPalette.textHigh,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
+        const SizedBox(width: 12),
+        // Build 128 — the value takes the remaining width and wraps. With a
+        // Spacer it overflowed the row by a few pixels at 320 pt / 2.0x
+        // (the "Source" row's longer values), which the large-text matrix
+        // now measures since the sheet no longer clips.
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              color: NexGenPalette.textHigh,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],
