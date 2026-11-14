@@ -128,8 +128,8 @@ void main() {
     test('the preview frame shows the lit colour, so a dim pixel looks dim', () {
       final d = _doc(len: 2).paint(0, [0, 1], const [255, 0, 0, 0]).setBrightness(0, [1], 102);
       final frame = frameFromDocument(d);
-      expect(frame[0]![0].red, 255);
-      expect(frame[0]![1].red, 184);
+      expect((frame[0]![0].r * 255).round(), 255);
+      expect((frame[0]![1].r * 255).round(), 184);
     });
 
     test('what the controller renders from the saved groups matches the intended light', () {

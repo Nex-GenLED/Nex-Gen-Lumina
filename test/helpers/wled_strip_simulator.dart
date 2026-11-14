@@ -47,7 +47,9 @@ int _scale8(int i, int scale) => (i * (scale + 1)) >> 8;
 List<List<int>> _gradient16(List<List<int>> stops) {
   final entries = List<List<int>>.generate(16, (_) => [0, 0, 0]);
   if (stops.length == 1) {
-    for (var i = 0; i < 16; i++) entries[i] = stops[0].sublist(0, 3);
+    for (var i = 0; i < 16; i++) {
+      entries[i] = stops[0].sublist(0, 3);
+    }
     return entries;
   }
   void fill(int from, List<int> a, int to, List<int> b) {
@@ -140,7 +142,9 @@ class WledStripSimulator {
 
     switch (fx) {
       case 0: // Solid
-        for (var i = 0; i < length; i++) out[i] = [...lit[0]];
+        for (var i = 0; i < length; i++) {
+          out[i] = [...lit[0]];
+        }
         return out;
       case 2: // Breathe, at its brightest instant (lum 254)
         for (var i = 0; i < length; i++) {

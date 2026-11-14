@@ -188,7 +188,7 @@ class BrightnessTileControls extends StatelessWidget {
                 _chip(
                   key: ValueKey('tile-white-${w.name}'),
                   label: w.name,
-                  selected: w.color.value == baseColor.value,
+                  selected: w.color.toARGB32() == baseColor.toARGB32(),
                   onTap: onWhiteChanged == null ? null : () => onWhiteChanged!(w.color),
                   swatch: w.color,
                 ),
@@ -444,8 +444,8 @@ Color dimmedForScreen(Color base, int levelPct) {
   final k = levelPct.clamp(0, 100) / 100.0;
   return Color.fromARGB(
     255,
-    (base.red * k).round(),
-    (base.green * k).round(),
-    (base.blue * k).round(),
+    (base.r * 255.0 * k).round().clamp(0, 255),
+    (base.g * 255.0 * k).round().clamp(0, 255),
+    (base.b * 255.0 * k).round().clamp(0, 255),
   );
 }

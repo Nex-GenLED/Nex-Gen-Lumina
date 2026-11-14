@@ -29,7 +29,6 @@ import 'package:nexgen_command/features/wled/wled_payload_utils.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/services/connectivity_service.dart';
-import 'package:nexgen_command/shared/wled_segment_defaults.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../helpers/home_dashboard_harness.dart';
@@ -305,8 +304,9 @@ void main() {
       final canvas = _RecordingCanvas();
       painter.paint(canvas, const Size(12 * 8.0, 8));
       expect(canvas.circles.length, greaterThanOrEqualTo(12));
-      final peak = canvas.circles.map((c) => c.red).reduce((a, b) => a > b ? a : b);
-      final previewLevels = [for (final c in canvas.circles.take(12)) c.red / peak * 100];
+      int red(Color c) => (c.r * 255.0).round();
+      final peak = canvas.circles.map(red).reduce((a, b) => a > b ? a : b);
+      final previewLevels = [for (final c in canvas.circles.take(12)) red(c) / peak * 100];
       _expectWithin(stripLevels.take(12).toList(), previewLevels, 'preview vs strip');
     });
   });
