@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/neighborhood/neighborhood_providers.dart';
+import 'package:nexgen_command/features/wled/library_hierarchy_models.dart';
 import 'package:nexgen_command/features/wled/pattern_grid_widgets.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
@@ -112,20 +113,32 @@ Object? _copy(Object? v) {
   return v;
 }
 
+/// Every catalog node that carries brightness preset [preset]: the card in
+/// each Kelvin folder's gradients folder (the six shipped presets) and the
+/// card in the Brightness Patterns root (every preset, warm white).
+Future<List<LibraryNode>> _nodesForPreset(
+    PatternRepository repo, String preset) async {
+  final out = <LibraryNode>[];
+  for (final style in ['k2000', 'k2700', 'k3000', 'k3500', 'k4000', 'k4500', 'k5000', 'k5500', 'k6500']) {
+    final n = await repo.getNodeById('arch_${style}_gradients_$preset');
+    if (n != null) out.add(n);
+  }
+  final rootNode = await repo.getNodeById('bright_$preset');
+  if (rootNode != null) out.add(rootNode);
+  return out;
+}
+
 /// The static card of one gradient preset under one Kelvin style.
 Future<PatternItem> _staticCard(
     PatternRepository repo, String style, String preset) async {
   final node = await repo.getNodeById('arch_${style}_gradients_$preset');
   expect(node, isNotNull, reason: 'catalog node arch_${style}_gradients_$preset');
-  final items = await repo.generatePatternsForNode(node!);
-  return items.firstWhere((p) => p.id.endsWith('_static'));
+  return _cardOf(repo, node!);
 }
 
-Future<PatternItem> _breathingCard(
-    PatternRepository repo, String style, String preset) async {
-  final node = await repo.getNodeById('arch_${style}_gradients_$preset');
-  final items = await repo.generatePatternsForNode(node!);
-  return items.firstWhere((p) => p.id.endsWith('_breathe'));
+Future<PatternItem> _cardOf(PatternRepository repo, LibraryNode node) async {
+  final items = await repo.generatePatternsForNode(node);
+  return items.firstWhere((p) => p.id.endsWith('_static'));
 }
 
 List<double> _steps(String preset) => PatternRepository.brightnessGradientPresets
@@ -220,14 +233,16 @@ void main() {
 
   group('shipped Brightness Gradients cards — the strip shows the per-bulb cycle the card promises', () {
     for (final preset in PatternRepository.brightnessGradientPresets) {
-      testWidgets('${preset.name} (${preset.id}) on every Kelvin style', (tester) async {
-        for (final style in ['k2000', 'k2700', 'k3000', 'k3500', 'k4000', 'k4500', 'k5000', 'k5500', 'k6500']) {
-          final card = await _staticCard(repo, style, preset.id);
+      testWidgets('${preset.name} (${preset.id}) on every card that carries it', (tester) async {
+        final nodes = await _nodesForPreset(repo, preset.id);
+        expect(nodes, isNotEmpty, reason: 'no catalog card carries ${preset.id}');
+        for (final node in nodes) {
+          final card = await _cardOf(repo, node);
           final strips = await _stripAfterTap(tester, card);
           for (final ch in kHomeLengths.keys) {
             final levels = lightLevels(strips[ch]!);
             _expectWithin(levels, intendedBulbLevels(_steps(preset.id), 1, levels.length),
-                '${preset.name} / $style / channel $ch');
+                '${preset.name} / ${node.id} / channel $ch');
           }
         }
       });
@@ -267,11 +282,13 @@ void main() {
       }
     });
 
-    testWidgets('the Breathing variant keeps the per-bulb cycle (at its brightest instant)', (tester) async {
-      final card = await _breathingCard(repo, 'k2700', 'medium');
-      final strips = await _stripAfterTap(tester, card);
-      final levels = lightLevels(strips[0]!);
-      _expectWithin(levels, intendedBulbLevels(_steps('medium'), 1, levels.length), 'Medium Fade – Breathing');
+    test('a brightness card is ONE still picture — no Breathing variant, because a '
+        'per-pixel frame freezes the segment and no effect can run over it', () async {
+      final node = await repo.getNodeById('arch_k2700_gradients_medium');
+      final items = await repo.generatePatternsForNode(node!);
+      expect(items, hasLength(1), reason: items.map((p) => p.id).join(', '));
+      final seg = (items.single.wledPayload['seg'] as List).first as Map;
+      expect(seg['fx'], 0, reason: 'the base the spine writes is Solid, not an effect');
     });
   });
 

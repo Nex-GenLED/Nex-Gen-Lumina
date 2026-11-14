@@ -12,12 +12,17 @@ import 'package:nexgen_command/features/wled/audioreactive_health.dart'
     show AudioReactiveConfigSource;
 import 'package:nexgen_command/features/wled/clock_health.dart'
     show ClockInfoSource, ControllerClockInfo;
+import 'package:nexgen_command/features/wled/per_pixel.dart';
 import 'package:nexgen_command/features/wled/wled_payload_utils.dart'
     show normalizeWledCfgPayload;
 import 'package:nexgen_command/features/wled/wled_repository.dart';
 
 class RecordingWledRepository
-    implements WledRepository, ClockInfoSource, AudioReactiveConfigSource {
+    implements
+        WledRepository,
+        PerPixelWriter,
+        ClockInfoSource,
+        AudioReactiveConfigSource {
   RecordingWledRepository({
     this.succeed = true,
     this.state,
@@ -93,6 +98,25 @@ class RecordingWledRepository
     applied.add(_copy(payload));
     return _write();
   }
+  /// Per-pixel paints land in [applied] too, one body per chunk, in order —
+  /// so a test can render everything the app wrote onto a simulated strip.
+  @override
+  Future<bool> applyPerPixel({
+    int segmentId = 0,
+    required List<PixelSpan> spans,
+    int chunkSize = kDefaultPixelChunkSize,
+  }) =>
+      postPixelSpansChunked(
+        spans: spans,
+        segmentId: segmentId,
+        chunkSize: chunkSize,
+        postChunk: (payload) async {
+          if (throwOnWrite) throw Exception('write failed');
+          applied.add(payload);
+          return succeed ? PerPixelChunkResult.ok : PerPixelChunkResult.failed;
+        },
+      );
+
 
   @override
   Future<bool> setState({

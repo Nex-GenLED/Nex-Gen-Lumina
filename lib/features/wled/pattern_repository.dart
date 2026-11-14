@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:nexgen_command/features/wled/brightness_tile.dart';
 import 'package:nexgen_command/features/wled/sparkle_background.dart';
 import 'package:nexgen_command/features/wled/pattern_models.dart';
 import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
@@ -809,6 +810,7 @@ class PatternRepository {
     try {
       // Architectural & Security: direct palettes
       nodes.addAll(_buildArchitecturalPalettes());
+      nodes.addAll(_buildBrightnessPatternPalettes());
       nodes.addAll(_buildSecurityPalettes());
     } catch (e) {
       debugPrint('[PatternRepository] Architectural/Security failed: $e');
@@ -869,6 +871,16 @@ class PatternRepository {
         sortOrder: 0,
         imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
       ),
+      // Build 129 — the brightness patterns (light-by-light brightness along
+      // every run) in warm white, one tap from Explore. Each Kelvin folder
+      // under Architectural keeps its own six.
+      LibraryNode(
+        id: LibraryCategoryIds.brightness,
+        name: 'Brightness Patterns (White)',
+        nodeType: LibraryNodeType.category,
+        sortOrder: 0,
+        imageUrl: 'https://images.unsplash.com/photo-1600585154154-8c857b74f2ab',
+      ),
       LibraryNode(
         id: 'cat_security',
         name: 'Security & Alerts',
@@ -922,16 +934,79 @@ class PatternRepository {
     (id: 'k6500', name: '6500K', desc: 'Moonlight', colors: [Color(0xFFFFFEFA), Color(0xFFEEF2FF)]),
   ];
 
-  /// Brightness gradient preset definitions.
-  /// Public so the adjustment panel can offer preset switching.
-  static const brightnessGradientPresets = [
-    (id: 'gentle',   name: 'Gentle Fade',   desc: 'Subtle brightness taper',         steps: [1.0, 0.85, 0.70]),
-    (id: 'medium',   name: 'Medium Fade',   desc: 'Balanced brightness falloff',     steps: [1.0, 0.75, 0.50]),
-    (id: 'deep',     name: 'Deep Fade',     desc: 'Dramatic brightness drop',        steps: [1.0, 0.60, 0.30]),
-    (id: 'stair',    name: 'Staircase',     desc: 'Even thirds brightness steps',    steps: [1.0, 0.66, 0.33]),
-    (id: 'duo',      name: 'Duo Alternate', desc: 'Two-step bright/dim alternation', steps: [1.0, 0.70]),
-    (id: 'pulse',    name: 'Soft Pulse',    desc: 'Rhythmic bright-dim-bright wave', steps: [1.0, 0.80, 1.0, 0.60]),
+  /// The brightness-pattern presets (brightness_tile.dart). Kept under this
+  /// name for the adjustment panel and the tests that read `.steps`.
+  static List<BrightnessPatternPreset> get brightnessGradientPresets =>
+      kBrightnessPatternPresets;
+
+  /// The six presets that have shipped inside every Kelvin folder since
+  /// 2026-03-17 (the folder's node count is pinned by the tree test). The
+  /// two Wave presets live in the Brightness Patterns root alongside them.
+  static const List<String> kKelvinFolderPresetIds = [
+    'gentle', 'medium', 'deep', 'stair', 'duo', 'pulse', //
   ];
+
+  /// The white the Brightness Patterns root paints with by default (3000K);
+  /// the adjustment panel offers every Kelvin step.
+  static const String kBrightnessRootWhiteId = 'k3000';
+
+  /// Public: the adjustment panel offers these whites for a brightness pattern.
+  static List<({String id, String name, String desc, List<Color> colors})>
+      get archWhiteStyles => _archWhiteStyles;
+
+  /// A brightness-pattern palette node: the card the customer taps.
+  static LibraryNode _brightnessPatternNode({
+    required String id,
+    required String parentId,
+    required BrightnessPatternPreset preset,
+    required Color baseColor,
+    required int sortOrder,
+  }) {
+    final tile = preset.tile;
+    final displayColors = [
+      for (final level in tile.levels.take(3))
+        Color.fromARGB(
+          255,
+          (baseColor.red * level / 100).round(),
+          (baseColor.green * level / 100).round(),
+          (baseColor.blue * level / 100).round(),
+        ),
+    ];
+    return LibraryNode(
+      id: id,
+      name: preset.name,
+      description: preset.description,
+      nodeType: LibraryNodeType.palette,
+      parentId: parentId,
+      themeColors: displayColors,
+      sortOrder: sortOrder,
+      metadata: {
+        'type': 'brightness_gradient',
+        'presetId': preset.id,
+        'brightnessTile': tile.toJson(),
+        'baseColorValue': baseColor.value,
+        'gradientColors': displayColors,
+        'bandWidth': tile.bandWidth,
+        'suggestedEffects': [0],
+      },
+    );
+  }
+
+  /// The Brightness Patterns root: every preset in warm white, one tap from
+  /// Explore (the brief's "easily accessible white design").
+  List<LibraryNode> _buildBrightnessPatternPalettes() {
+    final style = _archWhiteStyles.firstWhere((s) => s.id == kBrightnessRootWhiteId);
+    return [
+      for (var i = 0; i < kBrightnessPatternPresets.length; i++)
+        _brightnessPatternNode(
+          id: 'bright_${kBrightnessPatternPresets[i].id}',
+          parentId: LibraryCategoryIds.brightness,
+          preset: kBrightnessPatternPresets[i],
+          baseColor: style.colors[0],
+          sortOrder: i,
+        ),
+    ];
+  }
 
   /// Build architectural downlighting folders and spacing pattern palettes
   List<LibraryNode> _buildArchitecturalPalettes() {
@@ -1002,46 +1077,25 @@ class PatternRepository {
       final gradientsFolderId = 'arch_${style.id}_gradients';
       nodes.add(LibraryNode(
         id: gradientsFolderId,
-        name: 'Brightness Gradients',
-        description: 'Graduated brightness patterns in ${style.desc.toLowerCase()}',
+        name: 'Brightness Patterns',
+        description: 'Light-by-light brightness patterns in ${style.desc.toLowerCase()}',
         nodeType: LibraryNodeType.folder,
         parentId: 'arch_${style.id}',
         themeColors: style.colors,
         sortOrder: -1,
       ));
 
-      // Add gradient preset patterns inside the folder
+      // The six shipped presets inside the folder, as brightness tiles.
       final baseColor = style.colors[0];
-      final baseR = baseColor.red;
-      final baseG = baseColor.green;
-      final baseB = baseColor.blue;
-
-      for (var gi = 0; gi < brightnessGradientPresets.length; gi++) {
-        final preset = brightnessGradientPresets[gi];
-        final gradientColors = preset.steps
-            .map((pct) => Color.fromARGB(
-                  255,
-                  (baseR * pct).round(),
-                  (baseG * pct).round(),
-                  (baseB * pct).round(),
-                ))
-            .toList();
-
-        nodes.add(LibraryNode(
+      var gi = 0;
+      for (final presetId in kKelvinFolderPresetIds) {
+        final preset = brightnessPatternPresetById(presetId)!;
+        nodes.add(_brightnessPatternNode(
           id: 'arch_${style.id}_gradients_${preset.id}',
-          name: preset.name,
-          description: preset.desc,
-          nodeType: LibraryNodeType.palette,
           parentId: gradientsFolderId,
-          themeColors: gradientColors,
-          sortOrder: gi,
-          metadata: {
-            'type': 'brightness_gradient',
-            'gradientColors': gradientColors,
-            'bandWidth': 1,
-            'breathing': false,
-            'suggestedEffects': [83],
-          },
+          preset: preset,
+          baseColor: baseColor,
+          sortOrder: gi++,
         ));
       }
     }
@@ -1258,85 +1312,55 @@ class PatternRepository {
     return items;
   }
 
-  /// Generate patterns for a brightness gradient palette node.
-  /// Produces a static variant and a breathing variant from the gradient metadata.
+  /// The one card of a brightness-pattern node: a per-pixel TILE (see
+  /// brightness_tile.dart), not an effect. The payload's `seg` is the solid
+  /// base the spine writes first; the tile rides under
+  /// [kBrightnessTilePayloadKey] and `_gradientMeta` tells the adjustment
+  /// panel which preset and white it started from. Every consumer that
+  /// applies a card checks [brightnessTileOf] before treating the payload as
+  /// an effect.
+  ///
+  /// There is no Breathing variant any more: a per-pixel frame freezes the
+  /// segment, so no effect can run over it (and fx 2 never had a spatial
+  /// component to begin with — it pulsed the whole run).
   List<PatternItem> _generateBrightnessGradientPatterns(LibraryNode node) {
-    final gradientColors = (node.metadata?['gradientColors'] as List?)
-        ?.cast<Color>() ?? node.themeColors!;
-    final bandWidth = (node.metadata?['bandWidth'] as int?) ?? 1;
-    final col = colorsToWledCol(gradientColors);
-
-    // Extract the base color (full brightness) from the node's parent style.
-    // The first gradient color is always the 100% step, which IS the base color.
-    final baseColor = gradientColors.first;
-
-    // Determine which preset this node represents from its ID suffix
-    final nodeId = node.id;
-    final presetId = nodeId.contains('_gradients_')
-        ? nodeId.split('_gradients_').last
-        : 'gentle';
-
-    // Shared gradient metadata embedded in payload so the adjustment panel
-    // can detect gradient patterns and offer preset/bandWidth/breathing controls.
-    final gradientMeta = {
-      'isGradient': true,
-      'presetId': presetId,
-      'baseColorValue': baseColor.value,
-    };
-
-    final items = <PatternItem>[];
-    final categoryId = _findRootCategoryId(node.id);
-
-    // Static variant — Solid Pattern (fx 83)
-    // NOTE: pal omitted intentionally — testing whether pal: 5 was
-    // overriding the col array on fx 83 and causing the rendering to
-    // collapse to a uniform color. If this fix works, this comment
-    // becomes the documentation. If not, restore pal: 5 and try fx 84
-    // "Solid Pattern Tri" instead.
-    items.add(PatternItem(
-      id: 'gen_${node.id}_static',
-      name: '${node.name} – Static',
-      imageUrl: '',
-      categoryId: categoryId,
-      wledPayload: {
-        'on': true,
-        'bri': 200,
-        '_gradientMeta': gradientMeta,
-        'seg': [
-          {
-            'fx': 83,
-            'col': col,
-            'grp': bandWidth,
-            'spc': 0,
-            'sx': 0,
-          }
-        ],
-      },
-    ));
-
-    // Breathing variant — Breathe effect (fx 2)
-    items.add(PatternItem(
-      id: 'gen_${node.id}_breathe',
-      name: '${node.name} – Breathing',
-      imageUrl: '',
-      categoryId: categoryId,
-      wledPayload: {
-        'on': true,
-        'bri': 200,
-        '_gradientMeta': gradientMeta,
-        'seg': [
-          {
-            'fx': 2,
-            'col': col,
-            'grp': bandWidth,
-            'spc': 0,
-            'sx': 100,
-          }
-        ],
-      },
-    ));
-
-    return items;
+    final presetId = (node.metadata?['presetId'] as String?) ??
+        (node.id.contains('_gradients_') ? node.id.split('_gradients_').last : 'gentle');
+    final tile = BrightnessTile.fromJson(node.metadata?['brightnessTile']) ??
+        brightnessPatternPresetById(presetId)?.tile ??
+        kBrightnessPatternPresets.first.tile;
+    final baseColor = Color(
+        (node.metadata?['baseColorValue'] as int?) ?? node.themeColors!.first.value);
+    final base = colorsToWledCol([baseColor]).first;
+    return [
+      PatternItem(
+        id: 'gen_${node.id}_static',
+        name: node.name,
+        imageUrl: '',
+        categoryId: _findRootCategoryId(node.id),
+        wledPayload: {
+          'on': true,
+          'bri': 200,
+          '_gradientMeta': {
+            'isGradient': true,
+            'presetId': presetId,
+            'baseColorValue': baseColor.value,
+          },
+          kBrightnessTilePayloadKey: tile.toJson(),
+          'seg': [
+            {
+              'fx': 0,
+              'sx': 0,
+              'ix': 128,
+              'pal': 0,
+              'grp': 1,
+              'spc': 0,
+              'col': [base],
+            }
+          ],
+        },
+      ),
+    ];
   }
 
   /// Find the root category ID for a node

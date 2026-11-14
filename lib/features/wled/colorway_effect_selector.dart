@@ -18,6 +18,12 @@ import 'package:nexgen_command/features/wled/pattern_flash_safety.dart';
 import 'package:nexgen_command/features/wled/usage_tracking_extension.dart';
 import 'package:nexgen_command/shared/write_result.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart' show PatternRepository;
+import 'package:nexgen_command/features/wled/brightness_tile.dart';
+import 'package:nexgen_command/features/wled/brightness_tile_apply.dart';
+import 'package:nexgen_command/features/wled/widgets/brightness_tile_controls.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart' show SpineWriteResult;
+import 'package:nexgen_command/features/design/widgets/design_dialogs.dart' show showNameDesignDialog;
+import 'package:nexgen_command/features/installer/installer_access_providers.dart' show effectiveUserUidProvider;
 import 'package:nexgen_command/features/wled/wled_effects_catalog.dart';
 import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart' show WledStateModel;
@@ -36,7 +42,9 @@ import 'package:go_router/go_router.dart';
 import 'package:nexgen_command/features/dashboard/widgets/channel_selector_bar.dart';
 import 'package:nexgen_command/features/autopilot/game_day_autopilot_providers.dart';
 import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
-    show PerPixelDesignRefused;
+    show PerPixelDesignRefused, perPixelPickerRefusalMessage;
+import 'package:nexgen_command/shared/apply_blocked_reason.dart'
+    show applyBlockedReason, kApplyBlockedFallback;
 import 'package:nexgen_command/features/favorites/favorites_full_dialog.dart';
 import 'package:nexgen_command/features/game_day/game_day_design_save.dart';
 import 'package:nexgen_command/features/schedule/my_schedule_page.dart'
@@ -394,8 +402,8 @@ class _ColorwayEffectSelectorPageState
       ref.read(selectorIntensityProvider.notifier),
       ref.read(selectorColorGroupProvider.notifier),
       ref.read(selectorSpacingProvider.notifier),
-      ref.read(selectorGradientPresetProvider.notifier),
-      ref.read(selectorBreathingProvider.notifier),
+      ref.read(selectorBrightnessTileProvider.notifier),
+      ref.read(selectorBrightnessWhiteProvider.notifier),
       ref.read(selectorMotionTypeProvider.notifier),
       ref.read(selectorColorBehaviorProvider.notifier),
       ref.read(selectorSolidLayoutProvider.notifier),
@@ -451,17 +459,8 @@ class _ColorwayEffectSelectorPageState
     final meta = widget.paletteNode.metadata;
     final initGrouping = (meta?['grouping'] as int?) ?? (meta?['bandWidth'] as int?) ?? 1;
     final initSpacing = (meta?['spacing'] as int?) ?? 0;
-    final isBrGradient = meta?['type'] == 'brightness_gradient';
-    // Resolve initial gradient preset index from node ID suffix
-    int initPreset = 0;
-    if (isBrGradient) {
-      final nodeId = widget.paletteNode.id;
-      final suffix = nodeId.contains('_gradients_') ? nodeId.split('_gradients_').last : '';
-      final presets = PatternRepository.brightnessGradientPresets;
-      for (var pi = 0; pi < presets.length; pi++) {
-        if (presets[pi].id == suffix) { initPreset = pi; break; }
-      }
-    }
+    // Build 129: a brightness-pattern node opens on its own tile and white
+    // (the providers hold null = "the node's own"; see _currentTile).
     // DESIGN-EDIT: snapshot the shared providers BEFORE anything overwrites
     // them, so cancel can put them back for the next catalog visit.
     if (widget.isDesignEdit) {
@@ -495,8 +494,8 @@ class _ColorwayEffectSelectorPageState
           seedFx, widget.initialIntensity ?? effectDefaultIntensity(seedFx) ?? 128);
       ref.read(selectorColorGroupProvider.notifier).state = initGrouping;
       ref.read(selectorSpacingProvider.notifier).state = initSpacing;
-      ref.read(selectorGradientPresetProvider.notifier).state = initPreset;
-      ref.read(selectorBreathingProvider.notifier).state = false;
+      ref.read(selectorBrightnessTileProvider.notifier).state = null;
+      ref.read(selectorBrightnessWhiteProvider.notifier).state = null;
       ref.read(selectorMotionTypeProvider.notifier).state = null;
       ref.read(selectorColorBehaviorProvider.notifier).state = null;
       // Seeded like the nine above. It used to be the one provider left
@@ -529,11 +528,11 @@ class _ColorwayEffectSelectorPageState
     n[2].state = s.intensity;
     n[3].state = s.grouping;
     n[4].state = s.spacing;
-    // Gradient-only inputs: reset rather than derived. A stored design is
-    // never a brightness gradient (see `forDesign`), so leaving a previous
-    // palette's values in place would be stale state, not preserved state.
-    n[5].state = 0;
-    n[6].state = false;
+    // Brightness-pattern inputs (build 129): reset to "the node's own". A
+    // stored design is never a brightness-pattern node (see `forDesign`), so
+    // leaving a previous node's tile in place would be stale state.
+    n[5].state = null;
+    n[6].state = null;
     n[7].state = null;
     n[8].state = null;
     n[9].state = layout;
@@ -826,22 +825,29 @@ class _ColorwayEffectSelectorPageState
   /// the firmware's hue wheel renders the full spectrum (rainbow_scope.dart).
   bool get _isRainbowPalette => isRainbowLibraryNode(widget.paletteNode);
 
-  /// Compute gradient colors from the base (100%) color and preset steps.
-  List<Color> _gradientColorsForPreset(int presetIndex) {
-    final presets = PatternRepository.brightnessGradientPresets;
-    final preset = presets[presetIndex.clamp(0, presets.length - 1)];
-    final baseColor = widget.paletteNode.themeColors!.first;
-    final r = (baseColor.r * 255).round();
-    final g = (baseColor.g * 255).round();
-    final b = (baseColor.b * 255).round();
-    return preset.steps
-        .map((pct) => Color.fromARGB(
-              255,
-              (r * pct).round().clamp(0, 255),
-              (g * pct).round().clamp(0, 255),
-              (b * pct).round().clamp(0, 255),
-            ))
-        .toList();
+  /// Build 129 — a brightness-pattern node is tuned as a TILE (brightness_
+  /// tile.dart): the node's own preset until the customer changes it.
+  BrightnessTile get _nodeTile =>
+      BrightnessTile.fromJson(widget.paletteNode.metadata?['brightnessTile']) ??
+      brightnessPatternPresetById(
+              (widget.paletteNode.metadata?['presetId'] as String?) ?? 'gentle')
+          ?.tile ??
+      kBrightnessPatternPresets.first.tile;
+
+  BrightnessTile get _currentTile =>
+      ref.read(selectorBrightnessTileProvider) ?? _nodeTile;
+
+  /// The white the tile is painted in: the node's Kelvin colour until changed.
+  Color get _tileWhite =>
+      ref.read(selectorBrightnessWhiteProvider) ??
+      Color((widget.paletteNode.metadata?['baseColorValue'] as int?) ??
+          widget.paletteNode.themeColors!.first.value);
+
+  /// The first [count] lights of the tile as the phone shows them.
+  List<Color> _tilePreviewColors(int count) {
+    final tile = _currentTile;
+    final white = _tileWhite;
+    return [for (final l in tile.levelsForRun(count)) dimmedForScreen(white, l)];
   }
 
   /// Returns the effective WLED effect ID. When effect 0 (Solid) is selected
@@ -930,23 +936,23 @@ class _ColorwayEffectSelectorPageState
     final colorGroup = ref.read(selectorColorGroupProvider);
     final spacing = ref.read(selectorSpacingProvider);
 
-    // For brightness gradients, derive colors and effect from gradient state
-    final List<List<int>> cols;
-    final int fxId;
-    final int speed;
+    // Build 129 — a brightness pattern is a per-pixel tile: it goes through
+    // the Design Studio spine to every channel, never through a template
+    // segment (brightness_tile_apply.dart).
     if (_isBrightnessGradient) {
-      final presetIdx = ref.read(selectorGradientPresetProvider);
-      final breathing = ref.read(selectorBreathingProvider);
-      final gradColors = _gradientColorsForPreset(presetIdx);
-      cols = PatternRepository.colorsToWledCol(gradColors);
-      fxId = breathing ? 2 : 83;
-      speed = breathing ? 100 : 0;
-    } else {
-      final effectId = ref.read(selectorEffectIdProvider);
-      cols = _paletteColsRgbw();
-      fxId = _effectiveEffectId(effectId);
-      speed = ref.read(selectorSpeedProvider);
+      final result = await applyBrightnessTileWith(
+        ref.read,
+        tile: _currentTile,
+        baseRgbw: PatternRepository.colorsToWledCol([_tileWhite]).first,
+      );
+      if (result.isOk) _previewWritten = true;
+      return;
     }
+
+    final effectId = ref.read(selectorEffectIdProvider);
+    final List<List<int>> cols = _paletteColsRgbw();
+    final int fxId = _effectiveEffectId(effectId);
+    final int speed = ref.read(selectorSpeedProvider);
 
     // ONE builder for every exit (selector_payload.dart). `pal` is derived
     // from the effect's colour behaviour there, not hardcoded — palette-
@@ -1005,12 +1011,12 @@ class _ColorwayEffectSelectorPageState
     final List<Color> previewColors;
     final String effectName;
     if (_isBrightnessGradient) {
-      final breathing = ref.read(selectorBreathingProvider);
-      final presetIdx = ref.read(selectorGradientPresetProvider);
-      previewColors = _gradientColorsForPreset(presetIdx);
-      fxId = breathing ? 2 : 83;
-      speed = breathing ? 100 : 0;
-      effectName = breathing ? 'Breathing' : 'Static';
+      // The commit payload is the tile's solid BASE plus the tile itself; the
+      // apply path paints it per pixel (see _applyPattern).
+      previewColors = _tilePreviewColors(3);
+      fxId = 0;
+      speed = 0;
+      effectName = 'Brightness pattern';
     } else {
       final effectId = ref.read(selectorEffectIdProvider);
       previewColors = _paletteColors;
@@ -1021,7 +1027,7 @@ class _ColorwayEffectSelectorPageState
 
     final List<List<int>> cols;
     if (_isBrightnessGradient) {
-      cols = PatternRepository.colorsToWledCol(previewColors);
+      cols = PatternRepository.colorsToWledCol([_tileWhite]);
     } else {
       // previewColors == _paletteColors here; the local preview keeps the
       // brand colours, the device gets the LED ones.
@@ -1043,6 +1049,9 @@ class _ColorwayEffectSelectorPageState
           rainbowPaletteOverride(
               effectId: fxId, rainbowScope: _isRainbowPalette),
     ));
+    if (_isBrightnessGradient) {
+      payload[kBrightnessTilePayloadKey] = _currentTile.toJson();
+    }
     return _Commit(
       payload: payload,
       fxId: fxId,
@@ -1060,6 +1069,10 @@ class _ColorwayEffectSelectorPageState
   /// write of its own); APPLY mode writes it to the lights and persists
   /// nothing.
   Future<void> _applyPattern() async {
+    if (_isBrightnessGradient) {
+      await _commitBrightnessTile();
+      return;
+    }
     final commit = _buildCommit(
       brightness: widget.handsBack ? kHandedBackDesignBrightness : null,
     );
@@ -1198,6 +1211,103 @@ class _ColorwayEffectSelectorPageState
   ///     Preview is the ONLY thing here that does.
   ///   • APPLY (Explore) → "Save…" (Favorites / Game Day / schedule, no
   ///     controller write) + "Apply" (controller write, no persistence).
+  /// Build 129 — committing a brightness pattern. It is a per-pixel picture:
+  /// a destination that stores a segment payload (a schedule, Game Day,
+  /// Favorites) cannot replay it, so SAVE mode refuses with the per-pixel
+  /// wording every picker already uses. APPLY mode paints it through the
+  /// spine, like an Explore card.
+  Future<void> _commitBrightnessTile() async {
+    final name = '${widget.paletteNode.name} (brightness pattern)';
+    if (widget.handsBack) {
+      final notifier = ref.read(wledStateProvider.notifier);
+      final restored = await _restoreCapturedLook();
+      if (!restored) {
+        await notifier.runAndReport(_restoreFailed(),
+            onFailure: kRestoreFailedMessage);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        key: const ValueKey('brightness-tile-refused'),
+        content: Text(perPixelPickerRefusalMessage(
+            name, widget.saveDestinationLabel)),
+        duration: const Duration(seconds: 7),
+      ));
+      return;
+    }
+    final container = ProviderScope.containerOf(context, listen: false);
+    final channels = await resolveChannelsForTap(container);
+    if (channels == null || !mounted) return;
+    final result = await applyBrightnessTileWith(
+      container.read,
+      tile: _currentTile,
+      baseRgbw: PatternRepository.colorsToWledCol([_tileWhite]).first,
+      label: name,
+    );
+    if (!mounted) return;
+    if (!result.isOk) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result == SpineWriteResult.noChannels
+            ? (applyBlockedReason(container.read) ?? kApplyBlockedFallback)
+            : (result.userMessage ?? "Couldn't reach your lights.")),
+        backgroundColor: Colors.red.shade800,
+        duration: const Duration(seconds: 6),
+      ));
+      return;
+    }
+    _capturedLook = null;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Applied: $name'),
+      duration: const Duration(seconds: 2),
+      backgroundColor: NexGenPalette.gunmetal,
+    ));
+    maybeShowManualApplyOffWarning(ref);
+  }
+
+  /// A brightness pattern is kept as a painted design in My Designs (the one
+  /// place that can hold a per-pixel picture); from there Favorites and the
+  /// schedule picker treat it as any painted design.
+  Future<void> _saveTileToMyDesigns() async {
+    final uid = ref.read(effectiveUserUidProvider);
+    if (uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Sign in to save designs. Nothing was saved.')));
+      return;
+    }
+    final chosen = await showNameDesignDialog(context,
+        initialName: '${widget.paletteNode.name} brightness pattern');
+    if (chosen == null || chosen.trim().isEmpty || !mounted) return;
+    final wledState = ref.read(wledRepositoryProvider) == null
+        ? null
+        : ref.read(wledStateProvider);
+    final design = brightnessTileDesign(
+      ref.read,
+      name: chosen.trim(),
+      ownerId: uid,
+      tile: _currentTile,
+      baseRgbw: PatternRepository.colorsToWledCol([_tileWhite]).first,
+      brightness: wledState != null && wledState.connected
+          ? wledState.brightness
+          : null,
+    );
+    if (design.channels.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("Connect to your lights first — a brightness pattern "
+              "is laid over your home's actual runs.")));
+      return;
+    }
+    try {
+      await ref.read(designServiceProvider).saveDesign(uid, design);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Saved "${design.name}" to My Designs'),
+          backgroundColor: NexGenPalette.cyan));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
+  }
+
   List<Widget> _commitButtons() {
     final primaryStyle = ElevatedButton.styleFrom(
       backgroundColor: NexGenPalette.cyan,
@@ -1259,7 +1369,7 @@ class _ColorwayEffectSelectorPageState
     return [
       OutlinedButton.icon(
         key: const ValueKey('save-elsewhere'),
-        onPressed: _showSaveSheet,
+        onPressed: _isBrightnessGradient ? _saveTileToMyDesigns : _showSaveSheet,
         icon: const Icon(Icons.bookmark_add_outlined, size: 18),
         label: const Text('Save…'),
         style: secondaryStyle,
@@ -1446,18 +1556,14 @@ class _ColorwayEffectSelectorPageState
     final motionFilter = ref.watch(selectorMotionTypeProvider);
     final colorFilter = ref.watch(selectorColorBehaviorProvider);
 
-    // For brightness gradient patterns, derive preview colors from the active preset
-    final gradientPresetIdx = ref.watch(selectorGradientPresetProvider);
-    final breathing = ref.watch(selectorBreathingProvider);
-    final gradientPreviewColors = _isBrightnessGradient
-        ? _gradientColorsForPreset(gradientPresetIdx)
-        : _paletteColors;
-    final gradientPreviewFx = _isBrightnessGradient
-        ? (breathing ? 2 : 83)
-        : effectId;
-    final gradientPreviewSpeed = _isBrightnessGradient
-        ? (breathing ? 100 : 0)
-        : speed;
+    // Build 129 — a brightness pattern previews its tile (watched so the
+    // header swatches and the hero follow every edit).
+    ref.watch(selectorBrightnessTileProvider);
+    ref.watch(selectorBrightnessWhiteProvider);
+    final gradientPreviewColors =
+        _isBrightnessGradient ? _tilePreviewColors(3) : _paletteColors;
+    final gradientPreviewFx = _isBrightnessGradient ? 0 : effectId;
+    final gradientPreviewSpeed = _isBrightnessGradient ? 0 : speed;
 
     // Watched here so the effect tiles, the dot row AND the hero rebuild when
     // the Blocks/Alternating toggle changes (the helpers below use ref.read).
@@ -1607,13 +1713,9 @@ class _ColorwayEffectSelectorPageState
 
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-        // ---- Brightness Gradient controls ----
+        // ---- Brightness pattern controls (build 129) ----
         if (_isBrightnessGradient) ...[
-          SliverToBoxAdapter(child: _buildGradientPresetSelector(gradientPresetIdx)),
-          const SliverToBoxAdapter(child: SizedBox(height: 4)),
-          SliverToBoxAdapter(child: _buildBandWidthSelector(colorGroup)),
-          const SliverToBoxAdapter(child: SizedBox(height: 4)),
-          SliverToBoxAdapter(child: _buildBreathingToggle(breathing)),
+          SliverToBoxAdapter(child: _buildBrightnessTileCard()),
           SliverPadding(padding: EdgeInsets.only(bottom: navBarTotalHeight(context))),
         ],
 
@@ -1739,9 +1841,13 @@ class _ColorwayEffectSelectorPageState
   // Brightness Gradient Controls
   // ---------------------------------------------------------------------------
 
-  /// CONTROL 1 — Gradient Preset Selector (horizontal pill chips)
-  Widget _buildGradientPresetSelector(int activeIndex) {
-    final presets = PatternRepository.brightnessGradientPresets;
+  /// Build 129 — the adjustable brightness pattern (presets, shape,
+  /// brightest / dimmest / cycle / offset, lights per step, custom tile,
+  /// white). In SAVE mode the card says why the pattern cannot be handed to
+  /// the destination from here.
+  Widget _buildBrightnessTileCard() {
+    final tile = ref.watch(selectorBrightnessTileProvider) ?? _nodeTile;
+    final white = ref.watch(selectorBrightnessWhiteProvider) ?? _tileWhite;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       padding: const EdgeInsets.all(12),
@@ -1753,177 +1859,37 @@ class _ColorwayEffectSelectorPageState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Brightness Pattern',
-            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: List.generate(presets.length, (i) {
-              final preset = presets[i];
-              final isSelected = i == activeIndex;
-              return GestureDetector(
-                onTap: () {
-                  ref.read(selectorGradientPresetProvider.notifier).state = i;
-                  _sendToWled();
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? NexGenPalette.cyan.withValues(alpha: 0.2)
-                        : NexGenPalette.gunmetal,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isSelected ? NexGenPalette.cyan : NexGenPalette.line,
-                      width: isSelected ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Text(
-                    preset.name,
-                    style: TextStyle(
-                      color: isSelected ? NexGenPalette.cyan : NexGenPalette.textMedium,
-                      fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 8),
-          // LED dot preview showing the brightness gradient pattern
-          _buildGradientDotPreview(activeIndex, ref.watch(selectorColorGroupProvider)),
-        ],
-      ),
-    );
-  }
-
-  /// Shows a row of LED dots at varying brightness levels for the active preset.
-  Widget _buildGradientDotPreview(int presetIndex, int bandWidth) {
-    final colors = _gradientColorsForPreset(presetIndex);
-    final dots = <Widget>[];
-    for (int i = 0; i < 18; i++) {
-      final colorIdx = (i ~/ bandWidth) % colors.length;
-      dots.add(Container(
-        width: 14,
-        height: 14,
-        margin: const EdgeInsets.only(right: 2),
-        decoration: BoxDecoration(
-          color: colors[colorIdx],
-          shape: BoxShape.circle,
-          border: Border.all(color: NexGenPalette.line, width: 0.5),
-        ),
-      ));
-    }
-    return Row(
-      children: [
-        Text('Pattern:', style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 11)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: dots),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// CONTROL 2 — Band Width Selector (1 LED or 2 LED per brightness step)
-  Widget _buildBandWidthSelector(int activeBandWidth) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal90,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: NexGenPalette.line),
-      ),
-      child: Row(
-        children: [
-          Text(
-            'LEDs per Step',
-            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 12),
-          ),
-          const Spacer(),
-          for (final bw in [1, 2]) ...[
-            if (bw == 2) const SizedBox(width: 8),
-            GestureDetector(
-              onTap: () {
-                ref.read(selectorColorGroupProvider.notifier).state = bw;
-                _sendToWled();
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: activeBandWidth == bw
-                      ? NexGenPalette.cyan.withValues(alpha: 0.2)
-                      : NexGenPalette.gunmetal,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: activeBandWidth == bw ? NexGenPalette.cyan : NexGenPalette.line,
-                    width: activeBandWidth == bw ? 2 : 1,
-                  ),
-                ),
-                child: Text(
-                  '$bw LED',
-                  style: TextStyle(
-                    color: activeBandWidth == bw ? NexGenPalette.cyan : NexGenPalette.textMedium,
-                    fontSize: 13,
-                    fontWeight: activeBandWidth == bw ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-              ),
+          if (widget.handsBack) ...[
+            Text(
+              'Brightness patterns are painted light by light, so they '
+              "can't be handed to ${widget.saveDestinationLabel ?? 'this destination'} "
+              'from here. Apply one from Explore and save it to My Designs; a '
+              'saved design can be picked here.',
+              key: const ValueKey('brightness-tile-handback-note'),
+              style: TextStyle(color: NexGenPalette.textMedium, fontSize: 12),
             ),
+            const SizedBox(height: 10),
           ],
-        ],
-      ),
-    );
-  }
-
-  /// CONTROL 3 — Breathing Toggle
-  Widget _buildBreathingToggle(bool isBreathing) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: NexGenPalette.gunmetal90,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: NexGenPalette.line),
-      ),
-      child: Row(
-        children: [
-          Text(
-            'Breathing',
-            style: TextStyle(color: NexGenPalette.textSecondary, fontSize: 13),
-          ),
-          const Spacer(),
-          Switch(
-            value: isBreathing,
-            onChanged: (v) {
-              ref.read(selectorBreathingProvider.notifier).state = v;
+          BrightnessTileControls(
+            tile: tile,
+            baseColor: white,
+            onTileChanged: (t) {
+              ref.read(selectorBrightnessTileProvider.notifier).state = t;
               _sendToWled();
             },
-            activeThumbColor: NexGenPalette.cyan,
-            activeTrackColor: NexGenPalette.cyan.withValues(alpha: 0.3),
-            inactiveThumbColor: NexGenPalette.textSecondary,
-            inactiveTrackColor: NexGenPalette.gunmetal,
+            whites: [
+              for (final w in PatternRepository.archWhiteStyles)
+                (name: w.name, color: w.colors[0]),
+            ],
+            onWhiteChanged: (c) {
+              ref.read(selectorBrightnessWhiteProvider.notifier).state = c;
+              _sendToWled();
+            },
           ),
         ],
       ),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Roofline Preview
-  // ---------------------------------------------------------------------------
-
-  // ---------------------------------------------------------------------------
-  // Celebration mode
-  // ---------------------------------------------------------------------------
 
   /// The effect the celebration picker should open on.
   ///
@@ -1943,24 +1909,6 @@ class _ColorwayEffectSelectorPageState
     return WledEffectsCatalog.celebrationPickIds.first;
   }
 
-  /// CELEBRATION MODE's whole layout: the curated effect list, the two knobs
-  /// that actually reach the fired celebration (`sx` / `ix`), and one commit.
-  ///
-  /// Deliberately NOT here, and why:
-  ///   • the LEDs-per-color selector — `grp`/`spc` are base-design geometry;
-  ///     a celebration overlays whatever the house is already showing.
-  ///   • the roofline preview strip — it renders the BASE design's colours at
-  ///     140px and was overflowing its right edge; the per-tile mini previews
-  ///     already show what each effect does.
-  ///   • the motion / colour filter chips and the "N EFFECTS / Clear filters"
-  ///     row — there is one fixed list, so there is nothing to filter.
-  ///
-  /// [Material] and [SafeArea] are supplied HERE rather than by the caller
-  /// because celebration is the only mode pushed as a bare route body; the
-  /// other three render inside a Scaffold that already provides both. Without
-  /// the Material ancestor every Text falls back to Flutter's un-styled
-  /// default (the yellow double-underline); without the SafeArea the header
-  /// sits under the status bar.
   Widget _buildCelebrationBody(int effectId, int speed, int intensity) {
     final picks = scopeRainbowEffects(WledEffectsCatalog.celebrationPicks, rainbowScope: _isRainbowPalette);
     return Material(
@@ -2177,10 +2125,9 @@ class _ColorwayEffectSelectorPageState
     // the chips said. A brightness gradient is fx 83 + pal 5 with its steps as
     // col[], which the device lays out positionally too — so it draws as
     // blocks now, as it renders.
-    final heroFx =
-        _isBrightnessGradient ? effectId : _effectiveEffectId(effectId);
+    final heroFx = _isBrightnessGradient ? 0 : _effectiveEffectId(effectId);
     final heroPal = _isBrightnessGradient
-        ? WledEffectsCatalog.paletteForEffect(heroFx)
+        ? 0
         : (_activeSolidFields()?.pal ??
             rainbowPaletteOverride(
                 effectId: heroFx, rainbowScope: _isRainbowPalette) ??
@@ -2231,7 +2178,7 @@ class _ColorwayEffectSelectorPageState
                 builder: (context, constraints) {
                   return AnimatedRooflineOverlay(
                     previewColors: _isBrightnessGradient
-                        ? _gradientColorsForPreset(ref.watch(selectorGradientPresetProvider))
+                        ? _tilePreviewColors(3)
                         : _paletteColors,
                     previewEffectId: heroFx,
                     previewPaletteId: heroPal,

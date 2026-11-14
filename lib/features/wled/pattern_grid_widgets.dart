@@ -33,6 +33,10 @@ import 'package:nexgen_command/features/wled/pattern_explore_screen.dart' show e
 import 'package:nexgen_command/features/game_day/live_scoring_prompt.dart';
 import 'package:nexgen_command/features/explore_patterns/ui/explore_design_system.dart';
 import 'package:nexgen_command/features/wled/pattern_repository.dart';
+import 'package:nexgen_command/features/wled/brightness_tile.dart';
+import 'package:nexgen_command/features/wled/brightness_tile_apply.dart';
+import 'package:nexgen_command/features/wled/widgets/brightness_tile_controls.dart';
+import 'package:nexgen_command/features/design/manual_editor/design_apply.dart' show SpineWriteResult;
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
 import 'package:nexgen_command/features/wled/colorway_effect_selector.dart'
     show LibraryDesignSelection;
@@ -1529,26 +1533,68 @@ class _PatternCardState extends ConsumerState<PatternCard> {
     return 0;
   }
 
-  /// Check if this pattern is a brightness gradient and extract its colors.
-  List<Color>? _getGradientColors() {
+  /// The brightness tile this card paints, or null for an effect card.
+  BrightnessTile? get _tile => brightnessTileOf(widget.pattern.wledPayload);
+
+  /// The white a brightness card paints with (its base colour, on screen).
+  Color _tileBaseColor() {
     final meta = widget.pattern.wledPayload['_gradientMeta'];
-    if (meta is! Map || meta['isGradient'] != true) return null;
-    // Gradient colors are stored in themeColors on the PatternItem's payload col
-    // Reconstruct from the payload col (RGBW) back to display colors — or use
-    // the theme colors directly since they're already Flutter Colors.
-    return _getColors();
+    if (meta is Map && meta['baseColorValue'] is int) {
+      return Color(meta['baseColorValue'] as int);
+    }
+    final colors = _getColors();
+    return colors.isEmpty ? Colors.white : colors.first;
   }
 
-  int _getGradientBandWidth() {
-    try {
-      final seg = widget.pattern.wledPayload['seg'];
-      if (seg is List && seg.isNotEmpty) {
-        return (seg.first['grp'] as int?) ?? 1;
-      }
-    } catch (e) {
-      debugPrint('Error in pattern grid _getGradientBandWidth: $e');
+  /// Paints a brightness tile (build 129): every light's level, through the
+  /// per-pixel spine, to every channel — not a template segment. The card's
+  /// own `seg` is only the base the spine writes first.
+  Future<void> _applyTile(
+    BuildContext context,
+    WidgetRef ref,
+    ProviderContainer container,
+    BrightnessTile tile,
+  ) async {
+    // Row 1: a closed gate is explained on screen, never a silent return.
+    final channels = await resolveChannelsForTap(container);
+    if (channels == null || !context.mounted) return;
+    final base = brightnessTileBaseOf(widget.pattern.wledPayload) ??
+        PatternRepository.colorsToWledCol([_tileBaseColor()]).first;
+    final result = await applyBrightnessTileWith(
+      container.read,
+      tile: tile,
+      baseRgbw: base,
+      label: widget.pattern.name,
+    );
+    if (!context.mounted) return;
+    if (!result.isOk) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(result == SpineWriteResult.noChannels
+              ? (applyBlockedReason(container.read) ?? kApplyBlockedFallback)
+              : (result.userMessage ?? "Couldn't reach your lights.")),
+          backgroundColor: Colors.red.shade800,
+          duration: const Duration(seconds: 6),
+        ));
+      return;
     }
-    return 1;
+    // Not logged as a usage event: Recent Patterns rebuilds a card from
+    // effect id + colours (GradientPattern has no payload), so a tile there
+    // would re-apply as a plain solid. Follow-up noted in the build-129 note.
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text('Applied ${widget.pattern.name}'),
+        duration: const Duration(seconds: 6),
+        action: SnackBarAction(
+          key: const ValueKey('pattern-applied-adjust'),
+          label: 'Adjust',
+          onPressed: () {
+            if (context.mounted) _showAdjustmentPanel(context, ref);
+          },
+        ),
+      ));
   }
 
   /// Build the active-color subset preserving the user's toggle order
@@ -1656,8 +1702,8 @@ class _PatternCardState extends ConsumerState<PatternCard> {
   Widget build(BuildContext context) {
     final colors = _getColors();
     final effectId = _getEffectId();
-    final gradientColors = _getGradientColors();
-    final isGradient = gradientColors != null;
+    final tile = _tile;
+    final isGradient = tile != null;
 
     final activeColors = _activeColors(colors);
     // Preview should reflect what apply will produce. When the user has
@@ -1692,17 +1738,20 @@ class _PatternCardState extends ConsumerState<PatternCard> {
             Expanded(
               flex: 3,
               child: isGradient
+                  // The dots show exactly what the tile paints: the base
+                  // white at each light's level (the test
+                  // brightness_patterns_129_test compares them to the strip).
                   ? _GradientDotPreview(
-                      gradientColors: gradientColors,
-                      bandWidth: _getGradientBandWidth(),
+                      colorAt: (i) =>
+                          dimmedForScreen(_tileBaseColor(), tile.levelAt(i)),
                       borderRadius: 10,
                     )
                   : usePreparedBandPreview
                       ? _GradientDotPreview(
-                          gradientColors: activeColors,
                           // Band width is `grp` on the device now (no fx-84
                           // cap), so the preview mirrors the stepper directly.
-                          bandWidth: _ledsPerColor,
+                          colorAt: (i) =>
+                              activeColors[(i ~/ _ledsPerColor) % activeColors.length],
                           borderRadius: 10,
                         )
                       : EffectPreviewWidget(
@@ -1730,6 +1779,24 @@ class _PatternCardState extends ConsumerState<PatternCard> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: _buildColorToggles(colors),
+              ),
+            if (isGradient)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: GestureDetector(
+                  key: const ValueKey('brightness-card-adjust'),
+                  // Absorb the tap so the card's apply does not fire.
+                  onTap: () => _showAdjustmentPanel(context, ref),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.tune, color: NexGenPalette.cyan, size: 12),
+                      const SizedBox(width: 3),
+                      Text('Adjust',
+                          style: TextStyle(color: NexGenPalette.cyan, fontSize: 9)),
+                    ],
+                  ),
+                ),
               ),
             if (showLedStepper)
               Padding(
@@ -1845,6 +1912,12 @@ class _PatternCardState extends ConsumerState<PatternCard> {
       // Row 1: the shared reason (offline, away without remote access, still
       // connecting, no controller) — not "No device connected" for all four.
       await reportApplyBlocked(container);
+      return;
+    }
+
+    final tile = _tile;
+    if (tile != null) {
+      await _applyTile(context, ref, container, tile);
       return;
     }
 
@@ -2096,6 +2169,7 @@ class _PatternCardState extends ConsumerState<PatternCard> {
         spacing: spacing,
         colors: activeColors,
         gradientMeta: gradientMeta,
+        tile: _tile,
       ),
     );
   }
@@ -2115,6 +2189,9 @@ class _PatternAdjustmentBottomSheet extends ConsumerStatefulWidget {
   /// Contains 'isGradient', 'presetId', 'baseColorValue'.
   final Map<String, dynamic>? gradientMeta;
 
+  /// The brightness tile the card paints (build 129); null for an effect.
+  final BrightnessTile? tile;
+
   const _PatternAdjustmentBottomSheet({
     required this.patternName,
     required this.effectId,
@@ -2124,6 +2201,7 @@ class _PatternAdjustmentBottomSheet extends ConsumerStatefulWidget {
     required this.spacing,
     required this.colors,
     this.gradientMeta,
+    this.tile,
   });
 
   @override
@@ -2146,11 +2224,9 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     isRemote: () => ref.read(isRemoteModeProvider),
   );
 
-  // Brightness gradient state
+  // Brightness pattern (tile) state — build 129
   late bool _isGradient;
-  String _gradientPresetId = 'gentle';
-  int _bandWidth = 1;
-  bool _breathing = false;
+  BrightnessTile _tile = kBrightnessPatternPresets.first.tile;
   Color _gradientBaseColor = Colors.white;
 
   @override
@@ -2163,13 +2239,11 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     _effectId = widget.effectId;
     _reverse = false;
 
-    // Initialise gradient state from metadata
+    // Initialise the brightness tile from the card's payload
     final gm = widget.gradientMeta;
-    _isGradient = gm?['isGradient'] == true;
+    _isGradient = widget.tile != null;
     if (_isGradient) {
-      _gradientPresetId = (gm?['presetId'] as String?) ?? 'gentle';
-      _bandWidth = widget.grouping; // bandWidth was stored as grp
-      _breathing = _effectId == 2; // fx 2 = Breathe
+      _tile = widget.tile!;
       _gradientBaseColor = Color(gm?['baseColorValue'] as int? ?? 0xFFFFFFFF);
     }
   }
@@ -2177,6 +2251,7 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   @override
   void dispose() {
     _pacer.dispose();
+    _tilePacer.dispose();
     super.dispose();
   }
 
@@ -2273,53 +2348,41 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
     setState(() => _reverse = !reverse);
   }
 
-  /// Recompute gradient colors from the current preset + base color and
-  /// send the full segment payload (col + fx + grp) to the device.
-  void _applyGradientChange() {
-    // Find the selected preset's brightness steps
-    final presets = PatternRepository.brightnessGradientPresets;
-    final preset = presets.firstWhere(
-      (p) => p.id == _gradientPresetId,
-      orElse: () => presets.first,
+  /// A brightness-pattern edit: paint the tile (per-pixel, through the
+  /// spine) and say so when it did not land. Never a segment tweak — a tile
+  /// is not a segment field.
+  void _applyTileChange(BrightnessTile tile) {
+    setState(() => _tile = tile);
+    _tilePacer.changed(dragging: false);
+  }
+
+  late final AdjustmentPacer _tilePacer = AdjustmentPacer(
+    flush: _flushTile,
+    isRemote: () => ref.read(isRemoteModeProvider),
+  );
+
+  Future<void> _flushTile() async {
+    if (!mounted) return;
+    final container = ProviderScope.containerOf(context, listen: false);
+    final base = PatternRepository.colorsToWledCol([_gradientBaseColor]).first;
+    final result = await applyBrightnessTileWith(
+      container.read,
+      tile: _tile,
+      baseRgbw: base,
+      label: widget.patternName,
     );
-
-    final r = _gradientBaseColor.red;
-    final g = _gradientBaseColor.green;
-    final b = _gradientBaseColor.blue;
-
-    final gradientColors = preset.steps
-        .map((pct) => Color.fromARGB(
-              255,
-              (r * pct).round(),
-              (g * pct).round(),
-              (b * pct).round(),
-            ))
-        .toList();
-
-    final col = PatternRepository.colorsToWledCol(gradientColors);
-    final fx = _breathing ? 2 : 83;
-    final sx = _breathing ? 100 : 0;
-
-    setState(() {
-      _effectId = fx;
-      _speed = sx;
-      _grouping = _bandWidth;
-    });
-
-    _applyChange({
-      'fx': fx,
-      'col': col,
-      'grp': _bandWidth,
-      'spc': 0,
-      'sx': sx,
-      'pal': 5,
-    }, dragging: false);
+    if (!mounted || result.isOk) return;
+    await container.read(wledStateProvider.notifier).runAndReport(
+          Future.value(WriteResult.failed(WriteFailureKind.unreachable,
+              message: result.userMessage ?? kAdjustmentFailedMessage)),
+          onFailure: kAdjustmentFailedMessage,
+        );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Solid (0) and non-breathing gradients (83) are static — hide speed/direction controls
-    final isStatic = _effectId == 0 || (_isGradient && !_breathing);
+    // Solid (0) and brightness tiles are static — hide speed/direction controls
+    final isStatic = _effectId == 0 || _isGradient;
     // #91 — gates the LAN-only direction toggle below.
     final onLan = ref.watch(isLanConnectedProvider);
 
@@ -2409,94 +2472,20 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
               ),
               const SizedBox(height: 20),
 
-              // ── Brightness Gradient controls ──
+              // ── Brightness pattern controls (build 129) ──
               if (_isGradient) ...[
-                // CONTROL 1 — Gradient Preset Selector
-                Row(
-                  children: [
-                    const Icon(Icons.gradient, color: NexGenPalette.cyan, size: 20),
-                    const SizedBox(width: 8),
-                    Text('Gradient', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white)),
+                BrightnessTileControls(
+                  tile: _tile,
+                  baseColor: _gradientBaseColor,
+                  onTileChanged: _applyTileChange,
+                  whites: [
+                    for (final w in PatternRepository.archWhiteStyles)
+                      (name: w.name, color: w.colors[0]),
                   ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 34,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: PatternRepository.brightnessGradientPresets.map((preset) {
-                      final selected = preset.id == _gradientPresetId;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(
-                            preset.name,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: selected ? Colors.black : Colors.white70,
-                            ),
-                          ),
-                          selected: selected,
-                          selectedColor: NexGenPalette.cyan,
-                          backgroundColor: NexGenPalette.gunmetal90,
-                          side: BorderSide(
-                            color: selected ? NexGenPalette.cyan : NexGenPalette.line,
-                          ),
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          onSelected: (_) {
-                            setState(() => _gradientPresetId = preset.id);
-                            _applyGradientChange();
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // CONTROL 2 — Band Width Selector
-                Row(
-                  children: [
-                    const Icon(Icons.view_column, color: NexGenPalette.cyan, size: 20),
-                    const SizedBox(width: 12),
-                    const Text('Band Width', style: TextStyle(color: Colors.white, fontSize: 14)),
-                    const Spacer(),
-                    SegmentedButton<int>(
-                      segments: const [
-                        ButtonSegment(value: 1, label: Text('1 LED', style: TextStyle(fontSize: 12))),
-                        ButtonSegment(value: 2, label: Text('2 LED', style: TextStyle(fontSize: 12))),
-                      ],
-                      selected: {_bandWidth},
-                      onSelectionChanged: (s) {
-                        setState(() => _bandWidth = s.first);
-                        _applyGradientChange();
-                      },
-                      style: ButtonStyle(
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // CONTROL 3 — Breathing Toggle
-                Row(
-                  children: [
-                    const Icon(Icons.air, color: NexGenPalette.cyan, size: 20),
-                    const SizedBox(width: 12),
-                    const Text('Breathing', style: TextStyle(color: Colors.white, fontSize: 14)),
-                    const Spacer(),
-                    Switch(
-                      value: _breathing,
-                      activeColor: NexGenPalette.cyan,
-                      onChanged: (v) {
-                        setState(() => _breathing = v);
-                        _applyGradientChange();
-                      },
-                    ),
-                  ],
+                  onWhiteChanged: (c) {
+                    setState(() => _gradientBaseColor = c);
+                    _tilePacer.changed(dragging: false);
+                  },
                 ),
                 const SizedBox(height: 16),
               ],
@@ -2670,16 +2659,17 @@ class _PatternAdjustmentBottomSheetState extends ConsumerState<_PatternAdjustmen
   }
 }
 
-/// Pixel-dot preview that simulates a brightness gradient on a miniature LED strip.
-/// Each dot's color is determined by cycling through [gradientColors] at [bandWidth].
+/// Pixel-dot preview of a miniature LED strip: dot `i` is [colorAt]`(i)`,
+/// so whoever builds the preview decides what each light shows (a brightness
+/// tile's level, or an alternating band). The painter draws what the device
+/// will show — the test brightness_patterns_129_test reads the dots back and
+/// compares them with a simulated strip.
 class _GradientDotPreview extends StatelessWidget {
-  final List<Color> gradientColors;
-  final int bandWidth;
+  final Color Function(int index) colorAt;
   final double borderRadius;
 
   const _GradientDotPreview({
-    required this.gradientColors,
-    required this.bandWidth,
+    required this.colorAt,
     this.borderRadius = 10,
   });
 
@@ -2699,15 +2689,9 @@ class _GradientDotPreview extends StatelessWidget {
             const step = dotSize + spacing;
             final cols = (constraints.maxWidth / step).floor().clamp(1, 100);
             final rows = (constraints.maxHeight / step).floor().clamp(1, 20);
-
-            final bw = bandWidth.clamp(1, 4);
-            final stepCount = gradientColors.length;
-
             return CustomPaint(
               painter: _GradientDotPainter(
-                gradientColors: gradientColors,
-                bandWidth: bw,
-                stepCount: stepCount,
+                colorAt: colorAt,
                 cols: cols,
                 rows: rows,
                 dotSize: dotSize,
@@ -2723,18 +2707,14 @@ class _GradientDotPreview extends StatelessWidget {
 }
 
 class _GradientDotPainter extends CustomPainter {
-  final List<Color> gradientColors;
-  final int bandWidth;
-  final int stepCount;
+  final Color Function(int index) colorAt;
   final int cols;
   final int rows;
   final double dotSize;
   final double spacing;
 
   _GradientDotPainter({
-    required this.gradientColors,
-    required this.bandWidth,
-    required this.stepCount,
+    required this.colorAt,
     required this.cols,
     required this.rows,
     required this.dotSize,
@@ -2744,19 +2724,14 @@ class _GradientDotPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final step = dotSize + spacing;
-    // Centre the dot grid within the available space
+    // Each row continues the run: dot index = row * cols + col.
     final xOffset = (size.width - cols * step + spacing) / 2;
     final yOffset = (size.height - rows * step + spacing) / 2;
     final radius = dotSize / 2;
     final paint = Paint();
-
     for (var row = 0; row < rows; row++) {
       for (var col = 0; col < cols; col++) {
-        final i = row * cols + col;
-        // bandWidth determines how many consecutive dots share a step
-        final colorIndex = (i ~/ bandWidth) % stepCount;
-        paint.color = gradientColors[colorIndex];
-
+        paint.color = colorAt(row * cols + col);
         canvas.drawCircle(
           Offset(xOffset + col * step + radius, yOffset + row * step + radius),
           radius,
@@ -2767,9 +2742,5 @@ class _GradientDotPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GradientDotPainter old) =>
-      gradientColors != old.gradientColors ||
-      bandWidth != old.bandWidth ||
-      cols != old.cols ||
-      rows != old.rows;
+  bool shouldRepaint(_GradientDotPainter old) => true;
 }
