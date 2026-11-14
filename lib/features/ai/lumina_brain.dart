@@ -9,6 +9,8 @@ import 'package:nexgen_command/features/design/roofline_config_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/models/roofline_configuration.dart';
 import 'package:nexgen_command/models/roofline_segment.dart';
+import 'package:nexgen_command/features/ai/entry_delete_intent.dart'
+    show isEntryDeleteRequest;
 import 'package:nexgen_command/lumina_ai/lumina_ai_service.dart';
 import 'package:nexgen_command/features/wled/event_theme_library.dart';
 import 'package:nexgen_command/features/wled/semantic_pattern_matcher.dart';
@@ -232,6 +234,27 @@ class LuminaBrain {
     {
       final audioResponse = await _handleAudioIntent(ref, userPrompt);
       if (audioResponse != null) return audioResponse;
+    }
+
+    // ── PRE-TIER (build 128): a request to DELETE calendar entries ────────
+    // Goes straight to the Smart model, whose prompt carries the
+    // `deleteCalendarEntries` schema. Every local tier below would otherwise
+    // answer it with a design: the team tier for "delete the Chiefs entries",
+    // the holiday tier for "remove the Christmas nights", the compound
+    // detector for "cancel what you set up for this week". The model only
+    // DESCRIBES which entries; the driver resolves and the app confirms.
+    if (isEntryDeleteRequest(userPrompt)) {
+      return LuminaAI.chat(
+        userPrompt,
+        contextBlock: _buildContextBlock(ref),
+        solarSchedulingEnabled: () {
+          try {
+            return ref.read(solarSchedulingEnabledSyncProvider);
+          } catch (_) {
+            return false;
+          }
+        }(),
+      );
     }
 
     // ── PRE-TIER: Compound Command Detection ──────────────────────────────

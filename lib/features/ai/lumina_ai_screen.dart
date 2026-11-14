@@ -9,6 +9,8 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/features/ai/lumina_brain.dart';
 import 'package:nexgen_command/features/ai/lumina_conversation_actions.dart';
+import 'package:nexgen_command/features/ai/entry_delete_confirm_card.dart';
+import 'package:nexgen_command/features/ai/entry_delete_services.dart';
 import 'package:nexgen_command/features/ai/lumina_conversation_driver.dart';
 import 'package:nexgen_command/features/ai/mic_availability.dart';
 import 'package:nexgen_command/features/ai/lumina_sheet_controller.dart';
@@ -174,6 +176,7 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
   /// it holds no state, and nothing Riverpod-owned is kept on this State.
   LuminaConversationDriver get _driver => LuminaConversationDriver(
         services: RiverpodLuminaConversationServices(ref),
+        entryDelete: RiverpodLuminaEntryDeleteServices(ref),
         host: LuminaConversationHost(
           surface: LuminaSurface.screen,
           isMounted: () => mounted,
@@ -389,6 +392,30 @@ class _LuminaAIScreenState extends ConsumerState<LuminaAIScreen> {
           case LuminaMessageRole.user:
             return _UserBubble(text: msg.text);
           case LuminaMessageRole.assistant:
+            // Build 128 — a delete confirmation card instead of a bubble.
+            final proposal = msg.entryDeleteProposal;
+            if (proposal != null) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(right: 8, top: 2),
+                      child: _LuminaAvatar(size: 28),
+                    ),
+                    Flexible(
+                      child: EntryDeleteConfirmCard(
+                        text: msg.text,
+                        proposal: proposal,
+                        onDelete: () => _driver.confirmEntryDelete(proposal),
+                        onCancel: () => _driver.cancelEntryDelete(proposal),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
             return _AssistantBubble(
               text: msg.text,
               preview: msg.preview,

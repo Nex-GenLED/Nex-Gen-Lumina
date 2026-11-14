@@ -8,6 +8,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:nexgen_command/features/ai/ai_consent.dart';
+import 'package:nexgen_command/features/ai/entry_delete_intent.dart';
 import 'package:nexgen_command/features/ai/scheduling_intent.dart';
 
 /// LuminaAI — Two-layer Claude routing for Nex-Gen LED's Lumina feature.
@@ -78,6 +79,9 @@ _LuminaTier _classifyPromptTier(String prompt) {
 
   final wordCount = t.split(RegExp(r'\s+')).length;
   if (wordCount > 12) return _LuminaTier.smart;
+  // Build 128 — only the Smart prompt carries the `deleteCalendarEntries`
+  // schema; a short "delete the entries you made" must not fall to Fast.
+  if (isEntryDeleteRequest(t)) return _LuminaTier.smart;
   if (smartPatterns.any((p) => p.hasMatch(t))) return _LuminaTier.smart;
   if (fastPatterns.any((p) => p.hasMatch(t))) return _LuminaTier.fast;
   return wordCount <= 5 ? _LuminaTier.fast : _LuminaTier.smart;
@@ -239,9 +243,15 @@ class LuminaAI {
       '"repeatDays":[string],"patternName":string,"wled":object|omitted}]|null,'
       '"ephemeralSession":{"type":"post_game_revert","teamSlug":string,'
       '"gameAnchor":{"type":"today"|"tonight"|"tomorrow"|"next"|"specific_date",'
-      '"specificDate":string|null},"revertWledPayload":object,"revertLabel":string}|null}\n'
+      '"specificDate":string|null},"revertWledPayload":object,"revertLabel":string}|null,'
+      '"deleteCalendarEntries":{"target":"dated"|"recurring",'
+      '"scope":"date"|"range"|"lumina_all"|"unclear","date":string|null,'
+      '"startDate":string|null,"endDate":string|null,"nameFilter":string|null}|null}\n'
       '  • "message" — required. The user-facing sentence; mirrors the verbal '
       'lead-in before the JSON block.\n'
+      '  • "deleteCalendarEntries" — optional. Include ONLY when the user asks '
+      'to delete / remove / cancel / clear calendar entries (see DELETING '
+      'DATED CALENDAR ENTRIES). Omit or set null otherwise.\n'
       '  • "schedulingIntent" — optional. Include when the request implies a '
       'recurring or future schedule (see SCHEDULING INTENT section). Omit or '
       'set null for one-shot/now requests.\n'
@@ -382,7 +392,10 @@ class LuminaAI {
       // Scheduling schema sourced from the single-source-of-truth fragment so
       // producer + parser never drift (#58). The fragment is byte-for-byte the
       // former inline SCHEDULING INTENT section minus the dead `action` field.
-      + SchedulingIntent.schemaPromptFragment +
+      + SchedulingIntent.schemaPromptFragment
+      // Build 128 — the delete contract, from its own single source of truth
+      // (entry_delete_intent.dart) for the same producer/parser reason.
+      + EntryDeleteIntent.schemaPromptFragment +
       '═══ EPHEMERAL SESSION INTENT (sports + revert) ═══\n'
       'When the user requests a sports/team event AND specifies an "after" or '
       '"revert" state, generate BOTH the immediate `wled` payload (team '

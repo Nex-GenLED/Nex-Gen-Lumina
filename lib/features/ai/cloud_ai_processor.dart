@@ -335,6 +335,17 @@ class CloudAIProcessor {
           '[Lumina AI] Recurring sports autopilot intent received: $recurringSportsAutopilot');
     }
 
+    // Build 128 — the model's description of which dated calendar entries to
+    // delete. Carried raw; the driver resolves it against the calendar and
+    // the app confirms with a card before anything is removed.
+    Map<String, dynamic>? deleteCalendarEntries;
+    final deleteRaw = obj['deleteCalendarEntries'];
+    if (deleteRaw is Map) {
+      deleteCalendarEntries = Map<String, dynamic>.from(deleteRaw);
+      debugPrint(
+          '[Lumina AI] Delete calendar entries intent received: $deleteCalendarEntries');
+    }
+
     final command = LuminaCommand(
       type: type,
       parameters: {
@@ -358,6 +369,7 @@ class CloudAIProcessor {
       tier: ProcessingTier.cloud,
       ephemeralSession: ephemeralSession,
       recurringSportsAutopilot: recurringSportsAutopilot,
+      deleteCalendarEntries: deleteCalendarEntries,
       // Carry the normalized intents on the typed field INDEPENDENT of the
       // wled branch above (#58b). The in-wled mirror at the attach junction
       // (:193) is only populated when wled is a Map; this field is the

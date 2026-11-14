@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'entry_delete_intent.dart';
 import 'ephemeral_session_intent.dart';
 import 'lumina_schedule_flags.dart';
 import 'recurring_sports_autopilot_intent.dart';
@@ -122,6 +123,19 @@ class LuminaCommandResult {
   RecurringSportsAutopilotIntent? get recurringSportsAutopilotIntent =>
       RecurringSportsAutopilotIntent.fromJson(recurringSportsAutopilot);
 
+  /// Build 128 — the model's description of which dated calendar entries the
+  /// customer asked to delete (`deleteCalendarEntries`). The model proposes;
+  /// the driver resolves it against the calendar and the app confirms with a
+  /// card. Raw map kept for forward-compatibility; dispatch reads the typed
+  /// accessor [entryDeleteIntent].
+  final Map<String, dynamic>? deleteCalendarEntries;
+
+  /// Typed accessor for [deleteCalendarEntries]. Null when the field is
+  /// absent; otherwise always a usable intent ([EntryDeleteIntent.fromJson]
+  /// degrades anything unreadable to an "unclear" scope the app asks about).
+  EntryDeleteIntent? get entryDeleteIntent =>
+      EntryDeleteIntent.fromJson(deleteCalendarEntries);
+
   /// Normalized recurring weekly/daily scheduling intents (1 or N), already
   /// typed by [CloudAIProcessor.normalizeSchedulingIntents]. This is the
   /// CANONICAL carrier dispatch reads — set independently of [wledPayload] so
@@ -153,6 +167,7 @@ class LuminaCommandResult {
     this.tier = ProcessingTier.local,
     this.ephemeralSession,
     this.recurringSportsAutopilot,
+    this.deleteCalendarEntries,
     this.schedulingIntents,
     this.scheduleFlags,
   });

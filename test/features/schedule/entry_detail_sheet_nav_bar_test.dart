@@ -122,8 +122,7 @@ Finder _button(String label) => find.ancestor(
 /// says WHICH of the three went wrong at which cell.
 void _expectReachable(WidgetTester tester, String label, String cell) {
   final button = _button(label);
-  expect(button, findsOneWidget,
-      reason: '$cell: "$label" is not in the tree');
+  expect(button, findsOneWidget, reason: '$cell: "$label" is not in the tree');
 
   final rect = tester.getRect(button);
   final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
@@ -164,7 +163,8 @@ Future<void> _tearDownSheet(WidgetTester tester) async {
 void main() {
   group('dated-entry detail sheet, iPhone 15 Pro (393 x 852)', () {
     for (final scale in const [1.0, 1.3, 2.0]) {
-      testWidgets('Edit and Delete are on screen, clear of the dock and '
+      testWidgets(
+          'Edit and Delete are on screen, clear of the dock and '
           'tappable at text scale $scale', (tester) async {
         final cell = '393x852@$scale';
         await _pumpSheet(tester, _iphone15Pro(scale));
@@ -176,7 +176,8 @@ void main() {
   });
 
   group('dated-entry detail sheet, the +120 large-text matrix', () {
-    testWidgets('Edit and Delete are on screen, clear of the dock and '
+    testWidgets(
+        'Edit and Delete are on screen, clear of the dock and '
         'tappable at every cell', (tester) async {
       for (final (tag, profile) in largeTextProfiles()) {
         await _pumpSheet(tester, profile);

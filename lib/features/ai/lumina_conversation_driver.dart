@@ -6,6 +6,9 @@ import 'package:nexgen_command/app_providers.dart'
 import 'package:nexgen_command/features/ai/adjustment_state_controller.dart';
 import 'package:nexgen_command/features/ai/lumina_channel_apply.dart';
 import 'package:nexgen_command/features/ai/ephemeral_session_dispatcher.dart';
+import 'package:nexgen_command/features/ai/entry_delete_intent.dart';
+import 'package:nexgen_command/features/ai/entry_delete_resolver.dart';
+import 'package:nexgen_command/features/ai/entry_delete_services.dart';
 import 'package:nexgen_command/features/ai/ephemeral_session_intent.dart';
 import 'package:nexgen_command/features/ai/lumina_command.dart';
 import 'package:nexgen_command/features/ai/lumina_command_router.dart';
@@ -467,6 +470,7 @@ class _SheetControllerThread implements LuminaThread {
 enum LuminaResultBranch {
   navigation,
   schedule,
+  entryDelete,
   ephemeralSession,
   recurringSportsAutopilot,
   schedulingIntents,
@@ -490,9 +494,15 @@ class LuminaConversationDriver {
   final LuminaConversationHost host;
   final LuminaConversationServices services;
 
+  /// Build 128 — the delete branch's view of the app (calendar, card,
+  /// removal). Optional: a surface built without it answers a delete request
+  /// with [kEntryDeleteNotAvailable], the manual route.
+  final LuminaEntryDeleteServices? entryDelete;
+
   const LuminaConversationDriver({
     required this.host,
     required this.services,
+    this.entryDelete,
   });
 
   // -------------------------------------------------------------------------
@@ -554,6 +564,19 @@ class LuminaConversationDriver {
         scheduleFlags.hasOccurrences) {
       await _handleScheduleResult(result, scheduleFlags, thread);
       return LuminaResultBranch.schedule;
+    }
+
+    // ── Delete dated calendar entries (build 128) ─────────────────────────
+    // The model described which entries; the app resolves and confirms.
+    // Nothing is applied to the lights and nothing is removed here — a card
+    // with Delete / Cancel is posted, or a refusal / question / no-match
+    // sentence. Ahead of the ephemeral branch: a delete request carries no
+    // design, and the prompt forbids the other intents alongside it.
+    final deleteIntent = result.entryDeleteIntent;
+    if (deleteIntent != null && deleteIntent.isValid) {
+      _handleEntryDelete(deleteIntent, thread);
+      host.scrollToEnd();
+      return LuminaResultBranch.entryDelete;
     }
 
     // ── Ephemeral session intent (Item #51) ───────────────────────────────
@@ -707,6 +730,64 @@ class LuminaConversationDriver {
           (result.ok ? 'Saved to Favorites' : "Couldn't save to Favorites"));
     }
     return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // Delete dated calendar entries (build 128)
+  // -------------------------------------------------------------------------
+
+  /// Resolves the model's description against the calendar and posts either
+  /// the confirmation card (a proposal) or the one sentence that explains why
+  /// there is nothing to confirm. Removes nothing.
+  void _handleEntryDelete(EntryDeleteIntent intent, LuminaThread thread) {
+    final svc = entryDelete;
+    if (svc == null) {
+      // No delete service on this surface: today's manual route, said plainly.
+      thread.addAssistantMessage(kEntryDeleteNotAvailable);
+      return;
+    }
+    final resolution = resolveEntryDeletion(
+      intent,
+      svc.calendarEntries(),
+      today: svc.now(),
+    );
+    final proposal = resolution.proposal;
+    if (resolution.kind == EntryDeleteResolutionKind.propose &&
+        proposal != null) {
+      svc.postProposal(proposal.leadText, proposal);
+    } else {
+      thread.addAssistantMessage(resolution.reply);
+    }
+  }
+
+  /// The card's Delete: removes the proposal's entries through the manual
+  /// route, one at a time, then says how many went. A proposal already
+  /// decided does nothing — the card cannot be tapped twice.
+  Future<void> confirmEntryDelete(EntryDeleteProposal proposal) async {
+    final svc = entryDelete;
+    if (svc == null || proposal.decision != EntryDeleteDecision.pending) {
+      return;
+    }
+    proposal.decision = EntryDeleteDecision.deleted;
+    svc.proposalDecided(proposal);
+    final removed = await svc.deleteEntries(proposal.entries);
+    services.openThread().addAssistantMessage(entryDeleteOutcomeText(
+      requested: proposal.count,
+      deleted: removed,
+    ));
+    host.scrollToEnd();
+  }
+
+  /// The card's Cancel: nothing is removed; the card says so.
+  void cancelEntryDelete(EntryDeleteProposal proposal) {
+    final svc = entryDelete;
+    if (svc == null || proposal.decision != EntryDeleteDecision.pending) {
+      return;
+    }
+    proposal.decision = EntryDeleteDecision.cancelled;
+    svc.proposalDecided(proposal);
+    services.openThread().addAssistantMessage(kEntryDeleteCancelled);
+    host.scrollToEnd();
   }
 
   // -------------------------------------------------------------------------

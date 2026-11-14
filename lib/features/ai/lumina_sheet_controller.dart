@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:nexgen_command/features/ai/entry_delete_resolver.dart'
+    show EntryDeleteProposal;
+
 // ---------------------------------------------------------------------------
 // Data models
 // ---------------------------------------------------------------------------
@@ -19,12 +22,18 @@ class LuminaMessage {
   final Map<String, dynamic>? wledPayload;
   bool? feedbackGiven;
 
+  /// Build 128 — set when this assistant message is a confirmation card for
+  /// deleting dated calendar entries (the model proposed, the app confirms).
+  /// The surfaces render [EntryDeleteConfirmCard] instead of a bubble.
+  final EntryDeleteProposal? entryDeleteProposal;
+
   LuminaMessage({
     required this.role,
     required this.text,
     this.preview,
     this.wledPayload,
     this.feedbackGiven,
+    this.entryDeleteProposal,
   });
 
   factory LuminaMessage.user(String text) =>
@@ -40,6 +49,17 @@ class LuminaMessage {
         text: text,
         preview: preview,
         wledPayload: wledPayload,
+      );
+
+  /// A confirmation card: [text] above the proposal's list, Delete / Cancel.
+  factory LuminaMessage.entryDeleteProposal(
+    String text,
+    EntryDeleteProposal proposal,
+  ) =>
+      LuminaMessage(
+        role: LuminaMessageRole.assistant,
+        text: text,
+        entryDeleteProposal: proposal,
       );
 
   factory LuminaMessage.thinking() =>
@@ -207,6 +227,25 @@ class LuminaSheetController extends Notifier<LuminaSheetState> {
           wledPayload != null ? {'wled': wledPayload} : state.activePatternContext,
       activePreview: preview ?? state.activePreview,
     );
+  }
+
+  /// Build 128 — post a delete confirmation card. No pattern context or
+  /// preview changes: the card is a question, not a design.
+  void addEntryDeleteProposal(String text, EntryDeleteProposal proposal) {
+    state = state.copyWith(
+      messages: [
+        ...state.messages,
+        LuminaMessage.entryDeleteProposal(text, proposal),
+      ],
+      isThinking: false,
+    );
+  }
+
+  /// Build 128 — a proposal's decision changed (it is mutable on the
+  /// proposal, like `feedbackGiven`); re-emit so its card rebuilds without
+  /// its buttons.
+  void entryDeleteProposalDecided() {
+    state = state.copyWith(messages: List.of(state.messages));
   }
 
   /// Mark thinking state without adding a message.
