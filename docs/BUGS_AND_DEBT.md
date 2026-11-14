@@ -430,6 +430,32 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P1 — correctness & trust
 
+- [x] **#190 — BRIGHTNESS GRADIENTS NEVER RENDERED: every card in Explore › Architectural › Kelvin ›
+  Brightness Gradients lit one pixel and then a uniform dim run, while its preview drew a per-bulb
+  cycle; fx 65 Palette showed one still colour** (numbered 190 to stay clear of the 127/128 branches)
+  - Status: **FIXED on `feat/129-brightness-patterns` (from `bd29c38`), not merged, not tagged** ·
+    Severity: **P1** · Evidence: **verified-by-bench** (2026-11-14, spare 0.15.4 + home 0.15.1,
+    live-view frames, `docs/bench/brightness_patterns_129_bench_2026-11-14.md`) +
+    **verified-by-source** (`9c48001`; `completeEffectSegment`; WLED 0.15.1/0.15.4 `FX.cpp`)
+  - **THE CLASS BUG.** The folder (shipped 2026-03-17) sent fx 83 Solid Pattern with `sx 0`; the
+    chokepoint filled `ix 128` and `pal 5`. fx 83 is a foreground/background SIZE pattern
+    (`lit = 1 + sx`, `unlit = 1 + ix`), so the wire was one lit pixel then 129 pixels of the second
+    step; `pal 5` is positional across the segment. The step values scaled the colour value, not the
+    light ("Deep 100/60/30" lit at 100/24/3.4 % under gamma 2.8); Soft Pulse's fourth step never
+    left the phone (three slots); saving dropped the gradient metadata. Separately, fx 65 Palette
+    reads `c1` as its rotation: the born-with 128 (what the chokepoint stated) turns the gradient 90°
+    so every pixel shows one colour; the effect's own default is 0.
+  - **THE FIX.** Brightness patterns are per-pixel TILES (`brightness_tile.dart`), gamma-compensated,
+    painted through the Design Studio spine to every channel; eight presets (the six shipped + Wave 6
+    + Wave 18) in a new Explore root "Brightness Patterns (White)" and in each Kelvin folder; an
+    adjustable sheet (preset / shape / brightest / dimmest / cycle / offset / custom tile / white);
+    save = a painted design (scheduling follows the painted-design rules). `kWledEffectOptionDefaults`
+    states `c1 0` on fx 65 only (table test over the whole pool). Per-pixel brightness added to
+    Design Studio (`LedColorGroup.bri`, document brightness layer, Dim / Full / Ramp).
+  - Bench decision rule: fx 65 cannot cycle in 6 pixels on any bus (Size caps at ≈ 16·(len−1)/143
+    px) and an 18-px cycle needs a per-bus Size the transport cannot send — per-pixel data, not the
+    palette path. See `docs/release/build_129_candidate.md` for the looks `c1 0` changes.
+
 - [ ] **#118 — NO RELAY COMMAND WITHOUT A PAIRED BRIDGE: a bridge-less account away from home
   queued commands nothing could pick up, waited 45 s, and was then told the bridge was offline**
   - Status: **functions deployed 2026-09-30 (`8b3bcdf`); app half ships in build 110** (app
