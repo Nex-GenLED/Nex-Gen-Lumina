@@ -446,9 +446,9 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
     reads `c1` as its rotation: the born-with 128 (what the chokepoint stated) turns the gradient 90°
     so every pixel shows one colour; the effect's own default is 0.
   - **THE FIX.** Brightness patterns are per-pixel TILES (`brightness_tile.dart`), gamma-compensated,
-    painted through the Design Studio spine to every channel; eight presets (the six shipped + Wave 6
-    + Wave 18) — the six as cards in each Kelvin folder, all eight in every card's Adjust sheet (the
-    catalog root/folder counts are pinned by tests, so no new nodes); an
+    painted through the Design Studio spine to every channel; eight presets (Wave 6 + Wave 18 + the
+    six shipped), all eight as cards in each Kelvin folder's Brightness Patterns folder (2026-11-15;
+    the folder's pinned count moved 6 → 8, no new Explore root) and in every card's Adjust sheet; an
     adjustable sheet (preset / shape / brightest / dimmest / cycle / offset / custom tile / white);
     save = a painted design (scheduling follows the painted-design rules). `kWledEffectOptionDefaults`
     states `c1 0` on fx 65 only (table test over the whole pool). Per-pixel brightness added to

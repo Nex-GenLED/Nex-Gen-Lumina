@@ -30,15 +30,16 @@ every bus). **Decision per the brief's rule: per-pixel data.**
    lights at 40 %), painted through the Design Studio spine (solid base + `i` chunks) to every
    channel. The six shipped presets now render as their cards always previewed. Two new presets:
    **Wave · 6 lights** (100/80/60/40/60/80 — T1) and **Wave · 18 lights** (T2).
-2. **Where they live.** Each Kelvin folder under Architectural keeps its six-card folder (renamed
-   "Brightness Patterns", first in the folder). The Wave 6 / Wave 18 presets are NOT catalog cards:
-   the Explore root list (eight + My Designs), each Kelvin folder (18) and the brightness folder (6)
-   are pinned by `my_designs_category_injection_test`, `rainbow_scope_test` and
-   `library_tree_coherence_test`, and a new root tried in this branch broke the first two. Every
-   brightness card's **Adjust** sheet offers all eight presets, so a Wave is two taps from any
-   brightness card; `PatternRepository.brightnessPatternCard` builds the card for any preset in any
-   white. Putting the Waves on cards means loosening one of those pins — Tyler's call. No Breathing
-   variant: a per-pixel frame freezes the segment.
+2. **Where they live.** Each Kelvin folder under Architectural keeps its folder (renamed
+   "Brightness Patterns", first in the folder), now with **eight cards**: **Wave · 6 lights** and
+   **Wave · 18 lights** first, then the six shipped presets (follow-up of 2026-11-15; at `3c0fcaa`
+   the Waves were sheet presets only). Every card is built by the same node builder, so a Wave
+   opens the same tuner, applies with the same Apply and shows the same Adjust link. No new
+   Explore root; each Kelvin folder keeps its 18 direct children. The one pinned assertion that
+   moved: `library_tree_coherence_test` — Brightness Patterns folder child count **6 → 8**
+   (`a0a98e9`). Every brightness card's **Adjust** sheet still offers all eight presets;
+   `PatternRepository.brightnessPatternCard` builds the card for any preset in any white. No
+   Breathing variant: a per-pixel frame freezes the segment.
 3. **Adjustable (T3).** Every brightness card shows an **Adjust** link (and the post-apply snackbar
    action) opening the adjustment sheet with `BrightnessTileControls`: presets, shape (Wave / Ramp /
    Steps / Custom), brightest, dimmest, lights per cycle, lights per step, start offset, a custom
@@ -60,6 +61,20 @@ every bus). **Decision per the brief's rule: per-pixel data.**
    scheduled API body and favourites honour it. Editor: a **Pixel brightness** slider with **Dim
    to N %** / **Full** for the selection and a **Ramp…** dialog (start, end, mirror) across the
    selection in LED order. Undo/redo cover it.
+
+## Checked against the owner's requirements (2026-11-15, tip after `e0fdab1`)
+
+| | Requirement | Result | Backed by |
+|---|---|---|---|
+| a | Any single light can be set dimmer or brighter than its neighbour, per light | **PASS** | `pixel_brightness_129_test` "what the controller renders from the saved groups matches the intended light" (Design Studio, 100/80/40/10 on four neighbours); `brightness_requirements_129_test` (a) — a custom tile 100/20/100/60/40/100 on the simulated strip |
+| b | Wave 6 in white renders 100, 80, 60, 40, 60, 80, repeating, with the strip's gamma | **PASS** | `brightness_wave_cards_129_test` "the card applies in one tap" (all nine Kelvin whites, both channels, simulator anchored to the bench frames) and "opening the Wave 6 node from Explore … Apply paints the wave" |
+| c | Cycle length adjustable well beyond the presets; brightest, dimmest, shape, offset adjustable | **PASS after one fix** | `brightness_requirements_129_test` (c): waves over 6/9/18/30/60 lights, 90→10, ramp/steps, offset, and the Adjust controls (cycle slider 2–60, four shapes, offset). **Failed first** at `a0a98e9`: a wave over 9 lights bottomed out at 47 % with the dimmest set to 40 — `BrightnessTile.triangle` never reached the dimmest on an odd cycle. Fixed in `e0fdab1` (trough = light m+1 at the dimmest; even cycles byte-identical, so Wave 6 / Wave 18 and the bench anchors are unchanged). |
+| d | White is easy to reach | **5 taps** from the Explore home to Wave 6 applied in white: Architectural Downlighting → a Kelvin style (the white) → Brightness Patterns → Wave · 6 lights (opens the tuner; browsing writes nothing) → Apply. | `brightness_wave_cards_129_test` "four taps into the tree …, then Apply = five" (the node's parent chain) |
+| e | Same tile on every channel; schedule and Game Day pickers refuse a tile with the existing per-pixel wording | **PASS** | `brightness_wave_cards_129_test` (both home channels hold the same levels); `brightness_requirements_129_test` (e): the tuner in Schedule / Game Day selection mode shows `perPixelPickerRefusalMessage`, hands nothing back, writes nothing |
+
+The 5-tap count is the same path the six shipped presets have always had: a palette node in Explore
+opens the tuner, and the tuner's Apply is the write. A 4-tap path would mean a node that applies
+on tap, which no brightness card does today — not changed here.
 
 ## Looks whose appearance changes with `c1 0` on fx 65
 
@@ -93,6 +108,11 @@ The stored customer payloads cannot be counted from the app (no Firestore read i
   84, pal 0/2–5, per-pixel `i`, gamma 2.8), anchored to the bench frames.
 - `test/features/wled/brightness_patterns_129_test.dart` — written first, 5 pass / 13 fail at
   bd29c38 (`scratchpad bench-129/step2_failing_at_bd29c38.log`); all pass after the fix.
+- `test/features/wled/brightness_wave_cards_129_test.dart` — written first, 1 pass / 8 fail at
+  `3c0fcaa` (the Wave nodes did not exist); the eight-card folder, the Wave nodes' shape, one-tap
+  apply in all nine whites, the Adjust link, the Explore tuner, the tap chain.
+- `test/features/wled/brightness_requirements_129_test.dart` — the owner's requirements a / c / e;
+  13 pass / 1 fail at `a0a98e9` (the odd-cycle trough), all pass after `e0fdab1`.
 - `test/features/design/pixel_brightness_129_test.dart` — the brightness layer, JSON compatibility,
   lit spans, frame, ramp.
 - `test/helpers/recording_wled_repository.dart` now implements `PerPixelWriter` (records every
