@@ -928,14 +928,14 @@ class PatternRepository {
   static List<BrightnessPatternPreset> get brightnessGradientPresets =>
       kBrightnessPatternPresets;
 
-  /// The six presets that have shipped inside every Kelvin folder since
-  /// 2026-03-17. The folder's node count (6), each Kelvin folder's (18) and
-  /// the Explore root list (eight) are pinned by tests, so the two Wave
-  /// presets are not catalog nodes: every brightness card's Adjust sheet
-  /// offers all eight presets, and [brightnessPatternCard] builds the card
-  /// for any preset in any white.
+  /// The cards inside every Kelvin style's Brightness Patterns folder, in
+  /// order: the two Waves (the look the owner asked for, and its 18-light
+  /// stretch) first, then the six presets that have shipped since 2026-03-17.
+  /// The folder's node count (8), each Kelvin folder's (18) and the Explore
+  /// root list (eight) are pinned by tests (`library_tree_coherence_test`,
+  /// `brightness_wave_cards_129_test`).
   static const List<String> kKelvinFolderPresetIds = [
-    'gentle', 'medium', 'deep', 'stair', 'duo', 'pulse', //
+    'wave6', 'wave18', 'gentle', 'medium', 'deep', 'stair', 'duo', 'pulse', //
   ];
 
   /// Public: the adjustment panel offers these whites for a brightness pattern.
@@ -981,8 +981,8 @@ class PatternRepository {
   }
 
   /// The card for [preset] painted in [white] — what a catalog node
-  /// generates, and what the adjustment sheet or a test can build for a
-  /// preset that has no node of its own (Wave 6 / Wave 18).
+  /// generates, and what the adjustment sheet or a test can build for any
+  /// preset in any white without going through a node.
   static PatternItem brightnessPatternCard(
     BrightnessPatternPreset preset, {
     required Color white,
@@ -1097,7 +1097,8 @@ class PatternRepository {
         sortOrder: -1,
       ));
 
-      // The six shipped presets inside the folder, as brightness tiles.
+      // The eight presets inside the folder (Wave 6, Wave 18, then the six
+      // shipped ones), as brightness tiles.
       final baseColor = style.colors[0];
       var gi = 0;
       for (final presetId in kKelvinFolderPresetIds) {
