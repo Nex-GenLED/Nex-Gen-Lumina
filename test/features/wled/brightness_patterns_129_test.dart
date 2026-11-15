@@ -114,9 +114,10 @@ Object? _copy(Object? v) {
 }
 
 /// Every card that carries brightness preset [preset]: the card in each
-/// Kelvin folder's folder (the six shipped presets), or — for a preset with no
-/// node of its own (Wave 6 / Wave 18, which the Adjust sheet offers) — the
-/// card the repository builds for it in each Kelvin white.
+/// Kelvin folder's Brightness Patterns folder — all eight presets have a node
+/// there (Wave 6 and Wave 18 since the 2026-11-15 follow-up; see
+/// brightness_wave_cards_129_test.dart). The fallback builds the card for a
+/// preset without a node of its own, which no shipped preset is today.
 Future<List<PatternItem>> _cardsForPreset(
     PatternRepository repo, String presetId) async {
   final out = <PatternItem>[];
