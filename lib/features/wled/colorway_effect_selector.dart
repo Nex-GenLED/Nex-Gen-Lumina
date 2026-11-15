@@ -841,7 +841,7 @@ class _ColorwayEffectSelectorPageState
   Color get _tileWhite =>
       ref.read(selectorBrightnessWhiteProvider) ??
       Color((widget.paletteNode.metadata?['baseColorValue'] as int?) ??
-          widget.paletteNode.themeColors!.first.value);
+          widget.paletteNode.themeColors!.first.toARGB32());
 
   /// The first [count] lights of the tile as the phone shows them.
   List<Color> _tilePreviewColors(int count) {
