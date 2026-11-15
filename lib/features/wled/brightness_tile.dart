@@ -64,10 +64,20 @@ class BrightnessTile {
     int offset = 0,
   }) {
     final n = math.max(2, cycle);
+    // Light 1 is the brightest; light m+1 (m = n ~/ 2) is the dimmest — a
+    // real light at the dimmest level for every cycle length, not only even
+    // ones (over 9 lights the old `1 - |1 - 2i/n|` bottomed out at 47 % for
+    // a dimmest of 40). The fall takes m steps, the rise back n - m; for an
+    // even cycle the two halves are mirror images, as before.
+    final m = n ~/ 2;
+    final span = brightest - dimmest;
     return BrightnessTile(
       levels: [
         for (var i = 0; i < n; i++)
-          (brightest - (brightest - dimmest) * (1 - (1 - 2 * i / n).abs())).round(),
+          (i <= m
+                  ? brightest - span * i / m
+                  : brightest - span * (n - i) / (n - m))
+              .round(),
       ],
       offset: offset,
       shape: BrightnessShape.triangle,
