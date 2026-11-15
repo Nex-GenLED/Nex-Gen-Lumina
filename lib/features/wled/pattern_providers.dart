@@ -1,3 +1,4 @@
+import 'package:nexgen_command/features/wled/brightness_tile.dart';
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/features/wled/library_visibility.dart';
 import 'package:nexgen_command/features/wled/solid_palette_blocks.dart';
@@ -759,11 +760,13 @@ final selectorSpacingProvider = StateProvider<int>((ref) => 0);
 final selectorSolidLayoutProvider =
     StateProvider<SolidLayout>((ref) => SolidLayout.blocks);
 
-/// Active gradient preset index for brightness gradient patterns.
-final selectorGradientPresetProvider = StateProvider<int>((ref) => 0);
+/// The brightness tile being tuned for a brightness-pattern node (build
+/// 129); null = the node's own preset. Replaces the preset index + breathing
+/// toggle of the fx 83 era.
+final selectorBrightnessTileProvider = StateProvider<BrightnessTile?>((ref) => null);
 
-/// Breathing toggle for brightness gradient patterns.
-final selectorBreathingProvider = StateProvider<bool>((ref) => false);
+/// The white a brightness pattern is being tuned in; null = the node's own.
+final selectorBrightnessWhiteProvider = StateProvider<Color?>((ref) => null);
 
 /// Which mood categories are expanded in the effect list.
 final selectorExpandedMoodsProvider = StateProvider<Set<SelectorMood>>((ref) => {SelectorMood.calm});

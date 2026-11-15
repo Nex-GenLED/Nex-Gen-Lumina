@@ -32,6 +32,18 @@
 // ever been driven by this app those are already the values in place, so
 // stating them changes nothing there; on a segment that drifted, stating them
 // brings it back to what every other segment has been showing.
+//
+// ONE EXCEPTION, per effect ([kWledEffectOptionDefaults]): an effect whose
+// own default differs from the born-with value AND for which the born-with
+// value breaks the picture. fx 65 Palette reads `c1` as the ROTATION of its
+// palette rectangle: `theta = (c1 + 128)·π/256`. The effect's own default is
+// `c1 = 0` (θ = π/2, the colour index runs along the strip); the born-with
+// 128 is θ = π, the index is the same for every pixel and the whole run shows
+// ONE still colour (bench 2026-11-10 by eye; 2026-11-14 live-view read on
+// both firmwares, docs/bench/brightness_patterns_129_bench_2026-11-14.md).
+// WLED's own UI never shows this because it sends `fxdef:true`, which loads
+// the effect's metadata defaults. Every other effect keeps the born-with
+// value; the table test in brightness_patterns_129_test.dart pins that.
 
 /// `c1` — first effect slider.
 const int kSegDefaultC1 = 128;
@@ -147,6 +159,17 @@ Iterable<String> optionKeysReadBy(int effectId) {
   return kSegEffectOptionKeys.where(keys.contains);
 }
 
+/// Per-effect option values that replace the born-with default — see the
+/// header. Keyed by effect id, then option key.
+const Map<int, Map<String, Object>> kWledEffectOptionDefaults = {
+  65: {'c1': 0}, // Palette: rotation 0 = the gradient runs along the strip
+};
+
+/// The value option [key] is stated with for effect [effectId]: the effect's
+/// own default where [kWledEffectOptionDefaults] has one, else born-with.
+Object optionDefaultFor(int effectId, String key) =>
+    kWledEffectOptionDefaults[effectId]?[key] ?? _optionDefault(key);
+
 /// The born-with value of option [key].
 Object _optionDefault(String key) => switch (key) {
       'c1' => kSegDefaultC1,
@@ -187,7 +210,7 @@ Map<String, dynamic> completeEffectSegment(
   if (fx is! int || seg.containsKey('i')) return seg;
 
   for (final key in optionKeysReadBy(fx)) {
-    seg.putIfAbsent(key, () => _optionDefault(key));
+    seg.putIfAbsent(key, () => optionDefaultFor(fx, key));
   }
   seg.putIfAbsent('bri', () => kSegDefaultBri);
 

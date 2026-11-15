@@ -16,8 +16,9 @@ DesignFrame frameFromDocument(PixelDesignDocument doc) {
   final frame = <int, List<Color>>{};
   for (final ch in doc.channelLengths.keys) {
     final len = doc.channelLength(ch);
+    // The LIT colour (build 129): a dimmed pixel shows dimmer on the phone.
     frame[ch] = [
-      for (int i = 0; i < len; i++) _toColor(doc.colorAt(ch, i)),
+      for (int i = 0; i < len; i++) _toColor(doc.litColorAt(ch, i)),
     ];
   }
   return frame;
@@ -35,7 +36,7 @@ DesignFrame frameFromGlobalGroups({
 }) {
   Color colorAtGlobal(int g) {
     for (final grp in groups) {
-      if (g >= grp.startLed && g <= grp.endLed) return _toColor(grp.color);
+      if (g >= grp.startLed && g <= grp.endLed) return _toColor(grp.litColor);
     }
     return base;
   }
@@ -96,7 +97,7 @@ DesignFrame frameFromCustomDesign(
     if (len <= 0) continue;
     Color colorAtLocal(int i) {
       for (final grp in ch.colorGroups) {
-        if (i >= grp.startLed && i <= grp.endLed) return _toColor(grp.color);
+        if (i >= grp.startLed && i <= grp.endLed) return _toColor(grp.litColor);
       }
       return base;
     }

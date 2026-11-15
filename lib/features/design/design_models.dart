@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -680,12 +681,14 @@ class ChannelDesign {
     return cursor == ledCount;
   }
 
-  /// [colorGroups] as channel-local RGBW [PixelSpan]s, exactly as stored.
+  /// [colorGroups] as channel-local RGBW [PixelSpan]s — the LIT colour of
+  /// each group (its colour at its own brightness, [LedColorGroup.litColor]),
+  /// which is what every apply path and the scheduled API body send.
   /// RGB-only colours get W=0 (the same rule the apply spine uses).
   List<PixelSpan> positionalSpans() => [
         for (final g in colorGroups)
           if (g.endLed >= g.startLed && g.startLed >= 0)
-            PixelSpan(start: g.startLed, end: g.endLed, color: _rgbwOf(g.color)),
+            PixelSpan(start: g.startLed, end: g.endLed, color: _rgbwOf(g.litColor)),
       ];
 
   /// [positionalSpans] with every gap up to the channel's length filled black,
@@ -723,6 +726,22 @@ class ChannelDesign {
   }
 }
 
+/// Full brightness for a [LedColorGroup] (the value an absent `bri` means).
+const int kLedGroupFullBrightness = 255;
+
+/// [rgbw] scaled so the LIGHT output is `bri/255` of full, every channel
+/// including W — the inverse of the controller's gamma 2.8 (see
+/// `brightness_tile.dart`, `channelAtLevel`, for the same curve in percent).
+List<int> litRgbwForBrightness(List<int> rgbw, int bri) {
+  final c = rgbw.length >= 4
+      ? rgbw
+      : [...rgbw.take(3), ...List.filled(3 - rgbw.length.clamp(0, 3), 0), 0];
+  if (bri >= kLedGroupFullBrightness) return [c[0], c[1], c[2], c[3]];
+  if (bri <= 0) return const [0, 0, 0, 0];
+  final k = math.pow(bri / kLedGroupFullBrightness, 1 / 2.8);
+  return [for (var i = 0; i < 4; i++) (c[i] * k).round().clamp(0, 255)];
+}
+
 /// Represents a group of LEDs with the same color.
 /// Allows "virtual" per-LED control by defining color ranges.
 class LedColorGroup {
@@ -732,35 +751,58 @@ class LedColorGroup {
   /// 0-indexed end LED position (inclusive)
   final int endLed;
 
-  /// Color as [R, G, B] or [R, G, B, W]
+  /// Color as [R, G, B] or [R, G, B, W] — the PURE colour, at full brightness.
   final List<int> color;
+
+  /// Build 129 — the group's own brightness, 0–255 (255 = full), kept APART
+  /// from [color] so a dim red stays "red at 40 %" through every re-edit
+  /// instead of becoming a different dark red. Absent on the wire and in
+  /// Firestore when full, so every design saved before build 129 reads
+  /// unchanged and an unedited design re-saves byte-identical; an older
+  /// build reading a new design ignores it and shows the full colour (never
+  /// crashes). What reaches the lights is [litColor].
+  final int bri;
 
   const LedColorGroup({
     required this.startLed,
     required this.endLed,
     required this.color,
+    this.bri = kLedGroupFullBrightness,
   });
 
   /// Number of LEDs in this group
   int get ledCount => endLed - startLed + 1;
 
+  /// Dimmed below full.
+  bool get isDimmed => bri < kLedGroupFullBrightness;
+
+  /// The RGBW the lights receive: [color] scaled so the LIGHT output is
+  /// `bri/255` of full. The controller gamma-corrects every channel it is
+  /// sent (`light.gc.col` 2.8), so the scale is the inverse of that curve —
+  /// a plain `color × bri/255` would light a "40 %" pixel at 7.7 %.
+  List<int> get litColor => litRgbwForBrightness(color, bri);
+
   LedColorGroup copyWith({
     int? startLed,
     int? endLed,
     List<int>? color,
+    int? bri,
   }) {
     return LedColorGroup(
       startLed: startLed ?? this.startLed,
       endLed: endLed ?? this.endLed,
       color: color ?? this.color,
+      bri: bri ?? this.bri,
     );
   }
 
   factory LedColorGroup.fromJson(Map<String, dynamic> json) {
+    final rawBri = json['bri'];
     return LedColorGroup(
       startLed: json['start_led'] as int? ?? 0,
       endLed: json['end_led'] as int? ?? 0,
       color: (json['color'] as List<dynamic>?)?.cast<int>() ?? [255, 255, 255],
+      bri: rawBri is num ? rawBri.toInt().clamp(0, kLedGroupFullBrightness) : kLedGroupFullBrightness,
     );
   }
 
@@ -769,6 +811,7 @@ class LedColorGroup {
       'start_led': startLed,
       'end_led': endLed,
       'color': color,
+      if (bri != kLedGroupFullBrightness) 'bri': bri,
     };
   }
 

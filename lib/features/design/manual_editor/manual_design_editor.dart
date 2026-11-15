@@ -48,6 +48,9 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
   int? _activeChannel;
   final Map<int, Set<int>> _selection = {};
   List<int> _paintColor = kSmartPresetPalette[3].rgbw; // cyan default
+
+  /// Build 129 — the pixel brightness the "Dim" button applies (percent).
+  int _dimPct = 40;
   bool _livePreview = false;
   Timer? _previewThrottle;
   bool _busy = false;
@@ -110,6 +113,99 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
     }
     _commit(doc);
   }
+
+  // ── Build 129 — per-pixel brightness ──────────────────────────────────────
+
+  bool get _hasSelection => _selection.values.any((s) => s.isNotEmpty);
+
+  /// Dims every selected pixel to [pct] % (colour untouched).
+  void _dimSelection(int pct) {
+    if (!_hasSelection) return;
+    var doc = _doc;
+    final bri = (pct.clamp(0, 100) / 100 * kLedGroupFullBrightness).round();
+    for (final e in _selection.entries) {
+      doc = doc.setBrightness(e.key, e.value, bri);
+    }
+    _commit(doc);
+  }
+
+  /// A bright → dim ramp across the selection, per channel in LED order
+  /// (optionally mirrored: bright at both ends).
+  Future<void> _rampDialog() async {
+    if (!_hasSelection) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Select the lights to ramp first.')));
+      return;
+    }
+    var startPct = 100;
+    var endPct = _dimPct;
+    var mirror = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: NexGenPalette.gunmetal,
+          title: const Text('Brightness ramp',
+              style: TextStyle(color: NexGenPalette.textHigh, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _pctRow('Start', startPct, (v) => setState(() => startPct = v)),
+              _pctRow('End', endPct, (v) => setState(() => endPct = v)),
+              Row(children: [
+                Switch(
+                    key: const ValueKey('ramp-mirror'),
+                    value: mirror,
+                    onChanged: (v) => setState(() => mirror = v)),
+                const Expanded(
+                    child: Text('Mirror (bright at both ends)',
+                        style: TextStyle(color: Colors.white, fontSize: 13))),
+              ]),
+              const Text(
+                'Linear in light, from the first selected light to the last on '
+                'each channel. The level is kept apart from the colour.',
+                style: TextStyle(color: NexGenPalette.textMedium, fontSize: 11),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+            FilledButton(
+                key: const ValueKey('ramp-apply'),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Ramp')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    var doc = _doc;
+    for (final e in _selection.entries) {
+      final ordered = e.value.toList()..sort();
+      final ramp = brightnessRamp(ordered, startPct: startPct, endPct: endPct, mirror: mirror);
+      for (final r in ramp.entries) {
+        doc = doc.setBrightness(e.key, [r.key], r.value);
+      }
+    }
+    _commit(doc);
+  }
+
+  Widget _pctRow(String label, int value, ValueChanged<int> onChanged) => Row(
+        children: [
+          SizedBox(width: 44, child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 13))),
+          Expanded(
+            child: Slider(
+              value: value.toDouble(),
+              min: 0,
+              max: 100,
+              divisions: 100,
+              activeColor: NexGenPalette.cyan,
+              onChanged: (v) => onChanged(v.round()),
+            ),
+          ),
+          SizedBox(width: 40, child: Text('$value %', textAlign: TextAlign.right, style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 12))),
+        ],
+      );
 
   void _undo() {
     _history!.undo();
@@ -732,6 +828,43 @@ class _ManualDesignEditorState extends ConsumerState<ManualDesignEditor> {
             OutlinedButton.icon(onPressed: _clearSelectionToBase, icon: const Icon(Icons.format_color_reset, size: 18), label: const Text('Erase')),
             IconButton(onPressed: _history!.canUndo ? _undo : null, icon: const Icon(Icons.undo), color: Colors.white),
             IconButton(onPressed: _history!.canRedo ? _redo : null, icon: const Icon(Icons.redo), color: Colors.white),
+          ]),
+          const Divider(color: NexGenPalette.line, height: 24),
+          // Build 129 — per-pixel brightness, kept apart from colour. One
+          // slider for the whole selection (hundreds of lights, no per-light
+          // sliders), a ramp tool, and Full to undo a dim.
+          const Text('Pixel brightness', style: TextStyle(color: NexGenPalette.textMedium)),
+          Row(children: [
+            Expanded(
+              child: Slider(
+                key: const ValueKey('pixel-brightness-slider'),
+                value: _dimPct.toDouble(),
+                min: 0,
+                max: 100,
+                divisions: 20,
+                activeColor: NexGenPalette.cyan,
+                label: '$_dimPct %',
+                onChanged: (v) => setState(() => _dimPct = v.round()),
+              ),
+            ),
+            SizedBox(width: 44, child: Text('$_dimPct %', textAlign: TextAlign.right, style: const TextStyle(color: NexGenPalette.textHigh, fontSize: 12))),
+          ]),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            FilledButton.icon(
+                key: const ValueKey('pixel-dim'),
+                onPressed: () => _dimSelection(_dimPct),
+                icon: const Icon(Icons.brightness_6, size: 18),
+                label: Text('Dim to $_dimPct %')),
+            OutlinedButton.icon(
+                key: const ValueKey('pixel-full'),
+                onPressed: () => _dimSelection(100),
+                icon: const Icon(Icons.brightness_7, size: 18),
+                label: const Text('Full')),
+            OutlinedButton.icon(
+                key: const ValueKey('pixel-ramp'),
+                onPressed: _rampDialog,
+                icon: const Icon(Icons.show_chart, size: 18),
+                label: const Text('Ramp…')),
           ]),
           const Divider(color: NexGenPalette.line, height: 24),
           Row(children: [

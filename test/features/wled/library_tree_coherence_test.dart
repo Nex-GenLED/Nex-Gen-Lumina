@@ -60,7 +60,7 @@ void main() {
       expect(direct.length, 18, reason: k.id);
       expect(direct.where((n) => n.isPalette).length, 17, reason: k.id);
       final gradients = direct.singleWhere((n) => n.id == '${k.id}_gradients');
-      expect((await repo.getChildNodes(gradients.id)).length, 6, reason: gradients.id);
+      expect((await repo.getChildNodes(gradients.id)).length, 8, reason: gradients.id);
       // The spacing cards are the only ones allowed to promise dark LEDs.
       for (final card in direct.where((n) => n.isPalette)) {
         final spc = (card.metadata?['spacing'] as int?) ?? 0;
