@@ -2178,12 +2178,25 @@ class ScheduleSyncService {
       );
       if (dropped.isNotEmpty) {
         final names = dropped.map((s) => '"${s.actionLabel}"').join(', ');
+        // Build 129 — WHY the row went missing decides the words. A dropped
+        // schedule that passed every arm check (it is in `armable`) and did
+        // not arm (it is not in the table's `armed`) was cut by the slot
+        // budget alone: the held lease rows plus the schedules ahead of it
+        // filled the eight general slots. When that is true of every dropped
+        // schedule the table is simply full, and the copy says so and what
+        // to do. Any other shape (a schedule this sync refused and could not
+        // keep, or anything unforeseen) keeps the build-127 words.
+        final armableIds = {for (final s in armable) s.id};
+        final armedIds = {for (final s in armedSchedules) s.id};
+        final outOfRoomOnly = dropped.every(
+            (s) => armableIds.contains(s.id) && !armedIds.contains(s.id));
         debugPrint('ScheduleSync: SKIPPED cfg write — it would remove the '
             'row(s) the controller holds for $names, which this sync did not '
-            'mean to change. Controller left unchanged.');
+            'mean to change (${outOfRoomOnly ? 'no free timer slot' : 'could not keep'}). '
+            'Controller left unchanged.');
         return finish(ScheduleSyncResult(
           success: false,
-          error: kScheduleKeepRowsRefused,
+          error: outOfRoomOnly ? kScheduleTimerTableFull : kScheduleKeepRowsRefused,
           presetErrors: presetErrors,
           unconvergedPresetIds: unconvergedPresetIds,
           schedulesWithPresets: updatedSchedules,
@@ -2802,6 +2815,16 @@ const String kScheduleKeepRowsRefused =
     "Your controller still has a schedule the app couldn't rebuild this time, "
     'so nothing was changed. Tap Retry; if this keeps happening, contact '
     'support.';
+
+/// Build 129 — the keep guard's other reason: nothing was refused, but the
+/// held lease rows (one-night / Game Day) plus a newer schedule left no free
+/// slot for an older schedule the controller holds, so nothing was written.
+/// Names the two ways out: fewer schedules, or the night's lease rows
+/// clearing when its calendar lighting ends.
+const String kScheduleTimerTableFull =
+    "Your controller's timer is full right now, so nothing was changed. "
+    "Remove a schedule, or wait until tonight's calendar lighting ends, then "
+    'tap Retry.';
 
 /// Terminal failure copy for the case where the controller never answered
 /// within the verification window (didn't recover). Actionable and distinct
