@@ -4,11 +4,12 @@ Assembled 2026-11-14 from `feat/127-table-ownership` at `de4766b` (the
 build-127 candidate's tip, 2.5.10+127): dated calendar entries can be deleted
 by hand again on a phone at the default text size, and through the Lumina AI
 with a confirmation card, then these docs, then the version bump to
-2.5.10+128 as the final commit. **Not tagged, not built by CI, not deployed.
-No Firestore rules, functions or config write. No merge into main,
-`feat/124-colour`, `feat/126-candidate` or `feat/127-table-ownership`. No
-controller, bench unit or production system was contacted to assemble it; the
-tests use fakes.** The tag waits for the owner's go.
+2.5.10+128 as the final commit. **Tagged `build-128` at `9759da3`; built by
+CI as TestFlight 2.5.10 (363), released to testers on 2026-11-16, and
+uploaded to Google Play closed testing as versionCode 128 on 2026-11-16. No
+Firestore rules, functions or config write. `feat/124-colour` was
+fast-forwarded to it; no merge into main. No controller, bench unit or
+production system was contacted to assemble it; the tests use fakes.**
 
 ## 1. What went in
 
@@ -325,12 +326,12 @@ Worth fixing next, in this order: live_scoring_prompt.dart:71, house_photo_uploa
 Run on the candidate tip, one at a time, free space on C: checked before each
 SDK (stop under 10 GB). Logs under the session scratchpad `gates/128-tip/`.
 
-Filled in by the integration report.
+Filled 2026-11-16 from the logs of the gate run at the tag `9759da3` (2026-11-14); the same numbers are in the build-128 tag message.
 
 | SDK | pub get | analyze | TZ=UTC0 suite | golden | docs_guard |
 |---|---|---|---|---|---|
-| 3.47.9 | | | | | |
-| 3.41.2 | | | | | |
-| 3.50.0 (information) | | — | | — | — |
+| 3.47.9 | exit 0 | 0 errors / 12 warnings / 348 infos | 6,591 pass / 39 skip / 0 fail | 1 / 1 | 44 files / 141 facts / 0 failures / 0 warnings |
+| 3.41.2 | exit 0 | 0 / 12 / 343 | 6,591 / 39 / 0 | 1 / 1 | run once per tip, under 3.47.9 |
+| 3.50.0 (information) | exit 0 | — | 6,565 / 39 / 26 fail (the known text-scale set) | — | — |
 
-Not built by CI, not tagged, not deployed as of 2026-11-14.
+Tagged `build-128` at `9759da3`; built by CI as TestFlight 2.5.10 (363), released to testers on 2026-11-16; uploaded to Google Play closed testing as versionCode 128 on 2026-11-16.

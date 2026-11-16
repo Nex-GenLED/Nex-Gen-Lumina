@@ -3,10 +3,11 @@
 Assembled 2026-11-12 from `feat/124-colour` at `9a440b0` (the build-125 tag's
 commit, 2.5.10+125): sync-reliability slices A, C and B, a cross-slice test with
 one fix, these docs, then the version bump to 2.5.10+126 as the final commit.
-**Not tagged, not built by CI, not deployed. No Firestore rules or functions
-deploy. No controller, bench unit or production system was contacted to
-assemble it** (one read-only REST call to the Firebase Rules API, section 8).
-The tag waits for the owner's go. Slice D is **not** in this candidate
+**Tagged `build-126` at `bd29c38` (a lightweight tag; the bump `3bfcd6d` is
+five commits before it); built by CI as TestFlight 2.5.10 (361) and released
+to testers. No Firestore rules or functions deploy. No controller, bench unit
+or production system was contacted to assemble it** (one read-only REST call
+to the Firebase Rules API, section 8). Slice D is **not** in this candidate
 (section 9).
 
 ## 1. What went in
@@ -230,13 +231,13 @@ check that needs the controller's own pages or the app log.
 
 Run on the candidate tip, one at a time, free space on C: checked before each
 SDK (stop under 10 GB). Filled in by the integration report; the logs are
-under the session scratchpad `gates/126-candidate/`.
+under the session scratchpad `gates/126-candidate/` (at the bump `3bfcd6d`, 2026-11-12) and `gates/126-step3b/` (at the tag `bd29c38`, 2026-11-13). Filled 2026-11-16 from those logs.
 
 | SDK | pub get | analyze | TZ=UTC0 suite | golden | docs_guard |
 |---|---|---|---|---|---|
-| 3.47.9 | | | | | |
-| 3.41.2 | | | | | |
-| 3.50.0 (information) | | — | | — | — |
+| 3.47.9 | exit 0 | 0 errors / 12 warnings / 348 infos | 6,479 pass / 39 skip / 0 fail | 1 / 1 | 44 files / 135 facts / 0 failures / 0 warnings |
+| 3.41.2 | exit 0 | 0 / 12 / 343 | not recorded at the tag (the full suite ran at the bump `3bfcd6d`: 6,476 / 39 / 0; at `bd29c38` only the touched file ran: 23 / 0) | 1 / 1 | run once per tip, under 3.47.9 |
+| 3.50.0 (information) | exit 0 (at `3bfcd6d`) | — | not recorded at the tag (at `3bfcd6d`: 6,450 / 39 / 26 fail, the known text-scale set) | — | — |
 
 ## 7. Bench plan
 
@@ -302,4 +303,4 @@ in the suite uses a fake). That is the bench plan's section 3.
   condition; it is bounded like the other two. Whether it is worth keeping is
   the owner's call after the bench.
 
-Not built, not tagged, not deployed as of 2026-11-12.
+Tagged `build-126` at `bd29c38`; built by CI as TestFlight 2.5.10 (361), released to testers. (This line read "Not built, not tagged, not deployed as of 2026-11-12" until 2026-11-16.)

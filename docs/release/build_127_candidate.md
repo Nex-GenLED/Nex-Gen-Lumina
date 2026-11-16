@@ -4,11 +4,12 @@ Assembled 2026-11-13 from `feat/126-candidate` at `bd29c38` (the build-126
 tag's commit, 2.5.10+126): table ownership for every controller timer write,
 the kept rows and keep guard in schedule sync, the verified lease zeroing,
 drift detection at launch, these docs, then the version bump to 2.5.10+127 as
-the final commit. **Not tagged, not built by CI, not deployed. No Firestore
-rules, functions or config write (`config/calendar_leases.liveWritesEnabled`
-stays true). No merge into main, `feat/124-colour` or `feat/126-candidate`.
-No controller, bench unit or production system was contacted to assemble
-it.** The tag waits for the owner's go.
+the final commit. **Tagged `build-127` at `de4766b`; built by CI as
+TestFlight 2.5.10 (362), never distributed to testers; its content shipped
+inside build 128 (TestFlight 363). No Firestore rules, functions or config
+write (`config/calendar_leases.liveWritesEnabled` stays true).
+`feat/124-colour` was fast-forwarded to it; no merge into main. No
+controller, bench unit or production system was contacted to assemble it.**
 
 ## 1. What went in
 
@@ -187,13 +188,13 @@ All seven pass on the candidate tip.
 
 Run on the candidate tip, one at a time, free space on C: checked before each
 SDK (stop under 10 GB). Filled in by the integration report; the logs are
-under the session scratchpad `gates/127-tip/`.
+under the session scratchpad `gates/127-tip/` (at the tag `de4766b`, 2026-11-13, rerun 2026-11-14). Filled 2026-11-16 from those logs.
 
 | SDK | pub get | analyze | TZ=UTC0 suite | golden | docs_guard |
 |---|---|---|---|---|---|
-| 3.47.9 | | | | | |
-| 3.41.2 | | | | | |
-| 3.50.0 (information) | | — | | — | — |
+| 3.47.9 | exit 0 | 0 errors / 12 warnings / 348 infos | 6,554 pass / 39 skip / 0 fail | 1 / 1 | 44 files / 139 facts / 0 failures / 0 warnings |
+| 3.41.2 | exit 0 | 0 / 12 / 343 | 6,554 / 39 / 0 on the full rerun of 2026-11-14 (the first run: 6,532 / 39 / 22 fail, all in four lease test files, each passing alone and on the rerun) | 1 / 1 | run once per tip, under 3.47.9 |
+| 3.50.0 (information) | exit 0 | — | 6,506 / 39 / 48 fail | — | — |
 
 ## 7. Bench plan
 
@@ -202,4 +203,4 @@ controller is the spare `.179` (0.15.4): lease promotion over a "Pattern: …"
 schedule, expiry zeroing, the sunrise-off toggle and drift detection.
 **Written, not run.** The home controller `.150` is excluded by name.
 
-Not built by CI, not tagged, not deployed as of 2026-11-13.
+Tagged `build-127` at `de4766b`; built by CI as TestFlight 2.5.10 (362), never distributed to testers; its content shipped inside build 128. (This line read "Not built by CI, not tagged, not deployed as of 2026-11-13" until 2026-11-16.)

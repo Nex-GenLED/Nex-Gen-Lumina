@@ -2,8 +2,10 @@
 
 > **Integration note (2026-11-15):** the build-129 candidate (`feat/129-candidate`, from `build-128` at `9759da3`) also carries builds 127 (`de4766b`) and 128 (`9759da3`); FACTS rows T-D16/T-D17 of the feature branch are T-D17/T-D18 in the merged file.
 
-Branch `feat/129-brightness-patterns`, from `feat/126-candidate` at `bd29c38`. No tag, no deploy, no
-merge, version unchanged (2.5.10+126 — the integration step bumps it). Bench and decision:
+Branch `feat/129-brightness-patterns`, from `feat/126-candidate` at `bd29c38`, merged into
+`feat/129-candidate` and tagged `build-129` at `37cf275` (2.5.10+129); built by CI as TestFlight
+2.5.10 (364), installed on the owner's phone for the bench, not released to testers. No deploy; no
+merge into main. Bench and decision:
 [docs/bench/brightness_patterns_129_bench_2026-11-14.md](../bench/brightness_patterns_129_bench_2026-11-14.md).
 
 ## What was wrong (confirmed against source at bd29c38)
@@ -119,3 +121,13 @@ The stored customer payloads cannot be counted from the app (no Firestore read i
   lit spans, frame, ramp.
 - `test/helpers/recording_wled_repository.dart` now implements `PerPixelWriter` (records every
   chunk in `applied`), so a test can render everything the app wrote onto a simulated strip.
+
+## Gates (at the tag `37cf275`, 2026-11-15)
+
+From the saved gate logs of the integration session (`gates-129c/`); the same numbers are in the build-129 tag message. One SDK at a time, `TZ=UTC0`.
+
+| SDK | pub get | analyze | TZ=UTC0 suite | golden | docs_guard |
+|---|---|---|---|---|---|
+| 3.47.9 | exit 0 | 0 errors / 12 warnings / 341 infos | 6,652 pass / 39 skip / 0 fail | 1 / 1 | 44 files / 143 facts / 0 failures / 0 warnings |
+| 3.41.2 | exit 0 | 0 / 12 / 336 | 6,652 / 39 / 0 | 1 / 1 | 44 / 143 / 0 / 0 |
+| 3.50.0 (information) | exit 0 | — | 6,626 / 39 / 26 fail (the known text-scale set) | — | — |
