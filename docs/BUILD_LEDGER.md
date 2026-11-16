@@ -206,6 +206,82 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 
 ## Operational flags
 
+### ANDROID +128 — AAB built 2026-11-16 from `9759da3` (= tag `build-128`) — UPLOADED 2026-11-16 to Play Closed testing, available to testers
+
+| item | value |
+|---|---|
+| Source | Tag `build-128` = `9759da3`, the bump commit `chore(version): 2.5.10+128` (convention 1), so this bundle carries the same app code as iOS +128 below. Built in a scratch worktree checked out at `9759da3`. |
+| Build | Local Flutter 3.41.2 (the store recipe): `flutter build appbundle --release --obfuscate --split-debug-info=build/debug-info/android`. |
+| Android artifact | `Documents\Lumina Android Releases\lumina-2.5.10-128.aab` (the owner's Documents folder), **70,691,527 bytes**, sha256 `405a6bbb6b87261e3c51711009c8febf23edaff694a80780d6f1d8084195001a` (`lumina-2.5.10-128.aab.sha256` alongside; re-hashed 2026-11-16, matches). **versionCode 128** / versionName 2.5.10. |
+| Signer | Read from the artifact on 2026-11-16 (`keytool -printcert -jarfile`): `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US`; certificate SHA-1 `8E:4A:35:82:8B:32:BA:52:B9:93:25:25:B8:5E:B4:D4:FD:0A:57:DA`, SHA-256 `96:6A:…:6D:DF`, the same certificate as +121 and +122 (the main checkout's upload keystore). |
+| Manifest vs 122 | `git diff --stat build-122 build-128 -- android ios functions firestore.rules firestore.indexes.json codemagic.yaml` touches `codemagic.yaml` (the Flutter 3.47.9 pin, build-125) and `functions/src/teamLedColors.ts` with its unit test (source only, from the +124 colour work; no functions deploy): nothing under `android/` or `ios/`, so no Android or iOS shell change since +122. |
+| Symbols | `Documents\Lumina Android Releases\symbols-2.5.10-128\app.android-{arm,arm64,x64}.symbols` (7,086,184 / 8,136,472 / 8,137,896 bytes; three files). Keep them: they are needed to read Play crash reports from this build. |
+| Upload | **UPLOADED 2026-11-16 (Monday) by the owner**: manual Play Console upload to **Closed testing**, available to testers. versionCode 128 is now burned on Play. The previous Android upload was +122 on 2026-11-04 (ANDROID +122 below); no Android bundle was uploaded at 123–127. A +126 bundle was built (`lumina-2.5.10-126.aab`, versionCode 126) and **never uploaded**; it cannot be uploaded now, since 128 is on Play. |
+| Marker | `.android-versioncode-state` (main checkout, git-ignored) set 122 → **128** on 2026-11-16. `build.sh` reads it as the versionCode of the last completed Android build and refuses only an equal value; it does not refuse a lower one, so pubspec must still be bumped by hand. |
+| **Next Android bundle** | **versionCode must be 129 or higher.** `build-129` (`37cf275`) already reads `2.5.10+129` in `pubspec.yaml`. |
+| Rollback | Halt the rollout in Play Console. Testers who already have 128 keep it until a higher code ships; the rest stay on 122. |
+
+### +129 — build-129 tagged 2026-11-16 16:24:58Z (10:24:58 CST) (TestFlight number not recorded) — brightness patterns; built and installed on the owner's phone for bench, NOT released to testers
+
+| item | value |
+|---|---|
+| Tag | `build-129` = `37cf275` (annotated, on the bump commit `chore(version): 2.5.10+129`; convention 1). Branch `feat/129-candidate`; `feat/124-colour` fast-forwarded to `37cf275` and pushed. |
+| Base | `9759da3` (= `build-128`). First-parent `9759da3..37cf275` (6): `ca6af58` merge `origin/feat/129-brightness-patterns` (`c922bb8`); `566b980` `8c43804` the keep guard's full-table case gets its own Failed copy; `4b7561c` `880f334` a test comment and an analyze fix; `37cf275` bump. 27 files, +3,760 / −616 against build-128. |
+| Contents | Per-light brightness tiles painted through Design Studio, Wave 6 and Wave 18 cards in every Kelvin style's Brightness Patterns folder with an Adjust sheet (brightest, dimmest, cycle length, shape, offset, per-light custom tile); per-light Dim / Full / Ramp in the Design Studio editor; the six shipped brightness presets render as previewed; the full-timer case gets its own Failed copy. Effect 65 now sends `c1 0`, so the autopilot Game Day event, the pre-game colorloop, the AI rotation, the sync effect picker and stored customer effect-65 payloads change. Carries 127 and 128. Notes: `docs/release/build_129_candidate.md`; bench: `docs/bench/brightness_patterns_129_bench_2026-11-14.md`. FACTS T-D17 and T-D18 stay BUILT NOT SHIPPED (129 candidate). |
+| Not changed | `git diff --stat build-128 build-129 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. |
+| Gates on `37cf275` | From the tag message: 3.47.9 analyze 0 / 12 / 341, 3.41.2 analyze 0 / 12 / 336; `TZ=UTC0` suite **6,652 pass / 39 skip / 0 fail** on both; golden 1 / 1; `docs_guard` 44 files / 143 facts / 0 failures. 3.50.0 information only (the 26 known text-scale failures). |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | Not read. |
+| iOS build number | **TestFlight number not recorded.** Codemagic built the tag and the owner installed it on their phone for the bench; it was not released to testers. The number was not found on this PC on 2026-11-16. |
+| Android | Not built, not uploaded. versionCode 129 is unused; it is the next Android number (ANDROID +128 above). |
+| Rollback | Nothing to roll back: no tester has it. If it is later released, 128 (TestFlight 363) stays available. |
+
+### +128 — build-128 tagged 2026-11-15 04:18:08Z (2026-11-14 22:18:08 CST) (Codemagic build number: 363) — the dated-entry detail sheet clears the dock and scrolls, Lumina AI deletes dated calendar entries after a confirmation card; carries 127's table ownership — RELEASED to testers 2026-11-16
+
+| item | value |
+|---|---|
+| Tag | `build-128` = `9759da3` (annotated, on the bump commit `chore(version): 2.5.10+128`; convention 1). Branch `feat/128-entry-delete`; `feat/124-colour` fast-forwarded to `9759da3` and pushed. |
+| Base | `de4766b` (= `build-127`). First-parent `de4766b..9759da3` (5): `6b122dc` Step 1 tests, failing at `de4766b`; `f070be0` the detail sheet draws above the glass dock, scrolls, and pins Edit / Delete in a footer; `6e00bf0` Lumina deletes dated calendar entries (the model proposes, the app confirms); `32a1c25` candidate notes and FACTS; `9759da3` bump. 20 files, +2,604 / −127 against build-127. |
+| Contents | **Detail sheet** (T-D16): the dated-entry detail sheet opens above the glass nav bar, scrolls its details, and keeps Edit This Day and Delete This Entry in a footer that never scrolls away, at every text size. **Lumina AI delete** (T-L6): "delete the entries you created", "remove Friday's entry", a date range; the model only describes which entries, the app resolves them and shows a confirmation card with count, dates and names; `claudeProxy` is a pass-through, the action list is client-only. **Also carries +127** (T-D12 to T-D15), which was never distributed. Notes: `docs/release/build_128_candidate.md`. |
+| Not changed | `git diff --stat build-127 build-128 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. |
+| Gates on `9759da3` | From the tag message: 3.47.9 and 3.41.2 analyze 0 errors / 12 warnings (348 and 343 infos); `TZ=UTC0` suite **6,591 pass / 39 skip / 0 fail**; golden 1 / 1; `docs_guard` clean. 3.50.0 information only (the 26 known failures). |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | Not read. |
+| iOS build number | **363**: TestFlight `2.5.10 (363)`, **released to testers on Monday 2026-11-16** (owner). It is Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +128. |
+| Android | Built and uploaded 2026-11-16: see ANDROID +128 above. |
+| Docs guard | Run on the ledger-flip commit (branch `docs/ledger-126-129`); the summary line is in that commit's message. |
+| Rollback | iOS: expire the build in App Store Connect; TestFlight 361 (+126) stays available. Android: halt the rollout in Play Console (ANDROID +128). Nothing to revert in git unless the owner says so. |
+
+### +127 — build-127 tagged 2026-11-14 22:10:54Z (16:10:54 CST) (TestFlight number not recorded) — table ownership, kept rows and keep guard, verified lease zeroing, drift detection — BUILT, NEVER DISTRIBUTED to testers; its content shipped inside 128
+
+| item | value |
+|---|---|
+| Tag | `build-127` = `de4766b` (annotated, on the bump commit `chore(version): 2.5.10+127`; convention 1). Branch `feat/127-table-ownership`; `feat/124-colour` fast-forwarded to `de4766b` and pushed. |
+| Base | `bd29c38` (= `build-126`). First-parent `bd29c38..de4766b` (6): `491384f` cases (a)–(e), failing at `bd29c38`; `d3856cb` lease writers and the sunrise-off toggle keep every row they do not own, and a lease record is removed only after its zero-write is confirmed; `a1ddc83` sync keeps a refused schedule's rows and never sends a table that drops an enabled schedule; `9101807` drift detection at the LAN launch; `32785ee` candidate notes and FACTS; `de4766b` bump. 29 files, +3,786 / −336 against build-126. |
+| Contents | **Ownership for every timer write** (T-D12), **kept rows and the keep guard** (T-D13), **verified lease zeroing** (T-D14), **drift state** at launch (T-D15). Notes: `docs/release/build_127_candidate.md`. |
+| Not changed | `git diff --stat build-126 build-127 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. |
+| Gates on `de4766b` | The gates table in `docs/release/build_127_candidate.md` §6 was left blank; the review of 2026-11-14 was clean. The build-128 tag message records the first gates on the stacked tree (6,591 / 39 / 0 at `9759da3`). |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | Not read. |
+| iOS build number | **TestFlight number not recorded.** Codemagic built the tag, but the build was never distributed to testers; 128 superseded it the same day. The number was not found on this PC on 2026-11-16. FACTS T-D12 to T-D15 are therefore SHIPPED (128), not (127). |
+| Android | Not built. versionCode 127 is unused and now unusable, since 128 is on Play. |
+| Rollback | Nothing to roll back: no tester has it. |
+
+### +126 — build-126 tagged on `bd29c38` (commit dated 2026-11-13 15:57:30Z, 09:57:30 CST; lightweight tag, no tag timestamp) (Codemagic build number: 361) — sync reliability: queued not dropped, sync status row and chip, owed re-sync, Firestore mirror, the editor's plain-words line
+
+| item | value |
+|---|---|
+| Tag | `build-126` = `bd29c38` (lightweight). **Deviation from convention 1:** the bump commit is `3bfcd6d` (`chore(release): bump to 2.5.10+126`); five commits follow it on the tag — `52dbe44` and `7cf9c03` (two deferred-state detail strings), `593b8ac` and `bd29c38` (bench plan docs) and `a0d2bd0` (a test name) — so the tag, not the bump, is the build point. Branch `feat/126-candidate`; `feat/124-colour` fast-forwarded to `bd29c38` and pushed. |
+| Base | `9a440b0` (build-125's commit `b9a53da` plus its ledger row; same app bytes). First-parent `b9a53da..bd29c38` (12): `87943ad` merge slice A `feat/126-sync-queue-24h`; `76954ad` merge slice C `feat/126-schedule-editor-sentence`; `239cbfe` merge slice B `feat/126-sync-resync-status`; `d409a04` cross-slice test and its fix; `9263e75` FACTS T-D6 to T-D11 and notes; `3bfcd6d` bump; `52dbe44` `593b8ac` `7cf9c03` `a0d2bd0` `bd29c38`. 25 files, +3,729 / −43 against build-125. |
+| Contents | **Queue, not drop** (T-D7): a sync requested during another's verification runs once after it clears. **Sync status** (T-D6): the My Schedule row and the Home chip, five states with Retry. **Owed re-sync** (T-D8): one automatic re-sync per trigger between 9:00 and 15:00 local. **Firestore mirror** (T-D9): `schedule_sync` on the user record. **Editor sentence** (T-D10): "Lights on at 5:00 PM, off at 7:00 AM the next morning."; a 24-hour label re-opens on its saved time. **Written-not-verified** (T-D11). Slice D (`feat/126-sync-readback`) is NOT in. Notes: `docs/release/build_126_candidate.md`; bench plan: `docs/bench/sync_reliability_126_bench_plan.md`. |
+| Not changed | `git diff --stat build-125 build-126 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. |
+| Gates on `bd29c38` | Session record 2026-11-12/13: `TZ=UTC0` suite 6,479 pass / 39 skip / 0 fail on 3.47.9 and 3.41.2, analyze and golden clean. The gates table in `docs/release/build_126_candidate.md` §6 was left blank. |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | Not read. |
+| iOS build number | **361**: TestFlight `2.5.10 (361)` (owner, 2026-11-16). It is Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +126. |
+| Android | An AAB was built (`lumina-2.5.10-126.aab`, versionCode 126, obfuscated; a first attempt, `lumina-2.5.10-126-593b8ac-DO-NOT-UPLOAD.aab`, was cut from `593b8ac`, three commits short of the tag) and **never uploaded**. versionCode 126 is now unusable, since 128 is on Play. |
+| Rollback | iOS: expire the build in App Store Connect; TestFlight 360 (+125) stays available. |
+
 ### +125 — build-125 tagged 2026-11-11 on `b9a53da` — PASSED Codemagic's gate on the pinned Flutter 3.47.9; iOS 360 uploaded to TestFlight the night of 2026-11-11 (CST); Android not built
 
 | item | value |
@@ -226,6 +302,84 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | Outcome | Codemagic's "iOS Release" run for the tag failed at "Test and analyze (build gate)": 6,371 pass / 39 skip / 22 fail. Nothing was built, signed or uploaded, so build 124 never reached TestFlight. Android was not built; versionCode 124 is unused. |
 | Cause | `codemagic.yaml` said `flutter: stable`, and Flutter 3.50.0 (Dart 3.14.0) became stable on 2026-11-11 at 18:46Z, two hours before the tag push. The local gates had run on 3.41.2 and 3.47.9. Under 3.50.0, 22 text-scale tests fail with "An animation is still running even after the widget tree was disposed": the bundled-font load in `loadAppFontsForTest` (`test/helpers/text_scale_harness.dart`) triggers a fonts-change relayout whose frame is still pending at teardown. Reproduced here on 3.50.0 at both `38def5a` and `build-123`, the same 22 tests; none fail on 3.41.2 or 3.47.9. App code is not involved. |
 | Fix | build-125: Flutter pinned to 3.47.9 in `codemagic.yaml` (convention 5), and the same app bumped to 2.5.10+125. The test-helper fix for 3.50.0 is a separate, later change. |
+
+*No +123 row exists in this ledger, on `feat/124-colour` or on `release/store-submission-consolidated` (checked 2026-11-16). build-123 (`9615ff2` = tag `build-123`, TestFlight 358, shipped 2026-11-08; FACTS T-B1 and `docs/release/build_123_candidate.md`) is the only tagged build from +120 onward without a row. The row is owed; it is not reconstructed here. The +120, +121, +122 and ANDROID +121 / +122 rows below were copied unchanged on 2026-11-16 from `release/store-submission-consolidated` at `3458308`.*
+
+### ANDROID +122 — AAB built 2026-11-03 from `f7b8317` (= tag `build-122`) — UPLOADED 2026-11-04 to Play Closed testing
+
+| item | value |
+|---|---|
+| Source | Tag `build-122` = `f7b8317`, the bump commit (convention 1), so this bundle carries the same app code as iOS +122 below. Built in the worktree `lumina-122-cut` at `f7b8317`; `git status` empty before and after. |
+| Build | Local Flutter 3.41.2 (3.47.5 cannot build Android here, #125), after `flutter clean` + `pub get`: `flutter build appbundle --release --obfuscate --split-debug-info=build/debug-info/android`. 9.5 min with a fresh Gradle daemon. Two earlier attempts failed in Gradle 8.12's transform cache ("Could not read workspace metadata": seven half-written entries dated 2026-11-02 17:41); the seven directories were deleted by explicit path and the idle daemon, which still held them in its in-memory index, was stopped with the project's `gradlew --stop`. Nothing else in the cache was touched. |
+| Android artifact | `C:\Flutter Projects\lumina-b122-artifacts\lumina-2.5.10+122-f7b8317.aab`, **70,447,001 bytes**, sha256 `35fd4e4d688ebbf96c5d9434c109d3a589a9da00ffea8b822627f27f8a46128d` (`SHA256.txt` alongside; re-hashed 2026-11-04, matches). Bundle manifest (bundletool 1.18.3): **versionCode 122** / 2.5.10 / minSdk 24 / targetSdk 36 / compileSdk 36. 16 KB page sizes: 6/6 64-bit libraries aligned. |
+| Signer | Read from the artifact on 2026-11-04 (`keytool -printcert -jarfile`): `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US`; certificate SHA-256 `96:6A:…:6D:DF`, the same certificate as +121 (the main checkout's upload keystore). Signing inputs came from the environment only, as for +121: `CM_KEYSTORE_PATH` points at the main repo's keystore, nothing was copied, and the passwords were never printed. The only file placed in the worktree was the git-ignored `android/app/google-services.json`, byte-checked against the main checkout's. |
+| Manifest vs 121 | Merged-manifest permissions (19) identical to +121. `git diff --stat build-121 build-122 -- android ios functions firestore.rules firestore.indexes.json codemagic.yaml` is EMPTY: no Android or iOS shell change since +121. |
+| Symbols | `C:\Flutter Projects\lumina-b122-artifacts\debug-info-android\app.android-{arm,arm64,x64}.symbols` (6,976,788 / 8,011,152 / 8,019,568 bytes); the worktree keeps `build/debug-info/android`. Keep them: they are needed to read Play crash reports from this build. |
+| Upload | **UPLOADED 2026-11-04 by the owner**: manual Play Console upload to **Closed testing**. versionCode 122 is now burned on Play. |
+| Marker | `.android-versioncode-state` (main checkout, git-ignored) set 121 → **122** on 2026-11-04. |
+| **Next Android bundle** | **versionCode must be 123 or higher.** |
+| Rollback | Halt the rollout in Play Console. Testers who already have 122 keep it until a higher code ships; the rest stay on 121. |
+
+### +122 — build-122 tagged 2026-11-04 16:51Z (10:51 CDT) (Codemagic build number: 357) — sunset-to-sunrise and overnight schedules land on the right days, a one-night or Game Day schedule keeps the regular ones, a scheduled pattern reaches every zone, Neighborhood Sync says when a start did not go through, and the layout is restored after a controller restart
+
+| item | value |
+|---|---|
+| Tag | `build-122` = `f7b8317` (lightweight, the bump commit `chore(release): bump to 2.5.10+122`; convention 1). Release line: `git merge --no-ff release/122-cut` in `lumina-110-release` → merge commit `3157ebf` (parents `0cd3187`, `f7b8317`), pushed `0dcb81a..3157ebf`, then the tag pushed. A fast-forward was impossible: the release line already carried the two ledger-only commits `07596d3` and `0cd3187` past build-121, so the tag sits on the merge's second parent, not on the branch tip. |
+| Base | `0dcb81a` (= `build-121`). `release/122-cut` = `release/122-candidate` at `3cc7798` + the bump. First-parent `0dcb81a..f7b8317` (10): `ab52763` merge `fix/122-timer-table`; `7fdb9e7` merge `fix/122-segments-restore`; `895a6a1` merge `fix/122-sync-start`; `19788b9` merge `fix/122-consult-error`; `5cc77f5` the fan-out payload carries only the keys applySyncPattern keeps; `a8ab9c8` bench reads hour 254 as a sunset row; `52b5fec` `e0ac315` `3cc7798` lease-merge solar boundary tests; `f7b8317` bump. 86 files, +10,416 / −1,053 against build-121. |
+| Contents | **Timer table** (`fix/122-timer-table`): one shared builder for the WLED timer table — clock rows in slots 0–7, sunrise in slot 8 and sunset in slot 9 with a disabled placeholder so a lone sunset survives a reboot, overnight OFF days shifted to the next day, sun OFFs merged into the off macro, a named refusal when a schedule cannot fit, and sun-bounded schedules refused while solar scheduling is off. **Lease merge** (`fix/122-timer-table`, `fix/122-segments-restore`): a one-night or Game Day lease composes with the regular schedules' clock rows instead of replacing them, and defers while the schedules or the solar flag are still loading. **Pattern on a schedule**: the preset fans out to every zone, not only the first. **Segments restore** (`fix/122-segments-restore`): layout guard, geometry re-heal, restart watch, segment-count save read-back, revert capture for Light Up Now, frame-rate marker re-arm, error sink. **Neighborhood Sync** (`fix/122-sync-start`): start feedback when a start fails or the flag read times out, the initiator is never dropped, the fan-out payload is whitelisted. **Consultation** (`fix/122-consult-error`): the demo consultation failure reads as a plain line with Add details / Retry and is recorded. What's New text (489 characters, both stores) is in the cut notes. |
+| Not changed | `git diff --stat build-121 build-122 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. The ledger on the cut equals build-121's. |
+| Gates on `f7b8317` | Local 3.41.2: version tests 12 / 0; analyze 0 / 12 / 357; `TZ=UTC0` tests **5,889 pass / 39 skip / 0 fail** (build-121 = 5,649, so +240). On the candidate `3cc7798` (lib/ and bench/ identical to the tag): schedule suites 808 / 0, golden 1 / 1. `node scripts/docs_guard.mjs` on the cut: 44 files, 119 facts, 0 failures, 0 warnings. PII scan of the 10,416 added lines `0dcb81a..f7b8317`: clean (only `demo@example.com` and the test MAC `aa00000000a1`). |
+| Bench | The +122 candidate at `52b5fec` (lib/ and bench/ identical to the tag) on the 0.15.4 spare, 2026-11-03: timer-table steps 15 / 15, the real sunset ON observed at the controller's computed 17:15, and the sunrise OFF confirmed on 2026-11-04 (off, preset 2, table unchanged, no restart). Items needing the app on a controller were not run. Full record in the bench session's `BENCH_122_RESULTS.md`. |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | GitHub check-run `126739975796` "iOS Release" on `f7b8317`: completed / **success** 2026-11-04 17:24:18Z (12:24 CDT), 32:51 after the 16:51:27Z start. It was opened as `126726654405`, which stays `in_progress`, as with +109 onward. Codemagic build `6aeb628f81c4fc36161bea26`. 14/14 steps green; Test and analyze 11:07, Build IPA 6:23, Publishing 1:39. GitHub's API exposed the opening run only 11 minutes after it started (its check-suite was created 17:02:08Z) and the result run after 17:55Z; a lag to expect, not a missing build. Because the tag sits on the merge's second parent, GitHub also auto-created a `codemagic-ci-cd` check-suite on the branch tip `3157ebf` that stays `queued` forever; it is not a build. |
+| iOS build number | **357**: TestFlight `2.5.10 (357)`. The owner read it from App Store Connect on 2026-11-04. It is Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +122 (see the header and `codemagic.yaml` "Set build number"). |
+| Android | Built 2026-11-03 and uploaded 2026-11-04: see ANDROID +122 above. |
+| Rollback | iOS: do not submit the build, or expire it in App Store Connect; TestFlight 356 (+121) stays available. Android: halt the rollout in Play Console (see ANDROID +122). The release line keeps `3157ebf`; nothing to revert in git unless the owner says so. |
+
+### ANDROID +121 — AAB built 2026-10-29 from `0dcb81a` (= tag `build-121`) — UPLOADED 2026-11-02 to Play Closed testing
+
+| item | value |
+|---|---|
+| Source | Tag `build-121` = `0dcb81a`, the bump commit (convention 1), so this bundle carries the same app code as iOS +121 below. Built in the worktree `lumina-121-td7` at `0dcb81a`; `git status` empty after. |
+| Build | Local Flutter 3.41.2 (3.47.5 cannot build Android here, #125), after `flutter clean` + `pub get`: `flutter build appbundle --release --obfuscate --split-debug-info=build/debug-info/android`. 23 min cold. |
+| Android artifact | `C:\Flutter Projects\lumina-b121-artifacts\lumina-2.5.10+121-0dcb81a.aab`, **70,383,952 bytes**, sha256 `2d762f5eeef2fca949eba3dec024eb2045e3a22d56c6d11525df1532705b07e0` (`SHA256.txt` alongside; re-hashed 2026-11-02, matches). Bundle manifest (bundletool 1.18.3): **versionCode 121** / 2.5.10 / minSdk 24 / targetSdk 36 / compileSdk 36. 16 KB page sizes: 6/6 64-bit libraries aligned. |
+| Signer | Read from the artifact on 2026-11-02 (`keytool -printcert -jarfile`): `CN=Tyler Honeycutt, OU=Nex-Gen LED LLC, O=Nex-Gen LED LLC, L=Blue Springs, ST=MO, C=US`; certificate SHA-256 `96:6A:…:6D:DF`, the main checkout's upload keystore. Signing inputs came from the environment only: `CM_KEYSTORE_PATH` points at the main repo's keystore, nothing was copied, and the passwords were never printed. The only file placed in the worktree was the git-ignored `android/app/google-services.json`, which the guard byte-checks. |
+| Manifest vs 116 | Merged-manifest permissions identical to 116. The only Android shell change since 116 is the Maps removal (`04eacd0`, build 120): the Maps API-key meta-data, the Maps package query, the required glEs 2.0 feature and the Apache HTTP legacy library are gone. |
+| Symbols | `C:\Flutter Projects\lumina-b121-artifacts\debug-info-android\app.android-{arm,arm64,x64}.symbols` (6,952,332 / 7,994,464 / 7,995,504 bytes). Keep them: they are needed to read Play crash reports from this build. |
+| Upload | **UPLOADED 2026-11-02 by the owner**: manual Play Console upload to **Closed testing**. versionCode 121 is now burned on Play. No Android bundle was ever built at 117–120, and none can be uploaded now, since each is below 121. |
+| Marker | `.android-versioncode-state` (main checkout, git-ignored) set 116 → **121** on 2026-11-02. |
+| **Next Android bundle** | **versionCode must be 122 or higher.** `fix/122-segments-restore` (`76d213e`) is still numbered `2.5.10+121` in both `pubspec.yaml` and `lib/app_version.dart`. Bump it to +122 just before the Android bundle is cut, so the bump commit is the build point; a bundle cut from it as-is would be versionCode 121 and Play would reject it. Not bumped now: no version change on that branch without the owner's go. |
+| Rollback | Halt the rollout in Play Console. Testers who already have 121 keep it until a higher code ships; the rest stay on 116. |
+
+### +121 — build-121 tagged 2026-10-26 03:49Z (2026-10-25 22:49 CDT) (Codemagic build number: 356) — controller time zone from the profile's full IANA zone (TD-7)
+
+| item | value |
+|---|---|
+| Tag | `build-121` = `0dcb81a` (lightweight, the bump commit `chore(release): bump to 2.5.10+121`; convention 1). Release fast-forwarded `afc3bdc` → `0dcb81a` in `lumina-110-release` and pushed, then the tag pushed. |
+| Base | `afc3bdc` (= `build-120`). Branch `fix/121-td7-timezone`, five commits plus the bump: `1f73bb6` `dfe29dc` `caf1ccd` `658ef56` `38f2da2` `0dcb81a`. |
+| Contents | `1f73bb6`: the time/location push sends a zone only when the profile's IANA zone maps; an unmapped zone leaves the controller's zone alone, and more US zones map. `dfe29dc`: the healer never writes a fixed offset, and controllers pinned to an offset re-heal. `caf1ccd`: the profile editor stops writing its own time zone. `658ef56`: the phone's zone is read only when a heal is due. `38f2da2`: an unrecognized zone shows "Time zone not changed: this profile's zone isn't recognized yet." and never the raw abbreviation. |
+| Not changed | `git diff --stat build-120 build-121 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. |
+| Gates on `0dcb81a` | Local 3.41.2: analyze 0 / 12 / 355, tests 5,649 pass / 37 skip / 0 fail. 3.47.5: analyze 0 / 12 / 360, tests 5,649 / 37 / 0 (build-120 = 5,628, so +21). `node scripts/docs_guard.mjs`: 44 files, 119 facts, 0 failures, 0 warnings. PII scan of `afc3bdc..38f2da2`: clean. |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | GitHub check-run `121391279813` "iOS Release" on `0dcb81a`: completed / **success** 2026-10-25 23:01 CDT. It was opened as `121388307226`, which stays `in_progress`, as with +109 onward. Codemagic build `6adecdc2f2f481e66a6bd3f7`. 14/14 steps green; Test and analyze 5:58, Build IPA 3:02, Publishing 1:26. |
+| iOS build number | **356**: TestFlight `2.5.10 (356)`. The owner read it from App Store Connect on 2026-11-02 and checked it against the Codemagic run for tag `build-121`. It is Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +121 (see the header and `codemagic.yaml` "Set build number"). |
+| Android | Built 2026-10-29 and uploaded 2026-11-02: see ANDROID +121 above. |
+| Rollback | Rollback note not written: this row was recorded after the fact, from the cut notes. |
+
+### +120 — build-120 tagged 2026-10-22 21:17Z (16:17 CDT) (Codemagic build number: 355) — store-readiness pass, feature hides, flash caps (Strobe family 230, Lightning 40/60), cfg writes carry the frame rate, large-text layout, Maps removed
+
+| item | value |
+|---|---|
+| Tag | `build-120` = `afc3bdc` (lightweight, the bump commit `chore(release): bump to 2.5.10+120`; convention 1). Release fast-forwarded `afcb6f8` → `afc3bdc` in `lumina-110-release` and pushed, then the tag pushed. |
+| Base | `afcb6f8` (= `build-119` `83b9ccc` + its ledger row). 45 first-parent commits `afcb6f8..afc3bdc`. |
+| Contents | Grouped from `git log --first-parent afcb6f8..afc3bdc`. **Controller writes:** `fa8ef16` `d48c057` `7baeba9`, every cfg write carries `hw.led.fps` (a missing key reads as unlimited on 0.15.x), with a one-shot frame-rate heal and 42 as the substituted rate. **Large text:** `758f5a3`–`23a4a45`. **Hides:** `05483c5` `7c8ece7` `301ee2a` `046ae07` (Game Day crews, the neighborhood broadcast, Discover Nearby and the public listing, Group Schedule) and `68dddeb` (Movies & Superheroes). **Flash safety:** `801db83` `408aeca` `048b0e7` `aebb234` `15f3fd0` `28dda44` `c1fe727`: Strobe family capped at 230, Lightning clamped to speed 40 / intensity 60 on every write and out of the celebration picker and the Halloween / Stormy Seas / Thunderstorm suggestions, the fan-out payload normalized. **Store readiness:** `d462a25`–`5c20ad9`: iPhone only, portrait only; permission strings; the simulated-controller paths; the deletion dialog; the privacy manifest. **Store window:** `0fc8cc6` `04eacd0` `e3342aa`: GPS only while a Welcome Home config exists, `google_maps_flutter` removed, Lumina AI asks before it sends anything. **Names:** `d7bcd70` `7c29e93` `b1d1891` `2e79751` `b9201f3`: names, brands and effect labels. **Also:** `6cd6d0b`, a member-side stale sync-command guard (4 h); `62663cf`, seven customer strings; `2ed68a8`, the signed-out demo says Lumina AI needs an account. **Debt note:** `fecfe17` (#168). |
+| Shell changes | `git diff --stat build-119 build-120 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` changes six files: `android/app/src/main/AndroidManifest.xml`, `ios/Runner.xcodeproj/project.pbxproj`, `ios/Runner/AppDelegate.swift`, `ios/Runner/Info.plist`, `ios/Runner/PrivacyInfo.xcprivacy`, `ios/Runner/Runner.entitlements`. No change under `functions/` or to rules, indexes or `codemagic.yaml`. |
+| Gates | Run on `fecfe17`, the bump's parent: local 3.41.2 analyze 0 / 12 / 355, tests 5,628 pass / 37 skip / 0 fail; 3.47.5 analyze 0 / 12 / 360, tests 5,628 / 37 / 0 (re-run; the first run had one wall-clock failure in a file the branch does not touch, and 3.47.5 did not run because of a pub.dev socket error). On the bump `afc3bdc`: analyze equal to the gate, 61 version tests green, `docs_guard` 44 files / 119 facts / 0 / 0. PII scan of the 43 commits: clean. |
+| Functions | No deploy. |
+| Check-run | GitHub check-run `120107372242` "iOS Release" on `afc3bdc`: completed / **success** 2026-10-22 16:46 CDT. It was opened as `120094256236`, which stays `in_progress`. Codemagic build `6ada7d526a1999f83b2564b5`. All 14 steps green; Test and analyze 18:54, Build IPA 5:00, Publishing 1:49. |
+| iOS build number | **355**: TestFlight `2.5.10 (355)`. The owner read it from App Store Connect on 2026-11-02 and checked it against the Codemagic run for tag `build-120`. It is Codemagic's counter, as for +121. |
+| Android | NOT built. `pubspec.yaml` read `+120`. versionCode 120 is now unusable, since 121 is on Play. |
+| Rollback | Rollback note not written: this row was recorded after the fact, from the cut notes. |
 
 ### +119 — build-119 tagged 2026-10-20 20:31:11Z (15:31:11 CDT) (Codemagic build number: pending) — first App Store candidate: Autopilot, weekly generation and Simple Mode withheld; Neighborhood Sync bottom band fixed
 
