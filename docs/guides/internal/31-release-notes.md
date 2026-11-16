@@ -1,8 +1,36 @@
 # Release notes and tester messages
 
-*Describes build: 2.5.10+125 · Last verified: 2026-11-11 · Internal; the tester text is what testers receive.*
+*Describes build: 2.5.10+128 · Last verified: 2026-11-16 · Internal; the tester text is what testers receive.*
 
-One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Build 124 never shipped: its tag failed the automated test gate and produced no build, and build 125 carries the same changes. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Build 124 never shipped: its tag failed the automated test gate and produced no build, and build 125 carries the same changes. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Build 127 (TestFlight 362) was built but never distributed to testers; its changes are listed under build 128. Build 129 is built, not released, and is not listed. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+
+## 2.5.10 build 128 — 2026-11-16
+
+Released to testers on 2026-11-16 as TestFlight 2.5.10 (363), from tag `build-128` = `9759da3`. Also on Google Play closed testing as versionCode 128 (2.5.10), uploaded 2026-11-16. Build 127 (TestFlight 362, tag `build-127` = `de4766b`) was built but never distributed; this build carries its changes, so they are listed here too. The wording below is taken from `docs/release/build_128_candidate.md` and `docs/release/build_127_candidate.md`, section 2 of each.
+
+**What changed:** Tap a one-night entry on your Schedule and the sheet now opens above the bottom bar with Edit This Day and Delete This Entry always in reach, at any text size. And you can ask Lumina to delete one-night entries: "delete the entries you created for me", "remove Friday's entry", "cancel what you set up for Nov 20 to Nov 27". Lumina shows you exactly which entries it found — the count, the dates and the names — and nothing is removed until you tap Delete. Game Day entries and repeating schedules are not deleted this way; Lumina tells you where to manage those.
+
+**What changed (from build 127, carried in this build):** Adding a one-night look or a Game Day, letting one expire, or switching "Turn lights off at sunrise daily" on or off no longer removes your other schedules from your controller: each of those now changes only its own entry on the controller and leaves everything else exactly as it was. A schedule the app could not re-save on one attempt keeps its place on the controller instead of being dropped, and if the app cannot be sure it would keep every schedule it says so and changes nothing (Retry). And each time you open the app at home it checks that every schedule is actually on your lights; if one is not, My Schedule and Home say "Your schedule isn't on your lights." and the app sends it again during the day, or you can tap Retry.
+
+**New wording testers may see (from build 127, exact):** the sixth sync state on My Schedule and the Home chip reads "Your schedule isn't on your lights." with the second line "Something changed on your controller. It sends again when you open the app at home between 9 am and 3 pm, or tap Retry now." When the keep guard refuses a write, the sync result reads "Your controller still has a schedule the app couldn't rebuild this time, so nothing was changed. Tap Retry; if this keeps happening, contact support."
+
+**Tester text:** none written for this build; the withdrawal texts below are the candidate notes' own.
+
+**Withdrawal text (return to 127), if needed:** Build 128 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install the previous 2.5.10 build. Your schedules, teams, designs and favorites stay. Two things go back to how they were: on some phones the entry sheet's Edit and Delete buttons sit behind the bottom bar at the default text size (lower the text size in Settings → Display to reach them), and Lumina no longer deletes entries for you (open Schedule, tap the entry, then Delete This Entry). Send reports to general@nex-genled.com with the date and time.
+
+**Withdrawal text (return to 126), if needed:** Build 127 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install the previous 2.5.10 build. Your schedules, teams, designs and favorites stay. Two things go back to how they were: adding or ending a one-night look or Game Day, or switching the sunrise-off setting, can again drop a schedule from your controller (open My Schedule and tap Retry afterwards to put it back), and the app no longer checks at launch whether your schedules are on your lights. If you see anything wrong after switching, tell us the date and time. Send reports to general@nex-genled.com with the date and time.
+
+*Note: 127 was never on TestFlight, so "the previous 2.5.10 build" for a tester on 128 is 126 (TestFlight 361), and both withdrawal texts apply together.*
+
+## 2.5.10 build 126 — 2026-11-13
+
+Uploaded to TestFlight as 2.5.10 (361) from tag `build-126` = `bd29c38` and released to testers. Android: a bundle was built and never uploaded. The wording below is taken from `docs/release/build_126_candidate.md`, section 2.
+
+**What changed:** My Schedule now tells you whether your schedule has reached your lights, and Home shows the same in one line. If it hasn't — you saved it away from home, or your controller didn't answer — the app says so, offers Retry, and tries again by itself the next time you open it at home, during the day. A change you make while the previous one is still being saved is no longer lost: it goes next, automatically. The schedule editor spells out what you set ("Lights on at 5:00 PM, off at 7:00 AM the next morning.") and re-opens on the saved time on phones set to a 24-hour clock. If one pattern could not be confirmed on your lights, the schedule stays set and the app says so instead of switching it off.
+
+**Tester text:** none written for this build; the withdrawal text below is the candidate notes' own.
+
+**Withdrawal text (return to 125), if needed:** Build 126 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install 2.5.10 (360). Your schedules, teams, designs and favorites stay. Three things go back to how they were: My Schedule and Home no longer say whether your schedule reached your lights, a change made while the previous one is still saving can be lost (save it again at home), and the editor no longer spells out the on and off times. If you see anything wrong after switching, tell us the date and time. Send reports to general@nex-genled.com with the date and time.
 
 ## 2.5.10 build 125 — 2026-11-11
 
@@ -54,4 +82,4 @@ Uploaded to TestFlight as 2.5.10 (360) on the night of 2026-11-11 (CST), from ta
 
 See the rows in `docs/BUILD_LEDGER.md`.
 
-*Facts: T-B1, T-GD11, T-GD12, T-E5, T-E6, T-L5, T-D4, T-D5, T-G3, T-G4, T-E4, T-E3, T-S1, T-S2, T-L1, T-V1, T-E1, T-C1, T-C3, T-G1, T-GD1, T-GD4, T-E2, T-D1, T-L2, T-R8, T-R1, T-SU1, T-SU2.*
+*Facts: T-B1, T-D6, T-D7, T-D8, T-D9, T-D10, T-D11, T-D12, T-D13, T-D14, T-D15, T-D16, T-L6, T-GD11, T-GD12, T-E5, T-E6, T-L5, T-D4, T-D5, T-G3, T-G4, T-E4, T-E3, T-S1, T-S2, T-L1, T-V1, T-E1, T-C1, T-C3, T-G1, T-GD1, T-GD4, T-E2, T-D1, T-L2, T-R8, T-R1, T-SU1, T-SU2.*
