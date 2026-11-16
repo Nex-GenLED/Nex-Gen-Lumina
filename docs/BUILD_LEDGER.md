@@ -221,7 +221,7 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | **Next Android bundle** | **versionCode must be 129 or higher.** `build-129` (`37cf275`) already reads `2.5.10+129` in `pubspec.yaml`. |
 | Rollback | Halt the rollout in Play Console. Testers who already have 128 keep it until a higher code ships; the rest stay on 122. |
 
-### +129 — build-129 tagged 2026-11-16 16:24:58Z (10:24:58 CST) (TestFlight number not recorded) — brightness patterns; built and installed on the owner's phone for bench, NOT released to testers
+### +129 — build-129 tagged 2026-11-16 16:24:58Z (10:24:58 CST) (Codemagic build number: 364) — brightness patterns; built and installed on the owner's phone for bench, NOT released to testers
 
 | item | value |
 |---|---|
@@ -232,7 +232,7 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | Gates on `37cf275` | From the tag message: 3.47.9 analyze 0 / 12 / 341, 3.41.2 analyze 0 / 12 / 336; `TZ=UTC0` suite **6,652 pass / 39 skip / 0 fail** on both; golden 1 / 1; `docs_guard` 44 files / 143 facts / 0 failures. 3.50.0 information only (the 26 known text-scale failures). |
 | Functions | No deploy. No rules, indexes, hosting or config change. |
 | Check-run | Not read. |
-| iOS build number | **TestFlight number not recorded.** Codemagic built the tag and the owner installed it on their phone for the bench; it was not released to testers. The number was not found on this PC on 2026-11-16. |
+| iOS build number | **364**: TestFlight `2.5.10 (364)` (owner, 2026-11-16). Codemagic built the tag and the owner installed it on their phone for the bench; it was not released to testers. It is Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +129. |
 | Android | Not built, not uploaded. versionCode 129 is unused; it is the next Android number (ANDROID +128 above). |
 | Rollback | Nothing to roll back: no tester has it. If it is later released, 128 (TestFlight 363) stays available. |
 
@@ -252,7 +252,7 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | Docs guard | Run on the ledger-flip commit (branch `docs/ledger-126-129`); the summary line is in that commit's message. |
 | Rollback | iOS: expire the build in App Store Connect; TestFlight 361 (+126) stays available. Android: halt the rollout in Play Console (ANDROID +128). Nothing to revert in git unless the owner says so. |
 
-### +127 — build-127 tagged 2026-11-14 22:10:54Z (16:10:54 CST) (TestFlight number not recorded) — table ownership, kept rows and keep guard, verified lease zeroing, drift detection — BUILT, NEVER DISTRIBUTED to testers; its content shipped inside 128
+### +127 — build-127 tagged 2026-11-14 22:10:54Z (16:10:54 CST) (Codemagic build number: 362) — table ownership, kept rows and keep guard, verified lease zeroing, drift detection — BUILT, NEVER DISTRIBUTED to testers; its content shipped inside 128
 
 | item | value |
 |---|---|
@@ -263,7 +263,7 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 | Gates on `de4766b` | The gates table in `docs/release/build_127_candidate.md` §6 was left blank; the review of 2026-11-14 was clean. The build-128 tag message records the first gates on the stacked tree (6,591 / 39 / 0 at `9759da3`). |
 | Functions | No deploy. No rules, indexes, hosting or config change. |
 | Check-run | Not read. |
-| iOS build number | **TestFlight number not recorded.** Codemagic built the tag, but the build was never distributed to testers; 128 superseded it the same day. The number was not found on this PC on 2026-11-16. FACTS T-D12 to T-D15 are therefore SHIPPED (128), not (127). |
+| iOS build number | **362**: TestFlight `2.5.10 (362)` (owner, 2026-11-16). Codemagic built the tag, but the build was never distributed to testers; 128 superseded it the same day. It is Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +127. FACTS T-D12 to T-D15 are therefore SHIPPED (128), not (127). |
 | Android | Not built. versionCode 127 is unused and now unusable, since 128 is on Play. |
 | Rollback | Nothing to roll back: no tester has it. |
 
