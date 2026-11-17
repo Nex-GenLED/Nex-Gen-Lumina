@@ -88,16 +88,23 @@ class CustomerSearchHit {
 /// Firestore denies the entire list query (caller-and-resource scoped
 /// rules require the query shape to prove it can't return out-of-scope
 /// docs). Empty [dealerCode] returns no hits without firing the query.
+///
+/// [firestore] exists for tests; production passes nothing.
 Future<List<CustomerSearchHit>> searchCustomers(
   String query, {
   required String dealerCode,
+  FirebaseFirestore? firestore,
 }) async {
   final trimmed = query.trim();
   if (trimmed.isEmpty) return const [];
   if (dealerCode.isEmpty) return const [];
 
-  final users = FirebaseFirestore.instance.collection('users');
-  final end = '$trimmed';
+  final users = (firestore ?? FirebaseFirestore.instance).collection('users');
+  // Upper bound of each prefix range: the prefix followed by U+F8FF, a
+  // private-use character that sorts after anything a name, email or address
+  // contains. Keep it as the escape: typed as a raw character it is invisible
+  // and reads as `'$trimmed'`, an empty range.
+  final end = '$trimmed\uf8ff';
 
   // Three parallel prefix queries — name, email, address. Each capped at 10.
   final results = await Future.wait([
