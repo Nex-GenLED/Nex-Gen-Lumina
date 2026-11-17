@@ -6,7 +6,7 @@ One entry per build that reached TestFlight, newest first. Each entry is copied 
 
 ## 2.5.10 build 130 — 2026-11-17
 
-Tagged `build-130` = `321dc7a` on 2026-11-17; the tag matches Codemagic's `build-*` trigger for the iOS Release workflow, expected TestFlight 2.5.10 (365), not confirmed (no Codemagic check-run was visible on GitHub 18 minutes after the tag push). Not released to testers yet. Android not built. Build 129 (TestFlight 364, tag `build-129` = `37cf275`) was built and installed on the owner's phone for the bench but never distributed to testers; this build carries its changes, so they are listed here too. The wording below is taken from `docs/release/build_130_candidate.md`, section 2.
+Tagged `build-130` = `321dc7a` on 2026-11-17; the tag matches Codemagic's `build-*` trigger for the iOS Release workflow; it is TestFlight 2.5.10 (367), and 365 and 366 were failed Codemagic attempts of the same tag. Not released to testers yet. Android not built. Build 129 (TestFlight 364, tag `build-129` = `37cf275`) was built and installed on the owner's phone for the bench but never distributed to testers; this build carries its changes, so they are listed here too. The wording below is taken from `docs/release/build_130_candidate.md`, section 2.
 
 **What changed:** Delete This Entry now works when an entry is opened from the week strip or month view.
 

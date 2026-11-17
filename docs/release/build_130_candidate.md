@@ -5,8 +5,9 @@ the build-129 tag's commit `37cf275`, 2.5.10+129): the entry detail sheet's
 Delete This Entry works again when the entry is opened from a day sheet, then
 the version bump to 2.5.10+130 as the final commit. **Tagged `build-130` at
 `321dc7a` (the bump commit; convention 1); the tag matches Codemagic's
-`build-*` trigger for the iOS Release workflow; expected TestFlight 2.5.10
-(365), not confirmed here (section 7). Not released to testers. Android not built. No Firestore rules, functions or
+`build-*` trigger for the iOS Release workflow; TestFlight 2.5.10 (367), the
+third Codemagic build of the tag (365 and 366 were failed attempts of the
+same tag and commit; section 7). Not released to testers. Android not built. No Firestore rules, functions or
 config write. `feat/124-colour` was fast-forwarded to it; no merge into main.
 No controller, bench unit or production system was contacted to assemble it;
 the tests use fakes.**
@@ -208,4 +209,21 @@ same analyzer and the same `analysis_options.yaml`; the per-issue list is identi
 3.41.2 and 3.50.0 were not run for the tag (the fix branch's 3.41.2 run on
 `0a364ce` was analyze 0 / 12 / 336 and suite 6,655 / 39 / 0).
 
-Tagged `build-130` at `321dc7a` on 2026-11-17 17:58:30Z (11:58:30 CST; annotated, tag object `fd60654`), pushed 17:58:45Z. As of 18:16Z (18 minutes after the push) no Codemagic check-run had appeared on `321dc7a` on GitHub (build-129's appeared 14 s after its tag); whether Codemagic started the iOS Release build is not confirmed here. Not released to testers; Android not built.
+Tagged `build-130` at `321dc7a` on 2026-11-17 17:58:30Z (11:58:30 CST; annotated, tag object `fd60654`), pushed 17:58:45Z. As of 18:16Z (18 minutes after the push) no Codemagic check-run had appeared on `321dc7a` on GitHub (build-129's appeared 14 s after its tag).
+
+Codemagic did receive the tag. It built it three times, every time from the
+same tag and the same commit `321dc7a` (owner, 2026-11-17):
+
+| Codemagic build | Result |
+|---|---|
+| 365 | Failed at Build IPA: Xcode could not download the Firebase packages from `dl.google.com` (a DNS error on the build machine). The test gate had passed. |
+| 366 | Failed the test gate on one flaky test: `test/models/remote_command_status_test.dart`, "CloudRelayRepository honours server-written terminal statuses > a server fail-fast (failed/no_bridge_paired) resolves at once as a failure and is not relabelled timeout". Line 96 expects the elapsed time under 150 ms ("resolved by the failed status, not by the watchdog") and got exactly 150. The log shows the status changed at 3 ms and the result was failed / `no_bridge_paired`, so the code was right; only the wall-clock bound tripped on a loaded build Mac (Mac mini M2). The same commit passed this test on 365 and on this PC. |
+| **367** | Passed the gate and built; in TestFlight as **2.5.10 (367)**. Codemagic marked the build failed only because App Store Connect's API returned a 500 at the distribution step, after the upload. |
+
+So build 130 is TestFlight **367**, not the 365 the tag message expected (a
+tag message cannot be changed). 365 and 366 are failed production attempts of
+this tag, not staging builds: this is a different reason from the
+staging-build gaps that ledger convention 7 describes (that convention is on
+`backend/dealer-tools-staging-env`, not yet on this branch). The owner
+installed 367 on their phone and confirmed Delete This Entry works. Not
+released to testers; Android not built.
