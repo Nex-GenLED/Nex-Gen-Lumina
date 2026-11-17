@@ -51,7 +51,11 @@ class VoiceAssistantGuideScreen extends ConsumerWidget {
           // cards are gone. Linking has never worked and is not advertised.
           // What remains is what works: Siri Shortcuts on iPhone and the
           // Android App Shortcuts box. (Restore the cards only when linking
-          // is deployed and proven.)
+          // is deployed and proven, and only behind
+          // `if (kVoiceAssistantLinkingEnabled)` from
+          // lib/config/lumina_env.dart: a staging build must never show them,
+          // because the skill and action are the production ones. Pinned by
+          // test/features/voice/voice_linking_staging_block_test.dart.)
           if (Platform.isAndroid) ...[
             _buildAppShortcutsSection(context),
             const SizedBox(height: 16),

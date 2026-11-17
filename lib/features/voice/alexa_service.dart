@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:nexgen_command/config/lumina_env.dart';
+
 /// Service for managing Amazon Alexa Smart Home Skill integration.
 ///
 /// Handles:
@@ -18,8 +20,21 @@ class AlexaService {
   AlexaService({
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
+    this.allowsLinking = kVoiceAssistantLinkingEnabled,
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance;
+
+  /// False in a staging build: the skill is the production one (see
+  /// [kVoiceAssistantLinkingEnabled]). Link-outs then return before any
+  /// Firestore write or URL launch.
+  final bool allowsLinking;
+
+  bool _linkingBlocked(String action) {
+    if (allowsLinking) return false;
+    debugPrint('AlexaService: $action blocked: staging build '
+        '(the Alexa skill is the production one)');
+    return true;
+  }
 
   /// The Alexa skill ID
   static const String skillId = 'amzn1.ask.skill.749ced31-50ea-44a7-b023-9557c2010f16';
@@ -110,6 +125,7 @@ class AlexaService {
   /// 2. Complete OAuth account linking
   /// 3. Discover their devices
   Future<bool> initiateAccountLinking() async {
+    if (_linkingBlocked('account linking')) return false;
     final user = _auth.currentUser;
     if (user == null) {
       debugPrint('AlexaService: User not logged in');
@@ -178,6 +194,7 @@ class AlexaService {
   ///
   /// Opens the Alexa app to the device discovery page
   Future<void> discoverDevices() async {
+    if (_linkingBlocked('device discovery')) return;
     const discoverUrl = 'alexa://devices/discover';
     final uri = Uri.parse(discoverUrl);
 

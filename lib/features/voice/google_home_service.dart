@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:nexgen_command/config/lumina_env.dart';
+
 /// Service for managing Google Home Smart Home Action integration.
 ///
 /// Handles:
@@ -18,8 +20,21 @@ class GoogleHomeService {
   GoogleHomeService({
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
+    this.allowsLinking = kVoiceAssistantLinkingEnabled,
   })  : _firestore = firestore ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance;
+
+  /// False in a staging build: the action is the production one (see
+  /// [kVoiceAssistantLinkingEnabled]). Link-outs then return before any
+  /// Firestore write or URL launch.
+  final bool allowsLinking;
+
+  bool _linkingBlocked(String action) {
+    if (allowsLinking) return false;
+    debugPrint('GoogleHomeService: $action blocked: staging build '
+        '(the Google Home action is the production one)');
+    return true;
+  }
 
   /// The Google Home Action package name
   static const String actionPackage = 'com.nexgenled.command';
@@ -105,6 +120,7 @@ class GoogleHomeService {
   /// 2. Complete OAuth account linking
   /// 3. Discover their devices
   Future<bool> initiateAccountLinking() async {
+    if (_linkingBlocked('account linking')) return false;
     final user = _auth.currentUser;
     if (user == null) {
       debugPrint('GoogleHomeService: User not logged in');
@@ -170,6 +186,7 @@ class GoogleHomeService {
   ///
   /// Opens Google Home app with instructions to sync devices
   Future<void> syncDevices() async {
+    if (_linkingBlocked('device sync')) return;
     final uri = Uri.parse(googleHomeAppUrl);
 
     if (await canLaunchUrl(uri)) {

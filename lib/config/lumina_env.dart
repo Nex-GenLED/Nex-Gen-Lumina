@@ -71,6 +71,16 @@ const bool kIsStagingBuild = kLuminaEnvDefine == 'staging';
 /// The environment of THIS build; `null` when the define is not recognised.
 final LuminaEnv? luminaEnv = parseLuminaEnv(kLuminaEnvDefine);
 
+/// Whether this build may offer Alexa / Google Home account linking.
+///
+/// FALSE in staging (owner decision D3, 2026-11-17). The Alexa skill and the
+/// Google Home action are the PRODUCTION ones, and their account linking runs
+/// on production Cloud Functions, so linking from staging would link a
+/// production account. AlexaService and GoogleHomeService refuse to start a
+/// link-out when this is false, and any linking card must not render.
+/// (Today no card renders anywhere: they were removed under FACTS T-VA1.)
+const bool kVoiceAssistantLinkingEnabled = kIsProdBuild;
+
 /// The Firebase project a build for [env] must have loaded.
 String expectedProjectIdFor(LuminaEnv env) =>
     env == LuminaEnv.staging ? kStagingProjectId : kProductionProjectId;
