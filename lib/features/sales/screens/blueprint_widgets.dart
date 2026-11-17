@@ -367,3 +367,263 @@ class _RunDraw {
     required this.isSelected,
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zone card — for jobs built zone by zone
+//
+// `SalesJob.channelRuns` is written only by the estimate wizard. Jobs built
+// on the visit's zone builder carry `zones` instead and an empty
+// `channelRuns`, so both blueprint screens render one of these per zone in
+// their channels section when there are no channel runs. Shows what the
+// zone builder captured: run, product, rail, corners, injection points,
+// power mounts, notes and photos. Price is left off; this is a field sheet.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class BlueprintZoneCard extends StatelessWidget {
+  final InstallZone zone;
+
+  /// 1-based position, shown in the badge.
+  final int number;
+  final Color color;
+  final ValueChanged<String> onPhotoTap;
+
+  const BlueprintZoneCard({
+    super.key,
+    required this.zone,
+    required this.number,
+    required this.color,
+    required this.onPhotoTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hardware = <String>[
+      if (zone.totalPixels > 0) '${zone.totalPixels} pixels',
+      if (zone.railType != RailType.none)
+        zone.railColor == RailColor.none
+            ? zone.railType.label
+            : '${zone.railType.label} · ${zone.railColor.label}',
+      if (zone.cornerCount > 0)
+        '${zone.cornerCount} corner${zone.cornerCount == 1 ? '' : 's'}',
+      if (zone.connectorRunFt > 0)
+        '${zone.connectorRunFt.toStringAsFixed(0)} ft connector run',
+    ];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: NexGenPalette.gunmetal90,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: color.withValues(alpha: 0.5)),
+                ),
+                child: Text(
+                  '$number',
+                  style: TextStyle(color: color, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      zone.name.isEmpty ? 'Untitled zone' : zone.name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${zone.runLengthFt.toStringAsFixed(0)} ft · '
+                      '${zone.productType.label} · ${zone.colorPreset.label}',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (hardware.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              hardware.join(' · '),
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 12,
+              ),
+            ),
+          ],
+          if (zone.injections.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Divider(color: NexGenPalette.line, height: 1),
+            const SizedBox(height: 12),
+            _label('INJECTION POINTS'),
+            const SizedBox(height: 8),
+            for (final p in zone.injections) ...[
+              _detailTile(
+                icon: Icons.bolt,
+                title: '${p.positionFt.toStringAsFixed(0)} ft along the run · '
+                    '${p.wireGauge.label}'
+                    '${p.wireRunFt > 0 ? ' · ${p.wireRunFt.toStringAsFixed(0)} ft wire' : ''}',
+                subtitle: p.servedByController
+                    ? 'Fed from the controller'
+                    : 'Fed from an additional supply',
+                note: p.architecturalNote,
+              ),
+              if (p != zone.injections.last) const SizedBox(height: 6),
+            ],
+          ],
+          if (zone.mounts.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Divider(color: NexGenPalette.line, height: 1),
+            const SizedBox(height: 12),
+            _label('POWER AND MOUNTS'),
+            const SizedBox(height: 8),
+            for (final m in zone.mounts) ...[
+              _detailTile(
+                icon: m.isController
+                    ? Icons.developer_board
+                    : Icons.power_outlined,
+                title: m.isController ? 'Controller' : '${m.supplySize} supply',
+                subtitle: '${m.positionFt.toStringAsFixed(0)} ft along the run · '
+                    '${m.outletType.label}',
+                note: [m.mountLocationNote, m.outletNote]
+                    .where((s) => s.trim().isNotEmpty)
+                    .join(' — '),
+              ),
+              if (m != zone.mounts.last) const SizedBox(height: 6),
+            ],
+          ],
+          if (zone.notes.trim().isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _label('NOTES'),
+            const SizedBox(height: 4),
+            Text(
+              zone.notes,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ],
+          if (zone.photoUrls.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 64,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: zone.photoUrls.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => GestureDetector(
+                  onTap: () => onPhotoTap(zone.photoUrls[i]),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      zone.photoUrls[i],
+                      width: 64,
+                      height: 64,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 64,
+                        height: 64,
+                        color: NexGenPalette.matteBlack,
+                        child: const Icon(
+                          Icons.broken_image_outlined,
+                          color: Colors.white24,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _label(String text) => Text(
+        text,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.5),
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.8,
+        ),
+      );
+
+  Widget _detailTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String note,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: NexGenPalette.matteBlack.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: NexGenPalette.line),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.55),
+                    fontSize: 11,
+                  ),
+                ),
+                if (note.trim().isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    note,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
