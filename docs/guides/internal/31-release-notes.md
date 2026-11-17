@@ -1,8 +1,24 @@
 # Release notes and tester messages
 
-*Describes build: 2.5.10+128 · Last verified: 2026-11-16 · Internal; the tester text is what testers receive.*
+*Describes build: 2.5.10+130 · Last verified: 2026-11-17 · Internal; the tester text is what testers receive.*
 
-One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Build 124 never shipped: its tag failed the automated test gate and produced no build, and build 125 carries the same changes. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Build 127 (TestFlight 362) was built but never distributed to testers; its changes are listed under build 128. Build 129 is built, not released, and is not listed. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Build 124 never shipped: its tag failed the automated test gate and produced no build, and build 125 carries the same changes. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Build 127 (TestFlight 362) was built but never distributed to testers; its changes are listed under build 128. Build 129 (TestFlight 364) was built and installed on the owner's phone for the bench but never distributed to testers; its changes are listed under build 130. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+
+## 2.5.10 build 130 — 2026-11-17
+
+Tagged `build-130` = `321dc7a` on 2026-11-17; the tag matches Codemagic's `build-*` trigger for the iOS Release workflow, expected TestFlight 2.5.10 (365), not confirmed (no Codemagic check-run was visible on GitHub 18 minutes after the tag push). Not released to testers yet. Android not built. Build 129 (TestFlight 364, tag `build-129` = `37cf275`) was built and installed on the owner's phone for the bench but never distributed to testers; this build carries its changes, so they are listed here too. The wording below is taken from `docs/release/build_130_candidate.md`, section 2.
+
+**What changed:** Delete This Entry now works when an entry is opened from the week strip or month view.
+
+**What changed (from build 129, carried in this build):** Brightness patterns now light up the way their cards show them. Each white under Explore › Architectural Downlighting has a Brightness Patterns folder with eight cards, led by two new waves (Wave · 6 lights and Wave · 18 lights). Every brightness card has an Adjust link: the brightest and dimmest level, how many lights one cycle spans, the shape (Wave, Ramp, Steps or Custom), the starting light, or tap single lights to set their own level. A brightness pattern can be saved to My Designs, and scheduling it follows the same rules as any painted design. In Design Studio, single lights can be made dimmer or brighter than their neighbours (Pixel brightness, with Dim, Full and a Ramp across a selection). Looks that use the Palette effect now spread their colours along the lights instead of showing one still colour, so saved looks that use Palette look different. When the controller's timer has no room left for a schedule, My Schedule now says so in its own words and changes nothing.
+
+**New wording testers may see (from build 129, exact):** "Your controller's timer is full right now, so nothing was changed. Remove a schedule, or wait until tonight's calendar lighting ends, then tap Retry."
+
+**Tester text:** none written for this build; the withdrawal text below is the candidate notes' own.
+
+**Withdrawal text (return to 128), if needed:** Build 130 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install the previous 2.5.10 build. Your schedules, teams, designs and favorites stay. Three things go back to how they were: Delete This Entry again does nothing when the entry is opened from the week strip or month view (ask Lumina instead, for example "remove Friday's entry"); the brightness patterns light as one dim run instead of the pattern on their card, and the Wave cards and the Adjust link are gone; and Design Studio no longer sets a brightness per light. Send reports to general@nex-genled.com with the date and time.
+
+*Note: 129 was never on TestFlight for testers, so "the previous 2.5.10 build" for a tester on 130 is 128 (TestFlight 363).*
 
 ## 2.5.10 build 128 — 2026-11-16
 

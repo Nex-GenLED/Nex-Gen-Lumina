@@ -206,6 +206,24 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 
 ## Operational flags
 
+### +130 — build-130 tagged 2026-11-17 17:58:30Z (11:58:30 CST) (Codemagic build number: 365 expected, not confirmed) — Delete This Entry works when the entry is opened from the week strip or month view; carries 129 — NOT released to testers
+
+| item | value |
+|---|---|
+| Tag | `build-130` = `321dc7a` (annotated, tag object `fd60654`, on the bump commit `chore(version): 2.5.10+130`; convention 1), pushed 17:58:45Z. Branch `fix/entry-sheet-dead-ref`; `feat/124-colour` fast-forwarded `a9cfc49..321dc7a` and pushed (no force). main untouched (`699a498`). |
+| Base | `37cf275` (= `build-129`). First-parent `37cf275..321dc7a` (7): `927bf99` `ebf24fe` `e1da1ec` `a9cfc49` docs only (ledger rows 126–129, TestFlight numbers, release-notes entries, candidate notes); `c16864a` test, failing on the old code; `0a364ce` the entry detail sheet acts through its own ref, never a popped caller's; `321dc7a` bump (`pubspec.yaml` and `lib/app_version.dart`). Outside `docs/`: 5 files, +295 / −39 against build-129. |
+| Contents | **build 130 = build 129 + schedule entry-detail delete dead-ref fix (`lib/features/schedule/my_schedule_page.dart`).** A row of the day sheet (week strip, month view, a multi-entry day card) handed the popped sheet's ref to the entry detail sheet; after the confirmation, Delete This Entry threw `Bad state: Cannot use "ref" after the widget was disposed` and removed nothing (since build 82; the owner hit it 3 times on 2.5.10+129, 18 times across 10 accounts since 2026-10-20). Also carries 129, which was never released to testers (and 129 carries 127 and 128). Notes: `docs/release/build_130_candidate.md`. FACTS not edited: T-D17 and T-D18 stay BUILT NOT SHIPPED (129 candidate) and T-B1 still names 128 as the newest released build. |
+| **Old 130 queue → 131** | The queue that was planned for build 130 (healer re-read, lease sweep, tuner hardening, Info values) is NOT in this build. It moves to **build 131**. |
+| Version | `2.5.10+130`. App Store submission 357 (2.5.10) was still Waiting for Review on 2026-11-17; **if Apple approves 357, every later build must be 2.5.11.** |
+| Not changed | `git diff --stat build-129 build-130 -- functions firestore.rules firestore.indexes.json codemagic.yaml ios android` is EMPTY. |
+| Gates on `321dc7a` | Flutter 3.47.9 (the Codemagic pin), `TZ=UTC0`, after `flutter clean`: analyze **0 errors / 12 warnings / 341 infos** (the SDK's own `dart analyze`; that SDK copy's `flutter analyze` wrapper stops on a long path inside the SDK; per-issue list identical to the `0a364ce` record); suite **6,655 pass / 39 skip / 0 fail** (17:32–17:54Z, outside both flake windows); golden 1 / 1; `docs_guard` 44 files / 143 facts / 0 failures / 0 warnings. `pubspec.lock` and `analysis_options.yaml` restored; worktree clean. 3.41.2 and 3.50.0 not run for the tag. |
+| Functions | No deploy. No rules, indexes, hosting or config change. |
+| Check-run | Not seen as of 18:16Z, 18 minutes after the tag push: no Codemagic check-run on `321dc7a`; the commit's only check suite is the one GitHub opened at the branch push (17:17:51Z), still `queued`. Build-129's check-run appeared 14 s after its tag. Whether Codemagic received the tag is not visible without Codemagic credentials; read the Codemagic dashboard. The tag is not moved or re-pushed (convention 5). |
+| iOS build number | Expected **365** (126 = 361, 127 = 362, 128 = 363, 129 = 364); not confirmed here. It will be Codemagic's `PROJECT_BUILD_NUMBER`, not pubspec's +130. |
+| Android | Not built, not uploaded. versionCode 129 and 130 are unused; a bundle from this tag would be versionCode 130. Marker not touched. |
+| Docs guard | 44 files / 143 facts / 0 failures / 0 warnings on the tag; the docs commit's run is in its message. |
+| Rollback | Nothing to roll back until it is released. If released and withdrawn: expire the build in App Store Connect; TestFlight 363 (+128) stays available. Withdrawal text: `docs/release/build_130_candidate.md` section 2. |
+
 ### ANDROID +128 — AAB built 2026-11-16 from `9759da3` (= tag `build-128`) — UPLOADED 2026-11-16 to Play Closed testing, available to testers
 
 | item | value |
