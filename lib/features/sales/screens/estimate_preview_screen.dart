@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,7 +7,6 @@ import 'package:nexgen_command/app_router.dart';
 import 'package:nexgen_command/features/sales/models/sales_models.dart';
 import 'package:nexgen_command/features/sales/sales_providers.dart';
 import 'package:nexgen_command/theme.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// Estimate preview — consumer-facing estimate card.
 class EstimatePreviewScreen extends ConsumerStatefulWidget {
@@ -43,26 +41,9 @@ class _EstimatePreviewScreenState extends ConsumerState<EstimatePreviewScreen> {
     } catch (_) {}
   }
 
-  Future<void> _shareEstimate() async {
-    final job = ref.read(activeJobProvider);
-    if (job == null) return;
-
-    final url = 'https://nex-genled.com/estimate/${job.id}';
-    await Clipboard.setData(ClipboardData(text: url));
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Estimate link copied to clipboard')),
-    );
-
-    // Also try to open the URL
-    final uri = Uri.parse(url);
-    try {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      // clipboard copy is sufficient
-    }
-  }
+  // No "Share with customer": it linked to a customer estimate page that
+  // does not exist. Share again only once a real page or an estimate PDF
+  // exists; never point the customer at a guessed URL.
 
   @override
   Widget build(BuildContext context) {
@@ -147,23 +128,6 @@ class _EstimatePreviewScreenState extends ConsumerState<EstimatePreviewScreen> {
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             child: Column(
               children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _shareEstimate,
-                    icon: const Icon(Icons.share, color: Colors.black, size: 18),
-                    label: const Text(
-                      'Share with customer',
-                      style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 15),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: NexGenPalette.cyan,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
                 TextButton(
                   onPressed: () => Navigator.of(context).maybePop(),
                   child: Text('Back to review', style: TextStyle(color: NexGenPalette.textMedium)),
