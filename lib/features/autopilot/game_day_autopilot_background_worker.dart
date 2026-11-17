@@ -24,6 +24,7 @@ import 'dart:ui' show Color;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../../config/lumina_env.dart';
 import '../../data/team_led_colors.dart';
 import '../../utils/sun_utils.dart';
 import '../sports_alerts/models/game_state.dart';
@@ -42,11 +43,11 @@ const _kPostGameCountdown = Duration(minutes: 30);
 /// How far ahead to look for upcoming games.
 const _kPreGameLeadTimeMinutes = 30;
 
-/// Cloud Functions base URL for the active Firebase project. Mirrors the
-/// constant in lib/features/neighborhood/services/sync_event_background_worker.dart.
-const String _functionsBaseUrl =
-    'https://us-central1-icrt6menwsv2d8all8oijs021b06s5'
-    '.cloudfunctions.net';
+/// Cloud Functions base URL for the active Firebase project, switched by
+/// LUMINA_ENV (lib/config/lumina_env.dart). Production is the same URL this
+/// constant always held. Mirrors the constant in
+/// lib/features/neighborhood/services/sync_event_background_worker.dart.
+const String _functionsBaseUrl = kCloudFunctionsBaseUrl;
 
 class GameDayAutopilotBackgroundWorker {
   final EspnApiService _espnApi;

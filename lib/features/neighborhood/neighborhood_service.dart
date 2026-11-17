@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'neighborhood_models.dart';
+import 'package:nexgen_command/config/lumina_env.dart';
 import 'package:nexgen_command/services/user_service.dart';
 
 /// Outcome of a server-side ad-hoc fanout POST (Slice 1 Commit 2).
@@ -161,9 +162,10 @@ class NeighborhoodService {
 
   String? get _currentUid => _auth.currentUser?.uid;
 
-  /// Cloud Functions base URL (matches sync_event_background_worker.dart).
-  static const String _functionsBaseUrl =
-      'https://us-central1-icrt6menwsv2d8all8oijs021b06s5.cloudfunctions.net';
+  /// Cloud Functions base URL (matches sync_event_background_worker.dart),
+  /// switched by LUMINA_ENV (lib/config/lumina_env.dart). Production is the
+  /// same URL this constant always held.
+  static const String _functionsBaseUrl = kCloudFunctionsBaseUrl;
 
   /// Read the current user's own controller doc ids from
   /// users/{uid}/controllers, for denormalizing onto the member doc

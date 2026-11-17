@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:nexgen_command/config/firebase_options_staging.dart';
+import 'package:nexgen_command/config/lumina_env.dart';
 import 'package:nexgen_command/firebase_options.dart';
 
 class GeocodeResult {
@@ -60,7 +62,19 @@ class GeocodingService {
   const GeocodingService();
 
   /// Platform-appropriate Google API key from Firebase config.
+  ///
+  /// A non-production build never sends the PRODUCTION key: staging uses the
+  /// staging project's key (Places requests then bill staging, and without
+  /// Places enabled there autocomplete falls through to Photon), and an
+  /// unrecognised LUMINA_ENV sends none. Both consts: production compiles to
+  /// the lines below, unchanged.
   String get _googleApiKey {
+    if (!kIsProdBuild) {
+      return kIsStagingBuild && !kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.iOS
+          ? StagingFirebaseOptions.ios.apiKey
+          : '';
+    }
     if (kIsWeb) return DefaultFirebaseOptions.web.apiKey;
     switch (defaultTargetPlatform) {
       case TargetPlatform.iOS:

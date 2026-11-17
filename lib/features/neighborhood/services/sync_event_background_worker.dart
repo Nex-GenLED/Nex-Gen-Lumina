@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:http/http.dart' as http;
 
+import '../../../config/lumina_env.dart';
 import '../../autopilot/game_day_background_persistence.dart';
 import '../../sports_alerts/models/game_state.dart';
 import '../../sports_alerts/models/sport_type.dart';
@@ -37,9 +38,10 @@ import 'sync_refusal_record.dart';
 /// Fixed id so a re-notification replaces rather than stacks.
 const int _kRefusalNotificationId = 90210;
 
-const String _functionsBaseUrl =
-    'https://us-central1-icrt6menwsv2d8all8oijs021b06s5'
-    '.cloudfunctions.net';
+/// Cloud Functions base URL for the active Firebase project, switched by
+/// LUMINA_ENV (lib/config/lumina_env.dart). Production is the same URL this
+/// constant always held.
+const String _functionsBaseUrl = kCloudFunctionsBaseUrl;
 
 /// The core background worker for sync event monitoring.
 class SyncEventBackgroundWorker {

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:nexgen_command/config/lumina_env.dart';
 
 /// Data returned by GET /api/info on the bridge.
 class BridgeInfo {
@@ -90,11 +91,28 @@ class BridgeStatus {
 class BridgeApiClient {
   final String baseUrl;
 
-  BridgeApiClient(this.baseUrl);
+  /// Whether this client may change a bridge: pair, reboot, reset.
+  ///
+  /// FALSE in a staging build (lib/config/lumina_env.dart). Every Lumina
+  /// Bridge is flashed for the PRODUCTION Firebase project, so pairing one
+  /// from a staging build would point a real bridge at a staging uid and break
+  /// that home's remote access; a reboot or reset interrupts or wipes it.
+  /// Reads (info, status, auth check) stay allowed. Blocked calls return
+  /// false without sending anything.
+  final bool allowsDeviceWrites;
+
+  BridgeApiClient(this.baseUrl, {this.allowsDeviceWrites = kIsProdBuild});
 
   factory BridgeApiClient.fromIp(String ip, {int port = 80}) {
     final base = port == 80 ? 'http://$ip' : 'http://$ip:$port';
     return BridgeApiClient(base);
+  }
+
+  bool _writeBlocked(String action) {
+    if (allowsDeviceWrites) return false;
+    debugPrint('[BridgeApiClient] $action blocked: staging build '
+        '(bridges are wired to the production project)');
+    return true;
   }
 
   static const _timeout = Duration(seconds: 5);
@@ -139,6 +157,7 @@ class BridgeApiClient {
     required String wledIp,
     int wledPort = 80,
   }) async {
+    if (_writeBlocked('pair')) return false;
     try {
       final response = await http
           .post(
@@ -181,6 +200,7 @@ class BridgeApiClient {
 
   /// POST /api/reboot — restart the bridge.
   Future<bool> reboot() async {
+    if (_writeBlocked('reboot')) return false;
     try {
       final response =
           await http.post(Uri.parse('$baseUrl/api/reboot')).timeout(_timeout);
@@ -204,6 +224,7 @@ class BridgeApiClient {
   /// Endpoint paths are pinned against the firmware's own route table by
   /// test/services/bridge_api_client_endpoints_test.dart.
   Future<bool> reset() async {
+    if (_writeBlocked('reset')) return false;
     try {
       final response =
           await http.post(Uri.parse('$baseUrl/api/reset')).timeout(_timeout);

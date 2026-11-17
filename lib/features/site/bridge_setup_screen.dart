@@ -468,7 +468,10 @@ class _BridgeSetupScreenState extends ConsumerState<BridgeSetupScreen> {
 
     final paired = await client.pair(userId: userId, wledIp: wledIp);
     if (!paired) {
-      _pairError = 'Pair request failed. Check the bridge is reachable.';
+      _pairError = client.allowsDeviceWrites
+          ? 'Pair request failed. Check the bridge is reachable.'
+          : 'Bridge pairing is turned off in staging builds. '
+              'Bridges are set up for the live system.';
       return false;
     }
 
