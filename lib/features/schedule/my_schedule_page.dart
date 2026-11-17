@@ -1395,7 +1395,7 @@ class _DayHeroCard extends ConsumerWidget {
                 brightnessPercent: brightness,
                 source: sourceLabel,
                 timeFormat: timeFormat,
-                ref: ref,
+                editable: true,
                 calEntry: leadDated,
                 recurringItem: leadDated == null ? leadRecurring : null,
                 dateKey: dateKey,
@@ -1920,9 +1920,14 @@ void showDayDetailSheet(
                           controllerLabel: ref
                               .watch(timelineScopeLabellerProvider)
                               .controllerFor(e),
+                          // The day sheet is popping; the detail sheet must
+                          // not inherit this Consumer's ref (it is disposed
+                          // before Delete can be confirmed). It takes only
+                          // values.
                           onTap: () {
                             Navigator.of(sheetCtx).pop();
-                            showTimelineEntryDetail(context, ref, e, dateKey);
+                            showTimelineEntryDetail(context, e, dateKey,
+                                timeFormat: timeFormat);
                           },
                         ),
                     ],
@@ -1942,11 +1947,10 @@ void showDayDetailSheet(
 /// new caller re-derive strip colours and effect ids.
 void showTimelineEntryDetail(
   BuildContext context,
-  WidgetRef ref,
   TimelineEntry entry,
-  String dateKey,
-) {
-  final timeFormat = ref.read(timeFormatPreferenceProvider);
+  String dateKey, {
+  required String timeFormat,
+}) {
   final dated = entry.dated;
   final recurring = entry.recurring;
 
@@ -1982,7 +1986,7 @@ void showTimelineEntryDetail(
         ? '${timelineSourceLabel(entry)} · ${recurrenceCopy(recurring.repeatDays)}'
         : timelineSourceLabel(entry),
     timeFormat: timeFormat,
-    ref: ref,
+    editable: true,
     calEntry: dated,
     recurringItem: recurring,
     dateKey: dateKey,
@@ -2002,17 +2006,27 @@ void showScheduleDetailSheetForEntry(
   required int? brightnessPercent,
   required String source,
   String timeFormat = '12h',
-  WidgetRef? ref,
+
+  /// Show Edit and Delete. Replaces the old `WidgetRef? ref` parameter, whose
+  /// presence meant "editable": every caller that passed a ref passes true.
+  ///
+  /// The sheet never borrows a caller's ref. The one the day sheet handed
+  /// over was that sheet's own Consumer, popped on the way here and disposed
+  /// before Delete could be confirmed, so `ref.read` threw
+  /// `Cannot use "ref" after the widget was disposed` after the
+  /// confirmation await: no snackbar, no write, the sheet stayed open. Edit
+  /// and Delete now read providers through their own ConsumerWidget ref,
+  /// which lives exactly as long as this sheet.
+  bool editable = false,
   CalendarEntry? calEntry,
   ScheduleItem? recurringItem,
   String? dateKey,
 }) {
-  // The delete affordance is only meaningful when we have both a ref to
-  // mutate state through and an actual entry to remove. The recurring
-  // card surfaces its own delete button on the schedule list, so we only
-  // wire delete here for the calendar day-detail path that's missing it.
-  final canDelete =
-      ref != null && (calEntry != null || recurringItem != null);
+  // The delete affordance is only meaningful when the caller allows edits
+  // and there is an actual entry to remove. The recurring card surfaces its
+  // own delete button on the schedule list, so we only wire delete here for
+  // the calendar day-detail path that's missing it.
+  final canDelete = editable && (calEntry != null || recurringItem != null);
 
   // Build 128 — the sheet goes on the ROOT navigator so it renders above
   // MainScaffold's GlassDockNavBar: the branch navigator is a SIBLING of the
@@ -2176,18 +2190,14 @@ void showScheduleDetailSheetForEntry(
                       // itself had zero call sites (F3-3), and which was
                       // deleted in that change. Both entry kinds edit.
                       _EditEntryButton(
-                        ref: ref,
                         calEntry: calEntry,
                         recurringItem: recurringItem,
-                        sheetContext: ctx,
                       ),
                       const SizedBox(height: 4),
                       _DeleteEntryButton(
-                        ref: ref,
                         calEntry: calEntry,
                         recurringItem: recurringItem,
                         dateKey: dateKey,
-                        sheetContext: ctx,
                       ),
                     ],
                   ),
@@ -2208,21 +2218,17 @@ void showScheduleDetailSheetForEntry(
 /// `showCalendarEntryEditor` takes a `CalendarEntry` (one date, times,
 /// brightness, and a this-game/all-games scope). They are not variants of one
 /// form, and merging them is a model change (audit blocker F3-3), not a button.
-class _EditEntryButton extends StatelessWidget {
-  final WidgetRef ref;
+class _EditEntryButton extends ConsumerWidget {
   final CalendarEntry? calEntry;
   final ScheduleItem? recurringItem;
-  final BuildContext sheetContext;
 
   const _EditEntryButton({
-    required this.ref,
     required this.calEntry,
     required this.recurringItem,
-    required this.sheetContext,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // calEntry takes precedence, matching _DeleteEntryButton: when a date has a
     // dated entry, that is what this sheet is showing.
     final isCalEntry = calEntry != null;
@@ -2240,8 +2246,11 @@ class _EditEntryButton extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w600)),
         onPressed: () {
           // Close the detail sheet first so the editor is not stacked behind
-          // it — both are modal bottom sheets.
-          Navigator.of(sheetContext).pop();
+          // it — both are modal bottom sheets. No await between the pop and
+          // the push: this element is still mounted, and both editors are
+          // ConsumerStatefulWidgets that read providers through their own
+          // ref, never through the one passed here.
+          Navigator.of(context).pop();
           final entry = calEntry;
           final item = recurringItem;
           if (entry != null) {
@@ -2255,23 +2264,19 @@ class _EditEntryButton extends StatelessWidget {
   }
 }
 
-class _DeleteEntryButton extends StatelessWidget {
-  final WidgetRef ref;
+class _DeleteEntryButton extends ConsumerWidget {
   final CalendarEntry? calEntry;
   final ScheduleItem? recurringItem;
   final String? dateKey;
-  final BuildContext sheetContext;
 
   const _DeleteEntryButton({
-    required this.ref,
     required this.calEntry,
     required this.recurringItem,
     required this.dateKey,
-    required this.sheetContext,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // calEntry takes precedence: removing the one-off override reveals
     // the recurring fallback (if any) on the next render.
     final isCalEntry = calEntry != null;
@@ -2291,12 +2296,19 @@ class _DeleteEntryButton extends StatelessWidget {
           label,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        onPressed: () => _confirmAndDelete(sheetContext),
+        onPressed: () => _confirmAndDelete(context, ref),
       ),
     );
   }
 
-  Future<void> _confirmAndDelete(BuildContext ctx) async {
+  /// [ctx] and [ref] belong to this button, which lives as long as the
+  /// detail sheet. Every use after an await is guarded by `ctx.mounted`, and
+  /// the navigator and messenger are captured before the first await so the
+  /// pop and the snackbar do not depend on a context that may be gone.
+  Future<void> _confirmAndDelete(BuildContext ctx, WidgetRef ref) async {
+    final navigator = Navigator.of(ctx);
+    final messenger = ScaffoldMessenger.maybeOf(ctx);
+
     final String title;
     final String body;
     if (calEntry != null) {
@@ -2340,7 +2352,6 @@ class _DeleteEntryButton extends StatelessWidget {
     if (confirmed != true) return;
     if (!ctx.mounted) return;
 
-    final messenger = ScaffoldMessenger.maybeOf(ctx);
     bool ok = false;
     if (calEntry != null && dateKey != null) {
       ok = await ref
@@ -2352,7 +2363,7 @@ class _DeleteEntryButton extends StatelessWidget {
     }
 
     if (ctx.mounted) {
-      Navigator.of(ctx).pop();
+      navigator.pop();
     }
     messenger?.showSnackBar(
       SnackBar(

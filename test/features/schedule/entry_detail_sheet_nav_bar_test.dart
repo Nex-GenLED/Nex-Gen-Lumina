@@ -94,7 +94,7 @@ class _OpensDetailState extends ConsumerState<_OpensDetail> {
         offTime: e.offTime,
         brightnessPercent: e.brightness,
         source: 'AI-Generated',
-        ref: ref,
+        editable: true,
         calEntry: e,
         dateKey: e.dateKey,
       );
