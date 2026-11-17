@@ -204,6 +204,24 @@ node scripts/docs_guard.mjs --links-all  # optional: every markdown link under d
 - `codemagic.yaml` is not changed for this (owner decision 2026-10-09); the guard is
   run by hand on this PC, like the gates in convention 5.
 
+**7. A gap in production's Codemagic build number is a staging build.** Owner
+decision 2026-11-17 (staging decision D1). `codemagic.yaml` has a second workflow,
+`ios-staging-workflow`: the separate app "Lumina Staging"
+(`com.nexgenled.command.staging`, Firebase `nex-gen-lumina-22751`, its own App Store
+Connect record), built only from `staging-*` tags. Production's "Set build number"
+step writes Codemagic's `PROJECT_BUILD_NUMBER` into CFBundleVersion. That counter
+counts builds of EVERY workflow in the Codemagic app, so each staging build, even one
+its guard stops, makes production's next number skip one. Apple accepts this: build
+numbers only have to rise.
+
+- When a production row's Codemagic build number is not the previous row's plus one,
+  the missing numbers are staging builds (or, as before, a production build that
+  failed before upload). Write "skipped N–M: staging builds" in the row; do not hunt
+  for a lost production build.
+- Staging builds get no rows here. They number 1, 2, 3 … from the per-workflow
+  `BUILD_NUMBER`, on the staging record only.
+- Setup: `docs/staging/STAGING_SETUP_CHECKLIST.md`.
+
 ## Operational flags
 
 ### ANDROID +128 — AAB built 2026-11-16 from `9759da3` (= tag `build-128`) — UPLOADED 2026-11-16 to Play Closed testing, available to testers
