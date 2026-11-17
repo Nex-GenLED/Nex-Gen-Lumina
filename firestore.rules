@@ -306,6 +306,22 @@ service cloud.firestore {
       return hasAdminClaim() || hasOwnerClaim();
     }
 
+    // Caller-only check: an admin-role staff claim minted FOR THIS DEALER —
+    // mintStaffToken mode 'admin' resolved from an installers doc whose
+    // dealerCode is `dealerCode` (staffAuth.ts:540-554 puts role and
+    // dealerCode on the token). Used for dealer settings a sales or installer
+    // PIN must not change (pricing, messaging config, ship-to).
+    //
+    // NOTE: hasAdminClaim() above is cross-dealer by design, so today
+    // `hasDealerAdminClaim(code) || hasAdminOrOwnerClaim()` admits exactly the
+    // same callers as hasAdminOrOwnerClaim() alone. The dealer arm is written
+    // out so the intent survives if admin claims are ever scoped.
+    function hasDealerAdminClaim(dealerCode) {
+      return request.auth != null
+        && request.auth.token.get('role', '') == 'admin'
+        && request.auth.token.get('dealerCode', '') == dealerCode;
+    }
+
     // Helper function to check if user belongs to a specific installation
     function belongsToInstallation(installationId) {
       return request.auth != null &&
@@ -2037,10 +2053,14 @@ service cloud.firestore {
         return isDealerStaffAccount(dealerCode);
       }
       // Staff-claim and admin/owner-claim read access are inlined here
-      // (not in isDealerMember) so the create rule below stays gated by
-      // user-doc membership only.
+      // (not in isDealerMember).
       allow read: if isDealerMember() || hasStaffClaim(dealerCode) || hasAdminOrOwnerClaim();
-      allow create: if isDealerMember();
+      // 2026-11-17: create also admits the dealer's own sales/installer PIN
+      // sessions. isDealerMember() (a user_role dealer ACCOUNT) has no live
+      // members, so before this every ledger write — Day-2 final check-in,
+      // material checkout, Receive Stock — was denied for everyone. Still
+      // append-only: no update, no delete.
+      allow create: if isDealerMember() || hasStaffClaim(dealerCode);
       allow update, delete: if false;
     }
 
@@ -2088,7 +2108,12 @@ service cloud.firestore {
           hasAdminOrOwnerClaim()
         );
       }
-      allow read, write: if isDealerMember();
+      allow read: if isDealerMember();
+      // 2026-11-17: write was `isDealerMember()`, which includes
+      // hasStaffClaim — so any sales or installer PIN of the dealer could
+      // change the ship-to on every order. Now the dealer's admin-role claim
+      // plus corporate admin/owner claims, same as pricing and config.
+      allow write: if hasDealerAdminClaim(dealerCode) || hasAdminOrOwnerClaim();
     }
 
     // ── Dealer Pricing ───────────────────────────────────────────
@@ -2102,10 +2127,13 @@ service cloud.firestore {
         return isDealerStaffAccount(dealerCode);
       }
       // Staff-claim and admin/owner-claim read access are inlined here
-      // (not in isDealerMember) so write stays gated by user-doc
-      // membership only.
+      // (not in isDealerMember).
       allow read: if isDealerMember() || hasStaffClaim(dealerCode) || hasAdminOrOwnerClaim();
-      allow write: if isDealerMember();
+      // 2026-11-17: write was the user_role dealer ACCOUNT only, which has no
+      // live members, so nobody could set pricing. Dealer writes go to staff
+      // PIN sessions — but only the dealer's admin-role claim (plus corporate
+      // admin/owner); a sales or installer PIN must not change pricing.
+      allow write: if hasDealerAdminClaim(dealerCode) || hasAdminOrOwnerClaim();
     }
 
     // ── Dealer Config (messaging templates, dealer-scoped settings) ──
@@ -2119,10 +2147,12 @@ service cloud.firestore {
         return isDealerStaffAccount(dealerCode);
       }
       // Staff-claim and admin/owner-claim read access are inlined here
-      // (not in isDealerMember) so write stays gated by user-doc
-      // membership only.
+      // (not in isDealerMember).
       allow read: if isDealerMember() || hasStaffClaim(dealerCode) || hasAdminOrOwnerClaim();
-      allow write: if isDealerMember();
+      // 2026-11-17: same move as pricing above — the dealer's admin-role
+      // claim plus corporate admin/owner. The Messaging tab therefore saves
+      // under an admin PIN session only.
+      allow write: if hasDealerAdminClaim(dealerCode) || hasAdminOrOwnerClaim();
     }
 
     // ==================== Neighborhood Sync (Block Party) ====================
