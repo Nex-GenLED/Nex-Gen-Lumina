@@ -215,6 +215,14 @@ export interface DealerMessagingConfig {
   sendDay2Reminder: boolean;
   sendEstimateSignedEmail: boolean;
   sendInstallCompleteEmail: boolean;
+  /**
+   * Gates the status-update SMS onSalesJobStatusChanged sends (prep day
+   * confirmed, install day confirmed, wiring prep complete). Added
+   * 2026-11-17; before it those three SMS had no dealer toggle at all.
+   * Not yet in the Flutter DealerMessagingConfig model — until it is, the
+   * Messaging tab neither shows nor clears it (its save is merge:true).
+   */
+  sendStatusSms: boolean;
 }
 
 /** Defaults applied when the dealer has no config doc. */
@@ -225,6 +233,7 @@ const DEFAULT_DEALER_CONFIG: DealerMessagingConfig = {
   sendDay2Reminder: true,
   sendEstimateSignedEmail: true,
   sendInstallCompleteEmail: true,
+  sendStatusSms: true,
 };
 
 /**
@@ -287,6 +296,9 @@ export async function loadDealerMessagingConfig(
       sendInstallCompleteEmail:
         (data.sendInstallCompleteEmail as boolean | undefined) ??
         DEFAULT_DEALER_CONFIG.sendInstallCompleteEmail,
+      sendStatusSms:
+        (data.sendStatusSms as boolean | undefined) ??
+        DEFAULT_DEALER_CONFIG.sendStatusSms,
     };
   } catch (err) {
     logger.warn(

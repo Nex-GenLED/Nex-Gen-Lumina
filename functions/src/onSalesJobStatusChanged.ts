@@ -13,6 +13,10 @@
  * outbound message call is wrapped in a per-channel try/catch that
  * logs and continues.
  *
+ * 2026-11-17: every message is sent at most once per job (a claimed
+ * `messagingSent.<key>` marker, see claimSend), and the three
+ * status-update SMS honour the dealer's `sendStatusSms` toggle.
+ *
  * Deployment:
  *   cd functions
  *   npm run build
@@ -325,39 +329,67 @@ function buildInstallCompleteEmail(
   return { subject, html, text };
 }
 
-// ── Cloud Function ──────────────────────────────────────────────────────────
+// ── Sent markers (2026-11-17) ───────────────────────────────────────────────
+//
+// Each customer message is sent AT MOST ONCE per job. Before this, a status
+// that bounced A→B→A→B re-sent B's message, and Firestore's at-least-once
+// trigger delivery could double-send on a retry.
+//
+// The marker lives on the job at `messagingSent.<key>` (a server timestamp)
+// and is CLAIMED in a transaction BEFORE the send, so a retry or a concurrent
+// invocation finds it and stops. If the claim itself fails, the message is
+// skipped (fail closed: a missed message beats a duplicate). The marker write
+// re-fires this trigger, which returns early because neither status nor
+// day1CompletedAt changed. A message whose dealer toggle is off is not
+// marked, so turning the toggle back on lets a LATER transition send.
+//
+// Clients write the job with set(merge:true) of SalesJob.toJson(), which
+// has no messagingSent key, so client saves never clear a marker.
 
-export const onSalesJobStatusChanged = onDocumentUpdated(
-  {
-    document: "sales_jobs/{jobId}",
-    region: "us-central1",
-  },
-  async (event) => {
-    const before = event.data?.before.data();
-    const after = event.data?.after.data();
-    if (!before || !after) {
-      logger.warn(
-        "onSalesJobStatusChanged: missing before/after snapshot, ignoring",
+export type MessageKey =
+  | "day1CompletedSms"
+  | "estimateSignedEmail"
+  | "prewireScheduledSms"
+  | "installScheduledSms"
+  | "installCompleteEmail";
+
+async function claimSend(jobId: string, key: MessageKey): Promise<boolean> {
+  const db = admin.firestore();
+  const ref = db.collection("sales_jobs").doc(jobId);
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return false;
+      if (snap.get(new admin.firestore.FieldPath("messagingSent", key)) != null) {
+        logger.info(
+          `onSalesJobStatusChanged: job ${jobId} ${key} already sent — skipping`,
+        );
+        return false;
+      }
+      tx.update(
+        ref,
+        new admin.firestore.FieldPath("messagingSent", key),
+        admin.firestore.FieldValue.serverTimestamp(),
       );
-      return;
-    }
+      return true;
+    });
+  } catch (err) {
+    logger.error(
+      `onSalesJobStatusChanged: job ${jobId} could not claim ${key} — not sending: ${(err as Error).message}`,
+    );
+    return false;
+  }
+}
 
-    const jobId = event.params.jobId;
+// ── Handler (exported for the emulator suite) ───────────────────────────────
+
+export async function processSalesJobUpdate(
+  jobId: string,
+  before: admin.firestore.DocumentData,
+  after: admin.firestore.DocumentData,
+): Promise<void> {
     const beforeStatus = before.status as string | undefined;
     const afterStatus = after.status as string | undefined;
-
-    const prospect = readProspect(after);
-    const firstName = prospect.firstName || "there";
-
-    // ── Load dealer messaging config (toggles + sign-off) ─────────────────
-    //
-    // Load once up front since both the day1-completed branch and the
-    // status-transition branch need it. loadDealerMessagingConfig
-    // returns defaults on missing/invalid configs and never throws.
-    const dealerCode = (after.dealerCode as string) ?? "";
-    const config: DealerMessagingConfig =
-      await loadDealerMessagingConfig(dealerCode);
-    const signOff = resolveSignOff(config);
 
     // ── Day 1 completion detection (independent of status change) ─────────
     //
@@ -366,31 +398,54 @@ export const onSalesJobStatusChanged = onDocumentUpdated(
     // We detect day1CompletedAt becoming non-null specifically rather
     // than the prewireComplete status, because the spec wants this
     // message tied to the completion event, not the queue transition.
-    //
-    // Not toggle-controlled — the spec only puts toggles on the two
-    // emails and the two day-before reminders. This SMS always sends.
-
     const day1CompletedBefore = before.day1CompletedAt;
     const day1CompletedAfter = after.day1CompletedAt;
     const day1JustCompleted =
       day1CompletedBefore == null && day1CompletedAfter != null;
 
-    if (day1JustCompleted) {
-      const body =
-        `Great news, ${firstName}! Wiring prep is complete at your home. ` +
-        "Your light installation day is coming soon — we'll text you the " +
-        `night before. — ${signOff}`;
-      await trySendSms(
-        prospect,
-        body,
-        `job ${jobId} day1 completed`,
+    // Nothing this trigger reacts to changed (this includes our own
+    // messagingSent marker writes) → return before any read.
+    if (!day1JustCompleted && beforeStatus === afterStatus) {
+      return;
+    }
+
+    const prospect = readProspect(after);
+    const firstName = prospect.firstName || "there";
+
+    // ── Load dealer messaging config (toggles + sign-off) ─────────────────
+    //
+    // loadDealerMessagingConfig returns defaults on missing/invalid
+    // configs and never throws.
+    const dealerCode = (after.dealerCode as string) ?? "";
+    const config: DealerMessagingConfig =
+      await loadDealerMessagingConfig(dealerCode);
+    const signOff = resolveSignOff(config);
+
+    // SMS toggle (sendStatusSms) covers the three status-update SMS. The
+    // two emails keep their own toggles; the day-before reminders live in
+    // sendInstallReminders.
+    const smsSkipped = (what: string) =>
+      logger.info(
+        `onSalesJobStatusChanged: job ${jobId} ${what} SMS skipped — dealer ${dealerCode} has sendStatusSms=false`,
       );
+
+    if (day1JustCompleted) {
+      if (!config.sendStatusSms) {
+        smsSkipped("day1 completed");
+      } else if (await claimSend(jobId, "day1CompletedSms")) {
+        const body =
+          `Great news, ${firstName}! Wiring prep is complete at your home. ` +
+          "Your light installation day is coming soon — we'll text you the " +
+          `night before. — ${signOff}`;
+        await trySendSms(
+          prospect,
+          body,
+          `job ${jobId} day1 completed`,
+        );
+      }
     }
 
     // ── Status transitions ───────────────────────────────────────────────
-    //
-    // Status hasn't changed and there was no day1 completion event →
-    // nothing to do. Return early.
 
     if (beforeStatus === afterStatus) {
       return;
@@ -409,6 +464,7 @@ export const onSalesJobStatusChanged = onDocumentUpdated(
           );
           break;
         }
+        if (!(await claimSend(jobId, "estimateSignedEmail"))) break;
         const dealerName = await lookupDealerName(dealerCode);
         const { subject, html, text } = buildEstimateSignedEmail(
           prospect,
@@ -425,7 +481,12 @@ export const onSalesJobStatusChanged = onDocumentUpdated(
       }
 
       case STATUS_PREWIRE_SCHEDULED: {
-        // SMS — day 1 scheduling confirmation. Always sends.
+        // SMS — day 1 scheduling confirmation. sendStatusSms-controlled.
+        if (!config.sendStatusSms) {
+          smsSkipped("prewireScheduled");
+          break;
+        }
+        if (!(await claimSend(jobId, "prewireScheduledSms"))) break;
         const day1 = readableDate(after.day1Date);
         const techName = resolveTechName(after.day1TechUid as string | null);
         const body =
@@ -441,7 +502,12 @@ export const onSalesJobStatusChanged = onDocumentUpdated(
       }
 
       case STATUS_INSTALL_SCHEDULED: {
-        // SMS — day 2 scheduling confirmation. Always sends.
+        // SMS — day 2 scheduling confirmation. sendStatusSms-controlled.
+        if (!config.sendStatusSms) {
+          smsSkipped("installScheduled");
+          break;
+        }
+        if (!(await claimSend(jobId, "installScheduledSms"))) break;
         const day2 = readableDate(after.day2Date);
         const body =
           `Hi ${firstName}, your Nex-Gen LED light installation is ` +
@@ -463,6 +529,7 @@ export const onSalesJobStatusChanged = onDocumentUpdated(
           );
           break;
         }
+        if (!(await claimSend(jobId, "installCompleteEmail"))) break;
         const dealerName = await lookupDealerName(dealerCode);
         const { subject, html, text } = buildInstallCompleteEmail(
           prospect,
@@ -482,5 +549,24 @@ export const onSalesJobStatusChanged = onDocumentUpdated(
         // No customer-facing message for other transitions.
         break;
     }
+}
+
+// ── Cloud Function ──────────────────────────────────────────────────────────
+
+export const onSalesJobStatusChanged = onDocumentUpdated(
+  {
+    document: "sales_jobs/{jobId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) {
+      logger.warn(
+        "onSalesJobStatusChanged: missing before/after snapshot, ignoring",
+      );
+      return;
+    }
+    await processSalesJobUpdate(event.params.jobId, before, after);
   },
 );
