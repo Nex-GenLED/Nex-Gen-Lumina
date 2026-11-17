@@ -2014,15 +2014,43 @@ service cloud.firestore {
       allow update: if request.auth != null && (isJobStakeholder() || isMediaOrAdmin() || hasAdminOrOwnerClaim());
       allow delete: if false;
 
+      // ── Item 4 (2026-11-17): subcollections follow their job ────────
+      // materialList / materialLedger were `request.auth != null` — any
+      // customer or anonymous session could read and rewrite any job's
+      // material list and append to its ledger. They now admit exactly the
+      // parent job's stakeholders (the same arms as isJobStakeholder(),
+      // resolved from the PARENT job's dealerCode) plus corporate, mirroring
+      // the job's own read/update rule. A missing parent job resolves to an
+      // error and denies everyone but the admin/owner/media clauses.
+      // Writers: inventory_service.dart and job_material_list_screen.dart,
+      // both under the dealer's staff PIN session.
+      function parentJobDealerCode() {
+        return get(/databases/$(database)/documents/sales_jobs/$(jobId)).data.get('dealerCode', '');
+      }
+      function isJobStakeholderFor(code) {
+        return request.auth != null && code != '' && (
+          hasStaffClaim(code) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin'] &&
+           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == code ||
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == code))
+        );
+      }
+      function mayWorkThisJob() {
+        return isJobStakeholderFor(parentJobDealerCode())
+            || isMediaOrAdmin()
+            || hasAdminOrOwnerClaim();
+      }
+
       // Material list — single document per job
       match /materialList/{docId} {
-        allow read, write: if request.auth != null;
+        allow read, write: if mayWorkThisJob();
       }
 
       // Material ledger — append-only audit trail
       match /materialLedger/{entryId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null;
+        allow read: if mayWorkThisJob();
+        allow create: if mayWorkThisJob();
         allow update, delete: if false;
       }
     }
