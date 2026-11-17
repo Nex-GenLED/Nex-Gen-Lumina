@@ -121,6 +121,16 @@ export interface SendEmailParams {
 }
 
 /**
+ * True when a Resend API key is configured for this deployment. Callers that
+ * must never ATTEMPT a send without one (createCustomerAccount on a staging
+ * project with no key) check this first and skip cleanly, instead of relying
+ * on sendEmail's throw.
+ */
+export function isEmailConfigured(): boolean {
+  return resendApiKey.value().trim().length > 0;
+}
+
+/**
  * Send a transactional email via Resend. Throws on validation failure
  * or on a Resend API error — callers are expected to catch and log so
  * a failed message never fails its parent trigger.

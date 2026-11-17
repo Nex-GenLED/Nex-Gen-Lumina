@@ -13,9 +13,19 @@
  * Side effects on success:
  *   • Creates the auth user (admin.auth().createUser)
  *   • Generates a password reset link (admin.auth().generatePasswordResetLink)
- *   • Sends a welcome email via Resend with the reset link + store links
+ *   • Sends a welcome email via Resend with the reset link — ONLY when
+ *     RESEND_API_KEY is configured; otherwise skips and reports
+ *     tempPasswordSent=false
  *   • Seeds /users/{uid} with displayName, email, dealerCode, jobId,
  *     installation_role: 'primary'
+ *
+ * Auth (2026-11-17): the caller must hold a staff claim — role installer or
+ * admin whose dealerCode equals the job's dealerCode, or role owner (owner
+ * tokens carry no dealerCode by design). The request's dealerCode must equal
+ * the job's, and an existing account already affiliated with a DIFFERENT
+ * dealer is refused rather than re-homed (the Admin SDK bypasses the /users
+ * rule that forbids that transition). Before this the callable checked
+ * nothing: anyone, signed in or not, could create Auth users and send mail.
  *
  * NOTE: this function does NOT call SalesJobService.linkToInstall to
  * write the new uid back onto the SalesJob — that's the wrap-up
@@ -27,21 +37,19 @@
  *   firebase deploy --only functions:createCustomerAccount
  */
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
 import { logger } from "firebase-functions";
 import * as admin from "firebase-admin";
 
-import { sendEmail } from "./messaging-helpers";
+import { isEmailConfigured, sendEmail } from "./messaging-helpers";
 import { dealerContactFields, lookupDealerContact } from "./dealerContact";
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
-// ── Store URL placeholders (mirror of onSalesJobStatusChanged.ts) ───────────
-// TODO: replace with real store URLs once the apps are listed.
-const APP_STORE_URL =
-  "https://apps.apple.com/app/lumina/id[PLACEHOLDER_APP_ID]";
-const PLAY_STORE_URL =
-  "https://play.google.com/store/apps/details?id=[PLACEHOLDER_PACKAGE_ID]";
+// Store links: none. The app is not on the public stores, and the previous
+// placeholder URLs ("id[PLACEHOLDER_APP_ID]") would have gone to customers
+// as dead links. The email tells the customer to sign in to the Lumina app
+// their installer set up; add real links here only once real listings exist.
 
 // ── Email regex ─────────────────────────────────────────────────────────────
 // Loose check — full RFC 5322 is unnecessary; bad addresses get rejected
@@ -85,9 +93,7 @@ function buildWelcomeEmail(params: {
     "",
     `(This link is tied to ${email}. If you didn't expect this email, you can safely ignore it.)`,
     "",
-    "Once your password is set, download Lumina to control your lights:",
-    `  • iPhone: ${APP_STORE_URL}`,
-    `  • Android: ${PLAY_STORE_URL}`,
+    "Once your password is set, sign in to the Lumina app with this email address to control your lights.",
     "",
     "Welcome to the family!",
     "— Nex-Gen LED",
@@ -113,11 +119,10 @@ function buildWelcomeEmail(params: {
       this email, you can safely ignore it.
     </p>
 
-    <h3 style="font-size:14px; color:#1a1a1a; margin:32px 0 12px 0;">Once your password is set, download Lumina:</h3>
-    <div style="margin:8px 0;">
-      <a href="${APP_STORE_URL}" style="display:inline-block; background:#1a1a1a; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:8px; font-size:14px; font-weight:600; margin-right:8px;">iPhone</a>
-      <a href="${PLAY_STORE_URL}" style="display:inline-block; background:#1a1a1a; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:8px; font-size:14px; font-weight:600;">Android</a>
-    </div>
+    <p style="font-size:16px; line-height:1.5; margin-top:32px;">
+      Once your password is set, sign in to the Lumina app with this email
+      address to control your lights.
+    </p>
 
     <p style="font-size:16px; line-height:1.5; margin-top:32px;">
       Welcome to the family!<br>
@@ -131,14 +136,59 @@ function buildWelcomeEmail(params: {
   return { subject, html, text };
 }
 
-// ── Cloud Function ──────────────────────────────────────────────────────────
+// ── Auth policy ─────────────────────────────────────────────────────────────
 
-export const createCustomerAccount = onCall(
-  {
-    region: "us-central1",
-    maxInstances: 10,
-  },
-  async (request): Promise<CreateCustomerAccountResult> => {
+const GENERIC_DENY = "Not authorized to create a customer account for this job";
+
+/**
+ * Role gate, checked BEFORE any read: an installer, admin or owner staff
+ * claim (mintStaffToken). Salesperson, customer and anonymous callers stop
+ * here. Exported for the emulator suite.
+ */
+export function assertStaffRoleForAccountCreation(
+  auth: CallableRequest["auth"],
+): { role: string; dealerCode: string } {
+  if (!auth) {
+    throw new HttpsError("unauthenticated", "Sign-in required");
+  }
+  const token = (auth.token ?? {}) as Record<string, unknown>;
+  const role = typeof token.role === "string" ? token.role : "";
+  const dealerCode = typeof token.dealerCode === "string" ? token.dealerCode : "";
+  if (role === "owner") return { role, dealerCode };
+  if ((role === "installer" || role === "admin") && dealerCode !== "") {
+    return { role, dealerCode };
+  }
+  throw new HttpsError("permission-denied", GENERIC_DENY);
+}
+
+/**
+ * Dealer gate, checked once the job is read: installer and admin claims must
+ * belong to the job's dealer. Owner tokens have no dealerCode (cross-dealer
+ * by design) and pass. The request's dealerCode — the value stamped onto the
+ * customer — must equal the job's for every role.
+ */
+export function assertCallerMatchesJob(params: {
+  caller: { role: string; dealerCode: string };
+  jobDealerCode: string;
+  requestDealerCode: string;
+}): void {
+  const { caller, jobDealerCode, requestDealerCode } = params;
+  if (jobDealerCode === "" || requestDealerCode !== jobDealerCode) {
+    throw new HttpsError("permission-denied", GENERIC_DENY);
+  }
+  if (caller.role !== "owner" && caller.dealerCode !== jobDealerCode) {
+    throw new HttpsError("permission-denied", GENERIC_DENY);
+  }
+}
+
+// ── Core (exported for the emulator suite) ──────────────────────────────────
+
+export async function runCreateCustomerAccount(
+  request: Pick<CallableRequest, "auth" | "data">,
+): Promise<CreateCustomerAccountResult> {
+    // ── Auth: role first, before any read ─────────────────────────────────
+    const caller = assertStaffRoleForAccountCreation(request.auth);
+
     // ── Input validation ──────────────────────────────────────────────────
     const data = (request.data ?? {}) as Partial<CreateCustomerAccountInput>;
     const email = (data.email ?? "").trim().toLowerCase();
@@ -173,6 +223,14 @@ export const createCustomerAccount = onCall(
     if (!jobDoc.exists) {
       throw new HttpsError("not-found", `sales job ${jobId} not found`);
     }
+
+    // ── Auth: the caller must belong to the job's dealer ──────────────────
+    const jobDealerCode = jobDoc.get("dealerCode");
+    assertCallerMatchesJob({
+      caller,
+      jobDealerCode: typeof jobDealerCode === "string" ? jobDealerCode : "",
+      requestDealerCode: dealerCode,
+    });
 
     // ── Idempotency: existing user → return early ─────────────────────────
     let existingUser: admin.auth.UserRecord | null = null;
@@ -210,6 +268,27 @@ export const createCustomerAccount = onCall(
 
     if (existingUser) {
       uid = existingUser.uid;
+      // Never re-home a customer who already belongs to another dealer. The
+      // seed below merges dealer_code through the Admin SDK, which bypasses
+      // the /users rule that forbids reassignment; claimCustomerByEmail
+      // refuses the same transition.
+      const existingProfile = await db.collection("users").doc(uid).get();
+      const existingDealer = existingProfile.exists
+        ? existingProfile.get("dealer_code")
+        : undefined;
+      if (
+        typeof existingDealer === "string" &&
+        existingDealer !== "" &&
+        existingDealer !== dealerCode
+      ) {
+        logger.warn("createCustomerAccount: refusing cross-dealer reassignment", {
+          uid,
+        });
+        throw new HttpsError(
+          "permission-denied",
+          "That account already belongs to another dealer",
+        );
+      }
       logger.info(
         `createCustomerAccount: user already exists for ${email} (uid=${uid}) — reusing the account and seeding the user doc`,
       );
@@ -264,25 +343,35 @@ export const createCustomerAccount = onCall(
       // created, the user doc is about to be seeded, and the wrap-up
       // screen will surface a snackbar to the installer either way. We
       // log loudly so the dealer can re-trigger manually if needed.
-      try {
-        const { subject, html, text } = buildWelcomeEmail({
-          displayName,
-          email,
-          resetLink,
-        });
-        await sendEmail({
-          to: email,
-          subject,
-          htmlBody: html,
-          textBody: text,
-        });
-        tempPasswordSent = true;
-      } catch (err) {
-        logger.error(
-          `createCustomerAccount: welcome email failed for ${email}: ${(err as Error).message}`,
+      //
+      // No RESEND_API_KEY (e.g. a staging project) → no send is attempted
+      // at all; tempPasswordSent stays false.
+      if (!isEmailConfigured()) {
+        logger.info(
+          "createCustomerAccount: RESEND_API_KEY not configured — welcome email skipped",
+          { uid },
         );
-        // tempPasswordSent stays false — the response signals to the
-        // wrap-up screen that the email didn't actually go out.
+      } else {
+        try {
+          const { subject, html, text } = buildWelcomeEmail({
+            displayName,
+            email,
+            resetLink,
+          });
+          await sendEmail({
+            to: email,
+            subject,
+            htmlBody: html,
+            textBody: text,
+          });
+          tempPasswordSent = true;
+        } catch (err) {
+          logger.error(
+            `createCustomerAccount: welcome email failed for ${email}: ${(err as Error).message}`,
+          );
+          // tempPasswordSent stays false — the response signals to the
+          // wrap-up screen that the email didn't actually go out.
+        }
       }
     }
 
@@ -360,5 +449,15 @@ export const createCustomerAccount = onCall(
       uid,
       tempPasswordSent,
     };
+}
+
+// ── Cloud Function ──────────────────────────────────────────────────────────
+
+export const createCustomerAccount = onCall(
+  {
+    region: "us-central1",
+    maxInstances: 10,
   },
+  (request): Promise<CreateCustomerAccountResult> =>
+    runCreateCustomerAccount(request),
 );
