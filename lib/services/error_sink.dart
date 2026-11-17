@@ -32,6 +32,18 @@ typedef ErrorReporter = Future<void> Function({
 /// we must not recurse into ourselves and feedback-loop.
 bool _errorSinkActive = false;
 
+/// Set once, by main(), when the startup environment check refuses to start
+/// (lib/config/lumina_env.dart). The Firebase app that is loaded is then the
+/// WRONG project, so a debug_errors write would land in it: for a staging
+/// build, production. Never cleared; the process is not going to run the app.
+bool _errorSinkSuspended = false;
+
+/// Stops [reportErrorToSink] from writing anywhere for the rest of the process.
+void suspendErrorSink() => _errorSinkSuspended = true;
+
+@visibleForTesting
+bool get errorSinkSuspended => _errorSinkSuspended;
+
 /// Writes one record for [error] under [context]. #84 hardening.
 ///
 /// Without this the app has no error reporting surface — Crashlytics is not
@@ -47,6 +59,7 @@ Future<void> reportErrorToSink({
   _errorSinkActive = true;
   try {
     debugPrint('🛑 ERROR [$context]: $error\n$stack');
+    if (_errorSinkSuspended) return;
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     await FirebaseFirestore.instance

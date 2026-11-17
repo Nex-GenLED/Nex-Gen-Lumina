@@ -2,11 +2,12 @@ import 'dart:async';
 import 'package:nexgen_command/services/error_sink.dart';
 import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:nexgen_command/firebase_options.dart';
+import 'package:nexgen_command/config/environment_widgets.dart';
+import 'package:nexgen_command/config/firebase_bootstrap.dart';
+import 'package:nexgen_command/config/lumina_env.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/nav.dart';
 import 'package:nexgen_command/services/notifications_service.dart';
@@ -26,7 +27,6 @@ import 'package:nexgen_command/features/wled/wled_providers.dart';
 import 'package:nexgen_command/models/user_model.dart';
 import 'package:nexgen_command/services/bridge_health_service.dart';
 import 'package:nexgen_command/features/voice/voice_providers.dart';
-import 'package:nexgen_command/shared/accessibility/text_scale_clamp.dart';
 import 'package:nexgen_command/shared/fonts/bundled_font_weights.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
@@ -101,60 +101,45 @@ Future<void> main() async {
   // to the same files declared under `fonts:` in pubspec.yaml.
   unawaited(registerBundledFontWeights());
 
+  // ENVIRONMENT CHECK, FAIL-CLOSED. A non-production build (staging, or an
+  // unrecognised LUMINA_ENV) starts out REFUSED, and only an allowing verdict
+  // from bootstrapFirebase clears it — so a throw anywhere before that verdict
+  // still ends on the refusal screen, never in the app. A production build
+  // starts out allowed, which keeps today's behaviour for every failure path.
+  // See lib/config/lumina_env.dart.
+  EnvGuardVerdict startup = kIsProdBuild
+      ? const EnvGuardVerdict.allow()
+      : const EnvGuardVerdict.refuse(
+          'The environment check did not finish, so this build stopped.',
+        );
+
   // The whole startup body is wrapped so that runApp() is UNCONDITIONAL —
   // see the finally at the bottom of main(). Nothing below may be the reason
   // the app never draws a frame.
   try {
-    // GUARDED for exactly the reason documented on the encryption block below:
-    // a step that blocks runApp() must be protected against BOTH failure modes,
-    // and a bare try/catch only covers one of them.
-    //
-    // This block used to catch a throw from the primary attempt and then call
-    // the fallback UNGUARDED — no try/catch, no timeout. A throw from that
-    // fallback aborted main() before runApp(), producing a permanent splash
-    // with no crash dialog: the exact 2.5.10+55 signature described in this
-    // file's header comment. Both attempts are now bounded and caught.
-    //
-    // If both fail the app still starts. That is deliberate: a launched app
-    // whose Firebase calls error is diagnosable by the user and by us; a
-    // process sitting pre-runApp() forever is neither.
-    //
-    // TIMEOUTS ARE 15s, matching the project-wide network-timeout standard in
-    // CLAUDE.md. They were 10s. 10s is short enough to trip on a cold cellular
-    // start or a slow DNS resolve and send a perfectly healthy launch down the
-    // fallback path (and then into the degraded both-failed branch), which is
-    // the same class of false alarm as the "System Offline" bug. A longer bound
-    // costs nothing here because the timeout is a backstop against a HANG, not
-    // a latency budget — runApp() is unconditional either way.
-    _startupBreadcrumb('firebase:begin');
-    try {
-      if (kIsWeb) {
-        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-            .timeout(const Duration(seconds: 15));
-      } else {
-        // Prefer native configs from google-services.json / GoogleService-Info.plist when present
-        await Firebase.initializeApp().timeout(const Duration(seconds: 15));
-      }
-      _startupBreadcrumb('firebase:ok');
-    } catch (e) {
-      // Fallback to Dart-side options if native config files are missing or misconfigured
-      debugPrint('Firebase.initializeApp() without options failed, falling back: $e');
-      _startupBreadcrumb('firebase:primary FAILED, trying fallback err=$e');
-      try {
-        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-            .timeout(const Duration(seconds: 15));
-        _startupBreadcrumb('firebase:ok (via fallback)');
-      } catch (e2, st2) {
-        // Both paths are gone. Continue to runApp anyway — see above.
-        _startupBreadcrumb('firebase:FAILED BOTH (continuing) err=$e2');
-        // Fire-and-forget for the same reason as the encryption sink below:
-        // this writes to Firestore, which is precisely what is not working.
-        unawaited(_reportUncaughtError(
-          error: e2,
-          stack: st2,
-          context: 'startup/Firebase.initializeApp',
-        ));
-      }
+    // Firebase init + the environment check. For the default (production)
+    // build this is the exact sequence that used to be written out here —
+    // guards, 15 s timeouts, fallback, degraded start and breadcrumbs — moved
+    // to lib/config/firebase_bootstrap.dart unchanged, where it is tested.
+    startup = await bootstrapFirebase(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+      breadcrumb: _startupBreadcrumb,
+      // Fire-and-forget for the same reason as the encryption sink below:
+      // this writes to Firestore, which is precisely what is not working.
+      onBothFailed: (e2, st2) => unawaited(_reportUncaughtError(
+        error: e2,
+        stack: st2,
+        context: 'startup/Firebase.initializeApp',
+      )),
+    );
+    if (!startup.allowed) {
+      // Wrong project loaded (or none, in staging). Nothing else may run:
+      // the error sink would write into that project, and the steps below
+      // read and write Firebase.
+      suspendErrorSink();
+      _startupBreadcrumb('envguard:REFUSED ${startup.reason}');
+      return; // -> finally -> runApp(EnvironmentRefusedApp)
     }
 
     // Reviewer seed is now triggered post-login in login_page.dart — writing
@@ -249,6 +234,9 @@ Future<void> main() async {
     // Every individual step already has its own guard; this exists so that a
     // future unguarded await added to this function degrades into a running
     // app with a reported error, not into another silent pre-runApp() hang.
+    // (A refused environment must not report: the sink would write into the
+    // wrong project. Production never refuses here, so this is a no-op there.)
+    if (!startup.allowed) suspendErrorSink();
     _startupBreadcrumb('startup:UNEXPECTED (continuing) err=$e');
     unawaited(_reportUncaughtError(
       error: e,
@@ -258,7 +246,9 @@ Future<void> main() async {
   } finally {
     // UNCONDITIONAL — this is the whole point of the wrapper.
     _startupBreadcrumb('runApp');
-    runApp(const ProviderScope(child: MyApp()));
+    runApp(startup.allowed
+        ? const ProviderScope(child: MyApp())
+        : EnvironmentRefusedApp(reason: startup.reason ?? 'Unknown.'));
   }
 }
 
@@ -483,6 +473,11 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
     ref.listen<AsyncValue<User?>>(authStateProvider, (prev, next) {
       next.whenData((user) {
         if (kIsWeb) return;
+        // Staging has no push by design: APNs is tied to the production
+        // bundle id, and the staging CI build strips aps-environment. Skip
+        // the prompt and the token store rather than ask for a permission
+        // that cannot deliver anything. A const: compiled out of production.
+        if (kIsStagingBuild) return;
         if (user == null || user.isAnonymous) return;
         final service = ref.read(syncNotificationServiceProvider);
         unawaited(_onSignedInUnlessStaff(user, service));
@@ -533,7 +528,9 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
       themeMode: ThemeMode.dark,
 
       // Accessibility backstop: cap platform text scaling at 2.0x app-wide.
-      builder: TextScaleClamp.appBuilder,
+      // Production gets TextScaleClamp.appBuilder itself; a staging build
+      // gets the same builder under the STAGING ribbon.
+      builder: luminaAppBuilderFor(luminaEnv),
 
       // Router configuration
       routerConfig: AppRouter.router,
