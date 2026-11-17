@@ -19,7 +19,7 @@ library;
 
 /// Full version string, matching `version:` in `pubspec.yaml` exactly,
 /// including the `+buildNumber` suffix.
-const String kAppVersion = '2.5.10+129';
+const String kAppVersion = '2.5.10+130';
 
 /// Marketing version only — the part before `+`, e.g. `2.5.10`.
 ///
