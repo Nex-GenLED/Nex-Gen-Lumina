@@ -227,3 +227,209 @@ workflows:
         auth: integration
         submit_to_testflight: true
         expire_build_submitted_for_review: true
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # STAGING — "Lumina Staging", a SEPARATE app that installs beside the real
+  # one: bundle id com.nexgenled.command.staging, Firebase project
+  # nex-gen-lumina-22751, its own App Store Connect app record.
+  #
+  # Added below the production workflow; not one production line changed.
+  # Owner setup, in click order: docs/staging/STAGING_SETUP_CHECKLIST.md.
+  #
+  # HOW THE BUNDLE ID IS OVERRIDDEN WITHOUT EDITING PRODUCTION FILES: the
+  # "Rewrite the CI clone" step below edits the BUILD MACHINE'S throwaway
+  # clone only (project.pbxproj bundle id, Info.plist name + URL scheme,
+  # Runner.entitlements) before signing. Nothing is committed; the repo's
+  # ios/ files stay production. This is the same kind of CI-clone edit
+  # `xcode-project use-profiles` already makes to project.pbxproj in the
+  # production workflow. An xcodebuild PRODUCT_BUNDLE_IDENTIFIER override
+  # was not used: it applies to every target, gives each pod resource bundle
+  # the same id (App Store upload rejects the collision), and use-profiles
+  # matches profiles by the id in the project file.
+  #
+  # FOUR SEPARATE STOPS keep a staging build out of production:
+  #   1. triggering: staging-* tags only (never a push, never build-*), and
+  #      the first script refuses any build whose CM_TAG is not staging-*
+  #      (a manual start from the Codemagic UI on a branch stops there);
+  #   2. the Dart build is compiled with --dart-define=LUMINA_ENV=staging,
+  #      and the app itself refuses to start unless it loaded the staging
+  #      project (lib/config/lumina_env.dart);
+  #   3. the IPA is unpacked and checked BEFORE publishing: App Store Connect
+  #      files an upload under the bundle id inside the IPA, so a build that
+  #      still carried com.nexgenled.command would land on the PRODUCTION
+  #      app record;
+  #   4. staging numbers its builds from its own per-workflow counter.
+  # ═══════════════════════════════════════════════════════════════════════
+  ios-staging-workflow:
+    name: iOS Staging (Lumina Staging)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'staging-*'
+          include: true
+    integrations:
+      # Same App Store Connect API key as production: it is team-level and
+      # uploads to whichever app record matches the IPA's bundle id.
+      app_store_connect: NexGen
+    environment:
+      # Same pin as production. Move both together (docs/BUILD_LEDGER.md
+      # convention 5).
+      flutter: 3.47.9
+      xcode: latest
+      cocoapods: default
+      groups:
+        # Team-level signing material (the distribution certificate key that
+        # fetch-signing-files --create needs). Same Apple team as production.
+        # Checklist step C4 confirms the group holds nothing app-specific.
+        - ios-workflow
+      vars:
+        BUNDLE_ID: com.nexgenled.command.staging
+    scripts:
+      - name: Staging guard (tag, bundle id, staging Firebase values)
+        script: |
+          set -euo pipefail
+          echo "=== staging guard: commit $(git rev-parse HEAD) ==="
+          # 1. Only a staging-* tag builds this workflow.
+          case "${CM_TAG:-}" in
+            staging-*) echo "tag: $CM_TAG" ;;
+            *) echo "REFUSED: this workflow builds only from a staging-* tag (CM_TAG=${CM_TAG:-unset})."; exit 1 ;;
+          esac
+          # 2. The id this workflow signs and uploads, whatever an env group says.
+          if [ "$BUNDLE_ID" != "com.nexgenled.command.staging" ]; then
+            echo "REFUSED: BUNDLE_ID is $BUNDLE_ID, expected com.nexgenled.command.staging."; exit 1
+          fi
+          # 3. The staging Firebase values must be filled in. (The app refuses
+          #    to start on them too; this stops before a wasted build.)
+          OPTS=lib/config/firebase_options_staging.dart
+          if grep -n "'REPLACE_ME_" "$OPTS"; then
+            echo "REFUSED: $OPTS still has placeholder values (docs/staging/STAGING_SETUP_CHECKLIST.md, step H1)."; exit 1
+          fi
+          grep -q "projectId: 'nex-gen-lumina-22751'" "$OPTS" || { echo "REFUSED: $OPTS does not name nex-gen-lumina-22751."; exit 1; }
+          grep -q "iosBundleId: 'com.nexgenled.command.staging'" "$OPTS" || { echo "REFUSED: $OPTS does not name the staging bundle id."; exit 1; }
+          echo "staging guard: OK"
+      - name: Test and analyze (build gate)
+        # Same gate as production, on the checked-out commit BEFORE the
+        # staging rewrite below touches ios/. The suite runs WITHOUT
+        # --dart-define, exactly as in production: it includes the tests that
+        # pin the default build to production (test/config/).
+        script: |
+          set -euo pipefail
+          git rev-parse HEAD
+          grep '^version:' pubspec.yaml
+          flutter pub get
+          flutter test
+          ANALYZE_LOG=$(mktemp)
+          ANALYZE_EXIT=0
+          flutter analyze --no-fatal-warnings --no-fatal-infos > "$ANALYZE_LOG" 2>&1 || ANALYZE_EXIT=$?
+          cat "$ANALYZE_LOG"
+          echo "errors:   $(grep -cE '^ *error -'   "$ANALYZE_LOG" || true)"
+          echo "warnings: $(grep -cE '^ *warning -' "$ANALYZE_LOG" || true)"
+          echo "infos:    $(grep -cE '^ *info -'    "$ANALYZE_LOG" || true)"
+          exit $ANALYZE_EXIT
+      - name: Rewrite the CI clone to the staging app (never committed)
+        script: |
+          set -euo pipefail
+          PBX=ios/Runner.xcodeproj/project.pbxproj
+          PLIST=ios/Runner/Info.plist
+          ENT=ios/Runner/Runner.entitlements
+          PB=/usr/libexec/PlistBuddy
+          # Bundle id: exactly the three Runner build configurations. The
+          # RunnerTests target is not archived and keeps its id.
+          N=$(grep -c 'PRODUCT_BUNDLE_IDENTIFIER = com.nexgenled.command;' "$PBX" || true)
+          if [ "$N" != "3" ]; then
+            echo "REFUSED: expected 3 Runner bundle-id lines in $PBX, found $N. The Xcode project changed; update this step."; exit 1
+          fi
+          sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = com\.nexgenled\.command;/PRODUCT_BUNDLE_IDENTIFIER = com.nexgenled.command.staging;/' "$PBX"
+          [ "$(grep -c 'PRODUCT_BUNDLE_IDENTIFIER = com.nexgenled.command.staging;' "$PBX")" = "3" ]
+          [ "$(grep -c 'PRODUCT_BUNDLE_IDENTIFIER = com.nexgenled.command;' "$PBX" || true)" = "0" ]
+          # Home-screen name.
+          $PB -c "Set :CFBundleDisplayName 'Lumina Staging'" "$PLIST"
+          $PB -c "Set :CFBundleName 'Lumina Staging'" "$PLIST"
+          # Its own URL scheme, so a lumina:// link always opens the real app.
+          # (DeepLinkService accepts only lumina://, so links are inert here.)
+          $PB -c "Set :CFBundleURLTypes:0:CFBundleURLName com.nexgenled.command.staging" "$PLIST"
+          $PB -c "Set :CFBundleURLTypes:0:CFBundleURLSchemes:0 lumina-staging" "$PLIST"
+          # No push in staging, by design: APNs is tied to the production
+          # bundle id. Drop the entitlement (so the staging App ID needs no
+          # Push capability) and FCM auto-init. The app skips the push
+          # prompt in staging (lib/main.dart).
+          $PB -c "Delete :aps-environment" "$ENT"
+          $PB -c "Add :FirebaseMessagingAutoInitEnabled bool false" "$PLIST"
+          echo "=== CI-clone changes (discarded with this build machine) ==="
+          git --no-pager diff --stat
+          git --no-pager diff -- "$PLIST" "$ENT"
+      - name: Set up keychain
+        script: keychain initialize
+      - name: Fetch signing files
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --strict-match-identifier \
+            --create
+      - name: Add certificates to keychain
+        script: keychain add-certificates
+      - name: Set up code signing settings
+        script: xcode-project use-profiles
+      - name: Set build number (staging's own sequence)
+        script: |
+          set -euo pipefail
+          # BUILD_NUMBER is Codemagic's PER-WORKFLOW counter, so staging
+          # numbers 1, 2, 3 ... on its own app record. (Production reads
+          # PROJECT_BUILD_NUMBER, which Codemagic advances for EVERY workflow
+          # in this app, staging included; see the checklist, "Build numbers".)
+          # Same fail-fast rule as production: never invent a number.
+          # DO NOT RENAME this workflow: its counter would restart at 1.
+          BUILD_NUM=${BUILD_NUMBER:?BUILD_NUMBER is unset — refusing to invent a build number}
+          VERSION_NAME=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
+          sed -i '' "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUM}/" pubspec.yaml
+          echo "Version: $(grep '^version:' pubspec.yaml)"
+      - name: Install CocoaPods
+        script: |
+          flutter clean
+          flutter pub get
+          cd ios
+          rm -rf Pods Podfile.lock .symlinks
+          pod cache clean --all
+          pod install --repo-update
+      - name: Build IPA (LUMINA_ENV=staging)
+        script: flutter build ipa --release --dart-define=LUMINA_ENV=staging --split-debug-info=build/debug-info/ios
+      - name: Verify the IPA is the staging app (blocks publishing)
+        script: |
+          set -euo pipefail
+          IPA=$(find build/ios/ipa -name "*.ipa" -type f | head -1)
+          [ -n "$IPA" ] || { echo "REFUSED: no .ipa under build/ios/ipa"; exit 1; }
+          D=$(mktemp -d)
+          unzip -q "$IPA" -d "$D"
+          APP=$(find "$D/Payload" -maxdepth 1 -name "*.app" -type d | head -1)
+          PB=/usr/libexec/PlistBuddy
+          ID=$($PB -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          NAME=$($PB -c "Print :CFBundleDisplayName" "$APP/Info.plist")
+          echo "CFBundleIdentifier=$ID  CFBundleDisplayName=$NAME"
+          if [ "$ID" != "com.nexgenled.command.staging" ]; then
+            echo "REFUSED: IPA bundle id is $ID. App Store Connect files uploads by bundle id, so this would land on the PRODUCTION app record."; exit 1
+          fi
+          [ "$NAME" = "Lumina Staging" ] || { echo "REFUSED: display name is $NAME"; exit 1; }
+          if codesign -d --entitlements :- "$APP" 2>/dev/null | grep -q aps-environment; then
+            echo "REFUSED: the signed binary still carries aps-environment"; exit 1
+          fi
+          # lib/config/lumina_env.dart kLuminaEnvMarker is folded at compile
+          # time: this literal exists only if the define reached the Dart build.
+          if ! grep -a -q 'LUMINA_ENV_MARKER=staging' "$APP/Frameworks/App.framework/App"; then
+            echo "REFUSED: App.framework was not compiled with LUMINA_ENV=staging"; exit 1
+          fi
+          echo "OK: staging IPA verified"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/debug-info/ios/*.symbols
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Upload only. A build processed on the staging record is available
+        # to its INTERNAL TestFlight testers without Beta App Review
+        # (checklist step S3). submit_to_testflight would also request
+        # external beta review, which a staging record has no use for and
+        # which fails without Test Information filled in.
+        submit_to_testflight: false
