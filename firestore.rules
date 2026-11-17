@@ -1423,11 +1423,8 @@ service cloud.firestore {
 
     // Installers collection - managed by dealers/admins
     match /installers/{installerId} {
-      function isDealerAdmin() {
-        return request.auth != null &&
-               exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin'];
-      }
+      // (isDealerAdmin() — user_role dealer|admin with NO dealer scope — was
+      // removed in R4; see the create/delete/update rules below.)
 
       // Detects whether an update is flipping the role TO or FROM 'admin'.
       // Both directions count as a role flip — promoting an installer to
@@ -1507,13 +1504,35 @@ service cloud.firestore {
       // D0 deployed and C3's promote-to-dealer path depends on.
       allow read: if hasAdminOrOwnerClaim();
 
-      // Create/delete: existing dealer-admin path, plus admin/owner claims
-      allow create, delete: if isDealerAdmin() || hasAdminOrOwnerClaim();
+      // ── R4 (2026-11-17): dealer accounts are scoped to their own dealer ──
+      // isDealerAdmin() (user_role dealer OR admin, ANY dealer) let a dealer
+      // account create, rewrite or delete another dealer's installer docs —
+      // and mintStaffToken resolves claims from exactly these docs, so a
+      // dealer-01 account could mint a dealer-02 installer claim. Now:
+      //   • user_role admin (corporate) keeps global reach (isUserRoleAdmin);
+      //   • a user_role dealer account reaches only docs whose dealerCode is
+      //     its own (isDealerStaffAccount), before AND after an update, and
+      //     may not CREATE a role 'admin' doc — an admin claim is cross-dealer
+      //     (hasAdminClaim), so that would be the same escalation one step
+      //     removed. Role flips to/from admin were already owner-only.
+      // Admin/owner claims are unchanged. Zero dealer accounts exist in
+      // production, so no live caller changes.
+      allow create: if isUserRoleAdmin()
+                    || hasAdminOrOwnerClaim()
+                    || (isDealerStaffAccount(request.resource.data.get('dealerCode', ''))
+                        && request.resource.data.get('role', '') != 'admin');
+      allow delete: if isUserRoleAdmin()
+                    || hasAdminOrOwnerClaim()
+                    || isDealerStaffAccount(resource.data.get('dealerCode', ''));
 
-      // Update: dealer-admin or admin-claim sessions can update non-role-
-      // flipping changes; role flips to/from 'admin' require owner.
+      // Update: corporate admin, admin/owner claims, or the doc's own dealer
+      // account (for a doc that stays in that dealer) can update
+      // non-role-flipping changes; role flips to/from 'admin' require owner.
       allow update: if (
-        (isDealerAdmin() || hasAdminOrOwnerClaim()) &&
+        (isUserRoleAdmin() ||
+         hasAdminOrOwnerClaim() ||
+         (isDealerStaffAccount(resource.data.get('dealerCode', '')) &&
+          isDealerStaffAccount(request.resource.data.get('dealerCode', '')))) &&
         !isRoleFlipToFromAdmin()
       ) || hasOwnerClaim();
     }
@@ -1653,12 +1672,18 @@ service cloud.firestore {
     // script in 89b9880 populates it for legacy docs. Rule deploy to
     // production must be sequenced AFTER the backfill runs there.
     match /referral_payouts/{payoutId} {
+      // R3 (2026-11-17): the two user-doc dealer arms now also require
+      // user_role in ['dealer','admin'] (FINDING A). Before, every CUSTOMER
+      // stamped with dealer_code X read all of dealer X's payouts. A
+      // referrer still reads their own through the referrerUid arm.
       allow read: if request.auth != null && (
         resource.data.referrerUid == request.auth.uid ||
         (resource.data.dealerCode != null &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealerCode) ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealerCode &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
         (resource.data.dealerCode != null &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealerCode) ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealerCode &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
         hasStaffClaim(resource.data.dealerCode) ||
         isMediaOrAdmin() ||
         hasAdminOrOwnerClaim()
@@ -1804,13 +1829,21 @@ service cloud.firestore {
       allow write: if hasOwnerClaim();
     }
 
-    // Pricing defaults — broadly readable (clients fall back to this
-    // when a dealer has no per-dealer pricing). Writes are still gated
-    // to legacy installation_role admin pending corporate migration —
-    // tighten to hasOwnerClaim() in 8-iii.
+    // Pricing defaults — the network fallback when a dealer has no
+    // per-dealer pricing doc. It carries the dealer COST basis
+    // (dealerCostPerLinearFoot etc.), so:
+    //
+    // R5 (2026-11-17):
+    //   • read was any signed-in user (every customer, every anonymous
+    //     session). Now staff PIN sessions (the sales pricing cascade,
+    //     dealer_pricing_service.dart:28) and admin/owner claims (corporate
+    //     Admin tab, corporate_admin_providers.dart:66).
+    //   • write was legacy installation_role admin or owner, so the
+    //     corporate Admin tab under an ADMIN claim could not save it. Now
+    //     admin/owner claims. The installation_role admin arm is dropped.
     match /app_config/pricing_defaults {
-      allow read: if request.auth != null;
-      allow write: if (request.auth != null && isAdmin()) || hasOwnerClaim();
+      allow read: if isStaffSession() || hasAdminOrOwnerClaim();
+      allow write: if hasAdminOrOwnerClaim();
     }
 
     // Catch-all: any other app_config doc that doesn't have an explicit
