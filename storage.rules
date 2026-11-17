@@ -70,5 +70,89 @@ service firebase.storage {
       // purgeUserAccount callable sweeps the prefix server-side.
       allow delete: if isOwner(userId);
     }
+
+    // ── Sales pipeline artefacts (2026-11-17) ─────────────────────────────
+    //
+    // The customer e-signature PNG and the prospect / zone / wizard / day-1
+    // photos live under sales_jobs/{jobId}/**; the Day-2 install-complete
+    // photos under sales/{jobId}/install_complete/{runId}.jpg. No rule ever
+    // matched either prefix, so default-deny refused every one of the six
+    // putData() sites in lib/features/sales — the signature step could never
+    // complete for anyone.
+    //
+    // WHO: staff PIN sessions only (mintStaffToken claims). Sales and
+    // installer claims are scoped to the job's dealer through the job
+    // document; admin and owner claims are corporate and reach every job,
+    // as they do in firestore.rules. Customer and anonymous sessions get
+    // nothing here — the app renders these images through the tokenised
+    // download URL it stored on the job, which is served without rules.
+    //
+    // CROSS-SERVICE BUDGET: Storage rules may make at most 2
+    // firestore.exists()/get() calls per request. isStaffOfJob() makes
+    // exactly two, on the same job document, and only for a sales/installer
+    // claim; admin/owner short-circuit with none. No user-doc lookups.
+    //
+    // PRE-SAVE DRAFTS: prospect_info_screen.dart uploads photos under a job
+    // id that _ensureDraftJob() has generated but not yet written, and every
+    // upload site calls getDownloadURL() (a rules-gated READ) right after.
+    // So while the job document does not exist, any sales/installer claim may
+    // write and read under that id. Ids are random Firestore auto-ids and the
+    // moment the job lands, dealer scoping applies. Same residual shape as
+    // staffMayReach() in firestore.rules.
+    //
+    // DEPLOY NOTE: firestore.* calls need the storage service agent to hold
+    // roles/firebaserules.firestoreServiceAgent. The CLI offers that grant
+    // only on an INTERACTIVE deploy (it skips the check under
+    // --non-interactive), and neither project holds it today. Without it
+    // every staff branch below fails closed.
+
+    function isCorporateClaim() {
+      return request.auth != null
+          && request.auth.token.get('role', '') in ['admin', 'owner'];
+    }
+
+    function isScopedStaffClaim() {
+      return request.auth != null
+          && request.auth.token.get('dealerCode', '') != ''
+          && request.auth.token.get('role', '') in ['salesperson', 'installer'];
+    }
+
+    function isStaffOfJob(jobId) {
+      return isScopedStaffClaim() && (
+        !firestore.exists(/databases/(default)/documents/sales_jobs/$(jobId))
+        || firestore.get(/databases/(default)/documents/sales_jobs/$(jobId))
+             .data.get('dealerCode', '') == request.auth.token.get('dealerCode', ''));
+    }
+
+    function mayHandleSalesArtefact(jobId) {
+      return isCorporateClaim() || isStaffOfJob(jobId);
+    }
+
+    function isImageUnder10MB() {
+      return request.resource.size < 10 * 1024 * 1024
+          && request.resource.contentType.matches('image/.*');
+    }
+
+    match /sales_jobs/{jobId}/{allPaths=**} {
+      allow read: if mayHandleSalesArtefact(jobId);
+      // Create only: every writer under this prefix names its object with a
+      // fresh timestamp, so a re-sign or re-shoot is a NEW object and the
+      // signature bytes are never overwritten. `resource == null` is stated
+      // because the Storage emulator evaluates an overwrite as a create
+      // (production calls it an update); this keeps both immutable.
+      allow create: if mayHandleSalesArtefact(jobId)
+                    && isImageUnder10MB()
+                    && resource == null;
+      allow update, delete: if false;
+    }
+
+    match /sales/{jobId}/{allPaths=**} {
+      allow read: if mayHandleSalesArtefact(jobId);
+      // Create AND update: day2_wrap_up_screen.dart writes
+      // install_complete/{runId}.jpg — a deterministic name — so re-shooting
+      // a channel's photo overwrites it. No delete from the client.
+      allow create, update: if mayHandleSalesArtefact(jobId) && isImageUnder10MB();
+      allow delete: if false;
+    }
   }
 }
