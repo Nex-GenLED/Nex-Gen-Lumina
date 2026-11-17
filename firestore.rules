@@ -2005,11 +2005,17 @@ service cloud.firestore {
       // dashboard needs; dealers no longer do.
       allow read: if request.auth != null && (isJobStakeholder() || isMediaOrAdmin() || hasAdminOrOwnerClaim());
 
-      // NOT TIGHTENED — DELIBERATE. Bare `auth != null` create is a
-      // wizard/sales-path grant (prospect_info_screen.dart:198/283 writes
-      // under a staff session, but the anonymous wizard also touches this
-      // surface). Moves to a staff claim in slice 5, gated on slice 4.
-      allow create: if request.auth != null;
+      // Item 5 (2026-11-17): was bare `auth != null` — any customer or
+      // anonymous session could create a job for any dealer (or none).
+      // Every client create is prospect_info_screen.dart _saveAndContinue →
+      // SalesJobService.updateJob (set merge on a fresh id) under a SALES PIN
+      // session, with dealerCode = the session's dealerCode — the same value
+      // the token claim carries. Nothing in the installer wizard creates a
+      // job (Day-1/Day-2 screens only update existing ones). Emulator-proven
+      // with the client's exact payload for sales AND installer claims
+      // (dealerToolsRules.emulator.test.ts, item 5) before this landed.
+      allow create: if hasStaffClaim(request.resource.data.get('dealerCode', ''))
+                    || hasAdminOrOwnerClaim();
 
       allow update: if request.auth != null && (isJobStakeholder() || isMediaOrAdmin() || hasAdminOrOwnerClaim());
       allow delete: if false;
