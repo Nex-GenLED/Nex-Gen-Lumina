@@ -73,3 +73,30 @@ production Auth.
   allowed, the 39 ALLOW → DENY deltas are all the bridge identity, the pinned
   residuals stay allowed, and no owner / staff / installer / user-pairing /
   anonymous request changes.
+
+### Dealer-tools suites (2026-11-17)
+
+Need a firebase.json declaring the emulators each file uses (do not edit the
+repo's): `firestore` for the rules and trigger/callable suites, `firestore` +
+`storage` for the storage suite, `firestore` + `auth` for
+createCustomerAccount. Run the storage suite with `--project` equal to the
+project id the test uses (`GCLOUD_PROJECT`, default `demo-dealer-tools`):
+Storage rules resolve `firestore.get()` against the CLI project.
+
+- `dealerToolsRulesDiff.emulator.test.ts` — 16 personas × 61 requests run
+  against `git show ${DEALER_TOOLS_BASELINE_REF:-0a364ce0}:firestore.rules`
+  (byte-identical to production) and the working tree; asserts the delta set
+  equals the item-tagged expected set exactly. `DIFF_EXPECT=none` asserts no
+  deltas, `DIFF_ITEMS=1,2` limits expectations, `DIFF_OUT=<file>` writes both
+  matrices as JSON.
+- `dealerToolsRules.emulator.test.ts` — items 1-6 as named allow/deny cases,
+  including the customers who lose sales_jobs, dealer_orders, payouts,
+  pricing_defaults and material lists.
+- `dealerToolsStorage.emulator.test.ts` — sales_jobs/** and sales/** storage
+  rules: dealer scoping through the job doc, pre-save draft uploads, image
+  type, 10 MB cap, signature immutability, wrap-up re-shoot.
+- `createCustomerAccount.emulator.test.ts`, `notifyDay2Team.emulator.test.ts`,
+  `onSalesJobStatusChanged.emulator.test.ts` — the callable auth gates, the
+  sent markers and the dealer SMS toggle. Senders are jest mocks, `resend` and
+  `twilio` are tripwire modules that throw if constructed, FCM is injected:
+  nothing leaves the machine.

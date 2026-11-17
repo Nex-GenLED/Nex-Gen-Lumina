@@ -292,11 +292,18 @@ describe("tier: dealer-scoped — own-dealer access preserved", () => {
     );
   });
 
-  test("dealer account WRITES its OWN pricing", async () => {
-    await assertSucceeds(
+  // 2026-11-17 (dealer-tools item 2): dealer writes go to staff PIN claims,
+  // not user_role dealer accounts. Pricing is now written by the dealer's
+  // admin-role claim or corporate admin/owner — see
+  // dealerToolsRules.emulator.test.ts. A dealer account still READS it.
+  test("dealer account can no longer WRITE its own pricing (admin-role claim does)", async () => {
+    await assertFails(
       updateDoc(doc(dealerAcct(DEALER_A_UID), `dealers/${A}/pricing/current`), {
         pricePerLinearFoot: 20,
       }),
+    );
+    await assertSucceeds(
+      getDoc(doc(dealerAcct(DEALER_A_UID), `dealers/${A}/pricing/current`)),
     );
   });
 
