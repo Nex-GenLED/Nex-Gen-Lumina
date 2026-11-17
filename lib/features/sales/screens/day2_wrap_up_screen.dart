@@ -68,7 +68,13 @@ const int _kWrapUpStepCount = 4;
 
 class Day2WrapUpScreen extends ConsumerStatefulWidget {
   final String jobId;
-  const Day2WrapUpScreen({super.key, required this.jobId});
+
+  /// Test seam for loading the job; production passes nothing and the
+  /// screen reads [FirebaseFirestore.instance].
+  @visibleForTesting
+  final FirebaseFirestore? firestore;
+
+  const Day2WrapUpScreen({super.key, required this.jobId, this.firestore});
 
   @override
   ConsumerState<Day2WrapUpScreen> createState() => _Day2WrapUpScreenState();
@@ -123,7 +129,7 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
 
   Future<void> _loadJob() async {
     try {
-      final doc = await FirebaseFirestore.instance
+      final doc = await (widget.firestore ?? FirebaseFirestore.instance)
           .collection('sales_jobs')
           .doc(widget.jobId)
           .get();
@@ -405,7 +411,19 @@ class _Day2WrapUpScreenState extends ConsumerState<Day2WrapUpScreen> {
     } catch (e) {
       // Don't block job completion on inventory write failure — the
       // SalesJob.actualMaterialUsage write above is the durable record.
+      // But say so: otherwise the installer moves on believing dealer stock
+      // was updated.
       debugPrint('Day2 inventory check-in failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Material check-in saved on the job, but dealer stock was '
+              'not updated: $e',
+            ),
+          ),
+        );
+      }
     }
   }
 
