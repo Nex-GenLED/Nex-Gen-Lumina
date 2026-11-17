@@ -38,12 +38,9 @@ import {
 
 // admin.initializeApp() is called in index.js — do not call again here.
 
-// ── App store placeholders ──────────────────────────────────────────────────
-// TODO: replace with real store URLs once the apps are listed.
-const APP_STORE_URL =
-  "https://apps.apple.com/app/lumina/id[PLACEHOLDER_APP_ID]";
-const PLAY_STORE_URL =
-  "https://play.google.com/store/apps/details?id=[PLACEHOLDER_PACKAGE_ID]";
+// Store links: none (2026-11-17). The app is not on the public stores, and
+// the previous placeholder URLs ("id[PLACEHOLDER_APP_ID]") would have reached
+// customers as dead links. Add real links only once real listings exist.
 
 // ── Status enum mirror (matches lib/features/sales/models/sales_models.dart) ─
 const STATUS_ESTIMATE_SIGNED = "estimateSigned";
@@ -284,9 +281,7 @@ function buildInstallCompleteEmail(
     "",
     "Your permanent LED lighting system is installed and ready.",
     "",
-    "Download Lumina to control your lights:",
-    `  • iPhone: ${APP_STORE_URL}`,
-    `  • Android: ${PLAY_STORE_URL}`,
+    "Control your lights from the Lumina app.",
     "",
     `Your login was sent to ${prospect.email}. Check your inbox for your account setup email.`,
     "",
@@ -304,11 +299,7 @@ function buildInstallCompleteEmail(
     <p style="font-size:16px; line-height:1.5;">Hi ${firstName},</p>
     <p style="font-size:16px; line-height:1.5;">Your permanent LED lighting system is installed and ready.</p>
 
-    <h3 style="font-size:14px; color:#1a1a1a; margin:24px 0 12px 0;">Download Lumina to control your lights</h3>
-    <div style="margin:8px 0;">
-      <a href="${APP_STORE_URL}" style="display:inline-block; background:#00B7C2; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:8px; font-size:14px; font-weight:600; margin-right:8px;">Download for iPhone</a>
-      <a href="${PLAY_STORE_URL}" style="display:inline-block; background:#00B7C2; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:8px; font-size:14px; font-weight:600;">Download for Android</a>
-    </div>
+    <p style="font-size:16px; line-height:1.5;">Control your lights from the Lumina app.</p>
 
     <p style="font-size:14px; line-height:1.5; color:#555; margin-top:24px;">
       Your login was sent to <strong>${prospect.email}</strong>. Check your inbox for your account setup email.
