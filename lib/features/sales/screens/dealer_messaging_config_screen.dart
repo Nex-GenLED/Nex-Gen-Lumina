@@ -283,12 +283,19 @@ class _DealerMessagingConfigScreenState
 
   Widget _toggleCard(List<Widget> children) {
     return Container(
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: NexGenPalette.gunmetal90,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: NexGenPalette.line),
       ),
-      child: Column(children: children),
+      // The SwitchListTiles need a Material between them and this coloured
+      // box: they paint ink on the nearest Material, which the box would
+      // hide, and Flutter 3.47 asserts on exactly that in debug.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(children: children),
+      ),
     );
   }
 
