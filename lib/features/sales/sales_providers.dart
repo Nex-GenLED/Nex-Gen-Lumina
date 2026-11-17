@@ -265,23 +265,56 @@ final dealerMessagingConfigProvider =
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Job Number Generator
+//
+// NXG-YYYYMMDD-NNN, where NNN is 1 + the number of this dealer's jobs created
+// today. Job numbers are a per-dealer daily sequence; nothing looks a job up
+// by its number (jobs are keyed by document id).
+//
+// The count MUST be scoped to [dealerCode]. The sales_jobs read rule admits a
+// sales or installer PIN session only through
+// hasStaffClaim(resource.data.dealerCode), which Firestore can prove for a
+// list or count query only when the query carries `dealerCode ==` the token's
+// claim. An unscoped count is denied for every sales and installer session.
+// Pass the dealerCode the new job will be stamped with (the session's, which
+// is the claim).
+//
+// The createdAt-descending order makes the query match the deployed
+// composite index (dealerCode ASC, createdAt DESC) exactly, so it needs no
+// new index.
 // ─────────────────────────────────────────────────────────────────────────────
 
-Future<String> generateJobNumber() async {
-  final now = DateTime.now();
-  final dateStr =
-      '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
-
-  // Count existing jobs created today
+@visibleForTesting
+Query<Map<String, dynamic>> jobNumberCountQuery(
+  FirebaseFirestore db, {
+  required String dealerCode,
+  required DateTime now,
+}) {
   final startOfDay = DateTime(now.year, now.month, now.day);
   final endOfDay = startOfDay.add(const Duration(days: 1));
-
-  final todayJobs = await FirebaseFirestore.instance
+  return db
       .collection('sales_jobs')
+      .where('dealerCode', isEqualTo: dealerCode)
       .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
       .where('createdAt', isLessThan: Timestamp.fromDate(endOfDay))
-      .count()
-      .get();
+      .orderBy('createdAt', descending: true);
+}
+
+/// [firestore] and [now] exist for tests; production passes neither.
+Future<String> generateJobNumber({
+  required String dealerCode,
+  FirebaseFirestore? firestore,
+  DateTime? now,
+}) async {
+  final at = now ?? DateTime.now();
+  final dateStr =
+      '${at.year}${at.month.toString().padLeft(2, '0')}${at.day.toString().padLeft(2, '0')}';
+
+  // Count this dealer's jobs created today.
+  final todayJobs = await jobNumberCountQuery(
+    firestore ?? FirebaseFirestore.instance,
+    dealerCode: dealerCode,
+    now: at,
+  ).count().get();
 
   final count = (todayJobs.count ?? 0) + 1;
   return 'NXG-$dateStr-${count.toString().padLeft(3, '0')}';

@@ -191,14 +191,17 @@ class _ProspectInfoScreenState extends ConsumerState<ProspectInfoScreen> {
     if (existing != null) return existing.id;
 
     final session = ref.read(currentSalesSessionProvider);
-    final jobNumber = await generateJobNumber();
+    // The job-number count is scoped to the dealer the job is stamped with;
+    // the rules deny an unscoped count to sales and installer sessions.
+    final dealerCode = session?.dealerCode ?? '';
+    final jobNumber = await generateJobNumber(dealerCode: dealerCode);
     final jobId = FirebaseFirestore.instance.collection('sales_jobs').doc().id;
     final now = DateTime.now();
 
     final job = SalesJob(
       id: jobId,
       jobNumber: jobNumber,
-      dealerCode: session?.dealerCode ?? '',
+      dealerCode: dealerCode,
       salespersonUid: session?.salespersonUid ?? '',
       prospect: SalesProspect(
         id: jobId,
@@ -282,7 +285,7 @@ class _ProspectInfoScreenState extends ConsumerState<ProspectInfoScreen> {
       final existingJob = ref.read(activeJobProvider);
       final job = (existingJob ?? SalesJob(
         id: jobId,
-        jobNumber: await generateJobNumber(),
+        jobNumber: await generateJobNumber(dealerCode: session?.dealerCode ?? ''),
         dealerCode: session?.dealerCode ?? '',
         salespersonUid: session?.salespersonUid ?? '',
         prospect: prospect,
