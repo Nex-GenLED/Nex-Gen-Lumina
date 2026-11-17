@@ -76,6 +76,8 @@ Staff PIN sessions sign in anonymously first, then trade the session for a custo
 8. Click **Next**, **Next**, then **Continue to console**. Skip every SDK step: the code is already done.
 9. **Tell me F5 is done.** I then read the app id and key myself with a read-only command against staging only (`firebase apps:sdkconfig IOS <appId> --project nex-gen-lumina-22751`), and commit them to `lib/config/firebase_options_staging.dart`. The key is never printed.
 
+*Done 2026-11-17:* app `1:431625047151:ios:551ebf5c641337eccb919a` ("Lumina Staging"). Every field was checked against the committed values.
+
 **F6. Storage — REQUIRED.** *Needs F2. Blocks the estimate flows, so do it before C6.*
 
 The estimate and install flows upload to Storage:
@@ -116,6 +118,8 @@ What is deliberately left off:
 - **Firebase Cloud Messaging and Firebase Installations:** push is off in staging.
 - **Firebase Rules API:** only needed for third-party or REST use.
 - **Places API (New):** the app's Places request does not send an iOS bundle id, so the key restriction would refuse it anyway. Staging address search uses the free fallback (Photon) automatically.
+
+Before the commit carrying the key is pushed, I confirm this restriction myself, read-only: `gcloud services api-keys list --project=nex-gen-lumina-22751`. Key strings are compared in memory and never printed.
 
 Check it worked: after the first staging build is installed, sign in, open a screen with data, and upload one estimate photo. If anything fails with "API_KEY_SERVICE_BLOCKED" or "Requests to this API … are blocked", tell me which screen failed, and the missing API gets ticked.
 
@@ -233,9 +237,9 @@ The staging workflow lives in `codemagic.yaml` and needs no new variables and no
 
 | # | Who | What |
 |---|---|---|
-| H1 | you, then me | Tell me F5 is done. I read the app id and key with the read-only staging command in F5 and commit them. |
+| H1 | — | Done 2026-11-17: values read with the read-only staging command and committed (F5). |
 | H3 | you | Paste the variable **names** in Codemagic group `ios-workflow` (C4). |
-| — | you | F2, F3, F5, F6, F7, A1, S1, S3, C3. |
+| — | you | F2, F3, F6, F7, A1, S1, S3, C3. F7 first: the key is pushed only once it is restricted. |
 | — | you | Say when to push the first `staging-*` tag (C6). |
 | H5 | you, optional | The staging app's numeric Apple ID (S2), for the ledger. |
 

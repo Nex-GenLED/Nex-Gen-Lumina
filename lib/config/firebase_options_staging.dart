@@ -11,25 +11,22 @@
 // (com.nexgenled.command.staging). There is no staging Android or web app:
 // a staging build on either refuses to start (see [forPlatform]).
 //
-// FILLED IN SO FAR (read with the Firebase CLI, 2026-11-17):
-//   projectId          nex-gen-lumina-22751
-//   messagingSenderId  431625047151 (the staging project number)
-//   storageBucket      the default bucket (owner decision 2026-11-17; the
-//                      bucket itself is created in checklist step F6)
-//
-// STILL TO FILL IN: apiKey and appId. They exist only after the iOS app is
-// registered in the staging project (checklist step F5). They are read with
-// the read-only `firebase apps:sdkconfig IOS … --project nex-gen-lumina-22751`
-// (the API_KEY and GOOGLE_APP_ID of that app's config). The plist itself is
-// NOT added to the Xcode project; only these two strings are copied here.
+// WHERE THE VALUES CAME FROM (2026-11-17, read-only, staging project only):
+// the iOS app "Lumina Staging" (registered in checklist step F5), read with
+// `firebase apps:sdkconfig IOS 1:431625047151:ios:551ebf5c641337eccb919a
+// --project nex-gen-lumina-22751`. Every field was checked against that
+// config: apiKey = API_KEY, appId = GOOGLE_APP_ID, messagingSenderId =
+// GCM_SENDER_ID, projectId, storageBucket (the default bucket, owner decision
+// 2026-11-17; created in step F6) and iosBundleId = BUNDLE_ID. The plist
+// itself is NOT added to the Xcode project; only these strings are copied.
 //
 // The apiKey is committed here like production's (owner decision D4,
-// 2026-11-17), only after the key is restricted to this bundle id and to the
-// APIs the app uses (checklist step F7, REQUIRED).
+// 2026-11-17), restricted to this bundle id and to the APIs the app uses
+// (checklist step F7, REQUIRED).
 //
-// While any value still starts with the placeholder prefix, a staging build
-// refuses to start (lumina_env.dart preflightStagingOptions) and the
-// Codemagic staging workflow stops before it builds anything.
+// If a value is ever put back to a placeholder, a staging build refuses to
+// start (lumina_env.dart preflightStagingOptions) and the Codemagic staging
+// workflow stops before it builds anything.
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart' show TargetPlatform;
@@ -55,8 +52,8 @@ class StagingFirebaseOptions {
   }
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'REPLACE_ME_STAGING_IOS_API_KEY',
-    appId: 'REPLACE_ME_STAGING_IOS_GOOGLE_APP_ID',
+    apiKey: 'AIzaSyCQRc6w-GH0EGbeh-tLJIbWzVMcyXKwZXQ',
+    appId: '1:431625047151:ios:551ebf5c641337eccb919a',
     messagingSenderId: '431625047151',
     projectId: 'nex-gen-lumina-22751',
     storageBucket: 'nex-gen-lumina-22751.firebasestorage.app',

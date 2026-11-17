@@ -16,6 +16,7 @@ import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexgen_command/config/firebase_bootstrap.dart';
+import 'package:nexgen_command/config/firebase_options_staging.dart';
 import 'package:nexgen_command/config/lumina_env.dart';
 import 'package:nexgen_command/firebase_options.dart';
 
@@ -245,13 +246,24 @@ void main() {
       expect(v.reason, contains(kProductionProjectId));
     });
 
-    test('the committed placeholders refuse BEFORE Firebase is called',
-        () async {
+    test('placeholder values refuse BEFORE Firebase is called', () async {
+      final placeholders = _goodStaging.copyWith(
+        apiKey: '${kStagingPlaceholderPrefix}_STAGING_IOS_API_KEY',
+        appId: '${kStagingPlaceholderPrefix}_STAGING_IOS_GOOGLE_APP_ID',
+      );
       final fb = _FakeFirebase(loaded: kStagingProjectId);
-      final (v, _) = await _run(fb, define: 'staging'); // real staging file
+      final (v, _) = await _run(fb,
+          define: 'staging', stagingOptions: () => placeholders);
       expect(fb.calls, isEmpty);
       expect(v.allowed, isFalse);
       expect(v.reason, contains('not filled in'));
+    });
+
+    test('the committed staging file initialises once, as itself', () async {
+      final fb = _FakeFirebase(loaded: kStagingProjectId);
+      final (v, _) = await _run(fb, define: 'staging'); // real staging file
+      expect(fb.calls, [same(StagingFirebaseOptions.ios)]);
+      expect(v.allowed, isTrue);
     });
 
     test('production values pasted into staging refuse before init', () async {

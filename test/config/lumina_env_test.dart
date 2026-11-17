@@ -193,6 +193,10 @@ void main() {
       expect(o.messagingSenderId, '431625047151');
       expect(o.iosBundleId, kStagingBundleId);
       expect(o.storageBucket, 'nex-gen-lumina-22751.firebasestorage.app');
+      // The registered staging iOS app (checklist F5).
+      expect(o.appId, '1:431625047151:ios:551ebf5c641337eccb919a');
+      expect(RegExp(r'^AIza[0-9A-Za-z_\-]{35}$').hasMatch(o.apiKey), isTrue,
+          reason: 'a real Google API key, not a placeholder');
     });
 
     test('carries no production value at all', () {
@@ -234,13 +238,23 @@ void main() {
   group('preflightStagingOptions', () {
     final prodKeys = productionFirebaseApiKeys();
 
-    test('the committed placeholders are refused, naming the fields', () {
-      final r = preflightStagingOptions(StagingFirebaseOptions.ios,
+    test('placeholders are refused, naming the fields', () {
+      final r = preflightStagingOptions(
+          _with(_goodStaging,
+              apiKey: '${kStagingPlaceholderPrefix}_STAGING_IOS_API_KEY',
+              appId: '${kStagingPlaceholderPrefix}_STAGING_IOS_GOOGLE_APP_ID'),
           productionApiKeys: prodKeys);
       expect(r, isNotNull);
       expect(r, contains('apiKey'));
       expect(r, contains('appId'));
       expect(r, contains('STAGING_SETUP_CHECKLIST'));
+    });
+
+    test('the committed staging file passes', () {
+      expect(
+          preflightStagingOptions(StagingFirebaseOptions.ios,
+              productionApiKeys: prodKeys),
+          isNull);
     });
 
     test('filled-in staging values pass', () {
