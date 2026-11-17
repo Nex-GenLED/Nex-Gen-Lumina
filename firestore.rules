@@ -1920,14 +1920,28 @@ service cloud.firestore {
       // matching the job's own dealerCode). Corporate keeps global reach
       // via the isMediaOrAdmin()/hasAdminOrOwnerClaim() clauses on the
       // read/update rules below — see sites 10 and 11.
+      //
+      // ── R1 (2026-11-17): affiliation is not authority ───────────────
+      // The two user-doc arms used to match `dealer_code` /
+      // `installer_dealer_code` alone. The installer wizard stamps
+      // dealer_code on EVERY customer, so every customer of a dealer could
+      // read and update every one of that dealer's jobs — other prospects'
+      // contact details and the estimate margin. installer_dealer_code is
+      // written by nothing in the app and is not guarded by the /users
+      // update rule, so any account could self-stamp it. Both arms now also
+      // require user_role in ['dealer','admin'], exactly as
+      // isDealerStaffAccount() (FINDING A) does. Staff PIN sessions are
+      // unaffected — they come in through the hasStaffClaim arm.
       function isJobStakeholder() {
         return request.auth != null && (
           (resource != null &&
            resource.data.dealerCode != null &&
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealerCode) ||
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealerCode &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
           (resource != null &&
            resource.data.dealerCode != null &&
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealerCode) ||
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealerCode &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
           (resource != null &&
            resource.data.dealerCode != null &&
            hasStaffClaim(resource.data.dealerCode))
@@ -2474,14 +2488,21 @@ service cloud.firestore {
     // Admin/owner staff sessions and corporate (media+admin) read
     // every dealer's orders for review/approval.
     match /dealer_orders/{orderId} {
+      // ── R2 (2026-11-17): same fix as R1 on /sales_jobs ──────────────
+      // The user-doc arms (here and on create below) now require
+      // user_role in ['dealer','admin'] as well as the dealer code, so a
+      // CUSTOMER stamped with dealer_code no longer reads, creates, updates
+      // or deletes their dealer's orders. Staff claims are unchanged.
       function isOrderStakeholder() {
         return request.auth != null && (
           (resource != null &&
            resource.data.dealer_code != null &&
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealer_code) ||
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == resource.data.dealer_code &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
           (resource != null &&
            resource.data.dealer_code != null &&
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealer_code) ||
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == resource.data.dealer_code &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
           (resource != null &&
            resource.data.dealer_code != null &&
            hasStaffClaim(resource.data.dealer_code))
@@ -2495,9 +2516,11 @@ service cloud.firestore {
       // Admin/owner staff can also create on a dealer's behalf.
       allow create: if request.auth != null && (
         (request.resource.data.dealer_code != null &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == request.resource.data.dealer_code) ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('dealer_code', '') == request.resource.data.dealer_code &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
         (request.resource.data.dealer_code != null &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == request.resource.data.dealer_code) ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('installer_dealer_code', '') == request.resource.data.dealer_code &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('user_role', '') in ['dealer', 'admin']) ||
         (request.resource.data.dealer_code != null &&
          hasStaffClaim(request.resource.data.dealer_code)) ||
         hasAdminOrOwnerClaim()
