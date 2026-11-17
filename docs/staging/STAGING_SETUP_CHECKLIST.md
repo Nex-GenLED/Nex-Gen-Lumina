@@ -14,24 +14,28 @@ The client side is on branch `backend/dealer-tools-staging-env`. The backend (ru
 
 **Do not, at any step:** run `flutterfire configure`, add a `GoogleService-Info.plist` to Xcode, or edit anything under `ios/`. Staging is switched by `--dart-define=LUMINA_ENV=staging`. The bundle id is rewritten only on the Codemagic build machine.
 
+**Decisions taken 2026-11-17:** D1–D4 are at the end of this page. No `staging-*` tag is pushed until you say so.
+
 ---
 
 ## Order and what blocks what
 
 ```
-F1 ─ F2 Blaze ─┬─ F6 Storage (optional)
-               └─ backend Cloud Functions deploy (other window)
-F3 Auth providers ──────────────────────────────┐
-F5 register iOS app ── H1 hand back ── I commit ─┤
-A1 App ID ── S1 app record ── S3 testers ────────┼── C6 first staging build
-C3 / C4 Codemagic checks ────────────────────────┘
+F1 ─ F2 Blaze ─┬─ F6 Storage (REQUIRED) ──────────┐
+               └─ backend Cloud Functions deploy   │  (other window)
+F3 Auth providers ─────────────────────────────────┤
+F5 register iOS app ─ F7 restrict key (REQUIRED) ──┤
+     └─ you tell me ─ I read + commit the values ──┼── C6 first staging build
+A1 App ID ─ S1 app record ─ S3 testers ────────────┤
+C4 group names (you paste) ────────────────────────┘
 ```
 
 - **F5 blocks C6.** Until the staging `apiKey` and `appId` are in the code, the workflow stops at its first step. If someone did build it, the app would refuse to start.
+- **F7 must be done as soon as F5 creates the key.** That key gets committed to this public repo (D4), so it is restricted before it lands.
+- **F6 blocks every estimate flow** (signatures and photos), so it is required before C6.
 - **A1 blocks S1 and C6.** The bundle id appears in the App Store Connect dropdown only after A1. Signing also needs it.
 - **S1 blocks C6.** An upload needs a record with that bundle id.
 - **F2 blocks F6** and the backend window's function deploys.
-- F3, S3, C3 and C4 can be done in any order before C6.
 
 ---
 
@@ -61,30 +65,59 @@ Staff PIN sessions sign in anonymously first, then trade the session for a custo
 
 **F4. Firestore.** Already created. Nothing to do here; rules are the backend window's job.
 
-**F5. Register the staging iOS app.** *Blocks: H1, then C6.*
+**F5. Register the staging iOS app.** *Blocks: F7 and C6.*
 1. Click **Project Overview** (top left).
 2. Click **+ Add app**, then the **iOS** (Apple) icon.
 3. **Apple bundle ID:** `com.nexgenled.command.staging` (exactly, all lower case).
 4. **App nickname:** `Lumina Staging`.
 5. **App Store ID:** leave blank.
 6. Click **Register app**.
-7. Click **Download GoogleService-Info.plist** and keep the file somewhere outside the repo. **Do not add it to Xcode or to the repo.**
+7. Skip the plist: you do not need to download or send `GoogleService-Info.plist`. If you do download it, keep it outside the repo and **never add it to Xcode**.
 8. Click **Next**, **Next**, then **Continue to console**. Skip every SDK step: the code is already done.
+9. **Tell me F5 is done.** I then read the app id and key myself with a read-only command against staging only (`firebase apps:sdkconfig IOS <appId> --project nex-gen-lumina-22751`), and commit them to `lib/config/firebase_options_staging.dart`. The key is never printed.
 
-**F6. Storage (optional; only for photo uploads in staging).** *Needs F2.*
+**F6. Storage — REQUIRED.** *Needs F2. Blocks the estimate flows, so do it before C6.*
+
+The estimate and install flows upload to Storage:
+- the customer signature;
+- estimate-wizard photos;
+- day-1 check-in and day-2 wrap-up photos;
+- prospect and zone-builder photos;
+- the house photo.
+
+Without a bucket, every one of those fails in staging.
+
 1. Click **Build**, then **Storage**, then **Get started**.
 2. Choose the same region as Firestore (US multi-region).
 3. Pick **Start in production mode**. The backend window deploys the real rules.
-4. When it finishes, note the bucket name at the top. The code assumes `gs://nex-gen-lumina-22751.firebasestorage.app`. If yours differs, hand it back (H2).
+4. The code uses the default bucket `gs://nex-gen-lumina-22751.firebasestorage.app` (decided 2026-11-17). If the name shown at the top is anything else, tell me before testing uploads.
 
-If you skip F6, photo uploads fail in staging with an error message. Nothing else is affected.
-
-**F7. Restrict the staging iOS API key (recommended).**
-1. Go to console.cloud.google.com and select project **nex-gen-lumina-22751**.
+**F7. Restrict the staging iOS API key — REQUIRED.** *Do it right after F5: this key is committed to the public repo (D4).*
+1. Go to console.cloud.google.com. In the top bar, select project **nex-gen-lumina-22751**. Check the project id: this must NOT be production's key.
 2. Click **APIs & Services**, then **Credentials**.
-3. Open **iOS key (auto created by Firebase)**.
-4. Under **Application restrictions**, choose **iOS apps**. Add `com.nexgenled.command.staging`. Click **Save**.
-5. Optional: for Google address autocomplete in staging, enable **Places API (New)** in this project. Without it, staging uses the free fallback (Photon) automatically.
+3. Under **API Keys**, open **iOS key (auto created by Firebase)**.
+4. Under **Application restrictions**, choose **iOS apps**. Click **Add**, enter `com.nexgenled.command.staging`, and click **Done**.
+5. Under **API restrictions**, choose **Restrict key**. Open the dropdown, untick everything, then tick only these seven:
+
+   | API | Why |
+   |---|---|
+   | Identity Toolkit API | Sign-in: email/password, anonymous, staff custom token |
+   | Token Service API | Keeps the sign-in session fresh |
+   | Cloud Firestore API | All app data |
+   | Cloud Datastore API | Listed by Firebase for Firestore |
+   | Cloud Storage for Firebase API | Signatures and photos (F6) |
+   | Firebase Management API | Listed by Firebase for all products |
+   | Cloud Logging API | Listed by Firebase for all products |
+
+6. Click **Save**. It can take up to 5 minutes to apply.
+
+What is deliberately left off:
+- **Cloud Functions:** callable functions send the signed-in user's token, not the API key.
+- **Firebase Cloud Messaging and Firebase Installations:** push is off in staging.
+- **Firebase Rules API:** only needed for third-party or REST use.
+- **Places API (New):** the app's Places request does not send an iOS bundle id, so the key restriction would refuse it anyway. Staging address search uses the free fallback (Photon) automatically.
+
+Check it worked: after the first staging build is installed, sign in, open a screen with data, and upload one estimate photo. If anything fails with "API_KEY_SERVICE_BLOCKED" or "Requests to this API … are blocked", tell me which screen failed, and the missing API gets ticked.
 
 ---
 
@@ -145,19 +178,19 @@ The staging workflow lives in `codemagic.yaml` and needs no new variables and no
 2. Open **Developer Portal** (App Store Connect API) and confirm the key named **NexGen** is listed.
 3. In App Store Connect, open **Users and Access**, then **Integrations**, then **App Store Connect API**. Confirm that key's access is **Admin** or **App Manager**, which the first build needs to create the staging profile. Production already creates profiles with it, so it almost certainly is.
 
-**C4. Check the `ios-workflow` group holds nothing app-specific.**
+**C4. Send me the variable NAMES in group `ios-workflow`.**
 1. In the Lumina app, click **Environment variables**.
-2. Open group **`ios-workflow`**. Read the variable names only; do not reveal values.
+2. Open group **`ios-workflow`**. Paste me the variable names only; never reveal or send values.
 3. Expected: team-level signing names only (for example `CERTIFICATE_PRIVATE_KEY`).
-4. If you see anything app-specific (a bundle id, a Firebase project id, an App Store app id), stop and send me the names (H3). I will split the group. The staging workflow refuses a wrong `BUNDLE_ID` either way.
+4. If anything there is app-specific (a bundle id, a Firebase project id, an App Store app id), I split the group before C6. The staging workflow refuses a wrong `BUNDLE_ID` either way.
 
 **C5. Triggers.**
 1. Click **Webhooks** and confirm the repository webhook is present. It already is, because `build-*` tags trigger.
 2. Triggers come from the `triggering:` block in the YAML: `staging-*` tags only.
 3. A manual **Start new build** of the staging workflow on a branch is refused by its first step.
 
-**C6. First staging build.** *Needs F5 and H1 (values committed), A1, S1 and C4.*
-1. I commit the staging values (H1). The tag is then pushed by you, or by me when you say so: `git tag staging-1 <sha>` and `git push origin staging-1`.
+**C6. First staging build.** *Needs F5 (values committed), F6, F7, A1, S1, S3 and C4.*
+1. **No `staging-*` tag is pushed until you say so** (owner instruction, 2026-11-17). When you do: `git tag staging-1 <sha>` and `git push origin staging-1`, by you or by me on your word.
 2. Expected log, in order:
    1. staging guard OK;
    2. tests and analyze green;
@@ -167,15 +200,15 @@ The staging workflow lives in `codemagic.yaml` and needs no new variables and no
    6. "OK: staging IPA verified";
    7. upload.
 3. The build shows in App Store Connect under **Lumina Staging**, then **TestFlight**, after processing (usually 10–30 min). Install it from the TestFlight app. It sits beside the real Lumina.
+4. Then run F7's check (sign in, data, one photo upload).
 
 ---
 
-## Build numbers — please read (decision D1)
+## Build numbers (D1, decided: accept the gaps)
 
-- Staging numbers 1, 2, 3 … from Codemagic's **per-workflow** counter (`BUILD_NUMBER`), on its own App Store Connect record. That record never collides with production's.
-- Production reads `PROJECT_BUILD_NUMBER`. Codemagic advances that counter for **every** build of **every** workflow in the app, so **each staging build makes production's next build number skip one**. Production's YAML is unchanged and Apple accepts gaps (numbers only have to rise), but the TestFlight numbers in `docs/BUILD_LEDGER.md` will jump.
-- The only way to avoid it is a second Codemagic app on the same repo. That is worse: both apps would run `ios-workflow` on every `build-*` tag, uploading twice.
-- Recommendation: accept the gaps and note them in the ledger.
+- Staging numbers 1, 2, 3 … from Codemagic's **per-workflow** counter (`BUILD_NUMBER`), on its own App Store Connect record.
+- Production reads `PROJECT_BUILD_NUMBER`. Codemagic advances that counter for **every** build of **every** workflow in the app, so each staging build makes production's next build number skip one.
+- Apple accepts gaps (numbers only have to rise). `docs/BUILD_LEDGER.md` convention 7 records that a gap in production's number is a staging build.
 - Do not rename `ios-staging-workflow`: its counter would restart at 1, and uploads would then be rejected as duplicates.
 
 ---
@@ -186,28 +219,31 @@ The staging workflow lives in `codemagic.yaml` and needs no new variables and no
 |---|---|
 | Push notifications | Off. The build strips `aps-environment` and FCM auto-init, and the app never asks for notification permission. Joining a Neighborhood Sync group still works; it just stores no push token. |
 | Sign in with Apple, associated domains, App Check | Not used anywhere in the app today, so nothing to break. |
-| Lumina Bridge pair / reboot / reset | **Blocked** in the app (decision D2). Every bridge is flashed for the production project, so pairing one from staging would point a real bridge at a staging account. Reading bridge status still works. |
+| Lumina Bridge pair / reboot / reset | **Blocked** (D2). Every bridge is flashed for the production project, so pairing one from staging would point a real bridge at a staging account. Reading bridge status still works. |
+| Alexa / Google Home linking | **Hidden** (D3). No linking card renders in any build today: they were removed under FACTS T-VA1. If one is restored, it must sit behind `kVoiceAssistantLinkingEnabled`, which is false in staging. The two services also refuse to link from staging. A test enforces both. |
+| Google address autocomplete | Uses the free fallback (Photon); see F7. |
 | Android, web | Refuse to start. Staging is iOS only. An Android staging build would also replace the real app, which has the same package name. |
 | `lumina://` links | Staging registers `lumina-staging://`, so `lumina://` always opens the real app. Deep links do nothing in staging. |
-| Alexa / Google Home linking | Opens the **production** skill (decision D3). |
 
 **Controllers are shared hardware.** The staging app finds and controls any WLED controller on the phone's Wi-Fi, exactly like the real app. That includes writing schedules into the controller's timers. Point it at a bench controller only.
 
 ---
 
-## H. What to hand back
+## What is still owed
 
-| # | What | Where it comes from | Needed for |
-|---|---|---|---|
-| H1 | Either the two strings `API_KEY` and `GOOGLE_APP_ID` from the staging `GoogleService-Info.plist` (F5), or just "registered": I then read them myself with `firebase apps:sdkconfig IOS --project nex-gen-lumina-22751`, which only reads | F5 | C6 |
-| H2 | The Storage bucket name, only if it is not `nex-gen-lumina-22751.firebasestorage.app` | F6 | photo uploads |
-| H3 | The variable **names** in Codemagic group `ios-workflow` (never values), or "only signing" | C4 | C6 |
-| H4 | Your answers to decisions D1–D4 below | — | — |
-| H5 | The staging app's numeric Apple ID (optional) | S2 | ledger only |
+| # | Who | What |
+|---|---|---|
+| H1 | you, then me | Tell me F5 is done. I read the app id and key with the read-only staging command in F5 and commit them. |
+| H3 | you | Paste the variable **names** in Codemagic group `ios-workflow` (C4). |
+| — | you | F2, F3, F5, F6, F7, A1, S1, S3, C3. |
+| — | you | Say when to push the first `staging-*` tag (C6). |
+| H5 | you, optional | The staging app's numeric Apple ID (S2), for the ledger. |
 
-**Decisions**
+H2 (the bucket name) is settled: the default `nex-gen-lumina-22751.firebasestorage.app`.
 
-- **D1.** Accept production build-number gaps (above)? Recommended: yes.
-- **D2.** Keep bridge pair/reboot/reset blocked in staging? Recommended: yes, until a bridge can be flashed for staging.
-- **D3.** Alexa / Google Home buttons in staging open the production skill, and linking there links a production account. Recommended: hide them in staging (a small change).
-- **D4.** The staging `apiKey` will be committed in `lib/config/firebase_options_staging.dart`, the same way production's is, and this repo is public. With anonymous sign-in on, anyone holding the key can create staging users. F2's budget alert and F7's restriction limit that. The alternative is to keep the key out of git as a Codemagic secret passed with `--dart-define`. Recommended: commit it, with F7 done.
+## Decisions (owner, 2026-11-17)
+
+- **D1. Accept production build-number gaps.** Recorded in ledger convention 7.
+- **D2. Keep the bridge block in staging.** pair, reboot and reset are refused; reads are allowed.
+- **D3. Hide Alexa / Google Home in staging.** `kVoiceAssistantLinkingEnabled` is false in staging, and the services refuse.
+- **D4. Commit the staging API key**, the same way production's is, with F7's restriction REQUIRED: bundle id `com.nexgenled.command.staging` plus only the seven APIs above.

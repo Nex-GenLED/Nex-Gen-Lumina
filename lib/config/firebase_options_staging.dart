@@ -14,14 +14,18 @@
 // FILLED IN SO FAR (read with the Firebase CLI, 2026-11-17):
 //   projectId          nex-gen-lumina-22751
 //   messagingSenderId  431625047151 (the staging project number)
-//   storageBucket      the default bucket name for a project created after
-//                      Oct 2024. Confirm it once Storage is enabled
-//                      (checklist step F6).
+//   storageBucket      the default bucket (owner decision 2026-11-17; the
+//                      bucket itself is created in checklist step F6)
 //
 // STILL TO FILL IN: apiKey and appId. They exist only after the iOS app is
-// registered in the staging project (checklist step F5). Both come from that
-// app's GoogleService-Info.plist: API_KEY and GOOGLE_APP_ID. The plist itself
-// is NOT added to the Xcode project; only these two strings are copied here.
+// registered in the staging project (checklist step F5). They are read with
+// the read-only `firebase apps:sdkconfig IOS … --project nex-gen-lumina-22751`
+// (the API_KEY and GOOGLE_APP_ID of that app's config). The plist itself is
+// NOT added to the Xcode project; only these two strings are copied here.
+//
+// The apiKey is committed here like production's (owner decision D4,
+// 2026-11-17), only after the key is restricted to this bundle id and to the
+// APIs the app uses (checklist step F7, REQUIRED).
 //
 // While any value still starts with the placeholder prefix, a staging build
 // refuses to start (lumina_env.dart preflightStagingOptions) and the
