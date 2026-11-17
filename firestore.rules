@@ -1242,7 +1242,7 @@ service cloud.firestore {
     }
 
     // Global uncaught-error sink for the app's FlutterError / PlatformDispatcher
-    // handlers. Tyler reads these in the Firestore console to triage crashes
+    // handlers. The owner reads these in the Firestore console to triage crashes
     // that would otherwise need Crashlytics or a Mac (#84). Owner-only.
     match /users/{userId}/debug_errors/{errorId} {
       allow read:   if isOwner(userId);
@@ -1460,8 +1460,8 @@ service cloud.firestore {
       //   => list /installers -> read the admin doc's cleartext PIN ->
       //      mintStaffToken({mode:'admin', pin}) -> an admin-claim token ->
       //      global cross-dealer read + corporate catalog writes.
-      //   Two live docs (test_admin_5520 role=admin, test_installer_5510)
-      //   are active and carry valid roles, so this was exploitable NOW —
+      //   Two live docs (one role=admin, one role=installer) were active and
+      //   carried valid roles at the time, so this was exploitable NOW —
       //   not gated behind the missing-role bug, as first assumed.
       //
       // WHY PIN VALIDATION IS UNAFFECTED:
@@ -2648,7 +2648,7 @@ service cloud.firestore {
     }
 
     // ── Purchase Orders (Nex-Gen → suppliers) ────────────────────
-    // Tyler's inbound POs to Gouly et al. Status flow:
+    // Nex-Gen's inbound POs to its suppliers. Status flow:
     //   ordered → partial → received
     // Admin/owner-only — no dealer or installer access. Receiving
     // a PO line-item increments /corporate_inventory.on_hand for
