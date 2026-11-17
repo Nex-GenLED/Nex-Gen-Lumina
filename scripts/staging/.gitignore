@@ -1,0 +1,3 @@
+# Local-only staging material: the production catalog export (dealer buy
+# prices) and the generated staging test PINs. Never commit either.
+.local/
