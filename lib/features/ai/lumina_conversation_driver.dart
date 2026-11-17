@@ -770,8 +770,11 @@ class LuminaConversationDriver {
     }
     proposal.decision = EntryDeleteDecision.deleted;
     svc.proposalDecided(proposal);
+    // Captured before the await, as [send] does: the customer can close the
+    // surface while the removals run, and its ref throws once it is gone.
+    final thread = services.openThread();
     final removed = await svc.deleteEntries(proposal.entries);
-    services.openThread().addAssistantMessage(entryDeleteOutcomeText(
+    thread.addAssistantMessage(entryDeleteOutcomeText(
       requested: proposal.count,
       deleted: removed,
     ));
