@@ -61,8 +61,13 @@ every bus). **Decision per the brief's rule: per-pixel data.**
 6. **Per-pixel brightness in Design Studio.** `LedColorGroup.bri` (0–255, absent = full, omitted
    when full — old designs read unchanged, an older build ignores it); a brightness layer in
    `PixelDesignDocument` kept apart from colour (`litColorAt` is what the lights and the preview
-   get; runs split on brightness too); `positionalSpans()` sends the lit colour, so apply, the
-   scheduled API body and favourites honour it. Editor: a **Pixel brightness** slider with **Dim
+   get; runs split on brightness too); `positionalSpans()` sends the lit colour, so `toWledPayload`
+   and the scheduled API body honour it. **Correction (2026-11-17):** the live apply paths did
+   not. The editor's Apply and Live Preview, My Designs, the AI studio, Home favourites, scenes
+   and the edit-pattern screen paint through `ledColorGroupsToSpans` (`design_apply.dart`), which
+   sent each light's pure colour, so in builds 129 and 130 a dimmed light lit at full when applied
+   and dim only when scheduled. Fixed on `fix/design-apply-brightness` (`bb838754`), not yet in a
+   build. Editor: a **Pixel brightness** slider with **Dim
    to N %** / **Full** for the selection and a **Ramp…** dialog (start, end, mirror) across the
    selection in LED order. Undo/redo cover it.
 
