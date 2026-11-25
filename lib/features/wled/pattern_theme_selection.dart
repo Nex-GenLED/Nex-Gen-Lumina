@@ -24,6 +24,7 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/features/neighborhood/widgets/sync_warning_dialog.dart';
 import 'package:nexgen_command/features/design/apply_saved_design.dart';
+import 'package:nexgen_command/features/design/design_card_route.dart';
 import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
@@ -552,18 +553,22 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                                 style: TextStyle(color: Colors.white70)),
                           );
                         }
-                        // Item C: a pattern saved from the Pattern Editor opens
-                        // the SAME tuner as the Explore card it came from,
-                        // with its effect, speed, intensity and layout —
-                        // live, with Apply and "Save to design".
-                        final editorDesign = _resolveDesign(designId);
-                        if (editorDesign != null &&
-                            editorDesign.tags
-                                .contains(kPatternEditorDesignTag) &&
-                            !editorDesign.isPositional) {
+                        // A saved design opens the SAME tuner as an Explore
+                        // card — its effect, speed, intensity and layout,
+                        // live, with Apply and "Save to design" — whenever
+                        // that page can show it unchanged. Item C opened only
+                        // Pattern Editor designs here; build 132 opens every
+                        // effect design whose channels share ONE look. The
+                        // page's "Save to design" writes one look to every
+                        // channel, so channels that differ, painted and AI
+                        // designs, and a Solid colour keep the detail screen
+                        // (design_card_route.dart).
+                        final savedDesign = _resolveDesign(designId);
+                        if (savedDesign != null &&
+                            designOpensOnCardPage(savedDesign)) {
                           return ColorwayEffectSelectorPage.forDesign(
                             key: ValueKey('design-tuner-$designId'),
-                            design: editorDesign,
+                            design: savedDesign,
                           );
                         }
                         // embedded: this Scaffold already provides the app
