@@ -184,12 +184,16 @@ void main() {
   });
 
   group('row 14/15 — bounded flag write with background retry', () {
-    test('a write that hangs returns within the bound and keeps retrying',
-        () async {
+    // On fake time (testWidgets): the write's 50 ms timeout and the 10 ms
+    // retry gaps run only when the test pumps, so "returns within the bound"
+    // and "retried until one landed" are exact rather than a wall-clock
+    // bound and a real sleep racing the background retries.
+    testWidgets('a write that hangs returns within the bound and keeps retrying',
+        (tester) async {
       final hanging = HangingWrite();
       var retries = 0;
-      final watch = Stopwatch()..start();
-      final outcome = await writeAccountFlag(
+      AccountFlagWrite? outcome;
+      final pending = writeAccountFlag(
         uid: kTestUid,
         flag: AccountFlag.welcomeCompleted,
         write: () {
@@ -205,15 +209,22 @@ void main() {
           Duration(milliseconds: 10),
           Duration(milliseconds: 10),
         ],
-      );
-      expect(outcome, AccountFlagWrite.retryingInBackground);
-      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+      ).then((o) => outcome = o);
+
+      await tester.pump();
+      expect(outcome, isNull, reason: 'the first write hangs');
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(outcome, AccountFlagWrite.retryingInBackground,
+          reason: 'returned at the 50 ms write timeout');
+      await pending;
       expect(
           SessionAccountFlags.isCleared(kTestUid, AccountFlag.welcomeCompleted),
           isTrue);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      expect(retries, 2,
-          reason: 'retried until one attempt landed, then stopped');
+      await tester.pump(const Duration(milliseconds: 10));
+      await tester.pump(const Duration(milliseconds: 10));
+      expect(retries, 2, reason: 'retried until one attempt landed');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(retries, 2, reason: 'then stopped');
     });
 
     test('a write that lands is reported saved and not retried', () async {
