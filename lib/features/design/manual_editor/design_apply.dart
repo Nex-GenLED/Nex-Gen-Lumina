@@ -277,7 +277,7 @@ Future<SpineWriteResult> applyBaseAndSpansWith(
 List<PixelSpan> ledColorGroupsToSpans(List<LedColorGroup> groups) {
   return [
     for (final g in groups)
-      PixelSpan(start: g.startLed, end: g.endLed, color: _rgbw(g.color)),
+      PixelSpan(start: g.startLed, end: g.endLed, color: _rgbw(g.litColor)),
   ];
 }
 
