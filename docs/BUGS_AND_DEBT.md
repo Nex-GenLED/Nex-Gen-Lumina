@@ -430,6 +430,50 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P1 — correctness & trust
 
+- [ ] **#192 — PATTERN EDITOR LAYERS 4 AND UP CANNOT BE RECOVERED ON REOPEN: an animated pattern
+  saved with more than three colours keeps them in the design, but no door opens the editor on them
+  again** (filed 2026-11-25 with build 132; 191/192 are clear of every branch, highest elsewhere 190)
+  - Status: **OPEN** · Severity: **P1** · Evidence: **verified-by-source** (`feat/132-saved-designs`
+    @ `8631f381`); not reproduced on hardware, no controller involved
+  - **What is stored.** `designFromPatternEditor` keeps the layers an animated effect cannot render —
+    "they are the customer's choices" — as extra colour groups after the three colour slots
+    (`lib/features/wled/pattern_editor_design.dart:79-82`). Every apply reads only the first three.
+  - **Why they cannot come back.** The only way back into the Pattern Editor for a saved design is
+    its card page's tune button. The card page builds its palette in
+    `ColorwayEffectSelectorPage.forDesign`, which stops at three colours
+    (`lib/features/wled/colorway_effect_selector.dart:302-312`), and the button builds the editor's
+    `EditablePattern` from that palette (`:1671-1676`). The editor therefore opens with at most three
+    layers; layers 4 and up are in the document and on no screen.
+  - **Build 132 makes it lossy.** Before build 132 the editor's SAVE filed a copy ("Name 2"), so the
+    original kept its layers. Since `56741955` SAVE updates the design in place, so reopening a design with
+    more than three layers and tapping SAVE with the name unchanged now REMOVES layers 4 and up from
+    it. Nothing the lights show changes (they never showed them).
+  - Fix shape (not built): hand the editor the design's own colour groups (all of them) instead of the
+    card page's three-colour palette when it is opened from a saved design. Related: `56741955`.
+
+- [ ] **#191 — AN AI MOTION DESIGN EDITED BY HAND: the paint editor's Apply shows a still picture, but
+  Save keeps the motion, so the saved design plays something the customer never saw**
+  (filed 2026-11-25 with build 132)
+  - Status: **OPEN** · Severity: **P1** · Evidence: **verified-by-source** (`feat/132-saved-designs`
+    @ `8631f381`); not reproduced on hardware, no controller involved
+  - **Path.** An AI Design Studio design with motion stores it in `composed_pattern`
+    (`has_motion`, `effect_id`). My Designs → Edit opens it in the paint editor
+    (`ManualDesignEditor`; `designKindOf` is `aiComposed`, so not the card page —
+    `lib/features/design/screens/design_detail_screen.dart:375-377`).
+  - **Apply in the editor** paints the still picture through the spine
+    (`lib/features/design/manual_editor/manual_design_editor.dart:540-548`) — no effect.
+  - **Save** copies the loaded design (`manual_design_editor.dart:659-669`), which carries
+    `composed_pattern` and its motion forward (by design: "every writer must preserve it"), and sets
+    `per_pixel`.
+  - **What the saved design then does.** Every positional apply checks the motion first
+    (`lib/features/design/manual_editor/design_apply.dart:439-452`): it sends the effect over the
+    first three distinct colours of the NEW painting (`buildDesignMotionPayload`) instead of the
+    picture the editor just showed. The schedule picker refuses it as animated
+    (`lib/features/schedule/design_api_preset.dart:539`).
+  - Open question for the fix (owner): after a hand edit, should the design keep its motion (and the
+    editor's Apply run it too), or become a still picture (Save clears `has_motion`)? Either way Apply
+    and Save must agree.
+
 - [x] **#190 — BRIGHTNESS GRADIENTS NEVER RENDERED: every card in Explore › Architectural › Kelvin ›
   Brightness Gradients lit one pixel and then a uniform dim run, while its preview drew a per-bulb
   cycle; fx 65 Palette showed one still colour** (numbered 190 to stay clear of the 127/128 branches)
