@@ -12,25 +12,14 @@ import 'package:nexgen_command/models/roofline_segment.dart';
 import 'package:nexgen_command/features/wled/wled_models.dart';
 import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 import 'package:nexgen_command/shared/write_result.dart';
+import 'package:nexgen_command/features/wled/channel_power_payload.dart'
+    show buildAllChannelsOnPayload;
 
-/// Row 23 — "All Channels On": an explicit ON for every channel the bar
-/// shows, and nothing else.
-///
-/// It used to be an empty design template through the apply path, i.e.
-/// `applyChannelFilter` — so a channel marked "leave it out" of shows got an
-/// explicit OFF from the one button that says every channel goes on, while
-/// the include-back sheet promised "Its power switch still works". Power is
-/// not a show: no participation, no exclusion pass, no look fields.
-@visibleForTesting
-Map<String, dynamic> buildAllChannelsOnPayload(Iterable<int> channelIds) {
-  final ids = channelIds.toSet().toList()..sort();
-  return <String, dynamic>{
-    'on': true,
-    'seg': [
-      for (final id in ids) <String, dynamic>{'id': id, 'on': true},
-    ],
-  };
-}
+// Row 23's "All Channels On" body now lives beside the other power builders
+// (build 133: the master power-ON reuses it). Re-exported so importers of
+// this file keep seeing it.
+export 'package:nexgen_command/features/wled/channel_power_payload.dart'
+    show buildAllChannelsOnPayload;
 
 /// Row 82 — true when a poll shows something that can change which channels
 /// are lit: master power, the effect, the colours or the preset. The chips'

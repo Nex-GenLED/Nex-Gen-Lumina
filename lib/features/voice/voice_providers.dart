@@ -248,7 +248,22 @@ void _applySceneByName(Ref ref, String sceneName) {
   });
 }
 
-/// Set power on/off
+/// Test seam: the deep-link handler exactly as [DeepLinkService]'s callback
+/// runs it.
+@visibleForTesting
+void debugHandleDeepLinkAction(Ref ref, DeepLinkAction action) =>
+    _handleDeepLinkAction(ref, action);
+
+/// Test seam: the Siri shortcut handler exactly as [SiriShortcutService]'s
+/// callback runs it.
+@visibleForTesting
+void debugHandleSiriShortcut(
+        Ref ref, String activityType, Map<String, dynamic> userInfo) =>
+    _handleSiriShortcut(ref, activityType, userInfo);
+
+/// Set power on/off. Goes through the same [WledNotifier.togglePower] as the
+/// Home power circle, so a voice "turn on" relights the channels exactly as a
+/// tap does (build 133).
 void _setPower(Ref ref, bool on) {
   debugPrint('Voice: Setting power: $on');
 

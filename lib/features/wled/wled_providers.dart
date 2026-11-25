@@ -854,6 +854,18 @@ class _WledPollLifecycleObserver extends WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) => onState(state);
 }
 
+/// The clock [WledNotifier] reads for its age checks (build 133: how old the
+/// polled per-channel power is). Tests override it.
+final wledNotifierClockProvider =
+    Provider<DateTime Function()>((ref) => DateTime.now);
+
+/// Build 133 — how old a poll's per-channel power may be and still decide a
+/// master power-ON (see [WledNotifier.togglePower]). The LAN poll runs every
+/// 1.5 s and the relay poll every 10 s plus its round trip, so a healthy
+/// session is always well inside this. Older than this the read is stale and
+/// the ON stays master-only.
+const Duration kChannelPowerSnapshotMaxAge = Duration(seconds: 30);
+
 class WledNotifier extends Notifier<WledStateModel> {
   Timer? _poller;
 
@@ -964,6 +976,63 @@ class WledNotifier extends Notifier<WledStateModel> {
     return DateTime.now().difference(at) < _kLocalApplyPollSuppressWindow;
   }
 
+  // ── Build 133: per-channel power as the last trusted poll read it ───────
+  //
+  // [state] keeps segment 0 only, so it cannot say whether EVERY channel is
+  // off. [togglePower] needs exactly that after a timed OFF (the OFF preset
+  // stores every segment `on:false`). Each poll records `seg[].on` here.
+  //
+  // The read is trusted only while nothing can have changed it unseen:
+  //  * every write this notifier sends forgets it ([_forgetChannelPower]),
+  //    and a poll dispatched before that forget is not recorded (the epoch);
+  //  * a poll inside the local-apply window, or one superseded by an
+  //    optimistic setter, is not recorded;
+  //  * a pause (sync, Game Day), a reconnect or a repository change forgets
+  //    it;
+  //  * at use it must be younger than [kChannelPowerSnapshotMaxAge] by the
+  //    injected clock, and the notifier must be connected and fresh.
+  // Anything else is UNKNOWN, and an unknown read keeps the master-only ON.
+  Map<int, bool>? _channelPower;
+  DateTime? _channelPowerReadAt;
+  int _channelPowerEpoch = 0;
+
+  DateTime _now() => ref.read(wledNotifierClockProvider)();
+
+  void _forgetChannelPower() {
+    _channelPowerEpoch++;
+    _channelPower = null;
+    _channelPowerReadAt = null;
+  }
+
+  void _recordChannelPower(
+    Map<String, dynamic> data, {
+    required bool trusted,
+    DateTime? readAt,
+  }) {
+    if (!trusted) {
+      _channelPower = null;
+      _channelPowerReadAt = null;
+      return;
+    }
+    final power = channelPowerFromState(data);
+    _channelPower = power;
+    _channelPowerReadAt = power == null ? null : (readAt ?? _now());
+  }
+
+  /// The recorded per-channel power when it may still be trusted, else null.
+  Map<int, bool>? _trustedChannelPower() {
+    final power = _channelPower;
+    final at = _channelPowerReadAt;
+    if (power == null || at == null) return null;
+    if (!state.connected) return null;
+    if (!ref.read(wledStateFreshProvider)) return null;
+    if (_isPollOverwriteSuppressed()) return null;
+    final age = _now().difference(at);
+    // A clock that has gone backwards cannot vouch for the read either.
+    if (age.isNegative || age > kChannelPowerSnapshotMaxAge) return null;
+    return power;
+  }
+
   @override
   WledStateModel build() {
     final s = WledStateModel.initial();
@@ -998,6 +1067,9 @@ class WledNotifier extends Notifier<WledStateModel> {
     // rebuilds (connectivity/profile churn, each a fresh repo for the same
     // endpoint) don't re-fire the evaluation.
     ref.listen<WledRepository?>(wledRepositoryProvider, (prev, next) {
+      // A different repository may be a different controller: what the last
+      // poll read about its channels no longer applies (build 133).
+      if (!identical(prev, next)) _forgetChannelPower();
       if (!shouldHealOnConnect(prev, next)) return;
       // Build 117 grey screen: after an account change the repository is
       // rebuilt INSIDE the provider graph's refresh, and the healer's first
@@ -1047,6 +1119,8 @@ class WledNotifier extends Notifier<WledStateModel> {
   /// ALWAYS pair with [resumePolling] in a `finally` — a thrown sync must not
   /// leave the dashboard permanently un-polled.
   void pausePolling() {
+    // The pause holder writes to the controller while nothing polls it.
+    _forgetChannelPower();
     _pollPauseDepth++;
     if (_pollPauseDepth == 1) {
       _poller?.cancel();
@@ -1131,6 +1205,8 @@ class WledNotifier extends Notifier<WledStateModel> {
       // worst case a remote getState pending up to 45s), the commit below
       // suppresses the stale device-echoed visual fields.
       final tokenAtDispatch = _stateApplySeq;
+      final channelPowerEpoch = _channelPowerEpoch;
+      final readAt = _now();
       final data = await service.getState();
       // The container can tear down during the up-to-45s remote getState above.
       // Bail before any ref.read / state mutation so a post-dispose write can't
@@ -1174,7 +1250,10 @@ class WledNotifier extends Notifier<WledStateModel> {
         ref.read(bridgeReachableProvider.notifier).state = true;
       }
       try {
-        _applyStateData(data, tokenAtDispatch: tokenAtDispatch);
+        _applyStateData(data,
+            tokenAtDispatch: tokenAtDispatch,
+            channelPowerEpochAtDispatch: channelPowerEpoch,
+            readAt: readAt);
       } catch (e) {
         debugPrint('WLED parse state error: $e');
       }
@@ -1209,10 +1288,15 @@ class WledNotifier extends Notifier<WledStateModel> {
       // current token and reconciles normally; only polls dispatched before a
       // newer optimistic write are suppressed.
       final tokenAtDispatch = _stateApplySeq;
+      final channelPowerEpoch = _channelPowerEpoch;
+      final readAt = _now();
       final data = await service.getState();
       if (data == null) return;
       try {
-        _applyStateData(data, tokenAtDispatch: tokenAtDispatch);
+        _applyStateData(data,
+            tokenAtDispatch: tokenAtDispatch,
+            channelPowerEpochAtDispatch: channelPowerEpoch,
+            readAt: readAt);
       } catch (e) {
         debugPrint('WLED parse state error (pollOnce): $e');
       }
@@ -1225,7 +1309,12 @@ class WledNotifier extends Notifier<WledStateModel> {
 
   /// Parse a full /json/state response and update all state fields.
   /// Used by both polling and refreshConnection to avoid duplication.
-  void _applyStateData(Map<String, dynamic> data, {int? tokenAtDispatch}) {
+  void _applyStateData(
+    Map<String, dynamic> data, {
+    int? tokenAtDispatch,
+    int? channelPowerEpochAtDispatch,
+    DateTime? readAt,
+  }) {
     final prevPresetId = state.presetId;
     final prevEffectId = state.effectId;
     // Within the post-apply window, polled writes to fields the local apply
@@ -1244,6 +1333,15 @@ class WledNotifier extends Notifier<WledStateModel> {
     //      A null token (e.g. the test seam) skips this check.
     final suppressVisual = _isPollOverwriteSuppressed() ||
         (tokenAtDispatch != null && tokenAtDispatch != _stateApplySeq);
+    // Build 133: the per-channel power this poll read, unless a write may
+    // have landed after it was dispatched (see [_trustedChannelPower]).
+    _recordChannelPower(
+      data,
+      trusted: !suppressVisual &&
+          (channelPowerEpochAtDispatch == null ||
+              channelPowerEpochAtDispatch == _channelPowerEpoch),
+      readAt: readAt,
+    );
     final isOn = (data['on'] as bool?) ?? (data['bri'] != null ? (data['bri'] as int) > 0 : state.isOn);
     final bri = (data['bri'] as int?) ?? state.brightness;
     int speed = state.speed;
@@ -1559,6 +1657,7 @@ class WledNotifier extends Notifier<WledStateModel> {
     _consecutiveRemoteFailures = 0;
     // Mark state as stale until fresh data arrives
     ref.read(wledStateFreshProvider.notifier).state = false;
+    _forgetChannelPower();
     final service = ref.read(wledRepositoryProvider);
     if (service == null) {
       debugPrint('🔄 WledNotifier: No repository available');
@@ -1573,11 +1672,16 @@ class WledNotifier extends Notifier<WledStateModel> {
     try {
       // Token captured before dispatch (see _runPollTick).
       final tokenAtDispatch = _stateApplySeq;
+      final channelPowerEpoch = _channelPowerEpoch;
+      final readAt = _now();
       final data = await service.getState();
       if (data != null) {
         debugPrint('🔄 WledNotifier: Connection restored');
         // Full state parse — colors, effect, speed, reverse, etc.
-        _applyStateData(data, tokenAtDispatch: tokenAtDispatch);
+        _applyStateData(data,
+            tokenAtDispatch: tokenAtDispatch,
+            channelPowerEpochAtDispatch: channelPowerEpoch,
+            readAt: readAt);
         // Query RGBW support if not yet done
         if (!_infoQueried) {
           _infoQueried = true;
@@ -1602,13 +1706,52 @@ class WledNotifier extends Notifier<WledStateModel> {
     }
   }
 
+  /// Master power — the Home power circle, voice (dashboard, deep link,
+  /// Siri) and the other master callers.
+  ///
+  /// Build 133: after a timed OFF the OFF preset leaves every segment
+  /// `on:false`, so `{"on":true}` alone brought the master up with every
+  /// channel dark. Turning ON now reads the per-channel power the last
+  /// trusted poll recorded: when it shows EVERY channel off, the ON names
+  /// every channel ([buildMasterPowerOnPayload] → the "All Channels On"
+  /// body). At least one channel on, or the read unknown or stale, keeps the
+  /// master-only ON, so a channel switched off on purpose stays off.
+  ///
+  /// The channels named are the display census — device buses on the LAN,
+  /// the #91 fallback off it (the relay has no `/json/cfg`), the same
+  /// fallback [setChannelPower] uses. The decision is made before the first
+  /// await, from what the app already knows: no extra read, so a power tap
+  /// is as quick as before. App-side only; the stored OFF preset is untouched.
   Future<WriteResult> togglePower(bool value,
       {bool isManualChange = true}) async {
     debugPrint('🔌 togglePower called: $value (manual: $isManualChange)');
+    final relightAll = value ? _relightAllChannelsPayload() : null;
     _stateApplySeq++;
     state = state.copyWith(isOn: value);
+    if (relightAll != null) {
+      debugPrint('🔌 togglePower: every channel was off — naming '
+          '${(relightAll['seg'] as List).length} channels ON');
+      return _postUpdate(
+        on: true,
+        statePayload: relightAll,
+        isManualChange: isManualChange,
+      );
+    }
     // Only send power state - don't include brightness when turning off
     return _postUpdate(on: value, isManualChange: isManualChange);
+  }
+
+  /// The every-channel ON body when the trusted live read shows every
+  /// channel off; null for the master-only ON.
+  Map<String, dynamic>? _relightAllChannelsPayload() {
+    final live = _trustedChannelPower();
+    if (live == null) return null;
+    final ids = [
+      for (final c in ref.read(displayChannelsProvider).channels) c.id,
+    ];
+    final payload =
+        buildMasterPowerOnPayload(liveChannelPower: live, channelIds: ids);
+    return payload.containsKey('seg') ? payload : null;
   }
 
   /// PER-CHANNEL power (P1-43) — the ADDITIVE seg-scoped counterpart to the
@@ -1623,6 +1766,8 @@ class WledNotifier extends Notifier<WledStateModel> {
   Future<WriteResult> setChannelPower(int channelId, bool on,
       {bool isManualChange = true}) async {
     debugPrint('🔌 setChannelPower ch$channelId → $on');
+    // This write changes which channels are lit (build 133).
+    _forgetChannelPower();
     final service = ref.read(wledRepositoryProvider);
     if (service == null) {
       if (state.connected) state = state.copyWith(connected: false);
@@ -1846,6 +1991,7 @@ class WledNotifier extends Notifier<WledStateModel> {
       spacing: spacing,
     );
     _lastLocalApplyAt = DateTime.now();
+    _forgetChannelPower(); // an apply sets channel power (build 133)
     debugPrint('🎨 Applied local preview: ${colors.length} colors, effect: $effectName, grp=$colorGroupSize spc=$spacing (offline OK)');
   }
 
@@ -1914,6 +2060,7 @@ class WledNotifier extends Notifier<WledStateModel> {
     final repo = ref.read(wledRepositoryProvider);
     if (repo == null) return false;
 
+    _forgetChannelPower(); // an apply sets channel power (build 133)
     final success = await repo.applyJson(payload);
     if (!success) return false;
 
@@ -2242,7 +2389,17 @@ class WledNotifier extends Notifier<WledStateModel> {
     bool? forceRgbwZeroWhite,
     bool isManualChange = false,
     String? transientType,
+    // Build 133: a complete `/json/state` body that names its own segments
+    // (the every-channel master ON). Sent as-is through applyJson, skipping
+    // the channel targeting below: power is not a show, so the channel
+    // selector does not narrow it. Never set together with [transientType].
+    Map<String, dynamic>? statePayload,
   }) async {
+    assert(statePayload == null || transientType == null);
+    // Every write may change which channels are lit; the next poll re-reads
+    // them (build 133, see [_trustedChannelPower]).
+    _forgetChannelPower();
+
     // Per-transient-type latest-wins coalescing.
     //
     // When a same-type write is already in flight, replace the pending
@@ -2343,7 +2500,10 @@ class WledNotifier extends Notifier<WledStateModel> {
         }
       }
 
-      if (effectiveChannels.isEmpty) {
+      if (statePayload != null) {
+        // Build 133: the body already names every segment it means.
+        ok = await service.applyJson(statePayload);
+      } else if (effectiveChannels.isEmpty) {
         // Still no channel map: device has no resolvable buses. setState sends
         // a top-level GLOBAL write for power/brightness (correct on any
         // device); colour/speed fall to seg 0 — the only segment addressable
