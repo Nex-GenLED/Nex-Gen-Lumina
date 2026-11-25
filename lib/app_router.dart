@@ -36,7 +36,6 @@ import 'package:nexgen_command/features/site/bridge_setup_screen.dart';
 import 'package:nexgen_command/features/design/refine/refine_roofline_screen.dart';
 import 'package:nexgen_command/features/site/roofline_editor_screen.dart';
 import 'package:nexgen_command/features/wled/edit_pattern_screen.dart';
-import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/design/screens/ai_design_studio_screen.dart';
 import 'package:nexgen_command/features/design/segment_setup_screen.dart';
 import 'package:nexgen_command/features/design/roofline_setup_wizard.dart';
@@ -310,10 +309,11 @@ class AppRouter {
         path: AppRoutes.editPattern,
         name: 'edit-pattern',
         parentNavigatorKey: _rootNavigatorKey,
-        pageBuilder: (context, state) {
-          final pattern = state.extra as EditablePattern?;
-          return MaterialPage(child: EditPatternScreen(initialPattern: pattern));
-        },
+        // An Explore card hands the bare EditablePattern; a saved design's
+        // card page hands a PatternEditorLaunch carrying the design too, so
+        // SAVE can update it in place (build 132).
+        pageBuilder: (context, state) =>
+            MaterialPage(child: editPatternScreenForExtra(state.extra)),
       ),
       GoRoute(
         path: AppRoutes.luminaAI,

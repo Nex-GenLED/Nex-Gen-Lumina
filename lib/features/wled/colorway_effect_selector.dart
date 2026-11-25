@@ -34,6 +34,8 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
+import 'package:nexgen_command/features/wled/edit_pattern_screen.dart'
+    show PatternEditorLaunch;
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
@@ -1673,7 +1675,18 @@ class _ColorwayEffectSelectorPageState
                               ? PatternDirection.left
                               : PatternDirection.right,
                         );
-                        context.push(AppRoutes.editPattern, extra: pattern);
+                        // From a saved design the editor is handed the design
+                        // too, so its SAVE updates that design in place
+                        // instead of filing "Name 2" (build 132). An Explore
+                        // card still hands the bare pattern.
+                        final source = widget.editingDesign;
+                        context.push(
+                          AppRoutes.editPattern,
+                          extra: source == null
+                              ? pattern
+                              : PatternEditorLaunch(
+                                  pattern: pattern, sourceDesign: source),
+                        );
                       },
                       icon: const Icon(Icons.tune, size: 22),
                       tooltip: 'Open in Pattern Editor',
