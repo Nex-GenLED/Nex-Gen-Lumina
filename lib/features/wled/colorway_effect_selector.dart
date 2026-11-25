@@ -299,18 +299,21 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   /// the header, the preview). No metadata is copied, so `_isBrightnessGradient`
   /// is false and the gradient branch is unreachable in design-edit mode — a
   /// stored design is never a brightness-gradient catalog node.
+  ///
+  /// The colours are the FIRST included channel's, up to three — the look the
+  /// page seeds its effect, speed and spacing from too. They used to be
+  /// gathered across channels until three were found, so a one-colour design
+  /// on two channels opened as [c, c] and a Pattern Editor colour-plus-
+  /// background design as [a, bg, a] (build 132).
   factory ColorwayEffectSelectorPage.forDesign({
     Key? key,
     required CustomDesign design,
   }) {
-    final colors = <Color>[];
-    for (final ch in design.channels.where((c) => c.included)) {
-      for (final g in ch.colorGroups) {
-        colors.add(g.flutterColor);
-        if (colors.length >= 3) break;
-      }
-      if (colors.length >= 3) break;
-    }
+    final first = design.channels.where((c) => c.included).firstOrNull;
+    final colors = <Color>[
+      for (final g in (first?.colorGroups ?? const <LedColorGroup>[]).take(3))
+        g.flutterColor,
+    ];
     return ColorwayEffectSelectorPage(
       key: key,
       paletteNode: LibraryNode(

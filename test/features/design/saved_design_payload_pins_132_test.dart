@@ -3,9 +3,11 @@
 // Build 132 changes which screen a saved design opens on, how the Pattern
 // Editor saves a design it was opened from, a hint under Home's Color
 // Sequence and the Favorites picker's refusal sentence. None of that may
-// change a single byte any saved design or card sends. Each expectation below
-// was captured at build 131 (3191e4b0) and is compared as the exact
-// `jsonEncode` string, so key ORDER is pinned as well as values.
+// change a single byte any saved design or card sends. Each payload
+// expectation below was captured at build 131 (3191e4b0) and is compared as
+// the exact `jsonEncode` string, so key ORDER is pinned as well as values.
+// The ONE deliberate change is the card page's palette group, moved to the
+// first included channel's colours in build 132 (see that group).
 
 import 'dart:convert';
 
@@ -208,22 +210,50 @@ void main() {
     });
   });
 
-  group('the card page a design opens on builds from the same palette', () {
+  group('the card page a design opens on builds its palette from ONE channel',
+      () {
     // The palette `forDesign` synthesises is what the card page previews,
-    // applies and hands to the Pattern Editor. Pinned as it is at build 131:
-    // it gathers up to three colours ACROSS channels (see the build 132
-    // report — a multi-channel design with fewer than three colours repeats
-    // them).
-    test('Now Playing shape', () {
+    // applies and hands to the Pattern Editor. At build 131 it gathered up to
+    // three colours ACROSS channels, so a multi-channel design with fewer
+    // than three colours repeated them: [c, c] and [a, bg, a] below. Changed
+    // DELIBERATELY in build 132 (item 1 of the follow-up): the palette is the
+    // first included channel's own colours, up to three.
+    test('Now Playing shape: one colour on two channels is [c]', () {
       expect(_argb(ColorwayEffectSelectorPage.forDesign(design: nowPlayingShape())),
-          const [0xFFFF0022, 0xFFFF0022]);
+          const [0xFFFF0022]);
     });
 
-    test('Pattern Editor, animated', () {
+    test('Pattern Editor, animated: colour plus background is [a, bg]', () {
       expect(
           _argb(ColorwayEffectSelectorPage.forDesign(
               design: editorAnimatedShape())),
-          const [0xFF0000FF, 0xFF000000, 0xFF0000FF]);
+          const [0xFF0000FF, 0xFF000000]);
+    });
+
+    test('one colour on three channels is still [c]', () {
+      final d = nowPlayingShape();
+      final three = d.copyWith(channels: [
+        ...d.channels,
+        d.channels.first.copyWith(channelId: 2, channelName: 'Porch'),
+      ]);
+      expect(_argb(ColorwayEffectSelectorPage.forDesign(design: three)),
+          const [0xFFFF0022]);
+    });
+
+    test('a left-out first channel is skipped; more than three colours stop '
+        'at three', () {
+      final d = editorAnimatedShape();
+      final withFour = d.copyWith(channels: [
+        d.channels.first.copyWith(included: false),
+        d.channels[1].copyWith(colorGroups: const [
+          LedColorGroup(startLed: 0, endLed: 0, color: [255, 0, 0, 0]),
+          LedColorGroup(startLed: 1, endLed: 1, color: [0, 255, 0, 0]),
+          LedColorGroup(startLed: 2, endLed: 2, color: [0, 0, 255, 0]),
+          LedColorGroup(startLed: 3, endLed: 3, color: [255, 255, 0, 0]),
+        ]),
+      ]);
+      expect(_argb(ColorwayEffectSelectorPage.forDesign(design: withFour)),
+          const [0xFFFF0000, 0xFF00FF00, 0xFF0000FF]);
     });
   });
 
