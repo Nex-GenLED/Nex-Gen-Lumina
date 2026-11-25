@@ -29,7 +29,7 @@ import 'package:nexgen_command/features/design/design_models.dart';
 import 'package:nexgen_command/features/design/design_deletion.dart';
 import 'package:nexgen_command/features/design/design_providers.dart';
 import 'package:nexgen_command/features/design/per_pixel_payload_guard.dart'
-    show perPixelPickerRefusalMessage;
+    show kPerPixelFavoritesPickerDetail, perPixelPickerRefusalMessage;
 import 'package:nexgen_command/features/design/screens/design_detail_screen.dart';
 import 'package:nexgen_command/features/design/manual_editor/manual_design_editor.dart';
 import 'package:nexgen_command/features/schedule/schedule_models.dart'
@@ -534,8 +534,17 @@ class _LibraryBrowserScreenState extends ConsumerState<LibraryBrowserScreen> {
                                 onOpenEditor: _openDesignEditor,
                               );
                             }
+                            // Favorites gets its own reason (build 132); the
+                            // timer sentence is the schedule's, and Game Day
+                            // keeps it as before.
                             return _PerPixelNotSelectable(
-                                designName: pending.name);
+                              designName: pending.name,
+                              detail: widget.saveDestinationLabel
+                                          ?.toLowerCase() ==
+                                      'favorites'
+                                  ? kPerPixelFavoritesPickerDetail
+                                  : null,
+                            );
                           }
                           if (!_savedDesignApplyKicked) {
                             _savedDesignApplyKicked = true;
