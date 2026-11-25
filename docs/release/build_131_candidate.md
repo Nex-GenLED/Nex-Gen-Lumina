@@ -3,9 +3,11 @@
 Assembled 2026-11-24 (CST) on the branch `feat/131-candidate`, cut from
 `feat/124-colour` at `a9c63c2` (docs only on top of the build-130 tag's
 commit `321dc7a`). Four finished fix branches merged with `--no-ff`, one at a
-time, each at the tip named below, with no conflicts. **Not tagged, no
-version bump, not built.** The version is set at tag time, in its own bump
-commit. No Firestore rules, functions, indexes or config write. No
+time, each at the tip named below, with no conflicts. **Tagged `build-131`
+at `3191e4b`, the bump commit `chore(version): 2.5.10+131` that follows this
+note (convention 1); the tag matches Codemagic's `build-*` trigger for the
+iOS Release workflow; TestFlight 2.5.10 (368) (section 7).** No Firestore
+rules, functions, indexes or config write. No
 controller, bench unit or production system was contacted to assemble it;
 the tests use fakes. No merge into main.
 
@@ -182,3 +184,9 @@ the 3.41.2 log shows it passing inside the suite. The 3.47.9 analyze count comes
 inside the SDK. 3.50.0 was not run. The suite baselines are the build-130
 records (3.47.9 on `321dc7a`; 3.41.2 on `0a364ce`) and the 2026-11-21 runs on
 `a9c63c2`.
+
+Tagged `build-131` at `3191e4b` (the bump, gated on both SDKs with the same
+results as `bac1d61`; ledger row +131) on 2026-11-25 13:55:56Z (07:55:56 CST;
+annotated, tag object `cb36dc4`), pushed 13:56:04Z. Codemagic built it as
+TestFlight 2.5.10 (368) (owner, 2026-11-25), the next number after build
+130's 367; the owner confirmed it is on their phone.

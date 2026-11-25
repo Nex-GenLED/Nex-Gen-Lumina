@@ -1,8 +1,20 @@
 # Release notes and tester messages
 
-*Describes build: 2.5.10+130 · Last verified: 2026-11-17 · Internal; the tester text is what testers receive.*
+*Describes build: 2.5.10+131 · Last verified: 2026-11-25 · Internal; the tester text is what testers receive.*
 
 One entry per build that reached TestFlight, newest first. Each entry is copied from the build's row in `docs/BUILD_LEDGER.md` when the row lands. Build 113 was never built or shipped. Build 124 never shipped: its tag failed the automated test gate and produced no build, and build 125 carries the same changes. Builds 117 to 122 are not listed here yet; see `docs/BUILD_LEDGER.md`. Build 127 (TestFlight 362) was built but never distributed to testers; its changes are listed under build 128. Build 129 (TestFlight 364) was built and installed on the owner's phone for the bench but never distributed to testers; its changes are listed under build 130. Every tester message ends with the same line: "Send reports to general@nex-genled.com with the date and time."
+
+## 2.5.10 build 131 — 2026-11-25
+
+Tagged `build-131` = `3191e4b` on 2026-11-25; the tag matches Codemagic's `build-*` trigger for the iOS Release workflow; it is TestFlight 2.5.10 (368). No Android bundle is recorded for it. The wording below is taken from `docs/release/build_131_candidate.md`, section 2.
+
+**What changed:** Glitter on a two-colour design sparkles bright white again, as it did before build 125. In Design Studio, lights you set dimmer or brighter on their own (Pixel brightness: Dim, Full or a Ramp) now light at that brightness when you tap Apply or Preview on lights, not only when the design runs on a schedule. Clean Up on an overloaded schedule now finishes even if you leave the screen while it runs, and when you ask Lumina to delete entries it still tells you what it removed if you close it straight after confirming.
+
+**Tester text:** none written for this build; the withdrawal text below is the candidate notes' own.
+
+**Withdrawal text (return to the previous build), if needed:** Build 131 has been withdrawn. Open TestFlight → Nex-Gen Lumina → Previous Builds → install the previous build. Your schedules, teams, designs and favorites stay. Three things go back to how they were: Glitter sparkles in the design's second colour instead of white; Design Studio's per-light brightness reaches the lights only when the design runs on a schedule, not on Apply; and Clean Up can stop part-way if you leave the screen while it runs (open My Schedule and check what is left), and Lumina may not say what it deleted if you close it straight after confirming. Send reports to general@nex-genled.com with the date and time.
+
+*If build 130 is never released to testers, "the previous build" for a tester is 128, and build 130's own withdrawal text applies as well.*
 
 ## 2.5.10 build 130 — 2026-11-17
 
