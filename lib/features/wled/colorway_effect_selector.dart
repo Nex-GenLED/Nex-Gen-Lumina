@@ -686,6 +686,20 @@ class _ColorwayEffectSelectorPageState
     if (ok) Navigator.of(context).maybePop(true);
   }
 
+  /// DESIGN-EDIT only (build 132). The Pattern Editor, opened from here, has
+  /// just updated this design IN PLACE. What this page holds — the design as
+  /// it was opened, the controls seeded from it — is out of date, and its
+  /// "Save to design" would write that old look back over the editor's save.
+  /// So leave the way a successful [_saveToDesign] does: CONSUME the captured
+  /// look (the design now stores what the lights show; undoing it would
+  /// contradict the save), put the shared controls back, close. Nothing is
+  /// written to the lights or the design here.
+  void _closeAfterEditorSavedInPlace() {
+    _capturedLook = null;
+    _restoreProviderSnapshot();
+    Navigator.of(context).maybePop(true);
+  }
+
   @override
   void dispose() {
     _previewPacer.dispose();
@@ -1649,7 +1663,7 @@ class _ColorwayEffectSelectorPageState
                     width: 44,
                     height: 44,
                     child: IconButton(
-                      onPressed: () {
+                      onPressed: () async {
                         final effectId = ref.read(selectorEffectIdProvider);
                         final speed = ref.read(selectorSpeedProvider);
                         final intensity = ref.read(selectorIntensityProvider);
@@ -1680,13 +1694,21 @@ class _ColorwayEffectSelectorPageState
                         // instead of filing "Name 2" (build 132). An Explore
                         // card still hands the bare pattern.
                         final source = widget.editingDesign;
-                        context.push(
+                        if (source == null) {
+                          context.push(AppRoutes.editPattern, extra: pattern);
+                          return;
+                        }
+                        var savedInPlace = false;
+                        await context.push(
                           AppRoutes.editPattern,
-                          extra: source == null
-                              ? pattern
-                              : PatternEditorLaunch(
-                                  pattern: pattern, sourceDesign: source),
+                          extra: PatternEditorLaunch(
+                            pattern: pattern,
+                            sourceDesign: source,
+                            onSourceUpdated: () => savedInPlace = true,
+                          ),
                         );
+                        if (!mounted || !savedInPlace) return;
+                        _closeAfterEditorSavedInPlace();
                       },
                       icon: const Icon(Icons.tune, size: 22),
                       tooltip: 'Open in Pattern Editor',
