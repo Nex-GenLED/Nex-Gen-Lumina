@@ -111,7 +111,7 @@ class _ScheduleOverloadBannerState
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             ),
             onPressed: () => _showCleanupSheet(
-                context, ref, schedules, calEntries.primaries, conflicts),
+                context, schedules, calEntries.primaries, conflicts),
             child: const Text('Clean Up',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
           ),
@@ -132,7 +132,6 @@ class _ScheduleOverloadBannerState
 
 void _showCleanupSheet(
   BuildContext context,
-  WidgetRef ref,
   List<ScheduleItem> schedules,
   Map<String, CalendarEntry> calEntries,
   ScheduleConflicts conflicts,
@@ -145,31 +144,30 @@ void _showCleanupSheet(
       schedules: schedules,
       calEntries: calEntries,
       conflicts: conflicts,
-      ref: ref,
     ),
   );
 }
 
 // ─── Clean Up bottom sheet ───────────────────────────────────────────────────
 
-class _CleanupSheet extends StatefulWidget {
+/// Reads providers through its own ref, never the banner's: the deletes run
+/// after awaits, and a ref handed in from another widget can be dead by then.
+class _CleanupSheet extends ConsumerStatefulWidget {
   final List<ScheduleItem> schedules;
   final Map<String, CalendarEntry> calEntries;
   final ScheduleConflicts conflicts;
-  final WidgetRef ref;
 
   const _CleanupSheet({
     required this.schedules,
     required this.calEntries,
     required this.conflicts,
-    required this.ref,
   });
 
   @override
-  State<_CleanupSheet> createState() => _CleanupSheetState();
+  ConsumerState<_CleanupSheet> createState() => _CleanupSheetState();
 }
 
-class _CleanupSheetState extends State<_CleanupSheet> {
+class _CleanupSheetState extends ConsumerState<_CleanupSheet> {
   final _selectedItemIds = <String>{};
   final _selectedEntryKeys = <String>{};
 
@@ -231,14 +229,15 @@ class _CleanupSheetState extends State<_CleanupSheet> {
     );
     if (ok != true || !mounted) return;
 
-    // Batch delete via existing notifier methods
-    final schedNotifier = widget.ref.read(schedulesProvider.notifier);
+    // Batch delete via existing notifier methods. Both are read now, before
+    // the first delete await: each delete is a Firestore write, and this
+    // sheet (or the whole schedule tab) can be gone by the time it lands.
+    final schedNotifier = ref.read(schedulesProvider.notifier);
+    final calNotifier = ref.read(calendarScheduleProvider.notifier);
     for (final id in _selectedItemIds) {
       await schedNotifier.remove(id);
     }
 
-    final calNotifier =
-        widget.ref.read(calendarScheduleProvider.notifier);
     for (final key in _selectedEntryKeys) {
       await calNotifier.removeEntry(key);
     }
