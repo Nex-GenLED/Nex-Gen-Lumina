@@ -173,8 +173,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
     } catch (e) {
       debugPrint('saveCurrentAsDesignProvider threw: $e');
       if (mounted) {
+        // Build 132: a save that could not read the lights' current look
+        // saves nothing and says so in its own words.
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save "$name": $e')),
+          SnackBar(content: Text(saveCurrentAsDesignFailureMessage(e, name))),
         );
       }
       return;

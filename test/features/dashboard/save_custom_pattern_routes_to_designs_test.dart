@@ -41,6 +41,12 @@ void main() {
           ),
           wledStateProvider.overrideWith(_FixedWledNotifier.new),
           zoneSegmentsProvider.overrideWith(_FixedZoneSegmentsNotifier.new),
+          // Build 132: the save reads the controller's current look ONCE at
+          // the tap, for the channels playing, and saves nothing when it
+          // cannot — so this fixture needs a controller to read and the
+          // playing set. What is asserted below is unchanged.
+          wledRepositoryProvider.overrideWith((ref) => _FixedStateRepo()),
+          effectiveChannelIdsProvider.overrideWithValue(const [0, 1]),
         ],
       );
       addTearDown(container.dispose);
@@ -134,6 +140,42 @@ class _FixedWledNotifier extends WledNotifier {
         supportsRgbw: true,
         effectId: 47,
       );
+}
+
+/// The controller's `/json/state`, matching the two segments and the look
+/// above. Only `getState` is used.
+class _FixedStateRepo implements WledRepository {
+  @override
+  Future<Map<String, dynamic>?> getState() async => {
+        'on': true,
+        'bri': 180,
+        'seg': [
+          for (final s in const [
+            (id: 0, n: 'Roof', start: 0, stop: 128),
+            (id: 1, n: 'Side', start: 128, stop: 188),
+          ])
+            {
+              'id': s.id,
+              'n': s.n,
+              'start': s.start,
+              'stop': s.stop,
+              'fx': 47,
+              'sx': 128,
+              'ix': 200,
+              'grp': 1,
+              'spc': 0,
+              'rev': false,
+              'col': [
+                [255, 136, 0, 64],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+              ],
+            },
+        ],
+      };
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 /// Overrides ZoneSegmentsNotifier.build to return a fixed segment list,
