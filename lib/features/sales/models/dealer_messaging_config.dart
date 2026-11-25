@@ -58,6 +58,12 @@ class DealerMessagingConfig {
   /// `installComplete` status. Defaults to true.
   final bool sendInstallCompleteEmail;
 
+  /// If true, the three status-update SMS go out via
+  /// [onSalesJobStatusChanged]: prep day booked, install day booked, and
+  /// wiring prep complete. Server field `sendStatusSms`; a doc saved before
+  /// the field existed reads as true, matching the server's default.
+  final bool sendStatusSms;
+
   /// Optional override for the SMS sign-off. When non-null/non-empty,
   /// replaces "— Nex-Gen LED" (and the dealer's [senderName]) at the
   /// end of every SMS this dealer sends. Capped at 30 characters by
@@ -77,6 +83,7 @@ class DealerMessagingConfig {
     this.sendDay2Reminder = true,
     this.sendEstimateSignedEmail = true,
     this.sendInstallCompleteEmail = true,
+    this.sendStatusSms = true,
     this.customSmsSignOff,
     this.updatedAt,
   });
@@ -97,6 +104,7 @@ class DealerMessagingConfig {
         sendDay2Reminder: true,
         sendEstimateSignedEmail: true,
         sendInstallCompleteEmail: true,
+        sendStatusSms: true,
         customSmsSignOff: null,
         updatedAt: null,
       );
@@ -111,6 +119,7 @@ class DealerMessagingConfig {
         'sendDay2Reminder': sendDay2Reminder,
         'sendEstimateSignedEmail': sendEstimateSignedEmail,
         'sendInstallCompleteEmail': sendInstallCompleteEmail,
+        'sendStatusSms': sendStatusSms,
         if (customSmsSignOff != null) 'customSmsSignOff': customSmsSignOff,
         if (updatedAt != null) 'updatedAt': Timestamp.fromDate(updatedAt!),
       };
@@ -128,6 +137,7 @@ class DealerMessagingConfig {
             j['sendEstimateSignedEmail'] as bool? ?? true,
         sendInstallCompleteEmail:
             j['sendInstallCompleteEmail'] as bool? ?? true,
+        sendStatusSms: j['sendStatusSms'] as bool? ?? true,
         customSmsSignOff: j['customSmsSignOff'] as String?,
         updatedAt: (j['updatedAt'] as Timestamp?)?.toDate(),
       );
@@ -142,6 +152,7 @@ class DealerMessagingConfig {
     bool? sendDay2Reminder,
     bool? sendEstimateSignedEmail,
     bool? sendInstallCompleteEmail,
+    bool? sendStatusSms,
     String? customSmsSignOff,
     bool clearCustomSmsSignOff = false,
     DateTime? updatedAt,
@@ -158,6 +169,7 @@ class DealerMessagingConfig {
             sendEstimateSignedEmail ?? this.sendEstimateSignedEmail,
         sendInstallCompleteEmail:
             sendInstallCompleteEmail ?? this.sendInstallCompleteEmail,
+        sendStatusSms: sendStatusSms ?? this.sendStatusSms,
         customSmsSignOff: clearCustomSmsSignOff
             ? null
             : (customSmsSignOff ?? this.customSmsSignOff),

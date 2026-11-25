@@ -29,7 +29,13 @@ import 'package:nexgen_command/theme.dart';
 
 class Day1BlueprintScreen extends ConsumerStatefulWidget {
   final String jobId;
-  const Day1BlueprintScreen({super.key, required this.jobId});
+
+  /// Test seam for loading the job; production passes nothing and the
+  /// screen reads [FirebaseFirestore.instance].
+  @visibleForTesting
+  final FirebaseFirestore? firestore;
+
+  const Day1BlueprintScreen({super.key, required this.jobId, this.firestore});
 
   @override
   ConsumerState<Day1BlueprintScreen> createState() =>
@@ -63,7 +69,7 @@ class _Day1BlueprintScreenState extends ConsumerState<Day1BlueprintScreen> {
 
   Future<void> _loadJob() async {
     try {
-      final doc = await FirebaseFirestore.instance
+      final doc = await (widget.firestore ?? FirebaseFirestore.instance)
           .collection('sales_jobs')
           .doc(widget.jobId)
           .get();
@@ -698,19 +704,32 @@ class _Day1BlueprintScreenState extends ConsumerState<Day1BlueprintScreen> {
   // ── Section 3: per-channel cards ────────────────────────────────────────
 
   Widget _section3Channels(SalesJob job) {
+    // channelRuns comes only from the estimate wizard; a job built on the
+    // visit's zone builder has zones instead, so show those.
     if (job.channelRuns.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: const [
-          BlueprintSectionHeader(
+        children: [
+          const BlueprintSectionHeader(
             title: 'CHANNELS',
             color: NexGenPalette.cyan,
           ),
-          SizedBox(height: 12),
-          Text(
-            'No channels on this job',
-            style: TextStyle(color: Colors.white54, fontSize: 13),
-          ),
+          const SizedBox(height: 12),
+          if (job.zones.isEmpty)
+            const Text(
+              'No channels on this job',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            )
+          else
+            for (int i = 0; i < job.zones.length; i++) ...[
+              BlueprintZoneCard(
+                zone: job.zones[i],
+                number: i + 1,
+                color: blueprintColorForChannel(i),
+                onPhotoTap: _expandPhoto,
+              ),
+              const SizedBox(height: 12),
+            ],
         ],
       );
     }

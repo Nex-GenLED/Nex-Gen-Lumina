@@ -83,13 +83,41 @@ class DealerDashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DealerDashboardScreenState extends ConsumerState<DealerDashboardScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+    with TickerProviderStateMixin {
+  late TabController _tabController;
+
+  /// Overview, Pipeline, Team, Payouts, Inventory, plus Messaging for admin
+  /// and owner sessions only. The Messaging tab saves
+  /// dealers/{code}/config/messaging, which the rules admit for the admin
+  /// and owner claims alone; a sales or installer session would get an
+  /// editor whose every save is denied.
+  static int _tabCount({required bool showMessaging}) =>
+      showMessaging ? 6 : 5;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(
+      length: _tabCount(
+        showMessaging: ref.read(hasAdminOrOwnerSessionProvider),
+      ),
+      vsync: this,
+    );
+  }
+
+  /// The admin/owner session can start or end while this screen is open.
+  /// When the tab count changes, swap in a controller of the new length,
+  /// keeping the selected tab if it still exists.
+  void _syncTabCount(int length) {
+    if (_tabController.length == length) return;
+    final old = _tabController;
+    _tabController = TabController(
+      length: length,
+      vsync: this,
+      initialIndex: old.index < length ? old.index : 0,
+    );
+    // The TabBar/TabBarView detach from the old controller in this build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
   }
 
   @override
@@ -110,6 +138,8 @@ class _DealerDashboardScreenState extends ConsumerState<DealerDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
+    final showMessaging = ref.watch(hasAdminOrOwnerSessionProvider);
+    _syncTabCount(_tabCount(showMessaging: showMessaging));
     final dealerCode = _resolveDealerCode();
 
     if (dealerCode == null) {
@@ -200,13 +230,13 @@ class _DealerDashboardScreenState extends ConsumerState<DealerDashboardScreen>
           unselectedLabelStyle: const TextStyle(fontSize: 13),
           isScrollable: true,
           tabAlignment: TabAlignment.start,
-          tabs: const [
-            Tab(text: 'Overview'),
-            Tab(text: 'Pipeline'),
-            Tab(text: 'Team'),
-            Tab(text: 'Payouts'),
-            Tab(text: 'Inventory'),
-            Tab(text: 'Messaging'),
+          tabs: [
+            const Tab(text: 'Overview'),
+            const Tab(text: 'Pipeline'),
+            const Tab(text: 'Team'),
+            const Tab(text: 'Payouts'),
+            const Tab(text: 'Inventory'),
+            if (showMessaging) const Tab(text: 'Messaging'),
           ],
         ),
       ),
@@ -221,7 +251,7 @@ class _DealerDashboardScreenState extends ConsumerState<DealerDashboardScreen>
           _TeamTab(dealerCode: dealerCode),
           _PayoutsTab(dealerCode: dealerCode),
           InventoryDashboardScreen(dealerCode: dealerCode),
-          DealerMessagingConfigScreen(dealerCode: dealerCode),
+          if (showMessaging) DealerMessagingConfigScreen(dealerCode: dealerCode),
         ],
       ),
     );

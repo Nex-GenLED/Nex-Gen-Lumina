@@ -10,8 +10,9 @@ import 'package:nexgen_command/theme.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // DealerMessagingConfigScreen
 //
-// Settings screen lives inside the dealer dashboard's "Messaging" tab.
-// Reads the dealer's config via the streaming dealerMessagingConfigProvider
+// Settings screen lives inside the dealer dashboard's "Messaging" tab, which
+// only admin and owner sessions see (the rules deny the save to sales and
+// installer claims; see DealerDashboardScreen._tabCount). Reads the dealer's config via the streaming dealerMessagingConfigProvider
 // (which emits DealerMessagingConfig.defaults() when no doc exists yet),
 // hydrates form controllers from the first emission, and keeps the
 // controllers as local state thereafter so a stream rebuild can't wipe
@@ -43,6 +44,7 @@ class _DealerMessagingConfigScreenState
   bool _sendDay2Reminder = true;
   bool _sendEstimateSignedEmail = true;
   bool _sendInstallCompleteEmail = true;
+  bool _sendStatusSms = true;
 
   /// Set to true after the first stream emission has hydrated the
   /// controllers. Subsequent emissions are ignored — the user's
@@ -73,6 +75,7 @@ class _DealerMessagingConfigScreenState
     _sendDay2Reminder = cfg.sendDay2Reminder;
     _sendEstimateSignedEmail = cfg.sendEstimateSignedEmail;
     _sendInstallCompleteEmail = cfg.sendInstallCompleteEmail;
+    _sendStatusSms = cfg.sendStatusSms;
     _hydrated = true;
   }
 
@@ -89,6 +92,7 @@ class _DealerMessagingConfigScreenState
       sendDay2Reminder: _sendDay2Reminder,
       sendEstimateSignedEmail: _sendEstimateSignedEmail,
       sendInstallCompleteEmail: _sendInstallCompleteEmail,
+      sendStatusSms: _sendStatusSms,
       customSmsSignOff: customSignOffRaw.isEmpty ? null : customSignOffRaw,
     );
   }
@@ -250,6 +254,14 @@ class _DealerMessagingConfigScreenState
           ),
           _divider(),
           _ConfigToggle(
+            title: 'Status Update SMS',
+            subtitle:
+                'Sent when the prep day or install day is booked, and when wiring prep is complete',
+            value: _sendStatusSms,
+            onChanged: (v) => setState(() => _sendStatusSms = v),
+          ),
+          _divider(),
+          _ConfigToggle(
             title: 'Install Complete Email',
             subtitle:
                 'Sent when the job is marked complete with Lumina download links',
@@ -271,12 +283,19 @@ class _DealerMessagingConfigScreenState
 
   Widget _toggleCard(List<Widget> children) {
     return Container(
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: NexGenPalette.gunmetal90,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: NexGenPalette.line),
       ),
-      child: Column(children: children),
+      // The SwitchListTiles need a Material between them and this coloured
+      // box: they paint ink on the nearest Material, which the box would
+      // hide, and Flutter 3.47 asserts on exactly that in debug.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(children: children),
+      ),
     );
   }
 
