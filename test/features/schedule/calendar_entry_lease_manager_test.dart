@@ -626,7 +626,10 @@ void main() {
   // ────────────────────────────────────────────────────────────────
   group('P0-3.1 lease pre-arm fixes (defects a + b)', () {
     test('(a) emitted cfg timer en is int 1, not bool true', () async {
-      final h = buildHarness();
+      // Build 133: the builder skips an expired lease, so this fixture needs
+      // a clock its lease (ends 2026-05-20 22:00) has not passed. Without
+      // one it read the wall clock.
+      final h = buildHarness(now: fixedNow);
       await h.manager.initialize();
       h.manager.injectLeaseForTest(_makeLease(
         dateKey: '2026-07-24',

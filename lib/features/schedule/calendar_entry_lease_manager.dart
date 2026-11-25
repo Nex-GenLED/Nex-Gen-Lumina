@@ -426,6 +426,16 @@ class CalendarEntryLease {
     this.channels,
   });
 
+  /// THE expiry rule (build 133). A lease is over once [now] has reached
+  /// [expiresAt]: at the end time itself it is expired; one instant before
+  /// it, the night is still running.
+  ///
+  /// [CalendarEntryLeaseManager.sweepExpiredLeases] (which removes the
+  /// record) and the row builder behind every table write (which stops
+  /// sending the row) both call this, each with the manager's `nowProvider`,
+  /// so the two can never disagree about a night.
+  bool isExpiredAt(DateTime now) => !expiresAt.isAfter(now);
+
   CalendarEntryLease copyWith({
     int? slotIndex,
     int? presetId,
@@ -1071,7 +1081,7 @@ class CalendarEntryLeaseManager {
         '$_kLogPrefix sweep START (registry size = ${_activeLeases.length})');
     final expiredKeys = <String>[];
     for (final entry in _activeLeases.entries) {
-      if (!entry.value.expiresAt.isAfter(now)) {
+      if (entry.value.isExpiredAt(now)) {
         expiredKeys.add(entry.key);
       }
     }
@@ -1860,12 +1870,28 @@ class CalendarEntryLeaseManager {
   ///
   /// IMPORTANT: this returns ONLY the lease-derived timers. What is pushed
   /// to the controller is the owned table from [_composeOwnedTable].
+  ///
+  /// Build 133 — an EXPIRED lease is never sent again. Its record can outlive
+  /// its night (the sweep removes it only once its own zero-write is
+  /// confirmed), and lease rows are dateless, so re-sending it re-armed the
+  /// row for the same weekday next week from every lease write, from the
+  /// ledger the schedule sync merges and from syncAll's table. The test is
+  /// [CalendarEntryLease.isExpiredAt] with [nowProvider], the sweep's own
+  /// rule and clock, so a night is either swept and not sent, or kept and
+  /// sent; a night still in progress keeps its row.
   Map<String, dynamic> _buildLeaseTimersPayload({
     Set<String> excluding = const {},
   }) {
+    final now = nowProvider();
     final List<Map<String, dynamic>> ins = [];
     for (final lease in _activeLeases.values) {
       if (excluding.contains(lease.dateKey)) continue;
+      if (lease.isExpiredAt(now)) {
+        debugPrint('$_kLogPrefix not re-sending expired lease ${lease.dateKey} '
+            '(ended ${lease.expiresAt.toIso8601String()}); the sweep clears '
+            'its record');
+        continue;
+      }
       // Defense in depth: a dowMask of 0 (unparseable dateKey) would arm a
       // timer that never fires. Skip it — never write a dead dow:0 lease timer.
       if (lease.dowMask == 0) {
