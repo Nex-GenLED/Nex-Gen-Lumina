@@ -1375,7 +1375,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       // (Static) favorite goes through the chunked spine My Designs uses,
       // everything else is one channel-filtered applyJson.
       outcome = await applyFavoritePayloadWith(
-          container.read, favorite.patternData);
+          container.read, favorite.patternData,
+          // The customer's own tap: a favourite that stores a look per
+          // channel sends each its own (build 132).
+          perChannelLooks: true);
     } catch (e) {
       debugPrint('Apply favorite failed: $e');
       await notifier.runAndReport(

@@ -21,7 +21,8 @@ import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 /// Steps:
 ///   1. SyncWarningDialog.checkAndProceed — auto-pause Neighborhood Sync.
 ///   2. effectiveChannelIds U1 gate — skip if no channels.
-///   3. applyChannelFilter — narrow seg[] to selected channels.
+///   3. applyChannelFilterPerChannel — narrow seg[] to selected channels,
+///      each stored channel keeping its own look.
 ///   4. repo.applyJson — Bug B chokepoint (#77).
 ///   5. wledStateProvider.notifier.applyPreviewSync — dashboard preview
 ///      cache + #77 poll-overwrite suppression window. Kills the stale
@@ -103,7 +104,11 @@ Future<void> applySavedDesign(
     }
     motion = motionEffectOf(design);
   } else {
-    payload = applyChannelFilter(
+    // Each stored channel is sent ITS OWN look (build 132): applyChannelFilter
+    // copied the first channel's onto every channel, so a design saved with a
+    // different look per channel came back as one. A one-look design sends
+    // exactly what it always did (applyChannelFilterPerChannel).
+    payload = applyChannelFilterPerChannel(
       design.toWledPayload(),
       channels,
       ref.read(deviceChannelsProvider),

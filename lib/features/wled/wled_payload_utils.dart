@@ -140,6 +140,79 @@ Map<String, dynamic> applyChannelFilter(
   return result;
 }
 
+/// [applyChannelFilter] for the user-initiated Apply of a SAVED effect design
+/// or a favourite (build 132): a targeted channel the payload states a look
+/// for — a `seg` entry with that channel's `id` that carries a design (`fx`,
+/// `col` or `i`, the [firstRealDesignSegment] rule) — is sent ITS OWN look,
+/// not the first one. [applyChannelFilter] copies the first look onto every
+/// channel, so a design that stores a different look per channel (Now
+/// Playing / Save As Custom Pattern, since build 132) came back as one.
+///
+/// Everything else is [applyChannelFilter]'s contract, unchanged: a targeted
+/// channel the payload does NOT state gets the first look (the template), a
+/// channel outside [channelIds] gets `{id, on:false}` and nothing else, no
+/// bounds are ever written, every targeted seg carries `on: true`, same
+/// census, same order. So a payload whose stated looks are all the same —
+/// every design saved before build 132, a single-channel design, every card
+/// and favourite shape — comes out byte-identical to [applyChannelFilter].
+///
+/// Only My Designs' Apply (`applySavedDesign`) and Home's favourite tap call
+/// this. Schedules, leases, Game Day, voice, autopilot, Sync and every live
+/// tuner keep [applyChannelFilter].
+Map<String, dynamic> applyChannelFilterPerChannel(
+  Map<String, dynamic> payload,
+  List<int> channelIds, [
+  List<DeviceChannel> channels = const [],
+]) {
+  if (channelIds.isEmpty) return payload;
+
+  final seg = payload['seg'];
+  if (seg is! List || seg.isEmpty) return payload;
+
+  // The same look fields applyChannelFilter keeps: no id, no bounds (rule 2),
+  // no `on` (set below).
+  Map<String, dynamic> lookOf(Map s) => Map<String, dynamic>.from(s)
+    ..remove('id')
+    ..remove('start')
+    ..remove('stop')
+    ..remove('on');
+
+  final template = lookOf(firstRealDesignSegment(payload) ??
+      Map<String, dynamic>.from(seg.first as Map));
+
+  final stated = <int, Map<String, dynamic>>{};
+  for (final entry in seg) {
+    if (entry is! Map || isChannelExclusionMarker(entry)) continue;
+    final id = entry['id'];
+    if (id is! num) continue;
+    if (!(entry.containsKey('fx') ||
+        entry.containsKey('col') ||
+        entry.containsKey('i'))) {
+      continue;
+    }
+    stated.putIfAbsent(id.toInt(), () => lookOf(entry));
+  }
+
+  final targeted = channelIds.toSet();
+  final census = <int>{...channels.map((c) => c.id), ...channelIds}.toList()
+    ..sort();
+
+  final expandedSegs = <Map<String, dynamic>>[
+    for (final id in census)
+      if (targeted.contains(id))
+        <String, dynamic>{'id': id, ...(stated[id] ?? template), 'on': true}
+      else
+        <String, dynamic>{'id': id, 'on': false},
+  ];
+
+  final result = Map<String, dynamic>.from(payload);
+  result['seg'] = expandedSegs;
+  debugPrint('🎯 applyChannelFilterPerChannel: targeting channels $channelIds '
+      '(${stated.length} stated looks, ${expandedSegs.length} segs over '
+      'census $census)');
+  return result;
+}
+
 /// The first `seg` entry that actually carries a DESIGN (an `fx` or a `col`),
 /// falling back to the first map entry and finally to null.
 ///
