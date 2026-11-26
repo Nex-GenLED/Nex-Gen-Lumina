@@ -39,6 +39,40 @@ import 'package:nexgen_command/features/wled/pattern_effect_speeds.dart';
 import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 import 'package:nexgen_command/shared/write_result.dart';
 
+/// What the Pattern Editor route is handed when it is opened from a SAVED
+/// design's card page: the pattern to edit and the design it came from, so
+/// SAVE can update that design rather than file a copy (build 132).
+///
+/// An Explore card still hands the bare [EditablePattern]; see
+/// [editPatternScreenForExtra].
+class PatternEditorLaunch {
+  const PatternEditorLaunch({
+    required this.pattern,
+    this.sourceDesign,
+    this.onSourceUpdated,
+  });
+
+  final EditablePattern pattern;
+  final CustomDesign? sourceDesign;
+
+  /// Called after SAVE has updated [sourceDesign] in place, so the card page
+  /// underneath knows what it is showing is no longer current.
+  final VoidCallback? onSourceUpdated;
+}
+
+/// The editor for the route's `extra`: a [PatternEditorLaunch] (a saved
+/// design's card page), an [EditablePattern] (an Explore card), or nothing.
+Widget editPatternScreenForExtra(Object? extra) {
+  if (extra is PatternEditorLaunch) {
+    return EditPatternScreen(
+      initialPattern: extra.pattern,
+      sourceDesign: extra.sourceDesign,
+      onSourceUpdated: extra.onSourceUpdated,
+    );
+  }
+  return EditPatternScreen(initialPattern: extra as EditablePattern?);
+}
+
 /// Full-screen Edit Pattern screen modeled after the native controller app.
 ///
 /// Provides: pattern name, roofline preview, MODE/DIRECTION/BG COLOR controls,
@@ -46,7 +80,19 @@ import 'package:nexgen_command/shared/write_result.dart';
 class EditPatternScreen extends ConsumerStatefulWidget {
   final EditablePattern? initialPattern;
 
-  const EditPatternScreen({super.key, this.initialPattern});
+  /// The saved design this editor was opened on, or null (opened from
+  /// Explore). See [_EditPatternScreenState._saveToMyDesigns].
+  final CustomDesign? sourceDesign;
+
+  /// See [PatternEditorLaunch.onSourceUpdated].
+  final VoidCallback? onSourceUpdated;
+
+  const EditPatternScreen({
+    super.key,
+    this.initialPattern,
+    this.sourceDesign,
+    this.onSourceUpdated,
+  });
 
   @override
   ConsumerState<EditPatternScreen> createState() => _EditPatternScreenState();
@@ -312,10 +358,17 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
   /// Save twice must not fork a copy). A different name → a NEW design, so
   /// renaming is how a second variation is kept. New designs always get a fresh
   /// auto-id and a name no other design is using.
+  ///
+  /// Opened from a SAVED design ([EditPatternScreen.sourceDesign], build 132):
+  /// with that design's name still in the field, SAVE updates THAT design in
+  /// place. It used to count the design's own name as taken and file a copy
+  /// named "Name 2". A changed name still makes a new design, made distinct
+  /// only if it collides.
   Future<void> _saveToMyDesigns() async {
     if (_saving) return;
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
+    final onSourceUpdated = widget.onSourceUpdated;
     // Replace, don't queue: a second Save must not sit behind the first toast
     // for four seconds looking like it did nothing.
     void toast(SnackBar bar) => messenger
@@ -333,7 +386,14 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
 
     final typed = _nameController.text.trim();
     final baseName = typed.isNotEmpty ? typed : 'Custom Pattern';
-    final isUpdate = _savedDesignId != null && baseName == _savedDesignName;
+    final source = widget.sourceDesign;
+    final CustomDesign? inPlace = source != null &&
+            source.id.isNotEmpty &&
+            baseName == source.name.trim()
+        ? source
+        : null;
+    final isUpdate = inPlace != null ||
+        (_savedDesignId != null && baseName == _savedDesignName);
 
     setState(() => _saving = true);
     // A one-shot fetch for the account being saved INTO. `designsStreamProvider`
@@ -376,15 +436,33 @@ class _EditPatternScreenState extends ConsumerState<EditPatternScreen> {
       ));
       return;
     }
-    final design = isUpdate
-        ? built.copyWith(id: _savedDesignId, createdAt: _savedCreatedAt)
-        : built;
+    final CustomDesign design;
+    if (inPlace != null) {
+      // copyWith on the STORED design, so what this editor does not own — its
+      // description, creation time, tags, any other metadata — round-trips;
+      // the look is exactly what a new save from here would store.
+      design = inPlace.copyWith(
+        name: name,
+        channels: built.channels,
+        brightness: built.brightness,
+        brightnessStated: built.brightnessStated,
+        perPixel: built.perPixel,
+        layoutStamp: built.layoutStamp,
+        tags: {...inPlace.tags, ...built.tags}.toList(),
+        updatedAt: built.updatedAt,
+      );
+    } else if (isUpdate) {
+      design = built.copyWith(id: _savedDesignId, createdAt: _savedCreatedAt);
+    } else {
+      design = built;
+    }
 
     try {
       final id = await ref.read(designServiceProvider).saveDesign(uid, design);
       _savedDesignId = id;
       _savedDesignName = name;
       _savedCreatedAt = design.createdAt;
+      if (inPlace != null) onSourceUpdated?.call();
       if (!mounted) return;
       if (_nameController.text.trim() != name) _nameController.text = name;
       toast(SnackBar(

@@ -153,14 +153,43 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
   bool _adjustmentPanelExpanded = false;
   Timer? _skyRefreshTimer;
 
+  /// True while Save As Custom Pattern / the Now Playing save waits on the
+  /// lights (see [_showSaveCustomDialog]).
+  bool _savingCustom = false;
+
   _SkyTheme get _currentSkyTheme => _getSkyTheme(DateTime.now());
 
   Future<void> _showSaveCustomDialog(BuildContext context, WidgetRef ref) async {
+    // One save at a time. While one waits on the lights (build 132: it reads
+    // the controller's current look first — up to kSaveCurrentLookReadTimeout
+    // away from home), a further tap, here or on Now Playing, is ignored.
+    if (_savingCustom) return;
     final name = await showDialog<String>(
       context: context,
       builder: (_) => const SaveCustomPatternDialog(),
     );
-    if (name == null || name.isEmpty || !mounted) return;
+    // `context` may be the Now Playing bar's, not this State's: check both.
+    if (name == null || name.isEmpty || !mounted || !context.mounted) return;
+
+    // The saving state: this bar, and the Save As Custom Pattern button's
+    // own spinner. Both clear when the save ends, saved or not.
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _savingCustom = true);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+        content: Row(children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+          ),
+          SizedBox(width: 12),
+          Text('Saving…'),
+        ]),
+        // Longer than the save can take; it is closed as soon as it ends.
+        duration: Duration(minutes: 2),
+      ));
 
     // #84 guards: try/catch around the await (mirrors _showSavePatternDialog
     // — without this an uncaught async exception SIGABRTs on iOS release);
@@ -172,16 +201,22 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       designId = await ref.read(saveCurrentAsDesignProvider)(name);
     } catch (e) {
       debugPrint('saveCurrentAsDesignProvider threw: $e');
+      messenger.hideCurrentSnackBar();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save "$name": $e')),
+        // Build 132: a save that could not read the lights' current look
+        // saves nothing and says so in its own words.
+        messenger.showSnackBar(
+          SnackBar(content: Text(saveCurrentAsDesignFailureMessage(e, name))),
         );
       }
       return;
+    } finally {
+      if (mounted) setState(() => _savingCustom = false);
     }
+    messenger.hideCurrentSnackBar();
     if (designId != null && mounted) {
       ref.read(activePresetLabelProvider.notifier).setLabelWithFingerprint(name, ref.read(wledStateProvider));
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text('Saved "$name" to My Designs')),
       );
     }
@@ -1201,9 +1236,24 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
                                   // wledStateProvider snapshot, so this redirect preserves the
                                   // user-tweaked state (slider tweaks are device-applied and
                                   // round-trip through wledStateProvider).
-                                  onPressed: () => _showSaveCustomDialog(context, ref),
-                                  icon: const Icon(Icons.save_alt_rounded),
-                                  label: const Text('Save As Custom Pattern'),
+                                  // While a save waits on the lights the button
+                                  // says so and takes no second tap.
+                                  onPressed: _savingCustom
+                                      ? null
+                                      : () => _showSaveCustomDialog(context, ref),
+                                  icon: _savingCustom
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: NexGenPalette.cyan,
+                                          ),
+                                        )
+                                      : const Icon(Icons.save_alt_rounded),
+                                  label: Text(_savingCustom
+                                      ? 'Saving…'
+                                      : 'Save As Custom Pattern'),
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: NexGenPalette.cyan,
                                     side: BorderSide(color: NexGenPalette.cyan.withValues(alpha: 0.5)),
@@ -1373,7 +1423,10 @@ class _WledDashboardPageState extends ConsumerState<WledDashboardPage> {
       // (Static) favorite goes through the chunked spine My Designs uses,
       // everything else is one channel-filtered applyJson.
       outcome = await applyFavoritePayloadWith(
-          container.read, favorite.patternData);
+          container.read, favorite.patternData,
+          // The customer's own tap: a favourite that stores a look per
+          // channel sends each its own (build 132).
+          perChannelLooks: true);
     } catch (e) {
       debugPrint('Apply favorite failed: $e');
       await notifier.runAndReport(

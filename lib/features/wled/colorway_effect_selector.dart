@@ -34,6 +34,8 @@ import 'package:nexgen_command/features/wled/wled_service.dart' show rgbToRgbw;
 import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/theme.dart';
 import 'package:nexgen_command/widgets/effect_speed_slider.dart';
+import 'package:nexgen_command/features/wled/edit_pattern_screen.dart'
+    show PatternEditorLaunch;
 import 'package:nexgen_command/features/wled/editable_pattern_model.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/widgets/animated_roofline_overlay.dart';
@@ -297,18 +299,21 @@ class ColorwayEffectSelectorPage extends ConsumerStatefulWidget {
   /// the header, the preview). No metadata is copied, so `_isBrightnessGradient`
   /// is false and the gradient branch is unreachable in design-edit mode — a
   /// stored design is never a brightness-gradient catalog node.
+  ///
+  /// The colours are the FIRST included channel's, up to three — the look the
+  /// page seeds its effect, speed and spacing from too. They used to be
+  /// gathered across channels until three were found, so a one-colour design
+  /// on two channels opened as [c, c] and a Pattern Editor colour-plus-
+  /// background design as [a, bg, a] (build 132).
   factory ColorwayEffectSelectorPage.forDesign({
     Key? key,
     required CustomDesign design,
   }) {
-    final colors = <Color>[];
-    for (final ch in design.channels.where((c) => c.included)) {
-      for (final g in ch.colorGroups) {
-        colors.add(g.flutterColor);
-        if (colors.length >= 3) break;
-      }
-      if (colors.length >= 3) break;
-    }
+    final first = design.channels.where((c) => c.included).firstOrNull;
+    final colors = <Color>[
+      for (final g in (first?.colorGroups ?? const <LedColorGroup>[]).take(3))
+        g.flutterColor,
+    ];
     return ColorwayEffectSelectorPage(
       key: key,
       paletteNode: LibraryNode(
@@ -682,6 +687,20 @@ class _ColorwayEffectSelectorPageState
       content: Text(ok ? 'Saved "${design.name}"' : 'Save failed'),
     ));
     if (ok) Navigator.of(context).maybePop(true);
+  }
+
+  /// DESIGN-EDIT only (build 132). The Pattern Editor, opened from here, has
+  /// just updated this design IN PLACE. What this page holds — the design as
+  /// it was opened, the controls seeded from it — is out of date, and its
+  /// "Save to design" would write that old look back over the editor's save.
+  /// So leave the way a successful [_saveToDesign] does: CONSUME the captured
+  /// look (the design now stores what the lights show; undoing it would
+  /// contradict the save), put the shared controls back, close. Nothing is
+  /// written to the lights or the design here.
+  void _closeAfterEditorSavedInPlace() {
+    _capturedLook = null;
+    _restoreProviderSnapshot();
+    Navigator.of(context).maybePop(true);
   }
 
   @override
@@ -1647,7 +1666,7 @@ class _ColorwayEffectSelectorPageState
                     width: 44,
                     height: 44,
                     child: IconButton(
-                      onPressed: () {
+                      onPressed: () async {
                         final effectId = ref.read(selectorEffectIdProvider);
                         final speed = ref.read(selectorSpeedProvider);
                         final intensity = ref.read(selectorIntensityProvider);
@@ -1673,7 +1692,26 @@ class _ColorwayEffectSelectorPageState
                               ? PatternDirection.left
                               : PatternDirection.right,
                         );
-                        context.push(AppRoutes.editPattern, extra: pattern);
+                        // From a saved design the editor is handed the design
+                        // too, so its SAVE updates that design in place
+                        // instead of filing "Name 2" (build 132). An Explore
+                        // card still hands the bare pattern.
+                        final source = widget.editingDesign;
+                        if (source == null) {
+                          context.push(AppRoutes.editPattern, extra: pattern);
+                          return;
+                        }
+                        var savedInPlace = false;
+                        await context.push(
+                          AppRoutes.editPattern,
+                          extra: PatternEditorLaunch(
+                            pattern: pattern,
+                            sourceDesign: source,
+                            onSourceUpdated: () => savedInPlace = true,
+                          ),
+                        );
+                        if (!mounted || !savedInPlace) return;
+                        _closeAfterEditorSavedInPlace();
                       },
                       icon: const Icon(Icons.tune, size: 22),
                       tooltip: 'Open in Pattern Editor',

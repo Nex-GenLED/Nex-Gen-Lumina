@@ -430,6 +430,54 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P1 — correctness & trust
 
+- [ ] **#192 — PATTERN EDITOR LAYERS 4 AND UP CANNOT BE RECOVERED ON REOPEN: an animated pattern
+  saved with more than three colours keeps them in the design, but no door opens the editor on them
+  again — and since build 132 fix 4 (`56741955`), saving in place with the name unchanged REMOVES
+  them** (filed 2026-11-25 with build 132; 191/192 are clear of every branch, highest elsewhere 190)
+  - Status: **OPEN — data loss since `56741955`** (layers 4 and up only; the lights never showed
+    them) · Severity: **P1** · Evidence: **verified-by-source** (`feat/132-saved-designs` @
+    `c35c61d6`); not reproduced on hardware, no controller involved
+  - **What is stored.** `designFromPatternEditor` keeps the layers an animated effect cannot render —
+    "they are the customer's choices" — as extra colour groups after the three colour slots
+    (`lib/features/wled/pattern_editor_design.dart:79-82`). Every apply reads only the first three.
+  - **Why they cannot come back.** The only way back into the Pattern Editor for a saved design is
+    its card page's tune button. The card page builds its palette in
+    `ColorwayEffectSelectorPage.forDesign` from the first included channel's colours, at most three
+    (`lib/features/wled/colorway_effect_selector.dart:308-316`, since `979645a3`; before that it
+    gathered three across channels), and the button builds the editor's `EditablePattern` from that
+    palette (`:1674-1679`). The editor therefore opens with at most three layers; layers 4 and up are
+    in the document and on no screen.
+  - **Since fix 4 the loss is real.** Before build 132 the editor's SAVE filed a copy ("Name 2"), so
+    the original kept its layers. Since `56741955`, opened from a saved design with the name unchanged,
+    SAVE updates that design IN PLACE with the editor's at-most-three layers, so layers 4 and up are
+    removed from the stored design. What the lights show does not change: no apply ever sent them. A
+    SAVE under a changed name makes a new design and leaves the original's layers alone.
+  - Fix shape (not built): hand the editor the design's own colour groups (all of them) instead of the
+    card page's three-colour palette when it is opened from a saved design. Related: `56741955`.
+
+- [ ] **#191 — AN AI MOTION DESIGN EDITED BY HAND: the paint editor's Apply shows a still picture, but
+  Save keeps the motion, so the saved design plays something the customer never saw**
+  (filed 2026-11-25 with build 132)
+  - Status: **OPEN** · Severity: **P1** · Evidence: **verified-by-source** (`feat/132-saved-designs`
+    @ `8631f381`); not reproduced on hardware, no controller involved
+  - **Path.** An AI Design Studio design with motion stores it in `composed_pattern`
+    (`has_motion`, `effect_id`). My Designs → Edit opens it in the paint editor
+    (`ManualDesignEditor`; `designKindOf` is `aiComposed`, so not the card page —
+    `lib/features/design/screens/design_detail_screen.dart:375-377`).
+  - **Apply in the editor** paints the still picture through the spine
+    (`lib/features/design/manual_editor/manual_design_editor.dart:540-548`) — no effect.
+  - **Save** copies the loaded design (`manual_design_editor.dart:659-669`), which carries
+    `composed_pattern` and its motion forward (by design: "every writer must preserve it"), and sets
+    `per_pixel`.
+  - **What the saved design then does.** Every positional apply checks the motion first
+    (`lib/features/design/manual_editor/design_apply.dart:439-452`): it sends the effect over the
+    first three distinct colours of the NEW painting (`buildDesignMotionPayload`) instead of the
+    picture the editor just showed. The schedule picker refuses it as animated
+    (`lib/features/schedule/design_api_preset.dart:539`).
+  - Open question for the fix (owner): after a hand edit, should the design keep its motion (and the
+    editor's Apply run it too), or become a still picture (Save clears `has_motion`)? Either way Apply
+    and Save must agree.
+
 - [x] **#190 — BRIGHTNESS GRADIENTS NEVER RENDERED: every card in Explore › Architectural › Kelvin ›
   Brightness Gradients lit one pixel and then a uniform dim run, while its preview drew a per-bulb
   cycle; fx 65 Palette showed one still colour** (numbered 190 to stay clear of the 127/128 branches)

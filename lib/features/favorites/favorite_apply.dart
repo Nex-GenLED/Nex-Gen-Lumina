@@ -63,10 +63,18 @@ class FavoriteApplyOutcome {
 /// This exists so the choice is made in ONE place. The grid used to inline
 /// `applyChannelFilter` + `applyJson`, which is capped at 4 KB: a Static
 /// favorite on any install past ~215 LEDs was refused before it was posted.
+///
+/// [perChannelLooks] (build 132) — set by the customer's own tap on Home: a
+/// favourite that stores a different look per channel (a mixed saved design
+/// added to Favorites) sends each channel its own look
+/// ([applyChannelFilterPerChannel]) instead of the first one everywhere. Off
+/// for every other caller (the geofence trigger), which keeps
+/// [applyChannelFilter]. A one-look favourite sends the same bytes either way.
 Future<FavoriteApplyOutcome> applyFavoritePayloadWith(
   ProviderReader read,
-  Map<String, dynamic> payload,
-) async {
+  Map<String, dynamic> payload, {
+  bool perChannelLooks = false,
+}) async {
   final repo = read(wledRepositoryProvider);
   if (repo == null) {
     return FavoriteApplyOutcome(FavoriteApplyStatus.noDevice, payload,
@@ -115,8 +123,10 @@ Future<FavoriteApplyOutcome> applyFavoritePayloadWith(
   }
   // Item B: no `bri` unless the customer saved one on purpose, and no
   // app-private keys on the wire (favorite_brightness.dart).
-  final filtered = applyChannelFilter(favoritePayloadForApply(payload),
-      channels, read(applyFilterChannelsProvider));
+  final filtered = (perChannelLooks
+      ? applyChannelFilterPerChannel
+      : applyChannelFilter)(favoritePayloadForApply(payload), channels,
+      read(applyFilterChannelsProvider));
   final ok = await repo.applyJson(filtered);
   return FavoriteApplyOutcome(
     ok ? FavoriteApplyStatus.applied : FavoriteApplyStatus.failed,

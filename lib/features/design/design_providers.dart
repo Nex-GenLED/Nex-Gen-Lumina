@@ -13,6 +13,7 @@ import 'package:nexgen_command/features/wled/zone_providers.dart';
 import 'package:nexgen_command/features/site/user_profile_providers.dart';
 import 'package:nexgen_command/app_providers.dart';
 import 'package:nexgen_command/models/segment_aware_pattern.dart';
+import 'package:nexgen_command/shared/apply_blocked_reason.dart';
 
 /// Service provider for design operations
 final designServiceProvider = Provider<DesignService>((ref) {
@@ -564,45 +565,148 @@ String nextCustomDesignName(List<CustomDesign> existing) {
   return 'Custom Design ${count + 1}';
 }
 
+/// What the customer is told when Save As Custom Pattern or the Now Playing
+/// save could not read the lights' current look (build 132).
+const String kCurrentLookUnreadableMessage =
+    "Couldn't read your lights' current look, so nothing was saved. Try again.";
+
+/// The longest that save waits for its one read of the controller. Above the
+/// home-network client's own 15 s and the bridge's 45 s command window, so it
+/// only ends a read that never answers at all.
+const Duration kSaveCurrentLookReadTimeout = Duration(seconds: 50);
+
+/// Thrown by [saveCurrentAsDesignProvider] when it saves NOTHING: the lights'
+/// current look could not be read, or no channel is playing. [message] is
+/// written for the customer.
+class CurrentLookNotSaved implements Exception {
+  const CurrentLookNotSaved(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// What the dashboard shows when [saveCurrentAsDesignProvider] fails:
+/// [CurrentLookNotSaved] in its own words, anything else as it always read.
+String saveCurrentAsDesignFailureMessage(Object error, String name) =>
+    error is CurrentLookNotSaved
+        ? error.message
+        : 'Failed to save "$name": $error';
+
+/// Each of [channelIds]' OWN look, read from one `/json/state` body: up to
+/// three colours (only the first for Solid, whose other slots are leftovers
+/// the lights do not show), effect, speed, intensity, direction, grouping and
+/// spacing. Null when any of those channels has no segment, or a segment with
+/// no colour, in [state] — its look cannot be read, so nothing may be saved.
+///
+/// Colour groups keep today's shapes: one colour spans its channel, as this
+/// save always wrote; two or three are one-LED colour slots (0–0, 1–1, 2–2),
+/// as the Pattern Editor writes. Black slots after the last colour are
+/// dropped — every apply fills the slots a design leaves out with black.
+@visibleForTesting
+List<ChannelDesign>? channelLooksFromState(
+  Map<String, dynamic> state,
+  List<int> channelIds,
+) {
+  final segAny = state['seg'];
+  final segs = segAny is List
+      ? segAny
+      : (segAny is Map ? <dynamic>[segAny] : const <dynamic>[]);
+  final byId = <int, Map>{};
+  for (var i = 0; i < segs.length; i++) {
+    final m = segs[i];
+    if (m is! Map) continue;
+    byId[m['id'] is num ? (m['id'] as num).toInt() : i] = m;
+  }
+  int intOf(Object? v, int fallback) => v is num ? v.toInt() : fallback;
+
+  final out = <ChannelDesign>[];
+  for (final id in channelIds) {
+    final m = byId[id];
+    if (m == null) return null;
+    final seg = WledSegment.fromMap(m, id);
+    final fx = intOf(m['fx'], 0);
+    final colors = <List<int>>[];
+    final rawCols = m['col'];
+    if (rawCols is List) {
+      for (final c in rawCols.take(fx == 0 ? 1 : 3)) {
+        if (c is! List || c.length < 3 || c.any((v) => v is! num)) break;
+        int at(int i) => (c[i] as num).toInt().clamp(0, 255);
+        colors.add([at(0), at(1), at(2), c.length >= 4 ? at(3) : 0]);
+      }
+    }
+    while (colors.length > 1 && colors.last.every((v) => v == 0)) {
+      colors.removeLast();
+    }
+    if (colors.isEmpty) return null;
+    final ledCount = seg.ledCount;
+    out.add(ChannelDesign(
+      channelId: id,
+      channelName: seg.name,
+      included: true,
+      colorGroups: colors.length == 1
+          ? [
+              LedColorGroup(
+                startLed: 0,
+                endLed: ledCount > 0 ? ledCount - 1 : 0,
+                color: colors.first,
+              ),
+            ]
+          : [
+              for (var i = 0; i < colors.length; i++)
+                LedColorGroup(startLed: i, endLed: i, color: colors[i]),
+            ],
+      effectId: fx,
+      speed: intOf(m['sx'], 128).clamp(0, 255),
+      intensity: intOf(m['ix'], 128).clamp(0, 255),
+      reverse: m['rev'] == true,
+      ledCount: ledCount,
+      // The running look's banding — a saved "1 On 4 Off" used to come back
+      // with every LED lit.
+      grouping: intOf(m['grp'], 1).clamp(1, 255),
+      spacing: intOf(m['spc'], 0).clamp(0, 255),
+    ));
+  }
+  return out;
+}
+
 /// Save the current WLED state as a new CustomDesign.
-/// Used by the Now Playing bar's tap-to-save flow for unsaved custom configs.
+/// Used by the Now Playing bar's tap-to-save flow for unsaved custom configs,
+/// and by Home's "Save As Custom Pattern".
+///
+/// Build 132: every playing channel keeps its OWN look. The app's live state
+/// holds only the first segment, so this used to store that segment's effect,
+/// speed and spacing with the primary colour alone, on every channel. It now
+/// reads the controller's state ONCE, at the tap — directly at home, through
+/// the bridge away — for the channels the dashboard treats as playing (the
+/// effective set). If that read fails, NOTHING is saved
+/// ([CurrentLookNotSaved]): a design that quietly flattened the look is what
+/// this replaced.
 final saveCurrentAsDesignProvider = Provider<Future<String?> Function(String name)>((ref) {
   return (name) async {
     final user = ref.read(authStateProvider).valueOrNull;
     if (user == null) return null;
 
     final wledState = ref.read(wledStateProvider);
-    final segments = ref.read(zoneSegmentsProvider).valueOrNull ?? [];
 
-    // #84 candidate 3: use the modern float accessors (.r/.g/.b ∈ [0,1])
-    // with rounding (mirrors wled_dashboard_page.dart:1471-1473). The
-    // deprecated .red/.green/.blue int accessors may be removed in newer
-    // Flutter stable channels — replacing them eliminates that as a runtime
-    // throw vector for the Save Design crash.
-    final c = wledState.color;
-    final r = (c.r * 255.0).round().clamp(0, 255);
-    final g = (c.g * 255.0).round().clamp(0, 255);
-    final b = (c.b * 255.0).round().clamp(0, 255);
-    final channels = segments.map((seg) => ChannelDesign(
-      channelId: seg.id,
-      channelName: seg.name,
-      included: true,
-      colorGroups: [
-        LedColorGroup(
-          startLed: 0,
-          endLed: seg.ledCount > 0 ? seg.ledCount - 1 : 0,
-          color: [r, g, b, wledState.warmWhite],
-        ),
-      ],
-      effectId: wledState.effectId,
-      speed: wledState.speed,
-      intensity: wledState.intensity,
-      ledCount: seg.ledCount,
-      // The running look's banding — a saved "1 On 4 Off" used to come back
-      // with every LED lit.
-      grouping: wledState.colorGroupSize.clamp(1, 255),
-      spacing: wledState.spacing.clamp(0, 255),
-    )).toList();
+    final channelIds = await resolveEffectiveChannelIds(ref.read);
+    if (channelIds.isEmpty) {
+      throw CurrentLookNotSaved(
+          applyBlockedReason(ref.read) ?? kApplyBlockedFallback);
+    }
+    final repo = ref.read(wledRepositoryProvider);
+    Map<String, dynamic>? live;
+    if (repo != null) {
+      try {
+        live = await repo.getState().timeout(kSaveCurrentLookReadTimeout);
+      } catch (e) {
+        debugPrint('saveCurrentAsDesign: state read failed — $e');
+      }
+    }
+    final channels = live == null ? null : channelLooksFromState(live, channelIds);
+    if (channels == null) {
+      throw const CurrentLookNotSaved(kCurrentLookUnreadableMessage);
+    }
 
     final now = DateTime.now();
     final design = CustomDesign(

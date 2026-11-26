@@ -1,7 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:nexgen_command/app_colors.dart';
+import 'package:nexgen_command/features/wled/editable_pattern_model.dart'
+    show EditablePattern;
 import 'package:nexgen_command/features/wled/widgets/neon_color_wheel.dart';
 import 'package:nexgen_command/theme.dart';
+
+/// How many colours of a sequence the lights show: a WLED segment has three
+/// colour slots ([EditablePattern.maxEffectColors], the limit the Pattern
+/// Editor states too).
+const int kColorSequenceLitColors = EditablePattern.maxEffectColors;
+
+/// Shown under the sequence when it holds more colours than the lights show.
+/// Worded after the Pattern Editor's hint ("Animated modes use the first 3
+/// colors."): here the limit holds in every mode, so it names the lights.
+const String kColorSequenceLimitHint =
+    'Your lights use the first $kColorSequenceLitColors colors. Colors '
+    '${kColorSequenceLitColors + 1} and up are dimmed here.';
 
 /// A compact, horizontal color sequence builder for WLED custom palettes.
 ///
@@ -134,22 +148,41 @@ class _ColorSequenceBuilderState extends State<ColorSequenceBuilder> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: NexGenPalette.line),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: [
-          // Existing slots
-          for (int i = 0; i < _sequence.length; i++) ...[
-            _SequenceSlot(
-              color: _toColor(_sequence[i]),
-              index: i,
-              onTap: () => _pickForIndex(i),
-              onLongPress: () => _removeAt(i),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              // Existing slots
+              for (int i = 0; i < _sequence.length; i++) ...[
+                _SequenceSlot(
+                  color: _toColor(_sequence[i]),
+                  index: i,
+                  pastLimit: i >= kColorSequenceLitColors,
+                  onTap: () => _pickForIndex(i),
+                  onLongPress: () => _removeAt(i),
+                ),
+                const SizedBox(width: 10),
+              ],
+              // Add new slot button - opens color picker
+              _AddSlotButton(onTap: _addNewColor),
+            ]),
+          ),
+          // The whole sequence is still sent; the controller lights only the
+          // first three (one per WLED colour slot). This used to say nothing,
+          // so colours 4 and up looked accepted and never appeared.
+          if (_sequence.length > kColorSequenceLitColors)
+            const Padding(
+              key: ValueKey('color-sequence-limit-hint'),
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                kColorSequenceLimitHint,
+                style: TextStyle(color: Colors.amber, fontSize: 12),
+              ),
             ),
-            const SizedBox(width: 10),
-          ],
-          // Add new slot button - opens color picker
-          _AddSlotButton(onTap: _addNewColor),
-        ]),
+        ],
       ),
     );
   }
@@ -327,24 +360,35 @@ class _ColorPickerSheetState extends State<_ColorPickerSheet> {
 class _SequenceSlot extends StatelessWidget {
   final Color color;
   final int index;
+
+  /// Past the colours the lights show ([kColorSequenceLitColors]): dimmed,
+  /// still tappable and removable.
+  final bool pastLimit;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
-  const _SequenceSlot({required this.color, required this.index, required this.onTap, required this.onLongPress});
+  const _SequenceSlot({required this.color, required this.index, this.pastLimit = false, required this.onTap, required this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
+    final slot = Column(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(shape: BoxShape.circle, color: color, border: Border.all(color: NexGenPalette.line, width: 2)),
+      ),
+      const SizedBox(height: 6),
+      Text('${index + 1}', style: Theme.of(context).textTheme.labelSmall),
+    ]);
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color, border: Border.all(color: NexGenPalette.line, width: 2)),
-        ),
-        const SizedBox(height: 6),
-        Text('${index + 1}', style: Theme.of(context).textTheme.labelSmall),
-      ]),
+      child: pastLimit
+          ? Opacity(
+              key: ValueKey('color-sequence-slot-past-limit-$index'),
+              opacity: 0.35,
+              child: slot,
+            )
+          : slot,
     );
   }
 }

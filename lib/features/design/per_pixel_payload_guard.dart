@@ -56,11 +56,30 @@ const String kPerPixelSyncRefusedMessage =
     'picture. Choose a colour-and-effect design and start again. Nothing was '
     'sent.';
 
+/// The Favorites "+" picker: why a painted design cannot be added from it.
+/// That list hands Favorites a design as ONE colour-and-effect message, and a
+/// painted picture is set LED by LED. Build 132 — it used to give the
+/// schedule's timer sentence, which has nothing to do with Favorites.
+const String kPerPixelFavoritesRefusalReason =
+    'Favorites added from this list store colours and effects, not a painted '
+    "picture, so this one can't be added here yet.";
+
+/// [kPerPixelFavoritesRefusalReason] as the picker's in-place card says it,
+/// under the design's name.
+const String kPerPixelFavoritesPickerDetail =
+    '$kPerPixelFavoritesRefusalReason You can still apply it any time from My '
+    'Designs.';
+
 /// The library picker's refusal, by destination. The schedule sentence is
-/// the +63 one (a preset stores no pixels); Game Day gets its own.
+/// the +63 one (a preset stores no pixels); Game Day and Favorites get their
+/// own.
 String perPixelPickerRefusalMessage(String designName, String? destination) {
   if (destination != null && destination.toLowerCase() == 'game day') {
     return perPixelGameDayRefusedMessage(designName);
+  }
+  if (destination != null && destination.toLowerCase() == 'favorites') {
+    return '"$designName" is a per-pixel design. '
+        '$kPerPixelFavoritesRefusalReason';
   }
   return '"$designName" is a per-pixel design. Those can\'t be scheduled '
       'yet — your controller\'s timers can only replay colours and effects, '
