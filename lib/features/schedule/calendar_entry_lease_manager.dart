@@ -55,6 +55,7 @@ import 'package:nexgen_command/features/schedule/solar_scheduling_feature_flag.d
 import 'package:nexgen_command/features/schedule/timer_table.dart'
     show generalRowsFor;
 import 'package:nexgen_command/features/schedule/timer_table_ownership.dart';
+import 'package:nexgen_command/features/schedule/timer_table_write_lock.dart';
 import 'package:nexgen_command/features/wled/device_channel.dart'
     show deviceChannelsFromConfig;
 import 'package:nexgen_command/features/wled/wled_dow.dart';
@@ -183,6 +184,27 @@ final calendarLeaseLiveWritesEnabledSyncProvider = Provider<bool>((ref) {
   return ref
       .watch(calendarLeaseLiveWritesEnabledProvider)
       .maybeWhen(data: (v) => v, orElse: () => false);
+});
+
+/// Build 133 — true when a lease write CAN land now: the live-writes flag has
+/// loaded as on (the same adapter the manager's own write gate reads, so the
+/// two never disagree; it is false while the flag is still loading) and the
+/// repository can write `/json/cfg` (the direct LAN service — the bridge
+/// relay cannot). A flag that loads as OFF is not ready: writes are off by
+/// design, and its flip to ON is a ready moment.
+///
+/// The repository is read only once the flag is on, so a manager that never
+/// gets a flag never builds the repository chain on its own account.
+final calendarLeaseControllerReadyProvider = Provider<bool>((ref) {
+  if (!ref.watch(calendarLeaseLiveWritesEnabledSyncProvider)) return false;
+  final WledRepository? repo;
+  try {
+    repo = ref.watch(wledRepositoryProvider);
+  } catch (e) {
+    debugPrint('$_kLogPrefix readiness: repository read failed — $e');
+    return false;
+  }
+  return repo != null && repoCanWriteCfg(repo);
 });
 
 /// Callable that forces an immediate WLED re-sync, bypassing the
@@ -426,6 +448,16 @@ class CalendarEntryLease {
     this.channels,
   });
 
+  /// THE expiry rule (build 133). A lease is over once [now] has reached
+  /// [expiresAt]: at the end time itself it is expired; one instant before
+  /// it, the night is still running.
+  ///
+  /// [CalendarEntryLeaseManager.sweepExpiredLeases] (which removes the
+  /// record) and the row builder behind every table write (which stops
+  /// sending the row) both call this, each with the manager's `nowProvider`,
+  /// so the two can never disagree about a night.
+  bool isExpiredAt(DateTime now) => !expiresAt.isAfter(now);
+
   CalendarEntryLease copyWith({
     int? slotIndex,
     int? presetId,
@@ -562,7 +594,8 @@ class LeaseResult {
 // ─── Manager ─────────────────────────────────────────────────────────────────
 
 class CalendarEntryLeaseManager {
-  CalendarEntryLeaseManager(this._ref);
+  CalendarEntryLeaseManager(this._ref)
+      : _wledWriteLock = _ref.read(timerTableWriteLockProvider);
 
   final Ref _ref;
 
@@ -580,7 +613,13 @@ class CalendarEntryLeaseManager {
   /// non-issue. Hand-rolled [AsyncLock] (commit 10345c1) used
   /// instead of the `synchronized` package to keep the dependency
   /// surface flat.
-  final AsyncLock _wledWriteLock = AsyncLock();
+  ///
+  /// Build 133: this is [timerTableWriteLockProvider], the one lock the
+  /// schedule sync takes around `syncAll` too, so a lease write and a
+  /// schedule sync never interleave their table read and write. Not
+  /// re-entrant: nothing run under it may wait on a schedule sync (the
+  /// sweep's sync trigger runs outside it).
+  final AsyncLock _wledWriteLock;
 
   Future<void>? _initializeFuture;
   bool _initialized = false;
@@ -692,6 +731,11 @@ class CalendarEntryLeaseManager {
 
   /// Tear down. Persists current state. Does NOT write to WLED.
   Future<void> dispose() async {
+    _disposed = true;
+    _readySettleTimer?.cancel();
+    _readySettleTimer = null;
+    _readySpacingTimer?.cancel();
+    _readySpacingTimer = null;
     try {
       await _saveToPrefs();
     } catch (e) {
@@ -1065,13 +1109,29 @@ class CalendarEntryLeaseManager {
   /// Periodic sweep. Removes expired leases, promotes newly-imminent
   /// entries. Safe to call concurrently with [handleEntryCreated] —
   /// registry mutations are synchronous and ordered.
-  Future<void> sweepExpiredLeases() async {
+  ///
+  /// Runs at [initialize], every [_kSweepInterval], and (build 133) at each
+  /// ready moment ([controllerReadinessChanged]).
+  Future<void> sweepExpiredLeases() {
+    final run = _sweepExpiredLeases();
+    _inFlightSweep = run;
+    run.whenComplete(() {
+      if (identical(_inFlightSweep, run)) _inFlightSweep = null;
+    }).ignore();
+    return run;
+  }
+
+  /// The sweep currently running, if any; a ready-moment sweep waits for it
+  /// rather than repeat its writes.
+  Future<void>? _inFlightSweep;
+
+  Future<void> _sweepExpiredLeases() async {
     final now = nowProvider();
     debugPrint(
         '$_kLogPrefix sweep START (registry size = ${_activeLeases.length})');
     final expiredKeys = <String>[];
     for (final entry in _activeLeases.entries) {
-      if (!entry.value.expiresAt.isAfter(now)) {
+      if (entry.value.isExpiredAt(now)) {
         expiredKeys.add(entry.key);
       }
     }
@@ -1182,6 +1242,94 @@ class CalendarEntryLeaseManager {
     }
     debugPrint('$_kLogPrefix sweep END (expired=${expiredKeys.length}, '
         'promoted=$promoted, evictions cleared=$evictionsCleared)');
+  }
+
+  // ─── Build 133: sweep at the ready moment ─────────────────────────
+  //
+  // The sweep ran only at initialize() and every 5 minutes, and skips
+  // (keeping the record) when it cannot write: flag still loading, no
+  // repository, off the LAN, table unreadable, write unconfirmed. A session
+  // on the venue Wi-Fi of 10–27 seconds got neither a sweep that could land
+  // nor a 5-minute tick, so an expired lease row stayed armed and fired
+  // again the next week. The moment a write CAN land
+  // ([calendarLeaseControllerReadyProvider] turning true) now runs the sweep
+  // as well:
+  //  * once the controller has stayed ready for [readySweepSettle], so a
+  //    flapping connection starts nothing until it holds;
+  //  * at most once per [readySweepSpacing]; a ready moment inside that
+  //    window is owed, and one sweep runs when it ends if still ready;
+  //  * after initialize() (the registry is loaded) and after any sweep
+  //    already running, so the same write is never sent twice;
+  //  * through the ordinary sweepExpiredLeases(): every skip rule holds, a
+  //    write that is not confirmed keeps its record for the next ready
+  //    moment, nothing is written when nothing has expired, and its writes
+  //    take the timer-table lock the schedule sync also holds.
+  // Only a change to ready counts. A manager created while already ready is
+  // covered by initialize()'s own sweep.
+
+  /// How long the controller must stay ready before the sweep runs.
+  @visibleForTesting
+  Duration readySweepSettle = const Duration(seconds: 2);
+
+  /// The least time between two ready-moment sweeps.
+  @visibleForTesting
+  Duration readySweepSpacing = const Duration(seconds: 30);
+
+  bool _disposed = false;
+  bool _controllerReady = false;
+  bool _readySweepRunning = false;
+  bool _readySweepOwed = false;
+  Timer? _readySettleTimer;
+  Timer? _readySpacingTimer;
+
+  /// Called by [calendarEntryLeaseManagerProvider] when
+  /// [calendarLeaseControllerReadyProvider] changes.
+  void controllerReadinessChanged(bool ready) {
+    if (_disposed) return;
+    _controllerReady = ready;
+    _readySettleTimer?.cancel();
+    _readySettleTimer = null;
+    if (!ready) return;
+    _readySettleTimer = Timer(readySweepSettle, _readyMomentSettled);
+  }
+
+  void _readyMomentSettled() {
+    _readySettleTimer = null;
+    if (_disposed || !_controllerReady) return;
+    if (_readySweepRunning || _readySpacingTimer != null) {
+      _readySweepOwed = true;
+      debugPrint('$_kLogPrefix controller ready again inside the spacing '
+          'window — one sweep is owed');
+      return;
+    }
+    unawaited(_runReadySweep());
+  }
+
+  Future<void> _runReadySweep() async {
+    _readySweepRunning = true;
+    _readySweepOwed = false;
+    _readySweepRuns++;
+    _readySpacingTimer = Timer(readySweepSpacing, _readySpacingEnded);
+    try {
+      await initialize();
+      final inFlight = _inFlightSweep;
+      if (inFlight != null) await inFlight.catchError((Object _) {});
+      if (_disposed) return;
+      debugPrint('$_kLogPrefix controller ready — sweeping');
+      await sweepExpiredLeases();
+    } catch (e) {
+      debugPrint('$_kLogPrefix ready-moment sweep failed — $e');
+    } finally {
+      _readySweepRunning = false;
+    }
+    if (_readySweepOwed && _readySpacingTimer == null) _readySpacingEnded();
+  }
+
+  void _readySpacingEnded() {
+    _readySpacingTimer = null;
+    if (_disposed || !_readySweepOwed || _readySweepRunning) return;
+    if (!_controllerReady) return; // the next ready moment schedules its own
+    unawaited(_runReadySweep());
   }
 
   // ─── +114: server-run Game Day stand-down ─────────────────────────
@@ -1860,12 +2008,28 @@ class CalendarEntryLeaseManager {
   ///
   /// IMPORTANT: this returns ONLY the lease-derived timers. What is pushed
   /// to the controller is the owned table from [_composeOwnedTable].
+  ///
+  /// Build 133 — an EXPIRED lease is never sent again. Its record can outlive
+  /// its night (the sweep removes it only once its own zero-write is
+  /// confirmed), and lease rows are dateless, so re-sending it re-armed the
+  /// row for the same weekday next week from every lease write, from the
+  /// ledger the schedule sync merges and from syncAll's table. The test is
+  /// [CalendarEntryLease.isExpiredAt] with [nowProvider], the sweep's own
+  /// rule and clock, so a night is either swept and not sent, or kept and
+  /// sent; a night still in progress keeps its row.
   Map<String, dynamic> _buildLeaseTimersPayload({
     Set<String> excluding = const {},
   }) {
+    final now = nowProvider();
     final List<Map<String, dynamic>> ins = [];
     for (final lease in _activeLeases.values) {
       if (excluding.contains(lease.dateKey)) continue;
+      if (lease.isExpiredAt(now)) {
+        debugPrint('$_kLogPrefix not re-sending expired lease ${lease.dateKey} '
+            '(ended ${lease.expiresAt.toIso8601String()}); the sweep clears '
+            'its record');
+        continue;
+      }
       // Defense in depth: a dowMask of 0 (unparseable dateKey) would arm a
       // timer that never fires. Skip it — never write a dead dow:0 lease timer.
       if (lease.dowMask == 0) {
@@ -2054,6 +2218,12 @@ class CalendarEntryLeaseManager {
 
   @visibleForTesting
   bool get isInitializedForTest => _initialized;
+
+  int _readySweepRuns = 0;
+
+  /// How many ready-moment sweeps have started (build 133).
+  @visibleForTesting
+  int get readySweepRunsForTest => _readySweepRuns;
 }
 
 // ─── Provider ────────────────────────────────────────────────────────────────
@@ -2071,6 +2241,17 @@ final calendarEntryLeaseManagerProvider =
   final sweepTimer = Timer.periodic(
     _kSweepInterval,
     (_) => manager.sweepExpiredLeases(),
+  );
+
+  // Build 133 — and at each ready moment (see controllerReadinessChanged).
+  // A change only: the value now is initialize()'s to handle.
+  ref.listen<bool>(
+    calendarLeaseControllerReadyProvider,
+    (prev, next) {
+      if (next != (prev ?? false)) manager.controllerReadinessChanged(next);
+    },
+    onError: (e, _) =>
+        debugPrint('$_kLogPrefix readiness listener error — $e'),
   );
 
   ref.onDispose(() {

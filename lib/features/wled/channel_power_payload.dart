@@ -79,3 +79,79 @@ Map<String, dynamic> buildChannelPowerPayload({
     'seg': [for (final id in sorted) seg(id, id == channelId)],
   };
 }
+
+/// Row 23 — "All Channels On": an explicit ON for every channel the bar
+/// shows, and nothing else.
+///
+/// It used to be an empty design template through the apply path, i.e.
+/// `applyChannelFilter` — so a channel marked "leave it out" of shows got an
+/// explicit OFF from the one button that says every channel goes on, while
+/// the include-back sheet promised "Its power switch still works". Power is
+/// not a show: no participation, no exclusion pass, no look fields.
+///
+/// Build 133: also the master power-ON payload when every channel is off
+/// (see [buildMasterPowerOnPayload]), so the two can never send different
+/// bodies for the same job.
+Map<String, dynamic> buildAllChannelsOnPayload(Iterable<int> channelIds) {
+  final ids = channelIds.toSet().toList()..sort();
+  return <String, dynamic>{
+    'on': true,
+    'seg': [
+      for (final id in ids) <String, dynamic>{'id': id, 'on': true},
+    ],
+  };
+}
+
+/// Per-channel power as a `/json/state` body reports it: segment id → `on`.
+///
+/// Null means UNKNOWN: no `seg`, an empty one, or any segment without a bool
+/// `on`. One unreadable segment makes the whole read unknown, because
+/// "every channel is off" must never be concluded from a partial read.
+/// A single-object `seg` (older firmware) is segment 0; a list entry without
+/// an `id` takes its position, as the OFF preset's builder does.
+Map<int, bool>? channelPowerFromState(Map<String, dynamic> state) {
+  final seg = state['seg'];
+  final List<dynamic> entries;
+  if (seg is List) {
+    entries = seg;
+  } else if (seg is Map) {
+    entries = [seg];
+  } else {
+    return null;
+  }
+  if (entries.isEmpty) return null;
+  final power = <int, bool>{};
+  for (var i = 0; i < entries.length; i++) {
+    final s = entries[i];
+    if (s is! Map) return null;
+    final on = s['on'];
+    if (on is! bool) return null;
+    final id = s['id'];
+    power[id is int ? id : i] = on;
+  }
+  return power;
+}
+
+/// Build 133 — the master power-ON body.
+///
+/// The OFF preset (slot 2) stores every segment `on:false`, so after a timed
+/// OFF a bare `{"on":true}` brings the master up with every channel still
+/// dark. When [liveChannelPower] shows EVERY channel off, the ON names every
+/// channel in [channelIds] instead — [buildAllChannelsOnPayload], the same
+/// body the "All Channels On" button sends.
+///
+/// Anything else stays `{"on":true}`, today's master-only body: at least one
+/// channel on (a channel someone switched off on purpose stays off), the live
+/// state unknown or stale (null — the caller decides freshness), or no
+/// channel census to name.
+Map<String, dynamic> buildMasterPowerOnPayload({
+  required Map<int, bool>? liveChannelPower,
+  required Iterable<int> channelIds,
+}) {
+  final live = liveChannelPower;
+  final everyChannelOff =
+      live != null && live.isNotEmpty && live.values.every((on) => !on);
+  final ids = channelIds.toSet();
+  if (!everyChannelOff || ids.isEmpty) return <String, dynamic>{'on': true};
+  return buildAllChannelsOnPayload(ids);
+}

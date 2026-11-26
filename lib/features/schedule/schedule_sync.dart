@@ -47,6 +47,7 @@ import 'package:nexgen_command/features/schedule/sunrise_off_service.dart'
 // resolve timersInsLanded / isRealEnabledTimer.
 import 'package:nexgen_command/features/schedule/timer_table.dart';
 import 'package:nexgen_command/features/schedule/timer_table_ownership.dart';
+import 'package:nexgen_command/features/schedule/timer_table_write_lock.dart';
 import 'package:nexgen_command/features/schedule/timer_landing.dart';
 export 'package:nexgen_command/features/schedule/timer_landing.dart'
     show
@@ -942,15 +943,23 @@ class ScheduleSyncService {
   /// The poller otherwise interleaves `getState` between a psave and the cfg
   /// commit — the concurrent-request half of the burst
   /// (audit/SYNC_PACING_FIX_STATUS.md §1(c)).
-  Future<ScheduleSyncResult> syncAll(
-      Ref ref, List<ScheduleItem> schedules) async {
-    final poller = ref.read(wledStateProvider.notifier);
-    poller.pausePolling();
-    try {
-      return await _syncAllInner(ref, schedules);
-    } finally {
-      poller.resumePolling();
-    }
+  ///
+  /// Build 133: the whole sync holds [timerTableWriteLockProvider], the lock
+  /// the lease manager's table writes hold too, so a lease sweep never reads
+  /// the table before this sync writes it and then writes the old rows back
+  /// (nor the other way round). Taken before polling pauses, so a wait for a
+  /// lease write does not hold the poller. Nothing in [_syncAllInner] waits
+  /// on a lease write: it only reads the lease ledger.
+  Future<ScheduleSyncResult> syncAll(Ref ref, List<ScheduleItem> schedules) {
+    return ref.read(timerTableWriteLockProvider).synchronized(() async {
+      final poller = ref.read(wledStateProvider.notifier);
+      poller.pausePolling();
+      try {
+        return await _syncAllInner(ref, schedules);
+      } finally {
+        poller.resumePolling();
+      }
+    });
   }
 
   Future<ScheduleSyncResult> _syncAllInner(

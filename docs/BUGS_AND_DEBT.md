@@ -430,6 +430,29 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
 
 ## P1 — correctness & trust
 
+- [ ] **#191 — AN AI MOTION DESIGN EDITED BY HAND: the paint editor's Apply shows a still picture, but
+  Save keeps the motion, so the saved design plays something the customer never saw**
+  (filed 2026-11-25 with build 132)
+  - Status: **OPEN** · Severity: **P1** · Evidence: **verified-by-source** (`feat/132-saved-designs`
+    @ `8631f381`); not reproduced on hardware, no controller involved
+  - **Path.** An AI Design Studio design with motion stores it in `composed_pattern`
+    (`has_motion`, `effect_id`). My Designs → Edit opens it in the paint editor
+    (`ManualDesignEditor`; `designKindOf` is `aiComposed`, so not the card page —
+    `lib/features/design/screens/design_detail_screen.dart:375-377`).
+  - **Apply in the editor** paints the still picture through the spine
+    (`lib/features/design/manual_editor/manual_design_editor.dart:540-548`) — no effect.
+  - **Save** copies the loaded design (`manual_design_editor.dart:659-669`), which carries
+    `composed_pattern` and its motion forward (by design: "every writer must preserve it"), and sets
+    `per_pixel`.
+  - **What the saved design then does.** Every positional apply checks the motion first
+    (`lib/features/design/manual_editor/design_apply.dart:439-452`): it sends the effect over the
+    first three distinct colours of the NEW painting (`buildDesignMotionPayload`) instead of the
+    picture the editor just showed. The schedule picker refuses it as animated
+    (`lib/features/schedule/design_api_preset.dart:539`).
+  - Open question for the fix (owner): after a hand edit, should the design keep its motion (and the
+    editor's Apply run it too), or become a still picture (Save clears `has_motion`)? Either way Apply
+    and Save must agree.
+
 - [ ] **#192 — PATTERN EDITOR LAYERS 4 AND UP CANNOT BE RECOVERED ON REOPEN: an animated pattern
   saved with more than three colours keeps them in the design, but no door opens the editor on them
   again — and since build 132 fix 4 (`56741955`), saving in place with the name unchanged REMOVES
@@ -455,28 +478,55 @@ bugs, tech debt, and promised features. Not documentation prose — keep it ters
   - Fix shape (not built): hand the editor the design's own colour groups (all of them) instead of the
     card page's three-colour palette when it is opened from a saved design. Related: `56741955`.
 
-- [ ] **#191 — AN AI MOTION DESIGN EDITED BY HAND: the paint editor's Apply shows a still picture, but
-  Save keeps the motion, so the saved design plays something the customer never saw**
-  (filed 2026-11-25 with build 132)
-  - Status: **OPEN** · Severity: **P1** · Evidence: **verified-by-source** (`feat/132-saved-designs`
-    @ `8631f381`); not reproduced on hardware, no controller involved
-  - **Path.** An AI Design Studio design with motion stores it in `composed_pattern`
-    (`has_motion`, `effect_id`). My Designs → Edit opens it in the paint editor
-    (`ManualDesignEditor`; `designKindOf` is `aiComposed`, so not the card page —
-    `lib/features/design/screens/design_detail_screen.dart:375-377`).
-  - **Apply in the editor** paints the still picture through the spine
-    (`lib/features/design/manual_editor/manual_design_editor.dart:540-548`) — no effect.
-  - **Save** copies the loaded design (`manual_design_editor.dart:659-669`), which carries
-    `composed_pattern` and its motion forward (by design: "every writer must preserve it"), and sets
-    `per_pixel`.
-  - **What the saved design then does.** Every positional apply checks the motion first
-    (`lib/features/design/manual_editor/design_apply.dart:439-452`): it sends the effect over the
-    first three distinct colours of the NEW painting (`buildDesignMotionPayload`) instead of the
-    picture the editor just showed. The schedule picker refuses it as animated
-    (`lib/features/schedule/design_api_preset.dart:539`).
-  - Open question for the fix (owner): after a hand edit, should the design keep its motion (and the
-    editor's Apply run it too), or become a still picture (Save clears `has_motion`)? Either way Apply
-    and Save must agree.
+- [ ] **#193 — THE AUTOMATIC RE-SYNC IS DAYTIME-ONLY: a venue whose phone is on the venue Wi-Fi only
+  in the evening never gets a dropped schedule back** (numbered from 193: build 132's branch holds
+  #191–#192)
+  - Status: **OPEN — not in build 133** · Severity: **P1** · Evidence: **verified-by-data**
+    (read-only audit 2026-11-25 of one commercial account at build-131: drift recorded on three
+    LAN sessions on +129/+130, at 19:30, 01:14 and 00:55 local, each held `outsideDaytime`; no
+    Retry, no edit, no sync write since the schedule was made) + **verified-by-source** @
+    `3191e4b0` (line numbers below are build-131)
+  - **THE CLASS BUG.** Build 127 detects the drift (`driftedSchedules`,
+    `schedule_drift.dart:67-77`; recorded and handed to `_maybeAutoResync` at
+    `schedule_providers.dart:472-506`), but `autoResyncDecision`
+    (`schedule_sync_status.dart:344-363`) runs only 9:00–15:00 local (`kAutoResyncDayStartHour` /
+    `kAutoResyncDayEndHour`, `:265-266`). The window is there for a reason (`:320-343`): a re-sync
+    psaves the pattern, and a psave applies its body to the strip for under a second before the
+    sync restores the captured state. A bar or restaurant whose only phone is on the venue LAN in
+    the evening and overnight is always outside it, and the copy (`:232-241`) promises a time that
+    customer never meets. The schedule stays off the controller until someone taps Retry or edits
+    it.
+  - **No other heal path.** The healer only reads; the build-127 writers keep only rows the
+    controller still holds; build 133's ready-moment sweep clears expired leases, not schedules.
+  - **Fix shape (options, not decided):** (a) at night, a re-sync that writes only the timer table
+    when every preset the table calls already satisfies (`presetSatisfies`) — no psave, nothing
+    flashes; (b) at night, re-sync only while the lights already show that schedule's look;
+    (c) at minimum, night copy that asks for Retry without naming hours. Bench the flash before
+    choosing between (a) and (b).
+  - Files: `lib/features/schedule/schedule_sync_status.dart`,
+    `lib/features/schedule/schedule_providers.dart`, `lib/features/schedule/schedule_drift.dart`.
+    Related: **#194**, **#196**; the window landed in `568d70f0`, drift in `91018071`.
+
+- [ ] **#194 — THE KEEP GUARD AND THE DRIFT CHECK ARE SUN-BLIND: a sunrise or sunset schedule's rows
+  are never kept, never protected and never reported missing**
+  - Status: **OPEN — not in build 133** · Severity: **P1** · Evidence: **verified-by-source** @
+    `3191e4b0` (no fleet count yet)
+  - **THE CLASS BUG.** Every build-127 ownership check finds a schedule's rows on the controller
+    through `deviceOnRowFor` / `deviceOffRowFor` (`timer_table_ownership.dart:307-350`), and both
+    return null for a solar label (`:309`, `:334`). So for a schedule that starts at sunset or ends
+    at sunrise: the sync's keep for a refused schedule (`deviceRowsFor`, `:355-361`) cannot keep
+    its rows; the backstop
+    `scheduleRowsDropped` (`:368-382`, behind syncAll's keep guard at `schedule_sync.dart:2163-2205`)
+    never sees its ON row, so a table that drops it is sent; and `driftJudges` skips it
+    (`schedule_drift.dart:59`), so a missing sunset schedule is never `drifted` and never
+    re-synced. Solar rows live in slots 8 and 9 (hour 255 sunrise, 254 sunset), which these
+    matchers do not read; a clock-ON / sunrise-OFF schedule loses its OFF row the same way.
+  - **Fix shape:** one matcher that reads the sun slots too (slot, hour marker, macro role, dow),
+    shared by the keep, the backstop and drift; table tests per firmware, including 16.0.1, which
+    the 2026-11-02 sun audit found breaks slots 8 and 9.
+  - Files: `lib/features/schedule/timer_table_ownership.dart`,
+    `lib/features/schedule/schedule_drift.dart`, `lib/features/schedule/schedule_sync.dart`.
+    Related: **#193**, **#195** (a stored solar label meets this first).
 
 - [x] **#190 — BRIGHTNESS GRADIENTS NEVER RENDERED: every card in Explore › Architectural › Kelvin ›
   Brightness Gradients lit one pixel and then a uniform dim run, while its preview drew a per-bulb
@@ -2528,6 +2578,47 @@ commit — merging `main` into this tree will collide with the untracked copies.
   as **#153**.
 
 ## P2 — hardening & platform
+
+- [ ] **#195 — LUMINA CHAT CAN STORE "SUNSET TO SUNRISE" AS THE CREATION DAY'S CLOCK TIMES: the
+  schedule then drifts away from the sun all season**
+  - Status: **OPEN — not in build 133** · Severity: **P2** · Evidence: **suspected** (2026-11-25
+    audit: a chat-made daily schedule stored 5:12 PM → 6:51 AM, exactly its location's sunset and
+    sunrise on the day it was made; by 11-25 sunset was 14 min earlier. The prompt text is not
+    stored, so which path wrote it is unconfirmed) + **verified-by-source** for the paths below @
+    `3191e4b0`
+  - **What the code does.** The dated-night path turns sun triggers into that night's clock times by
+    design (`resolveNightClock`, `lib/features/ai/lumina_schedule_persistence.dart:120-170`) —
+    right for one night, wrong if it ever feeds a repeating item. The repeating path stores
+    whatever `timeLabel` the model returns (`buildScheduleItemsFromIntents`,
+    `lib/features/ai/scheduling_intent_handler.dart:478-521`); the prompt asks for a literal
+    "Sunset" / "Sunrise" (`lib/features/ai/scheduling_intent.dart:108-109`), but nothing checks
+    that a clock time was meant, and the chat is given today's sun times. The audited item's
+    action label was not a "Pattern: …" label, so it may have come from another chat path: trace
+    it before fixing.
+  - **Fix shape:** when the request names sunrise, sunset, dusk or dawn and the stored time is a
+    clock time within a few minutes of that day's sun time, store the solar label (or ask). Size it
+    first with a read-only census of clock schedules that match their creation day's sun time
+    ±2 min. Fix **#194** first, or a stored solar label loses the keep and drift checks.
+  - Files: `lib/features/ai/scheduling_intent_handler.dart`, `lib/features/ai/scheduling_intent.dart`,
+    `lib/features/ai/lumina_schedule_persistence.dart`. Related: **#194**.
+
+- [ ] **#196 — LEASE ROWS CARRY NO DATE: a lease row that outlives its night fires again the same
+  weekday next week**
+  - Status: **OPEN — narrowed, not fixed, by build 133** · Severity: **P2** · Evidence:
+    **verified-by-data** (2026-11-25 audit: two Sunday 11:00 lease rows still armed three days
+    after the last game) + **verified-by-source** (`_buildLeaseTimersPayload` writes `en`, `hour`,
+    `min`, `macro` and `dow` only — `calendar_entry_lease_manager.dart:1863-1888` at build-131)
+  - **Build 133 narrows it:** an expired lease is never sent again (fix 2), and the sweep also runs
+    when the controller becomes ready (fix 3). A row still fires if no sweep lands before the next
+    same weekday, for example a week with no session on the controller's network.
+  - **Fix shape:** write each lease row with `start` and `end` set to the lease's own date. 0.15.x
+    serialises `start: {mon, day}` / `end: {mon, day}` on slots 0–7 (the readback shape the tests
+    model); that a row outside its range does not fire is an **assumption** — bench it on 0.15.1,
+    0.15.4 and 16.0.1 before it gates code. The ownership matchers and `timersInsLanded` must then
+    compare the new fields.
+  - Files: `lib/features/schedule/calendar_entry_lease_manager.dart`,
+    `lib/features/schedule/timer_table_ownership.dart`, `lib/features/schedule/timer_landing.dart`.
+    Related: **#193**.
 
 - [x] **#122 — "NEXT THREE NIGHTS" IS NOT A MULTI-NIGHT REQUEST (smoke F3): the compound detector
   matches "days" only**
