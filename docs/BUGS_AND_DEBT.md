@@ -2620,6 +2620,56 @@ commit — merging `main` into this tree will collide with the untracked copies.
     `lib/features/schedule/timer_table_ownership.dart`, `lib/features/schedule/timer_landing.dart`.
     Related: **#193**.
 
+- [ ] **#197 — WHITE LEDS LOST ON THE DESIGN CARD PAGE'S APPLY: on an RGBW controller the card page
+  sends a saved design's colours with W = 0, so a colour that uses the white LEDs loses them**
+  (filed 2026-11-26, found while building 132)
+  - Status: **OPEN — not in build 133** · Severity: **P2** · Evidence: **verified-by-source**
+    (`feat/132-saved-designs` @ `0d586341`; line numbers at `feat/133-candidate`); not reproduced
+    on hardware, no controller involved. **Needs a bench on WLED 0.15.4.**
+  - **Repro.** On an RGBW controller, save a look whose colour uses the white LEDs, open it from My
+    Designs (it opens the card page) and tap Apply: the white LEDs stay off, so the colour becomes
+    an RGB-only tint and a white-only colour goes dark. Apply from the detail screen keeps the
+    white.
+  - **Cause.** The card page builds its palette as RGB `Color`s (`ColorwayEffectSelectorPage.forDesign`,
+    `g.flutterColor`, `lib/features/wled/colorway_effect_selector.dart:308-316`), and
+    `selectorPaletteCols` sends W = 0 (`lib/features/wled/selector_payload.dart:135-144`, through
+    `_paletteColsRgbw`, `colorway_effect_selector.dart:632-639`).
+  - **Fix shape (not built):** in design-edit mode, carry the design's stored RGBW into the card
+    page's colours; catalog cards unchanged; pin the catalog payloads. Risk low (card page only).
+  - **Bench:** one RGBW visual check plus a `/json/state` readback.
+  - Files: `lib/features/wled/colorway_effect_selector.dart`, `lib/features/wled/selector_payload.dart`.
+    Related: **#198**.
+
+- [ ] **#198 — MAIN COLOUR LOST ON FIREWORKS (42), JUGGLE (64), FIREWORKS STARBURST (89) AND
+  FIREWORKS 1D (90) ON THE DESIGN CARD PAGE'S APPLY: the card page sends pal 4, which on these
+  effects never samples the main colour** (filed 2026-11-26, found while building 132)
+  - Status: **OPEN — not in build 133** · Severity: **P2** · Evidence: **verified-by-source**
+    (`feat/132-saved-designs` @ `0d586341`; line numbers at `feat/133-candidate`) + the app's own
+    bench note (WLED 0.15.1, 2026-09-21); not reproduced on hardware for this entry. **Needs a bench
+    on WLED 0.15.4.**
+  - **Cause.** The card page's payload takes `pal` from `paletteForEffect`
+    (`lib/features/wled/selector_payload.dart:174`), which returns pal 4 for these effects
+    (`lib/features/wled/wled_effects_catalog.dart:758`: 4 for every effect that overrides the user's
+    colours). The app's own bench note (`wled_effects_catalog.dart:764`, `:783-796`) found pal 4
+    never samples the main colour on these four (Juggle through the real path: 0 % of lit pixels in
+    the primary) and pal 5 is correct; they are `kColorsOnlyVerifiedEffects` (`:796`). The
+    normalizer only turns 5 into 4, and exempts these four (`lib/features/wled/wled_payload_utils.dart:770-775`);
+    it never turns 4 back into 5.
+  - **Reach.** The same rule feeds the Explore catalog cards
+    (`lib/features/wled/pattern_repository.dart:347`, `:1302`) and the normalizer's fill when a
+    payload omits `pal` (`wled_payload_utils.dart:738`), so Explore cards on those effects very
+    likely lose the main colour too.
+  - **Fix shape (not built):** pal 5 for the four bench-verified effects (`kColorsOnlyVerifiedEffects`),
+    either narrow (the selector builder only) or wide (`paletteForEffect`, which can reach schedule,
+    lease and Game Day payloads that omit `pal`; audit or pin them first).
+  - **Bench:** recheck the four effects on 0.15.4.
+  - **Also noted, no fix proposed: Strobe Mega (25).** It is retired, so both Apply paths send
+    Strobe (23) (`lib/features/wled/pattern_flash_safety.dart:64-72`). The design's own Apply sends
+    intensity 128 and the card page sends the stored value; probably invisible.
+  - Files: `lib/features/wled/selector_payload.dart`, `lib/features/wled/wled_effects_catalog.dart`,
+    `lib/features/wled/pattern_repository.dart`, `lib/features/wled/wled_payload_utils.dart`.
+    Related: **#197**.
+
 - [x] **#122 — "NEXT THREE NIGHTS" IS NOT A MULTI-NIGHT REQUEST (smoke F3): the compound detector
   matches "days" only**
   - Status: **DONE 78fd273 on `fix/112-dated-scheduling` (2026-10-01), NOT merged — nights / evenings / weeks / through-day / next-week detected; phrase table test added** · Severity: **P2**
